@@ -59,6 +59,9 @@ export interface PaperOpts {
   repriceTicks: number;
   horizonSec: number;
   bankrollUsd: number;
+  /** If true, an unfilled entry is canceled at entryTimeoutSec instead of taker-converted. Exits
+   *  always taker-convert regardless (an unresolved exit would corrupt measurement). */
+  neverCrossEntry?: boolean;
 }
 
 export interface FillEvent {
@@ -79,6 +82,8 @@ export class PaperBroker implements Broker {
   private open = new Map<string, OpenOrder | null>();
   private horizonExpiresAt = new Map<string, number | null>();
   private ticks = new Map<string, number>();
+  /** Fill-liquidity counters per pair, instrumenting how much entry edge is lost to taker fallback (PL-REVENUE-REVIEW.md 3.4). */
+  private fillCounts = new Map<string, { maker: number; taker: number }>();
   private seq = 0;
   /** Per-instance token so synthetic external ids stay unique even if a runId is ever reused. */
   private readonly instance = crypto.randomUUID().slice(0, 8);
@@ -98,6 +103,7 @@ export class PaperBroker implements Broker {
       this.acct.set(p, new Accounting(perPairBankroll));
       this.open.set(p, null);
       this.horizonExpiresAt.set(p, null);
+      this.fillCounts.set(p, { maker: 0, taker: 0 });
     }
   }
 
@@ -141,6 +147,16 @@ export class PaperBroker implements Broker {
     const acct = this.acct.get(pair)!;
     const sizeBase = side === "buy" ? this.opts.notionalUsd / touch : acct.positionBase;
     if (sizeBase <= 0) return;
+    // A buy needs cash on hand for its full notional plus the worst-case fee it might pay if it
+    // later converts to taker; a sell only ever closes existing inventory and never needs new cash.
+    if (side === "buy") {
+      const worstFeeBps = Math.max(this.opts.makerFeeBps, this.opts.takerFeeBps);
+      const requiredCashUsd = this.opts.notionalUsd * (1 + worstFeeBps / 10_000);
+      if (acct.cashUsd() < requiredCashUsd) {
+        console.warn(`${pair}: skipping ${purpose} buy, insufficient cash ($${acct.cashUsd().toFixed(2)} < $${requiredCashUsd.toFixed(2)} needed)`);
+        return;
+      }
+    }
     const now = Date.now();
     const id = await this.store.insertOrder({
       run_id: this.runId,
@@ -196,9 +212,16 @@ export class PaperBroker implements Broker {
       }
     }
 
-    // Taker conversion after the timeout: fill the remainder immediately, walking the book.
+    // After the timeout: exits always taker-convert (an unresolved exit would corrupt
+    // measurement). Entries taker-convert too, unless neverCrossEntry is set, in which case a
+    // missed entry is canceled for free instead of paying the taker fee.
     const current = this.open.get(pair);
     if (current && current.id === order.id && current.remaining > 1e-12 && now - current.createdAt >= this.opts.entryTimeoutSec * 1000) {
+      if (current.purpose === "entry" && this.opts.neverCrossEntry) {
+        await this.store.updateOrder(current.id, { status: "canceled" }, now);
+        this.open.set(pair, null);
+        return;
+      }
       const price = book.walk(current.side, current.remaining) ?? touch ?? current.price;
       await this.fill(pair, current, current.remaining, price, "taker", now, true);
     }
@@ -209,6 +232,8 @@ export class PaperBroker implements Broker {
     const notional = price * size;
     const fee = feeUsd(notional, liquidity === "maker" ? this.opts.makerFeeBps : this.opts.takerFeeBps);
     acct.apply({ side: order.side, sizeBase: size, notionalUsd: notional, feeUsd: fee });
+    const counts = this.fillCounts.get(pair)!;
+    counts[liquidity]++;
     order.remaining -= size;
     const done = order.remaining <= 1e-12;
     const status = done ? (converted ? "converted_taker" : "filled") : "partial";
@@ -249,6 +274,8 @@ export class PaperBroker implements Broker {
     const acct = this.acct.get(pair)!;
     const mid = this.feed.book(pair)?.mid() ?? null;
     const order = this.open.get(pair);
+    const counts = this.fillCounts.get(pair)!;
+    const totalFills = counts.maker + counts.taker;
     return {
       pair,
       position: this.positionOf(pair),
@@ -259,7 +286,12 @@ export class PaperBroker implements Broker {
       feesUsd: acct.feesUsd,
       inferenceUsd: acct.inferenceUsd,
       equityUsd: mid != null ? acct.equity(mid) : acct.equity(acct.entryPrice() ?? 0),
+      cashUsd: acct.cashUsd(),
+      bankrollUsd: acct.bankrollUsd,
       openOrder: order ? { side: order.side, purpose: order.purpose, price: order.price, remaining: order.remaining, ageMs: Date.now() - order.createdAt } : null,
+      makerFills: counts.maker,
+      takerFills: counts.taker,
+      takerFillShare: totalFills > 0 ? counts.taker / totalFills : 0,
     };
   }
 

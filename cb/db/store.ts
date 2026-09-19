@@ -248,6 +248,22 @@ export class Store {
     `;
   }
 
+  /**
+   * Earliest decision ts still lacking an outcome, per horizon (null when nothing is pending).
+   * Drives the report's "next 4h/24h read" countdown: the next read lands at ts + horizon.
+   */
+  async earliestUnresolvedTs(horizonsSec: readonly number[]): Promise<Array<{ horizon_sec: number; ts: number | null }>> {
+    const horizons = horizonsSec.map((h) => Number(h));
+    return this.sql`
+      SELECT h.horizon_sec, MIN(d.ts) AS ts
+      FROM unnest(${this.sql.array(horizons, "INTEGER")}::int[]) AS h(horizon_sec)
+      LEFT JOIN decisions d
+        ON NOT EXISTS (SELECT 1 FROM outcomes o WHERE o.decision_id = d.id AND o.horizon_sec = h.horizon_sec)
+      GROUP BY h.horizon_sec
+      ORDER BY h.horizon_sec
+    `;
+  }
+
   async recentDecisions(opts: { pair?: string; limit?: number } = {}): Promise<Array<DecisionRow & { outcomes: OutcomeRow[] }>> {
     const limit = opts.limit ?? 100;
     const rows = opts.pair
@@ -274,11 +290,13 @@ export class Store {
       : this.sql<FillRow[]>`SELECT * FROM fills ORDER BY traded_at ASC`;
   }
 
-  /** Total inference cost across decisions, optionally for one pair. */
-  async inferenceUsdTotal(pair?: string): Promise<number> {
-    const rows = pair
-      ? await this.sql<{ s: number | null }[]>`SELECT SUM(inference_usd) AS s FROM decisions WHERE pair = ${pair}`
-      : await this.sql<{ s: number | null }[]>`SELECT SUM(inference_usd) AS s FROM decisions`;
+  /** Total inference cost across decisions, optionally scoped to one pair and/or one run. */
+  async inferenceUsdTotal(pair?: string, runId?: string): Promise<number> {
+    const rows = await this.sql<{ s: number | null }[]>`
+      SELECT SUM(inference_usd) AS s FROM decisions
+      WHERE (${pair ?? null}::text IS NULL OR pair = ${pair ?? null})
+        AND (${runId ?? null}::text IS NULL OR run_id = ${runId ?? null})
+    `;
     return Number(rows[0]?.s ?? 0);
   }
 
@@ -304,5 +322,15 @@ export class Store {
   /** Every fill for a run, oldest first (the authoritative money record for the report). */
   async fillsForRun(runId: string): Promise<FillRow[]> {
     return this.sql<FillRow[]>`SELECT * FROM fills WHERE run_id = ${runId} ORDER BY traded_at ASC`;
+  }
+
+  /**
+   * Wipe every paper-trading record: runs, decisions, outcomes, orders, fills, snapshots. Used by
+   * the admin "clear paper trades" control to start a fresh campaign. Deliberately leaves `bars`
+   * alone: it is a market-data cache (OHLC from the public feed), not trading state, and refilling
+   * it from scratch would just cost the resolver a warm-up period for no benefit.
+   */
+  async resetAll(): Promise<void> {
+    await this.sql`TRUNCATE TABLE fills, orders, outcomes, decisions, snapshots, runs`;
   }
 }

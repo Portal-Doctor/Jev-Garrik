@@ -32,6 +32,10 @@ export interface PaperPosition {
   feesUsd: number;
   inferenceUsd: number;
   equityUsd: number;
+  /** Uncommitted cash available to spend on a new entry (excludes cash tied up in an open position). */
+  cashUsd: number;
+  /** This pair's slice of the total bankroll, allocated evenly across configured pairs. */
+  bankrollUsd: number;
   openOrder: OpenOrder | null;
 }
 
@@ -114,7 +118,8 @@ export interface HorizonMetrics {
 export interface PairReport {
   pair: string;
   horizons: HorizonMetrics[];
-  pnl: { grossUsd: number; feesUsd: number; inferenceUsd: number; netUsd: number; oracleUsd: number; capture: number | null };
+  pnl: { grossUsd: number; feesUsd: number; inferenceUsd: number; netUsd: number; unrealizedUsd: number; oracleUsd: number; capture: number | null };
+  takerFillShare: number;
   maxDrawdownPct: number;
   makerFeeSensitivity: Array<{ makerBps: number; netUsd: number }>;
   gate: {
@@ -129,9 +134,16 @@ export interface PairReport {
   };
 }
 
+/** When the next outcome at a horizon becomes resolvable; `at` is null when nothing is pending. */
+export interface NextRead {
+  horizonSec: number;
+  at: number | null;
+}
+
 export interface Report {
   generatedAt: number;
   tradedHorizonSec: number;
   config: { makerFeeBps: number; takerFeeBps: number; fillHaircut: number; notionalUsd: number; bankrollUsd: number };
+  nextReads: NextRead[];
   pairs: PairReport[];
 }

@@ -18,6 +18,10 @@ export interface ServerCtx {
   /** Live snapshot for GET / and the SSE `snapshot` event (feed + positions + last decisions). */
   snapshot: () => unknown;
   incidentsPerDay: () => number;
+  /** Wipes all paper-trading tables and restarts the service so in-memory state (positions, open
+   *  orders, run id) starts fresh too. Resolves once the DB is cleared; the process exit happens
+   *  shortly after so the HTTP response reaches the client first. */
+  reset: () => Promise<void>;
 }
 
 const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "*" };
@@ -36,6 +40,8 @@ const num = (v: string | null, fallback: number) => (v == null || v === "" ? fal
  * GET /equity      ?pair=&fromTs=  snapshot series for the equity curve
  * GET /calibration ?pair=&horizon= bucketed calibration data + Brier
  * GET /report      full metrics JSON including the promotion-gate booleans
+ * POST /reset       clears all paper-trading data (runs/decisions/outcomes/orders/fills/snapshots)
+ *                    and restarts the service; irreversible, meant for the dashboard's admin button
  */
 export function startServer(ctx: ServerCtx) {
   const { meta, store } = ctx;
@@ -99,7 +105,12 @@ export function startServer(ctx: ServerCtx) {
       }
 
       if (pathname === "/report") {
-        return json(await buildReport(store, { incidentsPerDay: ctx.incidentsPerDay() }));
+        return json(await buildReport(store, { incidentsPerDay: ctx.incidentsPerDay(), runId: meta.runId }));
+      }
+
+      if (pathname === "/reset" && req.method === "POST") {
+        await ctx.reset();
+        return json({ ok: true, message: "Paper trading data cleared. The service is restarting." });
       }
 
       return json({ error: "not found" }, 404);

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { wilson, brier, calibration, edgeBps, maxDrawdownPct, makerFeeSensitivity, pnlFromFills } from "./report";
+import { wilson, brier, calibration, edgeBps, maxDrawdownPct, makerFeeSensitivity, pnlFromFills, takerFillShare, fmtHorizonCell } from "./report";
 import type { FillRow } from "./db/store";
 
 test("wilson interval brackets the point estimate and tightens with n", () => {
@@ -65,15 +65,44 @@ const fill = (over: Partial<FillRow>): FillRow => ({
   ...over,
 });
 
-test("pnl split: gross is pre-fee, net subtracts fees and inference exactly once", () => {
+test("pnl split: gross is pre-fee, net subtracts fees and inference exactly once (closed round trip)", () => {
   const fills = [
-    fill({ side: "buy", notional_usd: 1000, fee_usd: 5, cost_basis_usd: 1005, proceeds_usd: 0 }),
-    fill({ side: "sell", notional_usd: 1100, fee_usd: 5.5, cost_basis_usd: 0, proceeds_usd: 1094.5 }),
+    fill({ side: "buy", size_base: 1, notional_usd: 1000, fee_usd: 5 }),
+    fill({ side: "sell", size_base: 1, notional_usd: 1100, fee_usd: 5.5 }),
   ];
   const p = pnlFromFills(fills, 0.2);
   expect(p.feesUsd).toBeCloseTo(10.5, 9);
   expect(p.grossUsd).toBeCloseTo(100, 9); // 1100 - 1000 price move, pre-fee
+  expect(p.unrealizedUsd).toBe(0); // fully closed
   expect(p.netUsd).toBeCloseTo(1094.5 - 1005 - 0.2, 9); // 89.3
+});
+
+test("pnl split: an open position is marked at lastMid, not expensed as a realized loss (PL-REVENUE-REVIEW.md 2.2/3.5)", () => {
+  const fills = [fill({ side: "buy", size_base: 10, notional_usd: 1000, fee_usd: 5 })]; // cost basis 1005, no exit
+  const noMid = pnlFromFills(fills, 0, null);
+  expect(noMid.unrealizedUsd).toBe(0); // unknown mark: valued at neither gain nor loss
+  expect(noMid.netUsd).toBe(0); // NOT -1005, the old defect this replaces
+
+  const atMid = pnlFromFills(fills, 0, 100); // flat mid: MTM should show only the entry fee drag
+  expect(atMid.unrealizedUsd).toBeCloseTo(10 * 100 - 1005, 9); // -5
+  expect(atMid.netUsd).toBeCloseTo(-5, 9);
+});
+
+test("taker fill share is the fraction of fills that were taker (instruments 3.4)", () => {
+  const fills = [
+    fill({ liquidity: "maker" }),
+    fill({ liquidity: "maker" }),
+    fill({ liquidity: "taker" }),
+  ];
+  expect(takerFillShare(fills)).toBeCloseTo(1 / 3, 9);
+  expect(takerFillShare([])).toBe(0);
+});
+
+test("CLI horizon cells print 'pending' when n=0 instead of a literal zero (SENIOR-DEV-REPORT-2026-09-19.md item 4)", () => {
+  expect(fmtHorizonCell(0, "0.0%")).toBe("pending");
+  expect(fmtHorizonCell(0, "0.0000")).toBe("pending");
+  expect(fmtHorizonCell(26, "72.4%")).toBe("72.4%");
+  expect(fmtHorizonCell(1, "0.0%")).toBe("0.0%"); // n>0 with a genuinely-zero value is not "pending"
 });
 
 test("maker fee sensitivity recomputes maker fees, keeping taker fills fixed", () => {

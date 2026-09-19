@@ -105,3 +105,21 @@ test("unfilled entry converts to taker after the timeout, walking the book for s
   expect(taker.length).toBe(1);
   expect(Number(taker[0]!.price)).toBeGreaterThanOrEqual(100.1); // crossed the spread to the ask
 });
+
+test("a pair with insufficient cash cannot enter a new position (confirms it has money to spend)", async () => {
+  const feed = new FakeFeed();
+  const broker = new PaperBroker(
+    [pair],
+    feed,
+    store,
+    runId,
+    // Bankroll smaller than the notional: a $1000 clip on a $500 bankroll should never be entered.
+    { notionalUsd: 1000, makerFeeBps: 50, takerFeeBps: 90, fillHaircut: 0.5, entryTimeoutSec: 120, repriceTicks: 2, horizonSec: 14400, bankrollUsd: 500 },
+  );
+
+  expect(broker.state(pair).cashUsd).toBe(500);
+  await (broker as any).place(pair, "buy", "entry", null);
+  expect(broker.state(pair).openOrder).toBeNull(); // rejected before an order was ever placed
+  expect(broker.state(pair).position).toBe("flat");
+  expect(broker.state(pair).cashUsd).toBe(500); // untouched
+});

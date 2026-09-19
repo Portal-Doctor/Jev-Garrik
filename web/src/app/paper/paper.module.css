@@ -79,6 +79,47 @@
   background: rgba(74, 222, 128, 0.22);
 }
 
+.resetBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 999px;
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  transition: background 0.15s ease;
+  cursor: pointer;
+}
+
+.resetBtn:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.2);
+}
+
+.resetBtn:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+/* Rotating loading indicator shown on .resetBtn while the backend restart is in flight. */
+.spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(248, 113, 113, 0.35);
+  border-top-color: #f87171;
+  animation: spin 0.7s linear infinite;
+  flex: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .dot {
   display: inline-flex;
   align-items: center;
@@ -356,6 +397,44 @@
   font-size: 10px;
   color: var(--link);
   font-family: var(--font-mono);
+}
+
+/* Per-pair cash balance: confirms the pair still has money to spend on a new entry. */
+.balRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.balLabel {
+  font-size: 9px;
+  color: var(--muted-2);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.balValue {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.balOf {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.balWarn {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  padding: 1px 6px;
+  border-radius: 6px;
 }
 
 .metricRow {

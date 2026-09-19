@@ -51,6 +51,8 @@ feed.start();
 
 // Assigned once the server is up; broker/engine hooks push through it.
 let broadcast: (type: string, data: unknown) => void = () => {};
+// Assigned once `shutdown` exists below; the /reset route needs a reference before that point.
+let doReset: () => Promise<void> = async () => {};
 
 const model = createModel();
 const broker = new PaperBroker(
@@ -67,6 +69,7 @@ const broker = new PaperBroker(
     repriceTicks: config.repriceTicks,
     horizonSec: config.horizonSec,
     bankrollUsd: config.bankrollUsd,
+    neverCrossEntry: config.neverCrossEntry,
   },
   (f) => {
     console.log(`FILL ${f.pair} ${f.side.toUpperCase()} ${f.purpose} ${f.sizeBase.toFixed(4)} @ ${f.price} ${f.liquidity} fee $${f.feeUsd.toFixed(4)}`);
@@ -87,6 +90,8 @@ const engine = new Engine(
     makerFeeBps: config.makerFeeBps,
     takerFeeBps: config.takerFeeBps,
     jevUsdPerMTok: config.jevUsdPerMTok,
+    buyThreshold: config.buyThreshold,
+    sellThreshold: config.sellThreshold,
   },
   broker,
   (id, decision, state, intent) => {
@@ -111,6 +116,7 @@ const srv = startServer({
     nextDecision: Object.fromEntries(config.pairs.map((p) => [p, engine.nextDecisionAt(p)])),
   }),
   incidentsPerDay: () => feed.incidents / uptimeDays(),
+  reset: () => doReset(),
 });
 broadcast = srv.broadcast;
 const server = srv.server;
@@ -138,6 +144,15 @@ const shutdown = async () => {
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+// Admin "clear paper trades" control (dashboard button -> POST /reset): wipe the DB, then exit so
+// the container's `restart: unless-stopped` policy brings up a fresh process with clean in-memory
+// state (positions, open orders, a new run id). The exit is delayed so the HTTP response reaches
+// the client before the process goes away.
+doReset = async () => {
+  await store.resetAll();
+  setTimeout(() => void shutdown(), 250);
+};
 
 console.log(
   `cb paper trader | run ${runId} | model=${meta.model} | pairs=${config.pairs.join(",")} | db=${config.databaseUrl.replace(/:[^:@/]*@/, ":****@")} | http://localhost:${server.port}`,

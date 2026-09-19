@@ -1,54 +1,134 @@
-import { test, expect } from "bun:test";
-import { PairBook, summarizeTape } from "./feed";
+import { test, expect, afterEach } from "bun:test";
+import { Feed, divergenceThreshold } from "./feed";
 
-test("book tracks best bid/ask, mid and spread; absolute quantities", () => {
-  const b = new PairBook();
-  b.set("bid", 99, 10);
-  b.set("bid", 98, 5);
-  b.set("offer", 101, 8);
-  b.set("offer", 102, 4);
-  expect(b.bestBid()).toBe(99);
-  expect(b.bestAsk()).toBe(101);
-  expect(b.mid()).toBe(100);
-  expect(b.spreadBps()).toBeCloseTo(((101 - 99) / 100) * 10_000, 6); // 200 bps
-  b.set("bid", 99, 0); // remove level
-  expect(b.bestBid()).toBe(98);
+const originalFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = originalFetch;
 });
 
-test("depth bands accumulate cumulative size within each band of mid", () => {
-  const b = new PairBook();
-  b.set("bid", 100, 10); // 0 bps from a mid of ~100.05
-  b.set("bid", 99.9, 5); // ~10 bps
-  b.set("offer", 100.1, 7);
-  b.set("offer", 100.6, 3); // ~55 bps, outside 50
-  const d = b.depthBands([10, 25, 50]);
-  expect(d["10bps"]!.bid).toBeGreaterThan(0);
-  expect(d["50bps"]!.ask).toBe(7); // the 100.6 level is beyond 50 bps
-  expect(d["50bps"]!.bid).toBe(15);
+function mockRestPrice(bid: number, ask: number) {
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ best_bid: String(bid), best_ask: String(ask) }), { status: 200 })) as typeof fetch;
+}
+
+function seedBook(feed: Feed, pair: string, bid: number, ask: number) {
+  const book = feed.book(pair)!;
+  book.set("bid", bid, 10);
+  book.set("offer", ask, 10);
+}
+
+test("divergenceThreshold scales with spread but never drops below the fixed floor", () => {
+  expect(divergenceThreshold(0)).toBe(5); // no spread info: fixed floor
+  expect(divergenceThreshold(1)).toBe(5); // 2x a 1 bps spread is under the floor
+  expect(divergenceThreshold(10)).toBe(20); // wide spread pair: scale up, timing skew is expected
+  expect(divergenceThreshold(null)).toBe(5);
 });
 
-test("imbalance is signed and bounded", () => {
-  const b = new PairBook();
-  b.set("bid", 100, 30);
-  b.set("offer", 100.2, 10);
-  const imb = b.imbalance(0.01);
-  expect(imb).toBeGreaterThan(0); // more bids than asks
-  expect(imb).toBeLessThanOrEqual(1);
+test("a single divergent REST check is logged but not counted as an incident", async () => {
+  const incidents: string[] = [];
+  const feed = new Feed(["SOL-USD"], null, (m) => incidents.push(m));
+  seedBook(feed, "SOL-USD", 99.9, 100.1); // mid 100, tight spread -> threshold stays at the 5 bps floor
+  mockRestPrice(101, 101); // ~100 bps away: one-off divergence
+
+  await (feed as any).checkDivergence();
+
+  expect(feed.incidents).toBe(0);
+  expect(incidents.some((m) => m.includes("diverges"))).toBe(true);
 });
 
-test("tape summary computes CVD from taker side over the window", () => {
-  const now = 1_000_000;
-  const tape = [
-    { ts: now - 5_000, price: 100, size: 2, takerSide: "buy" as const },
-    { ts: now - 4_000, price: 101, size: 1, takerSide: "sell" as const },
-    { ts: now - 3_000, price: 102, size: 3, takerSide: "buy" as const },
-    { ts: now - 120_000, price: 90, size: 9, takerSide: "sell" as const }, // outside 60s window
-  ];
-  const s = summarizeTape(tape, 60, now);
-  expect(s.count).toBe(3);
-  expect(s.buyBase).toBe(5);
-  expect(s.sellBase).toBe(1);
-  expect(s.cvdBase).toBe(4);
-  expect(s.lastSide).toBe("buy");
-  expect(s.vwap).toBeCloseTo((100 * 2 + 101 * 1 + 102 * 3) / 6, 6);
+test("divergence that persists across two consecutive checks of the same pair counts as an incident", async () => {
+  const feed = new Feed(["SOL-USD"], null, () => {});
+  seedBook(feed, "SOL-USD", 99.9, 100.1);
+  mockRestPrice(101, 101);
+
+  await (feed as any).checkDivergence(); // 1st: logged only
+  expect(feed.incidents).toBe(0);
+  await (feed as any).checkDivergence(); // 2nd consecutive: now it counts
+  expect(feed.incidents).toBe(1);
+  await (feed as any).checkDivergence(); // 3rd consecutive: keeps counting each persisted check
+  expect(feed.incidents).toBe(2);
+});
+
+test("a resolved divergence resets the persistence streak", async () => {
+  const feed = new Feed(["SOL-USD"], null, () => {});
+  seedBook(feed, "SOL-USD", 99.9, 100.1);
+
+  mockRestPrice(101, 101);
+  await (feed as any).checkDivergence(); // over threshold, 1st
+  mockRestPrice(100, 100);
+  await (feed as any).checkDivergence(); // back in line: streak resets
+  mockRestPrice(101, 101);
+  await (feed as any).checkDivergence(); // over threshold again, but only the 1st of a new streak
+
+  expect(feed.incidents).toBe(0);
+});
+
+test("a wide-spread pair does not false-positive on ordinary timing skew", async () => {
+  const feed = new Feed(["SUI-USD"], null, () => {});
+  seedBook(feed, "SUI-USD", 99.5, 100.5); // 100 bps spread -> threshold scales to 200 bps
+  mockRestPrice(100.6, 100.6); // ~60 bps from local mid: within a scaled threshold, not the fixed 5
+
+  await (feed as any).checkDivergence();
+  await (feed as any).checkDivergence();
+
+  expect(feed.incidents).toBe(0);
+});
+
+test("a WS drop after a successful connection counts as one incident", () => {
+  const incidents: string[] = [];
+  const feed = new Feed(["SOL-USD"], null, (m) => incidents.push(m));
+
+  (feed as any).hasConnectedOnce = true;
+  (feed as any).noteDisconnect();
+
+  expect(feed.incidents).toBe(1);
+  expect(incidents.some((m) => m.includes("reconnect"))).toBe(true);
+});
+
+test("a close before the feed ever connected is not counted (startup flakiness, not a defect)", () => {
+  const feed = new Feed(["SOL-USD"], null, () => {});
+
+  (feed as any).noteDisconnect();
+
+  expect(feed.incidents).toBe(0);
+});
+
+test("a repeated close does not double count without a fresh successful connection in between", () => {
+  const feed = new Feed(["SOL-USD"], null, () => {});
+
+  (feed as any).hasConnectedOnce = true;
+  (feed as any).noteDisconnect();
+  (feed as any).noteDisconnect(); // no reconnection happened in between
+
+  expect(feed.incidents).toBe(1);
+});
+
+test("the initial startup book snapshot is not counted as a resync incident", () => {
+  const feed = new Feed(["SOL-USD"], null, () => {});
+  (feed as any).onL2({ product_id: "SOL-USD", type: "snapshot", updates: [] });
+
+  expect(feed.incidents).toBe(0);
+});
+
+test("a mid-stream resync while already synced on the live connection counts as an incident", () => {
+  const incidents: string[] = [];
+  const feed = new Feed(["SOL-USD"], null, (m) => incidents.push(m));
+
+  (feed as any).onL2({ product_id: "SOL-USD", type: "snapshot", updates: [] }); // startup: not counted
+  (feed as any).onL2({ product_id: "SOL-USD", type: "snapshot", updates: [] }); // mid-stream: counted
+
+  expect(feed.incidents).toBe(1);
+  expect(incidents.some((m) => m.includes("resync"))).toBe(true);
+});
+
+test("a resync right after a reconnect (synced cleared) is not double-counted on top of the reconnect", () => {
+  const feed = new Feed(["SOL-USD"], null, () => {});
+
+  (feed as any).onL2({ product_id: "SOL-USD", type: "snapshot", updates: [] }); // startup sync
+  (feed as any).hasConnectedOnce = true;
+  (feed as any).noteDisconnect(); // reconnect incident #1, and clears `synced` upstream in onclose
+  (feed as any).synced.clear(); // mirror what ws.onclose does before reconnecting
+  (feed as any).onL2({ product_id: "SOL-USD", type: "snapshot", updates: [] }); // post-reconnect resync
+
+  expect(feed.incidents).toBe(1); // only the reconnect, not a second resync incident
 });

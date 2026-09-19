@@ -85,14 +85,21 @@ instance per pair against a shared feed process.
 - Entry: post-only limit at the touch (join best bid to buy, best ask to sell-to-close). Reprice
   if the touch moves more than `CB_REPRICE_TICKS` while resting. If unfilled after
   `CB_ENTRY_TIMEOUT_SEC` (default 120 s), convert to taker (cross the spread) so decisions get
-  exposure and taker costs are honestly measured. Both legs record their actual liquidity flag
-  and fee rate.
+  exposure and taker costs are honestly measured, unless `CB_NEVER_CROSS_ENTRY=true`, in which
+  case the entry is canceled instead (a missed entry costs nothing; a taker entry costs roughly
+  the whole per-trade edge - see `PL-REVENUE-REVIEW.md` 3.4). Both legs record their actual
+  liquidity flag and fee rate; the fraction of fills that were taker is on the `/report`
+  (`takerFillShare`).
 - Exit at horizon expiry: same ladder, but the taker conversion is mandatory (an unresolved exit
   would corrupt measurement).
 - Fees: applied per fill from config (`CB_MAKER_FEE_BPS` default 50, `CB_TAKER_FEE_BPS` default
   90). Fee tier is config, not hardcoded, so results can be re-run under "what if I reach the
   $100K volume tier" assumptions. The report shows P&L under the configured tier and under 0 bps
   maker as an upper bound.
+- Decision hysteresis: a raw model flip only trades once p(buy) clears `CB_BUY_THRESHOLD` (default
+  0.6) to enter, or drops to/below `CB_SELL_THRESHOLD` (default 0.4) to exit; in between, the
+  current position is held. With a ~140 bps round-trip cost, this converts marginal flips into
+  fewer, higher-conviction round trips (`PL-REVENUE-REVIEW.md` 3.2).
 
 ---
 
@@ -432,6 +439,9 @@ CB_TAKER_FEE_BPS=90
 CB_FILL_HAIRCUT=0.5
 CB_ENTRY_TIMEOUT_SEC=120
 CB_REPRICE_TICKS=2
+CB_NEVER_CROSS_ENTRY=false
+CB_BUY_THRESHOLD=0.6
+CB_SELL_THRESHOLD=0.4
 CB_PORT=3001
 CB_DB_PATH=data/cb.db
 # DATABASE_URL=postgres://user:pass@host:5432/cb   # optional, replaces sqlite

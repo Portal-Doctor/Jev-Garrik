@@ -9,10 +9,17 @@ import type { Store } from "./db/store";
  * book, a rolling trade tape for CVD, a 1/second mid ring buffer capped at 26 h, and persisted
  * minute bars so the resolver survives restarts. Reconnects with backoff and resyncs the book on the
  * next level2 snapshot; a heartbeat gap beyond 15 s forces a reconnect. Once a minute it cross-checks
- * the local book against the REST best bid/ask and logs divergence over 5 bps as an incident.
+ * the local book against the REST best bid/ask and logs divergence over a spread-scaled threshold.
  *
  * Mirrors the role of src/book.ts + src/trades.ts for the demo, so the MarketState the model later
  * sees is structurally familiar.
+ *
+ * `Feed.incidents` (SENIOR-DEV-REPORT-2026-09-19.md item 1) only counts signals that indicate an
+ * actual feed defect: WS reconnects, heartbeat-gap forced reconnects, mid-stream book resyncs
+ * (outside of the initial sync), and REST/WS mid divergence that persists across two consecutive
+ * checks of the same pair. A single divergent check is still logged for diagnostics but not
+ * counted, since on volatile/wide-spread pairs ordinary timing skew between the two samples
+ * routinely exceeds a fixed bps threshold without indicating anything wrong with the feed.
  */
 
 const DEPTH_BANDS_BPS = [10, 25, 50] as const;
@@ -21,6 +28,14 @@ const MID_RING_MS = 26 * 60 * 60 * 1000; // 26 h covers the 24 h measured horizo
 const TAPE_MS = 90 * 60 * 1000; // keep 90 min of prints
 const HEARTBEAT_GAP_MS = 15_000;
 const DIVERGENCE_BPS = 5;
+
+/** Divergence incident threshold: the fixed floor, or 2x the pair's own live spread, whichever is
+ *  wider. A pair with a 10 bps spread routinely shows >5 bps of local/REST timing skew with no
+ *  feed defect at all; scaling to the spread keeps the check meaningful on volatile pairs. */
+export function divergenceThreshold(spreadBps: number | null, baseBps: number = DIVERGENCE_BPS): number {
+  const spread = spreadBps != null && spreadBps > 0 ? spreadBps : 0;
+  return Math.max(baseBps, 2 * spread);
+}
 
 export interface DepthBands {
   [band: string]: { bid: number; ask: number };
@@ -203,6 +218,9 @@ export class Feed {
   private volAccum = new Map<string, number>();
   private lastTrade = new Map<string, number>();
   private synced = new Set<string>();
+  private everSynced = new Set<string>(); // pairs that have received at least one snapshot ever
+  private lastDivergent = new Map<string, boolean>(); // per pair: was the previous check over threshold?
+  private hasConnectedOnce = false; // true once the current/prior connection has successfully opened
   private lastHeartbeat = 0;
   private backoffMs = 1_000;
   private closed = false;
@@ -316,6 +334,7 @@ export class Feed {
     ws.onopen = () => {
       this.backoffMs = 1_000;
       this.lastHeartbeat = Date.now();
+      this.hasConnectedOnce = true;
       ws.send(JSON.stringify({ type: "subscribe", channel: "level2", product_ids: this.pairs }));
       ws.send(JSON.stringify({ type: "subscribe", channel: "market_trades", product_ids: this.pairs }));
       ws.send(JSON.stringify({ type: "subscribe", channel: "heartbeats" }));
@@ -324,10 +343,21 @@ export class Feed {
     ws.onerror = () => ws.close();
     ws.onclose = () => {
       this.synced.clear(); // force a fresh snapshot on reconnect
+      this.noteDisconnect();
       if (this.closed) return;
       setTimeout(() => this.connect(), this.backoffMs);
       this.backoffMs = Math.min(this.backoffMs * 2, 10_000);
     };
+  }
+
+  /** Counts a genuine feed defect: a socket that had successfully connected before just dropped.
+   *  A close before the first successful open (e.g. initial connection refused) is not counted -
+   *  that is startup flakiness, not an established feed going bad. */
+  private noteDisconnect(): void {
+    if (!this.hasConnectedOnce) return;
+    this.hasConnectedOnce = false;
+    this.incidents++;
+    this.onIncident("ws disconnected, reconnecting (incident)");
   }
 
   private onMessage(raw: string): void {
@@ -360,7 +390,16 @@ export class Feed {
     if (!book) return;
     if (ev.type === "snapshot") {
       book.clear();
+      // A fresh snapshot while this pair was already synced on the current connection means the
+      // server (or we) decided the book needed resyncing mid-stream, without a WS drop - a
+      // genuine feed defect distinct from the ordinary post-reconnect resync (already counted by
+      // noteDisconnect). Only counts once we've seen a real startup sync for this pair.
+      if (this.synced.has(pair) && this.everSynced.has(pair)) {
+        this.incidents++;
+        this.onIncident(`${pair} book resync mid-stream (incident)`);
+      }
       this.synced.add(pair);
+      this.everSynced.add(pair);
     }
     for (const u of ev.updates ?? []) {
       book.set(u.side, Number(u.price_level), Number(u.new_quantity));
@@ -433,7 +472,8 @@ export class Feed {
     if (this.pairs.length === 0) return;
     const pair = this.pairs[this.divergenceIdx % this.pairs.length]!;
     this.divergenceIdx++;
-    const localMid = this.books.get(pair)?.mid();
+    const book = this.books.get(pair);
+    const localMid = book?.mid();
     if (localMid == null) return;
     try {
       const res = await fetch(`${config.coinbaseRestUrl}/api/v3/brokerage/market/products/${pair}`);
@@ -444,10 +484,18 @@ export class Feed {
       const restMid = bid && ask ? (bid + ask) / 2 : Number(p.price);
       if (!restMid) return;
       const diffBps = (Math.abs(localMid - restMid) / restMid) * 10_000;
-      if (diffBps > DIVERGENCE_BPS) {
-        this.incidents++;
-        this.onIncident(`${pair} book diverges from REST by ${diffBps.toFixed(1)} bps (local ${localMid}, rest ${restMid})`);
+      const threshold = divergenceThreshold(book?.spreadBps() ?? null);
+      const over = diffBps > threshold;
+      const wasOver = this.lastDivergent.get(pair) ?? false;
+      if (over) {
+        // Always log for diagnostics; only count once it persists across two consecutive checks
+        // of the same pair - a genuinely stale book stays diverged, ordinary timing skew does not.
+        this.onIncident(
+          `${pair} book diverges from REST by ${diffBps.toFixed(1)} bps (threshold ${threshold.toFixed(1)}, local ${localMid}, rest ${restMid})${wasOver ? " (incident)" : ""}`,
+        );
+        if (wasOver) this.incidents++;
       }
+      this.lastDivergent.set(pair, over);
     } catch {
       // network hiccup; not an incident on its own
     }

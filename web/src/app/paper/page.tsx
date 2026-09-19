@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePaperFeed } from "@/lib/usePaperFeed";
 import { useUptime } from "@/lib/useUptime";
 import { fmtUsd } from "@/lib/format";
@@ -19,6 +19,17 @@ function fmtPrice(n: number | null | undefined): string {
 }
 
 const hhLabel = (sec: number) => (sec % 3600 === 0 ? `${sec / 3600}h` : `${Math.round(sec / 60)}m`);
+
+/** Base-asset ticker from a "XRP-USD"-style pair. */
+const baseSymbol = (pair: string) => pair.split("-")[0] ?? pair;
+
+/** Coin-quantity precision that adapts to scale (SOL ~9 vs DOGE ~11,000). */
+function fmtQty(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  const d = abs >= 1000 ? 2 : abs >= 1 ? 4 : 6;
+  return n.toFixed(d);
+}
 
 type Health = "checking" | "connected" | "disconnected";
 
@@ -76,11 +87,47 @@ function useReport(apiUrl: string, everyMs = 20_000): Report | null {
   return report;
 }
 
+/**
+ * Drives the reset button's spinner: shown from the click until the backend has visibly gone
+ * down and come back up (via the existing /health poll), which is the real signal the restart
+ * completed and the DB flush actually took hold - not just that the fetch resolved. A 30s
+ * failsafe clears it either way so the button never spins forever.
+ */
+function useResetControl(apiUrl: string, health: Health): { resetting: boolean; triggerReset: () => void } {
+  const [resetting, setResetting] = useState(false);
+  const sawDown = useRef(false);
+  const base = apiUrl.replace(/\/+$/, "");
+
+  const triggerReset = () => {
+    if (resetting) return;
+    if (typeof window !== "undefined" && !window.confirm("Clear all paper trading data? This flushes the database and restarts the service.")) return;
+    sawDown.current = false;
+    setResetting(true);
+    fetch(`${base}/reset`, { method: "POST" }).catch(() => {
+      /* the request can fail if the process exits before the response flushes; the health poll below still confirms completion */
+    });
+  };
+
+  useEffect(() => {
+    if (!resetting) return;
+    if (health === "disconnected") sawDown.current = true;
+    if (sawDown.current && health === "connected") {
+      setResetting(false);
+      return;
+    }
+    const failsafe = setTimeout(() => setResetting(false), 30_000);
+    return () => clearTimeout(failsafe);
+  }, [resetting, health]);
+
+  return { resetting, triggerReset };
+}
+
 export default function PaperPage() {
   const feed = usePaperFeed(API_URL);
   const report = useReport(API_URL);
   const health = useHealth(API_URL);
   const uptime = useUptime(feed.meta?.startedAt ?? null);
+  const { resetting, triggerReset } = useResetControl(API_URL, health);
 
   const pairs = feed.meta?.pairs ?? Object.keys(feed.feed);
   const positions = Object.values(feed.positions);
@@ -130,6 +177,10 @@ export default function PaperPage() {
           <Link href="/paper/report" className={styles.reportBtn}>
             P&amp;L Report
           </Link>
+          <button type="button" className={styles.resetBtn} onClick={triggerReset} disabled={resetting} title="Flush all paper trading data and restart">
+            {resetting && <span className={styles.spinner} />}
+            {resetting ? "Restarting…" : "Clear paper trades"}
+          </button>
         </div>
       </header>
 
@@ -151,6 +202,7 @@ export default function PaperPage() {
               decision={feed.lastDecision[pair]}
               report={reportByPair[pair]}
               tradedHorizonSec={report?.tradedHorizonSec ?? 14_400}
+              notionalUsd={report?.config.notionalUsd ?? 1_000}
               nextTs={feed.nextDecision[pair]}
               decideSec={feed.meta?.decideSec ?? 300}
             />
@@ -237,6 +289,7 @@ function PairCard({
   decision,
   report,
   tradedHorizonSec,
+  notionalUsd,
   nextTs,
   decideSec,
 }: {
@@ -245,6 +298,8 @@ function PairCard({
   decision?: LastDecision;
   report?: PairReport;
   tradedHorizonSec: number;
+  /** The configured per-trade notional; a balance under this can't fund the next entry. */
+  notionalUsd: number;
   nextTs?: number;
   decideSec: number;
 }) {
@@ -284,6 +339,25 @@ function PairCard({
           </span>
         )}
       </div>
+
+      {position && (
+        <div className={styles.balRow} title="Base-asset quantity currently held">
+          <span className={styles.balLabel}>holdings</span>
+          <span className={styles.balValue}>
+            {fmtQty(position.sizeBase)} <span className={styles.balOf}>{baseSymbol(pair)}</span>
+          </span>
+        </div>
+      )}
+
+      {position && (
+        <div className={styles.balRow} title="Cash available to spend on the next entry, out of this pair's allocated bankroll">
+          <span className={styles.balLabel}>balance</span>
+          <span className={`${styles.balValue} ${position.cashUsd < notionalUsd ? styles.neg : ""}`}>
+            {fmtUsd(position.cashUsd, 2)} <span className={styles.balOf}>/ {fmtUsd(position.bankrollUsd, 0)}</span>
+          </span>
+          {position.cashUsd < notionalUsd && <span className={styles.balWarn}>low funds</span>}
+        </div>
+      )}
 
       {traded && (
         <div className={styles.metricRow}>

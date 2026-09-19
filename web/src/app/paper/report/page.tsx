@@ -10,6 +10,15 @@ const API_URL = process.env.NEXT_PUBLIC_PAPER_API_URL ?? "http://localhost:3001"
 const hhLabel = (sec: number) => (sec % 3600 === 0 ? `${sec / 3600}h` : `${Math.round(sec / 60)}m`);
 const pct = (n: number, d = 1) => `${(n * 100).toFixed(d)}%`;
 
+/** "in 38m" / "in 20h 41m" until the next outcome resolves at a horizon; the resolver sweeps once a minute. */
+const fmtNextRead = (at: number | null, now: number): string => {
+  if (at == null) return "none pending";
+  const ms = at - now;
+  if (ms <= 0) return "due now";
+  const mins = Math.ceil(ms / 60_000);
+  return mins < 60 ? `in ${mins}m` : `in ${Math.floor(mins / 60)}h ${mins % 60}m`;
+};
+
 type Status = "loading" | "ok" | "error";
 
 /** Fetch /report on mount and every 20s; keeps the last good report if a refresh fails. */
@@ -68,6 +77,8 @@ export default function ReportPage() {
   const th = report?.tradedHorizonSec ?? 14_400;
   const makerTiers = report?.pairs[0]?.makerFeeSensitivity.map((s) => s.makerBps) ?? [50, 25, 10, 0];
   const hasData = (report?.pairs.length ?? 0) > 0;
+  // Countdown to the next resolvable outcome at the traded horizon and beyond (4h and 24h by default).
+  const nextReads = (report?.nextReads ?? []).filter((r) => r.horizonSec >= th);
 
   return (
     <div className="card">
@@ -107,6 +118,9 @@ export default function ReportPage() {
             <Stat label="Inference" value={fmtUsd(-totals.inference, 4)} tone={-1} />
             <Stat label="Capture" value={totals.capture == null ? "—" : pct(totals.capture)} />
             <Stat label="Gates passing" value={`${totals.gatesPassing}/${totals.nPairs}`} />
+            {nextReads.map((r) => (
+              <Stat key={r.horizonSec} label={`Next ${hhLabel(r.horizonSec)} read`} value={fmtNextRead(r.at, updatedAt ?? Date.now())} />
+            ))}
           </section>
 
           <section className={styles.block}>
@@ -120,6 +134,7 @@ export default function ReportPage() {
                   <th className={styles.num}>Fees</th>
                   <th className={styles.num}>Inference</th>
                   <th className={styles.num}>Capture</th>
+                  <th className={styles.num}>Taker fills</th>
                   <th className={styles.num}>Max DD</th>
                   <th>Gate</th>
                 </tr>
@@ -133,6 +148,7 @@ export default function ReportPage() {
                     <td className={styles.num}>{fmtUsd(p.pnl.feesUsd, 2)}</td>
                     <td className={styles.num}>{fmtUsd(p.pnl.inferenceUsd, 4)}</td>
                     <td className={styles.num}>{p.pnl.capture == null ? "—" : pct(p.pnl.capture)}</td>
+                    <td className={styles.num}>{pct(p.takerFillShare, 0)}</td>
                     <td className={styles.num}>{p.maxDrawdownPct.toFixed(1)}%</td>
                     <td>
                       <span className={`${styles.gateTag} ${p.gate.passes ? styles.gatePass : styles.gateFail}`}>

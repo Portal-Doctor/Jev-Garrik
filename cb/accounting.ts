@@ -27,7 +27,7 @@ export class Accounting {
   feesUsd = 0;
   inferenceUsd = 0;
 
-  constructor(private readonly bankrollUsd: number) {}
+  constructor(public readonly bankrollUsd: number) {}
 
   apply(f: FillInput): void {
     if (f.sizeBase <= 0) return;
@@ -68,6 +68,16 @@ export class Accounting {
 
   equity(mid: number): number {
     return this.bankrollUsd + this.realizedUsd + this.unrealized(mid) - this.inferenceUsd;
+  }
+
+  /**
+   * Uncommitted cash: the bankroll plus realized P&L minus inference cost minus whatever cash is
+   * currently tied up in the open position's cost basis. This is what is actually available to
+   * spend on a new entry - `equity()` includes unrealized mark-to-market, which is not spendable
+   * cash until the position closes.
+   */
+  cashUsd(): number {
+    return this.bankrollUsd + this.realizedUsd - this.inferenceUsd - this.costBasisUsd;
   }
 }
 

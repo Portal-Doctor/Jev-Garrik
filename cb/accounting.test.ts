@@ -69,3 +69,21 @@ test("inference cost reduces equity without touching realized", () => {
   expect(a.realizedUsd).toBe(0);
   expect(a.equity(100)).toBeCloseTo(9_999.75, 9);
 });
+
+test("cashUsd is the bankroll flat, and drops by the cost basis while a position is open", () => {
+  const a = new Accounting(2_500);
+  expect(a.cashUsd()).toBe(2_500); // flat: all cash free
+  a.apply(buy(10, 100, 50)); // cost basis 1005 tied up
+  expect(a.cashUsd()).toBeCloseTo(2_500 - 1005, 9); // 1495, not the full bankroll
+  a.apply(sell(10, 110, 50)); // closes fully, realizes 89.5
+  expect(a.cashUsd()).toBeCloseTo(2_500 + 89.5, 9); // cash is free again, plus the gain
+});
+
+test("cashUsd falls with realized losses and inference cost, independent of mark-to-market", () => {
+  const a = new Accounting(2_500);
+  a.apply(buy(10, 100, 90)); // cost basis 1009
+  a.apply(sell(10, 90, 90)); // a losing round trip
+  a.addInference(0.1);
+  expect(a.cashUsd()).toBeCloseTo(2_500 + a.realizedUsd - 0.1, 9);
+  expect(a.cashUsd()).toBeLessThan(2_500); // confirms losses actually reduce spendable cash
+});

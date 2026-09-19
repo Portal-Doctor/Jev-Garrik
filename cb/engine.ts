@@ -37,6 +37,21 @@ export interface EngineOpts {
   makerFeeBps: number;
   takerFeeBps: number;
   jevUsdPerMTok: number;
+  /** Enter long only when p(buy) clears this; exit to flat only when p(buy) drops below sellThreshold. */
+  buyThreshold: number;
+  sellThreshold: number;
+}
+
+/**
+ * Confidence-band hysteresis on top of the model's raw buy/sell call (PL-REVENUE-REVIEW.md 3.2):
+ * with a ~140bps round-trip cost, a flip should only be actioned when the model's conviction
+ * clears a band wide enough to plausibly beat that cost. Flat only enters above `buyThreshold`;
+ * long only exits below `sellThreshold`; in between, hold the current position. The raw
+ * decision/probabilities are still recorded for measurement regardless of this gate.
+ */
+export function targetFor(position: "long" | "flat", pBuy: number, buyThreshold: number, sellThreshold: number): "long" | "flat" {
+  if (position === "flat") return pBuy >= buyThreshold ? "long" : "flat";
+  return pBuy <= sellThreshold ? "flat" : "long";
 }
 
 /**
@@ -108,7 +123,7 @@ export class Engine {
     try {
       const decision = await this.model.decide(state);
       const inferenceUsd = (decision.inputTokens / 1e6) * this.opts.jevUsdPerMTok;
-      const target: "long" | "flat" = decision.action === "buy" ? "long" : "flat";
+      const target = targetFor(position, decision.probabilities.buy, this.opts.buyThreshold, this.opts.sellThreshold);
       const traded = target !== position;
       const id = await this.store.insertDecision({
         run_id: this.runId,

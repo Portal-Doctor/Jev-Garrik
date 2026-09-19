@@ -14,7 +14,9 @@ export const config = {
   databaseUrl: env("DATABASE_URL", "postgres://cb:cb@localhost:5432/cb")!,
 
   // Strategy (spec section 2). Pairs are config, not code.
-  pairs: list("CB_PAIRS", "SOL-USD,DOGE-USD,SUI-USD,XRP-USD"),
+  // AVAX (high-beta L1, deep book) and TAO (AI sector, structurally volatile) supplement the
+  // original four for volatility and sector diversity.
+  pairs: list("CB_PAIRS", "SOL-USD,DOGE-USD,SUI-USD,XRP-USD,AVAX-USD,TAO-USD"),
   decideSec: num("CB_DECIDE_SEC", 300),
   horizonSec: num("CB_HORIZON_SEC", 14_400),
   notionalUsd: num("CB_NOTIONAL_USD", 1_000),
@@ -26,6 +28,16 @@ export const config = {
   fillHaircut: num("CB_FILL_HAIRCUT", 0.5),
   entryTimeoutSec: num("CB_ENTRY_TIMEOUT_SEC", 120),
   repriceTicks: num("CB_REPRICE_TICKS", 2),
+  // If true, an entry that is unfilled at the maker touch after entryTimeoutSec is canceled
+  // instead of converted to a taker fill (PL-REVENUE-REVIEW.md 3.4): a missed entry costs
+  // nothing, a taker entry costs the whole per-trade edge.
+  neverCrossEntry: (env("CB_NEVER_CROSS_ENTRY", "false") ?? "false").toLowerCase() === "true",
+
+  // Decision hysteresis (PL-REVENUE-REVIEW.md 3.2): only act on the model's call when it clears a
+  // confidence band wide enough to beat the round-trip fee cost, converting a raw buy/sell flip
+  // into fewer, higher-conviction round trips. Holding position when p(buy) is between the two.
+  buyThreshold: num("CB_BUY_THRESHOLD", 0.6),
+  sellThreshold: num("CB_SELL_THRESHOLD", 0.4),
 
   // Model (shared with the demo).
   model: (env("MODEL", "mock") as "mock" | "jev"),
