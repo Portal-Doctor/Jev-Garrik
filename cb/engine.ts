@@ -50,6 +50,8 @@ export class Engine {
   private busy = new Map<string, boolean>();
   private timers: Array<ReturnType<typeof setInterval>> = [];
   private starters: Array<ReturnType<typeof setTimeout>> = [];
+  /** Wall-clock ms of the next scheduled decision per pair (drives the UI countdown). */
+  private nextAt = new Map<string, number>();
   readonly latest = new Map<string, { decision: Decision; state: MarketState; id: string }>();
 
   constructor(
@@ -65,11 +67,13 @@ export class Engine {
 
   start(): void {
     const n = this.pairs.length || 1;
+    const base = Date.now();
     this.pairs.forEach((pair, i) => {
       const stagger = (this.opts.decideSec * 1000 * i) / n;
+      this.nextAt.set(pair, base + stagger);
       const t = setTimeout(() => {
-        void this.decide(pair);
-        this.timers.push(setInterval(() => void this.decide(pair), this.opts.decideSec * 1000));
+        this.fire(pair);
+        this.timers.push(setInterval(() => this.fire(pair), this.opts.decideSec * 1000));
       }, stagger);
       this.starters.push(t);
     });
@@ -78,6 +82,17 @@ export class Engine {
   stop(): void {
     this.starters.forEach(clearTimeout);
     this.timers.forEach(clearInterval);
+  }
+
+  /** Advance the schedule clock (kept stable for the UI even if a cycle is skipped), then decide. */
+  private fire(pair: string): void {
+    this.nextAt.set(pair, Date.now() + this.opts.decideSec * 1000);
+    void this.decide(pair);
+  }
+
+  /** Wall-clock ms of the next scheduled decision for a pair, or null before `start()`. */
+  nextDecisionAt(pair: string): number | null {
+    return this.nextAt.get(pair) ?? null;
   }
 
   async decide(pair: string): Promise<void> {

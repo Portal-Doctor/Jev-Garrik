@@ -48,12 +48,16 @@ export interface PaperMeta {
   model: string;
   pairs: string[];
   startedAt: number;
+  /** Decision cadence in seconds; sizes the per-pair countdown. */
+  decideSec: number;
 }
 
 export interface Snapshot {
   pairs: PairFeedState[];
   positions: PaperPosition[];
   decisions: LastDecision[];
+  /** Wall-clock ms of the next scheduled decision per pair. */
+  nextDecision?: Record<string, number | null>;
 }
 
 export interface DecisionEvent {
@@ -63,6 +67,8 @@ export interface DecisionEvent {
   pBuy: number;
   mid: number;
   ts: number;
+  /** Wall-clock ms of the next scheduled decision for this pair. */
+  nextTs?: number;
 }
 
 export interface FillEvent {
@@ -89,6 +95,7 @@ export interface PaperState {
   lastDecision: Record<string, LastDecision>;
   recentDecisions: DecisionEvent[];
   recentFills: FillEvent[];
+  nextDecision: Record<string, number>;
   connection: ConnectionState;
 }
 

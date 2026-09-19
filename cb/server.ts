@@ -8,6 +8,8 @@ export interface RunMeta {
   model: string;
   pairs: string[];
   startedAt: number;
+  /** Decision cadence in seconds; the UI uses it to size the per-pair countdown. */
+  decideSec: number;
 }
 
 export interface ServerCtx {
@@ -27,6 +29,7 @@ const num = (v: string | null, fallback: number) => (v == null || v === "" ? fal
 /**
  * Bun.serve REST + SSE, same CORS/SSE conventions as src/server.ts.
  *
+ * GET /health      liveness probe (status + runId + uptime), polled by the UI
  * GET /            run meta + live per-pair snapshot
  * GET /events      SSE: snapshot on connect, then tick / decision / order / fill / equity / ping
  * GET /decisions   ?pair=&limit=  decision log with outcomes joined
@@ -53,6 +56,10 @@ export function startServer(ctx: ServerCtx) {
       const url = new URL(req.url);
       const { pathname, searchParams } = url;
       if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
+
+      // Lightweight liveness probe the UI polls; no DB access so it stays cheap.
+      if (pathname === "/health")
+        return json({ status: "ok", runId: meta.runId, ts: Date.now(), uptimeMs: Date.now() - meta.startedAt });
 
       if (pathname === "/") return json({ ...meta, snapshot: ctx.snapshot() });
 

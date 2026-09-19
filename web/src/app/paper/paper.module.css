@@ -20,6 +20,19 @@
   font-size: 12px;
 }
 
+/* Emphasize the safety guarantee: this is a measurement harness, not live money. */
+.safe {
+  background: rgba(74, 222, 128, 0.16);
+  color: var(--live-dot, #4ade80);
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
 .meta {
   display: flex;
   align-items: center;
@@ -50,6 +63,22 @@
   color: var(--ink-2);
 }
 
+.reportBtn {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 999px;
+  text-decoration: none;
+  color: var(--live-dot, #4ade80);
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  transition: background 0.15s ease;
+}
+
+.reportBtn:hover {
+  background: rgba(74, 222, 128, 0.22);
+}
+
 .dot {
   display: inline-flex;
   align-items: center;
@@ -74,6 +103,44 @@
 .connecting i,
 .reconnecting i {
   background: var(--late);
+}
+
+/* ---- backend health chip (polls /health every 15s) ---- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  text-transform: lowercase;
+  border: 1px solid transparent;
+}
+
+.chip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.chipOk {
+  color: var(--live-dot, #4ade80);
+  background: rgba(74, 222, 128, 0.12);
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+.chipDown {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.chipChecking {
+  color: var(--muted, #9ca3af);
+  background: rgba(156, 163, 175, 0.12);
+  border-color: rgba(156, 163, 175, 0.3);
 }
 
 /* ---- equity strip ---- */
@@ -163,6 +230,33 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
+}
+
+/* ---- per-pair next-decision countdown ---- */
+.countdown {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-2, #9ca3af);
+  white-space: nowrap;
+}
+
+.countdownBar {
+  width: 34px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.25);
+  overflow: hidden;
+}
+
+.countdownFill {
+  display: block;
+  height: 100%;
+  background: var(--live-dot, #4ade80);
+  transition: width 1s linear;
 }
 
 .synced {

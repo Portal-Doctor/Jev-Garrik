@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { usePaperFeed } from "@/lib/usePaperFeed";
 import { useUptime } from "@/lib/useUptime";
@@ -18,6 +19,36 @@ function fmtPrice(n: number | null | undefined): string {
 }
 
 const hhLabel = (sec: number) => (sec % 3600 === 0 ? `${sec / 3600}h` : `${Math.round(sec / 60)}m`);
+
+type Health = "checking" | "connected" | "disconnected";
+
+/** Poll the backend /health probe; independent of the SSE stream so it reports raw reachability. */
+function useHealth(apiUrl: string, everyMs = 15_000): Health {
+  const [health, setHealth] = useState<Health>("checking");
+  useEffect(() => {
+    let alive = true;
+    const base = apiUrl.replace(/\/+$/, "");
+    const check = async () => {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 5_000);
+      try {
+        const res = await fetch(`${base}/health`, { signal: ctrl.signal, cache: "no-store" });
+        if (alive) setHealth(res.ok ? "connected" : "disconnected");
+      } catch {
+        if (alive) setHealth("disconnected");
+      } finally {
+        clearTimeout(to);
+      }
+    };
+    check();
+    const t = setInterval(check, everyMs);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [apiUrl, everyMs]);
+  return health;
+}
 
 /** Poll the /report endpoint; returns null until the first successful fetch. */
 function useReport(apiUrl: string, everyMs = 20_000): Report | null {
@@ -48,6 +79,7 @@ function useReport(apiUrl: string, everyMs = 20_000): Report | null {
 export default function PaperPage() {
   const feed = usePaperFeed(API_URL);
   const report = useReport(API_URL);
+  const health = useHealth(API_URL);
   const uptime = useUptime(feed.meta?.startedAt ?? null);
 
   const pairs = feed.meta?.pairs ?? Object.keys(feed.feed);
@@ -77,16 +109,27 @@ export default function PaperPage() {
       <header className={styles.top}>
         <div className={styles.title}>
           <h1>Coinbase Paper Trader</h1>
-          <span className={styles.sub}>Measuring directional edge after fees · no capital at risk</span>
+          <span className={styles.sub}>
+            Measuring directional edge after fees · <mark className={styles.safe}>no capital at risk</mark>
+          </span>
         </div>
         <div className={styles.meta}>
           <span className={`${styles.badge} ${feed.meta?.model === "mock" ? styles.badgeMock : styles.badgeJev}`}>
             {feed.meta?.model ?? "…"}
           </span>
           <span className={styles.uptime}>{uptime}</span>
+          <span
+            className={`${styles.chip} ${health === "connected" ? styles.chipOk : health === "disconnected" ? styles.chipDown : styles.chipChecking}`}
+            title={`backend ${health} · /health polled every 15s`}
+          >
+            <i /> backend {health}
+          </span>
           <span className={`${styles.dot} ${styles[feed.connection]}`} title={feed.connection}>
             <i /> {feed.connection}
           </span>
+          <Link href="/paper/report" className={styles.reportBtn}>
+            P&amp;L Report
+          </Link>
         </div>
       </header>
 
@@ -108,6 +151,8 @@ export default function PaperPage() {
               decision={feed.lastDecision[pair]}
               report={reportByPair[pair]}
               tradedHorizonSec={report?.tradedHorizonSec ?? 14_400}
+              nextTs={feed.nextDecision[pair]}
+              decideSec={feed.meta?.decideSec ?? 300}
             />
           ))}
         </section>
@@ -160,18 +205,48 @@ function Stat({ label, value, tone, big }: { label: string; value: string; tone?
   );
 }
 
+function Countdown({ nextTs, decideSec }: { nextTs?: number; decideSec: number }) {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (now == null || typeof nextTs !== "number") return <span className={styles.countdown}>next …</span>;
+
+  const remainingMs = Math.max(0, nextTs - now);
+  const secs = Math.ceil(remainingMs / 1000);
+  const pct = decideSec > 0 ? Math.min(100, Math.max(0, ((decideSec - remainingMs / 1000) / decideSec) * 100)) : 0;
+  const mm = Math.floor(secs / 60);
+  const label = mm > 0 ? `${mm}:${String(secs % 60).padStart(2, "0")}` : `${secs}s`;
+
+  return (
+    <span className={styles.countdown} title="time until next decision">
+      <span className={styles.countdownBar}>
+        <span className={styles.countdownFill} style={{ width: `${pct}%` }} />
+      </span>
+      next {label}
+    </span>
+  );
+}
+
 function PairCard({
   feed,
   position,
   decision,
   report,
   tradedHorizonSec,
+  nextTs,
+  decideSec,
 }: {
   feed?: PairFeedState;
   position?: PaperPosition;
   decision?: LastDecision;
   report?: PairReport;
   tradedHorizonSec: number;
+  nextTs?: number;
+  decideSec: number;
 }) {
   const pair = feed?.pair ?? position?.pair ?? decision?.pair ?? "";
   const pBuy = decision?.pBuy ?? 0.5;
@@ -185,6 +260,7 @@ function PairCard({
         <span className={`${styles.syncDot} ${feed?.synced ? styles.synced : styles.unsynced}`} title={feed?.synced ? "synced" : "syncing"} />
         <span className={styles.mid}>{fmtPrice(feed?.mid)}</span>
         <span className={styles.spread}>{feed?.spreadBps != null ? `${feed.spreadBps.toFixed(1)} bps` : "—"}</span>
+        <Countdown nextTs={nextTs} decideSec={decideSec} />
       </div>
 
       <div className={styles.probRow}>

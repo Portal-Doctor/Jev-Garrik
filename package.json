@@ -24,6 +24,8 @@
     "cb:report": "bun run cb/report.ts",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
+    "ui:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ui-start.ps1",
+    "ui:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ui-stop.ps1",
     "test": "bun test cb"
   }
 }

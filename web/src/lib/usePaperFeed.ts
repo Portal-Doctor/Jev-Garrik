@@ -36,7 +36,15 @@ const initialState: PaperState = {
   lastDecision: {},
   recentDecisions: [],
   recentFills: [],
+  nextDecision: {},
   connection: "connecting",
+};
+
+/** Keep only numeric next-decision timestamps from a snapshot map. */
+const cleanNextDecision = (m?: Record<string, number | null>): Record<string, number> => {
+  const out: Record<string, number> = {};
+  for (const [pair, ts] of Object.entries(m ?? {})) if (typeof ts === "number") out[pair] = ts;
+  return out;
 };
 
 const byPair = <T extends { pair: string }>(rows: T[]): Record<string, T> =>
@@ -55,6 +63,7 @@ function reducer(state: PaperState, action: Action): PaperState {
         feed: byPair(s.pairs ?? []),
         positions: byPair(s.positions ?? []),
         lastDecision: byPair(s.decisions ?? []),
+        nextDecision: cleanNextDecision(s.nextDecision),
         connection: "live",
       };
     }
@@ -75,6 +84,8 @@ function reducer(state: PaperState, action: Action): PaperState {
         ...state,
         lastDecision: { ...state.lastDecision, [d.pair]: last },
         recentDecisions: [d, ...state.recentDecisions].slice(0, CAP),
+        nextDecision:
+          typeof d.nextTs === "number" ? { ...state.nextDecision, [d.pair]: d.nextTs } : state.nextDecision,
       };
     }
 
@@ -169,6 +180,7 @@ export function usePaperFeed(apiUrl: string): PaperState {
           model: String(d.model ?? ""),
           pairs: Array.isArray(d.pairs) ? (d.pairs as string[]) : [],
           startedAt: typeof d.startedAt === "number" ? d.startedAt : Date.now(),
+          decideSec: typeof d.decideSec === "number" ? d.decideSec : 300,
         };
         const snapshot = (d.snapshot ?? { pairs: [], positions: [], decisions: [] }) as Snapshot;
         dispatch({ type: "snapshot", meta, snapshot });

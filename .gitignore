@@ -1,3 +1,10 @@
 node_modules
 .env
 data/
+
+# cb runtime logs (redirected stdout/stderr from `bun run cb`)
+cb_run.out
+cb_run.err
+
+# database backups created during maintenance (see docs/DEPLOY.md)
+*.dump

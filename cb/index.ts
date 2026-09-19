@@ -43,6 +43,7 @@ const meta: RunMeta = {
   model: modelLabel,
   pairs: config.pairs,
   startedAt,
+  decideSec: config.decideSec,
 };
 
 const feed = new Feed(config.pairs, store);
@@ -90,7 +91,7 @@ const engine = new Engine(
   broker,
   (id, decision, state, intent) => {
     console.log(`${state.pair} ${decision.action.toUpperCase()} pBuy=${(decision.pBuy * 100).toFixed(0)}% mid=${state.mid} ${Math.round(decision.latencyMs)}ms`);
-    broadcast("decision", { id, pair: state.pair, action: decision.action, pBuy: decision.pBuy, mid: state.mid, ts: state.ts });
+    broadcast("decision", { id, pair: state.pair, action: decision.action, pBuy: decision.pBuy, mid: state.mid, ts: state.ts, nextTs: engine.nextDecisionAt(state.pair) });
     if (intent) broadcast("order", intent);
   },
 );
@@ -107,6 +108,7 @@ const srv = startServer({
     pairs: feed.allState(),
     positions: broker.allState(),
     decisions: [...engine.latest.entries()].map(([pair, v]) => ({ pair, action: v.decision.action, pBuy: v.decision.pBuy, mid: v.state.mid })),
+    nextDecision: Object.fromEntries(config.pairs.map((p) => [p, engine.nextDecisionAt(p)])),
   }),
   incidentsPerDay: () => feed.incidents / uptimeDays(),
 });
