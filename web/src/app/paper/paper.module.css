@@ -1,0 +1,428 @@
+/* /paper dashboard. Reuses the Jev Trader design tokens from globals.css. */
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.title h1 {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  text-transform: lowercase;
+}
+
+.badgeMock {
+  background: var(--badge-standin-bg);
+  color: var(--badge-standin-fg);
+}
+
+.badgeJev {
+  background: var(--badge-jev-bg);
+  color: var(--badge-jev-fg);
+}
+
+.uptime {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.dot i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted-2);
+}
+
+.live i {
+  background: var(--live-dot);
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.2);
+}
+
+.connecting i,
+.reconnecting i {
+  background: var(--late);
+}
+
+/* ---- equity strip ---- */
+.equityStrip {
+  display: flex;
+  gap: 28px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.statLabel {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.statValue {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.statBig .statValue {
+  font-size: 22px;
+}
+
+.pos {
+  color: var(--pnl-pos);
+}
+
+.neg {
+  color: var(--pnl-neg);
+}
+
+/* ---- body layout ---- */
+.body {
+  display: flex;
+  gap: 16px;
+  padding: 16px 24px;
+  flex: 1;
+  min-height: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  align-content: start;
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+
+/* ---- pair card ---- */
+.pairCard {
+  border: 1px solid var(--border-2);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg);
+}
+
+.pairHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pairName {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.syncDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.synced {
+  background: var(--live-dot);
+}
+
+.unsynced {
+  background: var(--late);
+}
+
+.mid {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.spread {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.probRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.probBar {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--sell-bar-dim);
+  overflow: hidden;
+}
+
+.probFill {
+  height: 100%;
+  background: var(--buy-bar);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.probVal {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.posRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.posTag,
+.tag,
+.posDetail {
+  font-family: var(--font-mono);
+}
+
+.posTag {
+  font-weight: 600;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.buy {
+  color: var(--buy-ink);
+  background: var(--buy-bar-dim);
+}
+
+.sell {
+  color: var(--sell-ink);
+  background: var(--sell-bar-dim);
+}
+
+.flat {
+  color: var(--muted);
+  background: var(--hold-cell);
+}
+
+.posDetail {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.posPnl {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.working {
+  font-size: 10px;
+  color: var(--link);
+  font-family: var(--font-mono);
+}
+
+.metricRow {
+  display: flex;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+}
+
+.metricLabel {
+  font-size: 9px;
+  color: var(--muted-2);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.metricValue {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gate {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 6px 8px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gatePass {
+  background: var(--buy-bar-dim);
+  color: var(--buy-ink);
+}
+
+.gateFail {
+  background: var(--track);
+  color: var(--muted);
+}
+
+.gateDetail {
+  font-weight: 500;
+  font-family: var(--font-mono);
+  color: var(--ink-2);
+}
+
+/* ---- activity column ---- */
+.activity {
+  width: 340px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.panel {
+  border: 1px solid var(--border-2);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.panel h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.log {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.log li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.empty {
+  color: var(--muted-2);
+  font-style: italic;
+  border-bottom: none !important;
+}
+
+.logPair {
+  font-weight: 600;
+  min-width: 64px;
+}
+
+.tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 5px;
+  text-transform: uppercase;
+}
+
+.logMuted {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.logMono {
+  font-family: var(--font-mono);
+  margin-left: auto;
+}
+
+.logFee {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.liq {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
+.maker {
+  color: var(--buy-ink);
+  background: var(--buy-bar-dim);
+}
+
+.taker {
+  color: var(--late-ink);
+  background: var(--badge-standin-bg);
+}
+
+@media (max-width: 899.98px) {
+  .body {
+    flex-direction: column;
+  }
+
+  .activity {
+    width: 100%;
+  }
+}

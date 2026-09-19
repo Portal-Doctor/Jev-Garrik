@@ -1,0 +1,26 @@
+# Persistence layer for the Coinbase paper-trading port (cb/).
+# The cb app runs locally with `bun run cb`; Postgres runs here.
+#   docker compose up -d   start Postgres
+#   docker compose down    stop it (data survives in the named volume)
+#   docker compose down -v remove the volume too (wipes all cb data)
+services:
+  db:
+    image: postgres:17
+    container_name: cb-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cb
+      POSTGRES_PASSWORD: cb
+      POSTGRES_DB: cb
+    ports:
+      - "5432:5432"
+    volumes:
+      - cb-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cb -d cb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  cb-pgdata:

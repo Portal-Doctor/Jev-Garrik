@@ -18,6 +18,12 @@
   },
   "scripts": {
     "start": "bun run src/index.ts",
-    "dev": "bun --watch run src/index.ts"
+    "dev": "bun --watch run src/index.ts",
+    "cb": "bun run cb/index.ts",
+    "cb:dev": "bun --watch cb/index.ts",
+    "cb:report": "bun run cb/report.ts",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "test": "bun test cb"
   }
 }
