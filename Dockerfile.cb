@@ -1,0 +1,13 @@
+FROM oven/bun:1.3
+WORKDIR /app
+
+# Install deps against the root manifest (cb/ shares it with the demo).
+COPY package.json bun.lock bunfig.toml ./
+RUN bun install --frozen-lockfile --production
+
+# Coinbase paper-trading service. schema.sql ships beside store.ts and is applied on boot.
+COPY cb ./cb
+
+ENV NODE_ENV=production
+# The service reads PORT (injected by the host) and connects to DATABASE_URL.
+CMD ["bun", "run", "cb/index.ts"]

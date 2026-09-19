@@ -31,6 +31,11 @@ export const config = {
   model: (env("MODEL", "mock") as "mock" | "jev"),
   jevModelId: env("JEV_MODEL_ID", "jev-latest")!,
   jevUsdPerMTok: 0.042,
+  // Vercel AI Gateway: when AI_GATEWAY_API_KEY is set, the Jev model routes through the Gateway using
+  // the string model id below (no direct TypeSafe key / waitlist needed). Otherwise it uses the direct
+  // TypeSafe provider with TYPESAFE_AI_API_KEY.
+  aiGatewayApiKey: env("AI_GATEWAY_API_KEY"),
+  jevGatewayModelId: env("JEV_GATEWAY_MODEL_ID", "typesafe-ai/jev")!,
 
   // Coinbase Advanced Trade endpoints.
   coinbaseWsUrl: env("CB_WS_URL", "wss://advanced-trade-ws.coinbase.com")!,
@@ -39,7 +44,9 @@ export const config = {
   apiKeyName: env("COINBASE_API_KEY_NAME"),
   apiPrivateKey: env("COINBASE_API_PRIVATE_KEY"),
 
-  port: num("CB_PORT", 3001),
+  // Prefer the platform-injected PORT (Railway/Render/Fly) so the service is reachable when hosted,
+  // then CB_PORT for local overrides, then the default.
+  port: num("PORT", num("CB_PORT", 3001)),
 };
 
 export type Config = typeof config;

@@ -1,5 +1,11 @@
 node_modules
+web
+.git
 .env
-data
-scripts
-.claude
+.env.*
+!.env.example
+*.log
+cb_run.out
+docs
+compose.yml
+**/*.test.ts

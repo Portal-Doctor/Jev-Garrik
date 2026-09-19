@@ -41,10 +41,25 @@ const QUESTIONS = {
   },
 } as const;
 
-/** Real Jev via the AI SDK. Swap-in is the MODEL env var (shared with the demo). */
+/**
+ * Real Jev via the AI SDK. Two transports:
+ * - Vercel AI Gateway (AI_GATEWAY_API_KEY set): pass the string model id `typesafe-ai/jev`; the SDK
+ *   resolves it through the Gateway. No TypeSafe waitlist/key needed.
+ * - Direct TypeSafe provider (otherwise): `typeSafeAi.evaluationModel(...)` with TYPESAFE_AI_API_KEY.
+ */
 export class JevModel implements Model {
-  readonly name = config.jevModelId;
-  private model = typeSafeAi.evaluationModel(config.jevModelId);
+  readonly name: string;
+  private readonly model: ReturnType<typeof typeSafeAi.evaluationModel> | string;
+
+  constructor() {
+    if (config.aiGatewayApiKey) {
+      this.name = config.jevGatewayModelId;
+      this.model = config.jevGatewayModelId; // string routes via the Gateway
+    } else {
+      this.name = config.jevModelId;
+      this.model = typeSafeAi.evaluationModel(config.jevModelId);
+    }
+  }
 
   async decide(state: MarketState): Promise<Decision> {
     const t0 = performance.now();
