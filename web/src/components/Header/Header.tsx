@@ -43,7 +43,7 @@ export default function Header({ meta, latest, connection }: HeaderProps) {
   }, [wallet]);
 
   const model = meta?.model ?? null;
-  const isJev = (model ?? "").toLowerCase().startsWith("jev");
+  const isJev = (model ?? "").toLowerCase().includes("jev");
   const offline = OFFLINE_LABEL[connection] ?? null;
 
   return (

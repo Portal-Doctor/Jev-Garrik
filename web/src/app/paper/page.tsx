@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePaperFeed } from "@/lib/usePaperFeed";
 import { useUptime } from "@/lib/useUptime";
@@ -157,7 +156,7 @@ export default function PaperPage() {
         <div className={styles.title}>
           <h1>Coinbase Paper Trader</h1>
           <span className={styles.sub}>
-            Measuring directional edge after fees · <mark className={styles.safe}>no capital at risk</mark>
+            Measuring directional edge after fees. <mark className={styles.safe}>no capital at risk</mark>
           </span>
         </div>
         <div className={styles.meta}>
@@ -174,9 +173,6 @@ export default function PaperPage() {
           <span className={`${styles.dot} ${styles[feed.connection]}`} title={feed.connection}>
             <i /> {feed.connection}
           </span>
-          <Link href="/paper/report" className={styles.reportBtn}>
-            P&amp;L Report
-          </Link>
           <button type="button" className={styles.resetBtn} onClick={triggerReset} disabled={resetting} title="Flush all paper trading data and restart">
             {resetting && <span className={styles.spinner} />}
             {resetting ? "Restarting…" : "Clear paper trades"}

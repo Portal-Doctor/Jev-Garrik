@@ -18,6 +18,8 @@ export interface RunRow {
   git_sha: string | null;
   started_at: number;
   stopped_at: number | null;
+  /** `paper` (Coinbase campaign) or `kuru`. Defaults to paper for existing rows. */
+  venue?: "paper" | "kuru";
 }
 
 export interface DecisionRow {
@@ -66,7 +68,7 @@ export interface FillRow {
   id: string;
   run_id: string;
   order_id: string | null;
-  venue: "paper" | "coinbase";
+  venue: "paper" | "coinbase" | "kuru";
   external_id: string;
   pair: string;
   side: "buy" | "sell";
@@ -77,7 +79,7 @@ export interface FillRow {
   liquidity: "maker" | "taker";
   cost_basis_usd: number;
   proceeds_usd: number;
-  source: "paper_sim" | "coinbase_sync";
+  source: "paper_sim" | "coinbase_sync" | "kuru_sim" | "kuru_live";
   traded_at: number;
   recorded_at: number;
   raw?: unknown;
@@ -96,6 +98,7 @@ export interface SnapshotRow {
   fees_usd: number;
   inference_usd: number;
   equity_usd: number;
+  gas_usd?: number;
 }
 
 export interface BarRow {
@@ -134,8 +137,8 @@ export class Store {
 
   async insertRun(r: Omit<RunRow, "stopped_at"> & { stopped_at?: number | null }): Promise<void> {
     await this.sql`
-      INSERT INTO runs (id, mode, model, pairs, config, git_sha, started_at, stopped_at)
-      VALUES (${r.id}, ${r.mode}, ${r.model}, ${r.pairs}, ${JSON.stringify(r.config)}, ${r.git_sha ?? null}, ${r.started_at}, ${r.stopped_at ?? null})
+      INSERT INTO runs (id, mode, model, pairs, config, git_sha, started_at, stopped_at, venue)
+      VALUES (${r.id}, ${r.mode}, ${r.model}, ${r.pairs}, ${JSON.stringify(r.config)}, ${r.git_sha ?? null}, ${r.started_at}, ${r.stopped_at ?? null}, ${r.venue ?? "paper"})
     `;
   }
 
@@ -202,8 +205,8 @@ export class Store {
   async insertSnapshot(s: Omit<SnapshotRow, "id"> & { id?: string }): Promise<void> {
     const id = s.id ?? uuid();
     await this.sql`
-      INSERT INTO snapshots (id, run_id, pair, ts, mid, position_base, entry_price, realized_usd, unrealized_usd, fees_usd, inference_usd, equity_usd)
-      VALUES (${id}, ${s.run_id}, ${s.pair}, ${s.ts}, ${s.mid ?? null}, ${s.position_base}, ${s.entry_price ?? null}, ${s.realized_usd}, ${s.unrealized_usd}, ${s.fees_usd}, ${s.inference_usd}, ${s.equity_usd})
+      INSERT INTO snapshots (id, run_id, pair, ts, mid, position_base, entry_price, realized_usd, unrealized_usd, fees_usd, inference_usd, equity_usd, gas_usd)
+      VALUES (${id}, ${s.run_id}, ${s.pair}, ${s.ts}, ${s.mid ?? null}, ${s.position_base}, ${s.entry_price ?? null}, ${s.realized_usd}, ${s.unrealized_usd}, ${s.fees_usd}, ${s.inference_usd}, ${s.equity_usd}, ${s.gas_usd ?? 0})
     `;
   }
 
@@ -234,8 +237,54 @@ export class Store {
    * Decisions whose (ts + horizon) has passed but that lack an outcomes row for that horizon.
    * One returned row per (decision, due horizon). Restart-safe by construction.
    */
-  async decisionsDueForResolve(now: number, horizonsSec: readonly number[]): Promise<Array<{ id: string; pair: string; ts: number; mid: number; action: "buy" | "sell"; horizon_sec: number }>> {
+  async decisionsDueForResolve(
+    now: number,
+    horizonsSec: readonly number[],
+    filter?: { pair?: string; runId?: string },
+  ): Promise<Array<{ id: string; pair: string; ts: number; mid: number; action: "buy" | "sell"; horizon_sec: number }>> {
     const horizons = horizonsSec.map((h) => Number(h));
+    const pair = filter?.pair;
+    const runId = filter?.runId;
+    if (pair && runId) {
+      return this.sql`
+        SELECT d.id, d.pair, d.ts, d.mid, d.action, h.horizon_sec
+        FROM decisions d
+        CROSS JOIN unnest(${this.sql.array(horizons, "INTEGER")}::int[]) AS h(horizon_sec)
+        LEFT JOIN outcomes o ON o.decision_id = d.id AND o.horizon_sec = h.horizon_sec
+        WHERE o.decision_id IS NULL
+          AND d.ts + h.horizon_sec * 1000 <= ${now}
+          AND d.pair = ${pair}
+          AND d.run_id = ${runId}
+        ORDER BY d.ts ASC
+        LIMIT 5000
+      `;
+    }
+    if (pair) {
+      return this.sql`
+        SELECT d.id, d.pair, d.ts, d.mid, d.action, h.horizon_sec
+        FROM decisions d
+        CROSS JOIN unnest(${this.sql.array(horizons, "INTEGER")}::int[]) AS h(horizon_sec)
+        LEFT JOIN outcomes o ON o.decision_id = d.id AND o.horizon_sec = h.horizon_sec
+        WHERE o.decision_id IS NULL
+          AND d.ts + h.horizon_sec * 1000 <= ${now}
+          AND d.pair = ${pair}
+        ORDER BY d.ts ASC
+        LIMIT 5000
+      `;
+    }
+    if (runId) {
+      return this.sql`
+        SELECT d.id, d.pair, d.ts, d.mid, d.action, h.horizon_sec
+        FROM decisions d
+        CROSS JOIN unnest(${this.sql.array(horizons, "INTEGER")}::int[]) AS h(horizon_sec)
+        LEFT JOIN outcomes o ON o.decision_id = d.id AND o.horizon_sec = h.horizon_sec
+        WHERE o.decision_id IS NULL
+          AND d.ts + h.horizon_sec * 1000 <= ${now}
+          AND d.run_id = ${runId}
+        ORDER BY d.ts ASC
+        LIMIT 5000
+      `;
+    }
     return this.sql`
       SELECT d.id, d.pair, d.ts, d.mid, d.action, h.horizon_sec
       FROM decisions d
@@ -252,6 +301,28 @@ export class Store {
    * Earliest decision ts still lacking an outcome, per horizon (null when nothing is pending).
    * Drives the report's "next 4h/24h read" countdown: the next read lands at ts + horizon.
    */
+  async earliestUnresolvedTsForRun(runId: string, horizonsSec: readonly number[]): Promise<Array<{ horizon_sec: number; ts: number | null }>> {
+    const horizons = horizonsSec.map((h) => Number(h));
+    return this.sql`
+      SELECT h.horizon_sec, MIN(d.ts) AS ts
+      FROM unnest(${this.sql.array(horizons, "INTEGER")}::int[]) AS h(horizon_sec)
+      LEFT JOIN decisions d
+        ON d.run_id = ${runId}
+        AND NOT EXISTS (SELECT 1 FROM outcomes o WHERE o.decision_id = d.id AND o.horizon_sec = h.horizon_sec)
+      GROUP BY h.horizon_sec
+      ORDER BY h.horizon_sec
+    `;
+  }
+
+  async resolvedForRun(runId: string): Promise<Array<{ pair: string; action: "buy" | "sell"; p_buy: number; traded: boolean; horizon_sec: number; move_bps: number; correct: boolean }>> {
+    return this.sql`SELECT d.pair, d.action, d.p_buy, d.traded, o.horizon_sec, o.move_bps, o.correct FROM outcomes o JOIN decisions d ON d.id = o.decision_id WHERE d.run_id = ${runId}`;
+  }
+
+  async pairsForRun(runId: string): Promise<string[]> {
+    const rows = await this.sql<{ pair: string }[]>`SELECT DISTINCT pair FROM decisions WHERE run_id = ${runId} ORDER BY pair`;
+    return rows.map((r) => r.pair);
+  }
+
   async earliestUnresolvedTs(horizonsSec: readonly number[]): Promise<Array<{ horizon_sec: number; ts: number | null }>> {
     const horizons = horizonsSec.map((h) => Number(h));
     return this.sql`
@@ -288,6 +359,36 @@ export class Store {
     return pair
       ? this.sql<FillRow[]>`SELECT * FROM fills WHERE pair = ${pair} ORDER BY traded_at ASC`
       : this.sql<FillRow[]>`SELECT * FROM fills ORDER BY traded_at ASC`;
+  }
+
+  /** Fills for one engine. Coinbase uses venue paper (and coinbase if live). */
+  async fillsByVenue(venue: "paper" | "kuru"): Promise<FillRow[]> {
+    return venue === "kuru"
+      ? this.sql<FillRow[]>`SELECT * FROM fills WHERE venue = ${"kuru"} ORDER BY traded_at ASC`
+      : this.sql<FillRow[]>`SELECT * FROM fills WHERE venue IN (${"paper"}, ${"coinbase"}) ORDER BY traded_at ASC`;
+  }
+
+  async inferenceUsdForVenue(venue: "paper" | "kuru"): Promise<number> {
+    const rows = await this.sql<{ s: number | null }[]>`
+      SELECT SUM(d.inference_usd) AS s
+      FROM decisions d
+      JOIN runs r ON r.id = d.run_id
+      WHERE r.venue = ${venue}
+    `;
+    return Number(rows[0]?.s ?? 0);
+  }
+
+  /** Latest cumulative gas per run, summed for the venue. */
+  async lastGasUsdForVenue(venue: "paper" | "kuru"): Promise<number> {
+    const rows = await this.sql<{ s: number | null }[]>`
+      SELECT SUM(x.gas_usd) AS s FROM (
+        SELECT DISTINCT ON (run_id) gas_usd
+        FROM snapshots
+        WHERE run_id IN (SELECT id FROM runs WHERE venue = ${venue})
+        ORDER BY run_id, ts DESC
+      ) x
+    `;
+    return Number(rows[0]?.s ?? 0);
   }
 
   /** Total inference cost across decisions, optionally scoped to one pair and/or one run. */
@@ -332,5 +433,15 @@ export class Store {
    */
   async resetAll(): Promise<void> {
     await this.sql`TRUNCATE TABLE fills, orders, outcomes, decisions, snapshots, runs`;
+  }
+
+  /** Wipe one venue's trading state. Leaves the other venue and `bars` alone. */
+  async resetVenue(venue: "paper" | "kuru"): Promise<void> {
+    await this.sql`DELETE FROM fills WHERE run_id IN (SELECT id FROM runs WHERE venue = ${venue}) OR venue = ${venue}`;
+    await this.sql`DELETE FROM orders WHERE run_id IN (SELECT id FROM runs WHERE venue = ${venue})`;
+    await this.sql`DELETE FROM outcomes WHERE decision_id IN (SELECT d.id FROM decisions d JOIN runs r ON r.id = d.run_id WHERE r.venue = ${venue})`;
+    await this.sql`DELETE FROM decisions WHERE run_id IN (SELECT id FROM runs WHERE venue = ${venue})`;
+    await this.sql`DELETE FROM snapshots WHERE run_id IN (SELECT id FROM runs WHERE venue = ${venue})`;
+    await this.sql`DELETE FROM runs WHERE venue = ${venue}`;
   }
 }

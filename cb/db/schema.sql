@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS runs (
   stopped_at BIGINT
 );
 
+-- Additive: venue distinguishes the Coinbase campaign (paper) from the Kuru paper book.
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS venue TEXT NOT NULL DEFAULT 'paper';
+CREATE INDEX IF NOT EXISTS idx_runs_venue ON runs(venue);
+
 CREATE TABLE IF NOT EXISTS decisions (
   id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL,
@@ -65,7 +69,7 @@ CREATE TABLE IF NOT EXISTS fills (
   id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL,
   order_id TEXT,
-  venue TEXT NOT NULL,              -- paper | coinbase
+  venue TEXT NOT NULL,              -- paper | coinbase | kuru
   external_id TEXT NOT NULL,        -- synthetic in paper, venue trade id live
   pair TEXT NOT NULL,
   side TEXT NOT NULL,               -- buy | sell
@@ -76,7 +80,7 @@ CREATE TABLE IF NOT EXISTS fills (
   liquidity TEXT NOT NULL,          -- maker | taker
   cost_basis_usd DOUBLE PRECISION NOT NULL,   -- buys: notional + fee, else 0
   proceeds_usd DOUBLE PRECISION NOT NULL,     -- sells: notional - fee, else 0
-  source TEXT NOT NULL,             -- paper_sim | coinbase_sync
+  source TEXT NOT NULL,             -- paper_sim | coinbase_sync | kuru_sim | kuru_live
   traded_at BIGINT NOT NULL,
   recorded_at BIGINT NOT NULL,
   raw JSONB,
@@ -99,6 +103,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
   equity_usd DOUBLE PRECISION NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_pair_ts ON snapshots(pair, ts);
+
+ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS gas_usd DOUBLE PRECISION NOT NULL DEFAULT 0;
 
 -- Minute bars so the resolver and charts survive restarts.
 CREATE TABLE IF NOT EXISTS bars (

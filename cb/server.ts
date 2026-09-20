@@ -1,6 +1,7 @@
 import { config, MEASURED_HORIZONS_SEC } from "./config";
 import { Store } from "./db/store";
 import { brier, calibration, buildReport } from "./report";
+import { buildTaxFromStore, taxLotsCsv } from "./tax";
 
 export interface RunMeta {
   runId: string;
@@ -40,6 +41,7 @@ const num = (v: string | null, fallback: number) => (v == null || v === "" ? fal
  * GET /equity      ?pair=&fromTs=  snapshot series for the equity curve
  * GET /calibration ?pair=&horizon= bucketed calibration data + Brier
  * GET /report      full metrics JSON including the promotion-gate booleans
+ * GET /tax         FIFO lot worksheet for the Coinbase venue (fills, months, pairs)
  * POST /reset       clears all paper-trading data (runs/decisions/outcomes/orders/fills/snapshots)
  *                    and restarts the service; irreversible, meant for the dashboard's admin button
  */
@@ -106,6 +108,21 @@ export function startServer(ctx: ServerCtx) {
 
       if (pathname === "/report") {
         return json(await buildReport(store, { incidentsPerDay: ctx.incidentsPerDay(), runId: meta.runId }));
+      }
+
+      if (pathname === "/tax") {
+        return json(await buildTaxFromStore(store, "paper"));
+      }
+
+      if (pathname === "/tax.csv") {
+        const report = await buildTaxFromStore(store, "paper");
+        return new Response(taxLotsCsv(report, "coinbase"), {
+          headers: {
+            ...CORS,
+            "content-type": "text/csv; charset=utf-8",
+            "content-disposition": 'attachment; filename="coinbase-tax-lots.csv"',
+          },
+        });
       }
 
       if (pathname === "/reset" && req.method === "POST") {

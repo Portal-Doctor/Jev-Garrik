@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
+import { BooksShell } from "@/components/BooksNav/BooksNav";
 import "./globals.css";
 
 const inter = Inter({
@@ -17,8 +18,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Jev Trader",
-  description: "One AI trade decision every Monad block.",
+  title: "Paper books",
+  description: "Kuru and Coinbase paper engines. No capital at risk.",
 };
 
 export const viewport: Viewport = {
@@ -30,7 +31,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable}`}>
-      <body>{children}</body>
+      <body>
+        <BooksShell>{children}</BooksShell>
+      </body>
     </html>
   );
 }

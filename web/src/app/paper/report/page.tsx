@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { Report } from "@/lib/paperTypes";
 import { fmtUsd } from "@/lib/format";
@@ -96,9 +95,6 @@ export default function ReportPage() {
           <button className={styles.refreshBtn} onClick={refresh} type="button">
             Refresh
           </button>
-          <Link href="/paper" className={styles.backBtn}>
-            ← Back to dashboard
-          </Link>
         </div>
       </header>
 

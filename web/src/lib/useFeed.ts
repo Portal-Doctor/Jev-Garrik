@@ -183,6 +183,8 @@ function parseMeta(raw: Record<string, unknown> | null): Meta | null {
     dryRun: Boolean(raw.dryRun),
     market: typeof raw.market === "string" ? raw.market : "MON/USDC",
     startedAt: typeof raw.startedAt === "number" ? raw.startedAt : Date.now(),
+    kuruMode: raw.kuruMode === "maker" ? "maker" : undefined,
+    runId: typeof raw.runId === "string" ? raw.runId : undefined,
   };
 }
 

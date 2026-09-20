@@ -1,5 +1,8 @@
 import { config } from "./config";
 
+/** Reconnects and heartbeat gaps. One-tick book noise is not counted. */
+export const rpcIncidents = { count: 0 };
+
 /** Raw JSON-RPC call over HTTP. Defaults to the send RPC; pass `config.readRpcUrl` for reads. */
 export async function rpc<T = unknown>(method: string, params: unknown[] = [], url = config.rpcUrl): Promise<T> {
   const res = await fetch(url, {
@@ -20,9 +23,12 @@ export async function rpc<T = unknown>(method: string, params: unknown[] = [], u
  */
 export function startBlockFeed(onBlock: (block: number) => void, pollMs = 150) {
   let last = 0, newest = 0, scheduled = false;
+  let lastOk = Date.now();
+  let gapOpen = false;
   const emit = (block: number) => {
     if (block <= last) return;
     last = newest = block;
+    lastOk = Date.now();
     if (scheduled) return;
     scheduled = true;
     setTimeout(() => { scheduled = false; onBlock(newest); }, 0);
@@ -32,6 +38,14 @@ export function startBlockFeed(onBlock: (block: number) => void, pollMs = 150) {
     try { emit(parseInt(await rpc<string>("eth_blockNumber", [], config.readRpcUrl), 16)); } catch {}
   };
   setInterval(poll, pollMs);
+  // Heartbeat: no new block for 5 s is a real RPC/feed gap (~16 blocks), not one-tick noise.
+  setInterval(() => {
+    if (Date.now() - lastOk > 5_000) {
+      if (!gapOpen) { rpcIncidents.count++; gapOpen = true; }
+    } else {
+      gapOpen = false;
+    }
+  }, 1_000);
   poll();
 
   if (!config.wsUrl) return;
@@ -43,7 +57,10 @@ export function startBlockFeed(onBlock: (block: number) => void, pollMs = 150) {
         const m = JSON.parse(String(e.data));
         if (m.method === "eth_subscription") emit(parseInt(m.params.result.number, 16));
       };
-      ws.onclose = () => connect(Math.min(delay + 1000, 10_000));
+      ws.onclose = () => {
+        rpcIncidents.count++;
+        connect(Math.min(delay + 1000, 10_000));
+      };
       ws.onerror = () => ws.close();
     }, delay);
   connect();

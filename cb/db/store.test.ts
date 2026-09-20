@@ -99,3 +99,32 @@ test("decisionsDueForResolve returns due horizons lacking an outcome", async () 
   const after = await store.decisionsDueForResolve(Date.now(), [3600, 14400, 86400]);
   expect(after.some((d) => d.id === id && Number(d.horizon_sec) === 3600)).toBe(false); // resolved, no longer due
 });
+
+test("resetVenue deletes only that venue", async () => {
+  const kuruId = `test-kuru-${crypto.randomUUID()}`;
+  const paperId = `test-paper-${crypto.randomUUID()}`;
+  await store.insertRun({
+    id: kuruId,
+    mode: "paper",
+    model: "mock",
+    pairs: "MON-USDC",
+    config: { test: true },
+    git_sha: null,
+    started_at: Date.now(),
+    venue: "kuru",
+  });
+  await store.insertRun({
+    id: paperId,
+    mode: "paper",
+    model: "mock",
+    pairs: "SOL-USD",
+    config: { test: true },
+    git_sha: null,
+    started_at: Date.now(),
+    venue: "paper",
+  });
+  await store.resetVenue("kuru");
+  const rows = await store.sql<{ id: string }[]>`SELECT id FROM runs WHERE id IN ${store.sql([kuruId, paperId])}`;
+  expect(rows.map((r) => r.id)).toEqual([paperId]);
+  await store.sql`DELETE FROM runs WHERE id = ${paperId}`;
+});

@@ -5,6 +5,7 @@ import MarginAccountAbi from "@kuru-labs/kuru-sdk/abi/MarginAccount.json";
 import { config } from "./config";
 import { rpc } from "./chain";
 import { readBook as fetchBook, readVaultParams, vaultActive, log10 } from "./book";
+import { killSwitch } from "./kill";
 
 export interface Book {
   block: number;
@@ -50,7 +51,7 @@ export interface Fill {
   simulated: boolean;
 }
 
-export interface QuoteResult { block: number; quote: Quote; canceled: number[] }
+export interface QuoteResult { block: number; quote: Quote; quotes: Quote[]; canceled: number[] }
 
 const ERC20_ABI = [
   "function allowance(address,address) view returns (uint256)",
@@ -62,7 +63,7 @@ const gwei = (n: number) => ethers.utils.parseUnits(String(n), "gwei");
 const BN = ethers.BigNumber;
 const ZERO_ADDRESS = ethers.constants.AddressZero;
 
-interface Pending { block: number; quote: Quote; gasLimit: ethers.BigNumber }
+interface Pending { block: number; quotes: Quote[]; gasLimit: ethers.BigNumber }
 
 /** Kuru MON-USDC market: read the book, post one limit order per block, confirm asynchronously. */
 export class Market {
@@ -72,6 +73,9 @@ export class Market {
   params!: Kuru.MarketParams; // public so scripts can build txs without init()
   /** Margin account balances, refreshed every `config.refreshBlocks`. Limit orders draw from here. */
   margin = { mon: 0, usdc: 0 };
+  /** Live contract values (or KURU_*_FEE_BPS overrides). 0 = free; negative = rebate. */
+  makerFeeBps = 0;
+  takerFeeBps = 0;
   private iface = new ethers.utils.Interface(OrderBookAbi.abi);
   private marginIface = new ethers.utils.Interface(MarginAccountAbi.abi);
   private nonce = 0;
@@ -87,11 +91,23 @@ export class Market {
 
   async init() {
     this.params = await Kuru.ParamFetcher.getMarketParams(this.provider, config.market);
+    this.makerFeeBps = config.makerFeeBps ?? Number(this.params.makerFeeBps.toString());
+    this.takerFeeBps = config.takerFeeBps ?? Number(this.params.takerFeeBps.toString());
+    const quote = String(this.params.quoteAssetAddress);
+    if (quote.toLowerCase() !== config.nativeUsdc.toLowerCase()) {
+      console.warn(`quoteAsset ${quote} != native USDC ${config.nativeUsdc}; refuse live deposits until this matches`);
+    }
+    console.log(`fees · maker ${this.makerFeeBps} bps · taker ${this.takerFeeBps} bps · quote ${quote}`);
     await this.refresh();
     if (!this.wallet) return;
     await this.resyncNonce();
     await this.ensureMargin();
     await this.initGasLimit();
+  }
+
+  /** Gas charged on a send at the last known fee (Monad bills the limit). Used for paper gas hurdle too. */
+  estimatedGasMon(): number {
+    return this.gasMon(this.gasLimit, this.feeWei);
   }
 
   /** Every `config.refreshBlocks`: fee estimate, margin balances, and whether the Kuru AMM vault went live. */
@@ -133,10 +149,34 @@ export class Market {
    * order. Returns as soon as the RPC has the hash. `pollPending` resolves placed/reverted later.
    */
   async send(block: number, side: Side, sizeMon: number, book: Book, cancel: number[], capped: boolean): Promise<Quote> {
-    const price = this.quotePrice(side, book);
-    if (!this.wallet) return { side, price, size: sizeMon, txHash: null, gasMon: 0, cancel, status: "sim", orderId: null, capped };
+    const [q] = await this.sendMany(block, [{ side, size: sizeMon, price: this.quotePrice(side, book) }], cancel, capped);
+    return q!;
+  }
 
-    const tx = this.buildTx(side, sizeMon, price, cancel);
+  /**
+   * One batchUpdate for any number of post-only legs (demo: one; maker: bid and ask). Dry-run
+   * still charges estimated gas so the paper hurdle matches the requote rate.
+   */
+  async sendMany(block: number, legs: { side: Side; size: number; price: number }[], cancel: number[], capped: boolean): Promise<Quote[]> {
+    if (!legs.length) return [];
+    const gasMon = this.estimatedGasMon();
+    const quotes: Quote[] = legs.map((leg, i) => ({
+      side: leg.side,
+      price: leg.price,
+      size: leg.size,
+      txHash: null,
+      gasMon: i === 0 ? gasMon : 0,
+      cancel: i === 0 ? cancel : [],
+      status: "sim" as const,
+      orderId: null,
+      capped,
+    }));
+    if (!this.wallet) return quotes;
+
+    const why = killSwitch.liveBlocked();
+    if (why) throw new Error(`live send blocked: ${why}`);
+
+    const tx = this.buildTxMany(legs, cancel);
     const signed = await this.wallet.signTransaction(tx);
     let hash: string;
     try {
@@ -146,9 +186,12 @@ export class Market {
       await this.resyncNonce().catch(() => {});
       throw e;
     }
-    const quote: Quote = { side, price, size: sizeMon, txHash: hash, gasMon: this.gasMon(this.gasLimit, this.feeWei), cancel, status: "sent", orderId: null, capped };
-    this.pending.set(hash, { block, quote, gasLimit: this.gasLimit });
-    return quote;
+    for (const q of quotes) {
+      q.txHash = hash;
+      q.status = "sent";
+    }
+    this.pending.set(hash, { block, quotes, gasLimit: this.gasLimit });
+    return quotes;
   }
 
   /** One eth_getTransactionReceipt per in-flight tx. Returns whatever resolved (or timed out). */
@@ -161,11 +204,12 @@ export class Market {
       if (!this.pending.has(hash)) return; // an overlapping poll already resolved it
       if (receipt) {
         this.pending.delete(hash);
-        out.push(this.parseReceipt(receipt, p));
+        out.push(...this.parseReceipt(receipt, p));
       } else if (block - p.block >= config.pendingBlocks) {
         this.pending.delete(hash);
         lost = true;
-        out.push({ block: p.block, quote: { ...p.quote, status: "lost", gasMon: 0 }, canceled: [] });
+        const lostQuotes = p.quotes.map((q, i) => ({ ...q, status: "lost" as const, gasMon: 0 }));
+        out.push({ block: p.block, quote: lostQuotes[0]!, quotes: lostQuotes, canceled: [] });
       }
     }));
     if (lost) await this.resyncNonce().catch(() => {});
@@ -174,41 +218,63 @@ export class Market {
 
   /** The exact transaction the hot loop signs: no pre-send RPC, hardcoded gas limit, static type-2 fees. */
   buildTx(side: Side, sizeMon: number, price: number, cancel: number[]): ethers.providers.TransactionRequest {
+    return this.buildTxMany([{ side, size: sizeMon, price }], cancel);
+  }
+
+  buildTxMany(legs: { side: Side; size: number; price: number }[], cancel: number[]): ethers.providers.TransactionRequest {
     return {
       type: 2, chainId: config.chainId, to: config.market, nonce: this.nonce, gasLimit: this.gasLimit,
       maxFeePerGas: gwei(config.maxFeeGwei), maxPriorityFeePerGas: gwei(config.priorityFeeGwei),
-      data: this.encode(side, sizeMon, price, cancel), value: BN.from(0),
+      data: this.encodeMany(legs, cancel), value: BN.from(0),
     };
   }
 
   /** batchUpdate(buyPrices, buySizes, sellPrices, sellSizes, orderIdsToCancel, postOnly). Funds come from the margin account, so value is 0. */
   encode(side: Side, sizeMon: number, price: number, cancel: number[]): string {
-    const priceU = BN.from(Math.round(price * 10 ** this.priceDec));
-    const sizeU = ethers.utils.parseUnits(sizeMon.toFixed(this.sizeDec), this.sizeDec);
-    const [bp, bs, sp, ss] = side === "buy" ? [[priceU], [sizeU], [], []] : [[], [], [priceU], [sizeU]];
+    return this.encodeMany([{ side, size: sizeMon, price }], cancel);
+  }
+
+  encodeMany(legs: { side: Side; size: number; price: number }[], cancel: number[]): string {
+    const bp: ethers.BigNumber[] = [], bs: ethers.BigNumber[] = [], sp: ethers.BigNumber[] = [], ss: ethers.BigNumber[] = [];
+    for (const leg of legs) {
+      const priceU = BN.from(Math.round(leg.price * 10 ** this.priceDec));
+      const sizeU = ethers.utils.parseUnits(leg.size.toFixed(this.sizeDec), this.sizeDec);
+      if (leg.side === "buy") { bp.push(priceU); bs.push(sizeU); }
+      else { sp.push(priceU); ss.push(sizeU); }
+    }
     return this.iface.encodeFunctionData("batchUpdate", [bp, bs, sp, ss, cancel.map((id) => BN.from(id)), true]);
   }
 
   /** OrderCreated for our address gives the new order id; OrdersCanceled lists what the tx removed. status 0x0: nothing changed on the book. */
-  private parseReceipt(r: any, p: Pending): QuoteResult {
+  private parseReceipt(r: any, p: Pending): QuoteResult[] {
     if (r.effectiveGasPrice) this.feeWei = BN.from(r.effectiveGasPrice);
     const gasMon = this.gasMon(p.gasLimit, BN.from(r.effectiveGasPrice ?? this.feeWei));
     const me = this.wallet!.address.toLowerCase();
-    let orderId: number | null = null;
+    const created: { id: number; isBuy: boolean }[] = [];
     const canceled: number[] = [];
     if (r.status !== "0x0") {
       for (const log of r.logs ?? []) {
         let ev; try { ev = this.iface.parseLog(log); } catch { continue; }
-        if (ev.name === "OrderCreated" && String(ev.args.owner).toLowerCase() === me) orderId = Number(ev.args.orderId);
+        if (ev.name === "OrderCreated" && String(ev.args.owner).toLowerCase() === me) {
+          created.push({ id: Number(ev.args.orderId), isBuy: Boolean(ev.args.isBuy) });
+        }
         if (ev.name === "OrdersCanceled" && String(ev.args.owner).toLowerCase() === me) for (const id of ev.args.orderId) canceled.push(Number(id));
       }
     }
     const status: Quote["status"] = r.status === "0x0" ? "reverted" : "placed";
-    return { block: p.block, quote: { ...p.quote, status, orderId, gasMon }, canceled };
+    const quotes = p.quotes.map((q, i) => {
+      const match = created.find((c) => (c.isBuy ? "buy" : "sell") === q.side);
+      return { ...q, status, orderId: match?.id ?? null, gasMon: i === 0 ? gasMon : 0 };
+    });
+    return [{ block: p.block, quote: quotes[0]!, quotes, canceled }];
   }
 
   /** Top the margin account up to MARGIN_MON / MARGIN_USDC. Runs once at startup, awaiting each receipt. */
   private async ensureMargin() {
+    const quote = String(this.params.quoteAssetAddress);
+    if (quote.toLowerCase() !== config.nativeUsdc.toLowerCase()) {
+      throw new Error(`refusing live deposit: quoteAsset ${quote} is not native Monad USDC ${config.nativeUsdc}`);
+    }
     const w = this.wallet!;
     const baseDec = this.params.baseAssetDecimals.toNumber(), quoteDec = this.params.quoteAssetDecimals.toNumber();
     const [monBal, usdcBal] = await Promise.all([this.marginBalance(ZERO_ADDRESS), this.marginBalance(this.params.quoteAssetAddress)]);

@@ -16,6 +16,7 @@ export class Resolver {
     private readonly horizonsSec: readonly number[],
     private readonly intervalMs = 60_000,
     private readonly onResolved: (n: number) => void = () => {},
+    private readonly filter?: { pair?: string; runId?: string },
   ) {}
 
   start(): void {
@@ -29,7 +30,7 @@ export class Resolver {
 
   /** Resolve everything currently due. Returns the number of outcomes written. */
   async tick(now = Date.now()): Promise<number> {
-    const due = await this.store.decisionsDueForResolve(now, this.horizonsSec);
+    const due = await this.store.decisionsDueForResolve(now, this.horizonsSec, this.filter);
     let n = 0;
     for (const d of due) {
       const horizonSec = Number(d.horizon_sec);

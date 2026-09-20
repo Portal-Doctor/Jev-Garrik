@@ -55,10 +55,20 @@ const QUESTIONS = {
   },
 } as const;
 
-/** Real Jev via the AI SDK. Swap-in is the MODEL env var. */
+/** Real Jev via the AI SDK. Gateway when AI_GATEWAY_API_KEY is set; else TypeSafe direct. */
 export class JevModel implements Model {
-  readonly name = config.jevModelId;
-  private model = typeSafeAi.evaluationModel(config.jevModelId);
+  readonly name: string;
+  private readonly model: ReturnType<typeof typeSafeAi.evaluationModel> | string;
+
+  constructor() {
+    if (config.aiGatewayApiKey) {
+      this.name = config.jevGatewayModelId;
+      this.model = config.jevGatewayModelId;
+    } else {
+      this.name = config.jevModelId;
+      this.model = typeSafeAi.evaluationModel(config.jevModelId);
+    }
+  }
 
   async decide(state: TradeState): Promise<Decision> {
     const t0 = performance.now();

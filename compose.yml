@@ -1,12 +1,13 @@
-# Always-on local stack for the Coinbase paper-trading port (cb/): Postgres + the trading engine.
-# Both use restart: unless-stopped, so they auto-restart on crash and return after a reboot
+# Always-on local stack: Postgres + Coinbase paper (cb) + Kuru paper (kuru).
+# Both engines use restart: unless-stopped, so they return after a crash or reboot
 # (as long as Docker Desktop is set to start on login).
-#   docker compose up -d --build   build + start DB and the cb backend
-#   docker compose logs -f cb      follow the engine logs
-#   docker compose restart cb      restart just the backend (e.g. after a code change + rebuild)
+#   docker compose up -d --build   build + start db, cb, and kuru
+#   docker compose logs -f cb      Coinbase logs
+#   docker compose logs -f kuru    Kuru logs
+#   docker compose restart cb      restart one engine
 #   docker compose down            stop everything (data survives in the named volume)
-#   docker compose down -v         also remove the volume (wipes all cb data)
-# The /paper dashboard is on-demand: `cd web; bun run dev` (it reads NEXT_PUBLIC_PAPER_API_URL).
+#   docker compose down -v         also remove the volume (wipes all paper data)
+# The dashboard is on-demand: `cd web; bun run dev` (ports 3001 and 3002).
 services:
   db:
     image: postgres:17
@@ -44,6 +45,25 @@ services:
       PORT: "3001"
     ports:
       - "3001:3001"
+
+  kuru:
+    build:
+      context: .
+      dockerfile: Dockerfile.kuru
+    container_name: kuru-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://cb:cb@db:5432/cb
+      PORT: "3002"
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./data:/app/data
 
 volumes:
   cb-pgdata:
