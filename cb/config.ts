@@ -14,9 +14,8 @@ export const config = {
   databaseUrl: env("DATABASE_URL", "postgres://cb:cb@localhost:5432/cb")!,
 
   // Strategy (spec section 2). Pairs are config, not code.
-  // AVAX (high-beta L1, deep book) and TAO (AI sector, structurally volatile) supplement the
-  // original four for volatility and sector diversity.
-  pairs: list("CB_PAIRS", "SOL-USD,DOGE-USD,SUI-USD,XRP-USD,AVAX-USD,TAO-USD"),
+  // AVAX supplements the original four. TAO was dropped after repeated Jev 429s.
+  pairs: list("CB_PAIRS", "SOL-USD,DOGE-USD,SUI-USD,XRP-USD,AVAX-USD"),
   decideSec: num("CB_DECIDE_SEC", 300),
   horizonSec: num("CB_HORIZON_SEC", 14_400),
   notionalUsd: num("CB_NOTIONAL_USD", 1_000),
@@ -31,7 +30,11 @@ export const config = {
   // If true, an entry that is unfilled at the maker touch after entryTimeoutSec is canceled
   // instead of converted to a taker fill (PL-REVENUE-REVIEW.md 3.4): a missed entry costs
   // nothing, a taker entry costs the whole per-trade edge.
-  neverCrossEntry: (env("CB_NEVER_CROSS_ENTRY", "false") ?? "false").toLowerCase() === "true",
+  neverCrossEntry: (env("CB_NEVER_CROSS_ENTRY", "true") ?? "true").toLowerCase() === "true",
+  /** Hard halt: no new entries. Flatten still allowed. Also trips if data/CB_KILL exists. */
+  kill: (env("CB_KILL", "false") ?? "false").toLowerCase() === "true",
+  /** UTC-day realized P and L (including fees) that trips the kill switch. */
+  dailyLossUsd: num("CB_DAILY_LOSS_USD", 1500),
 
   // Decision hysteresis (PL-REVENUE-REVIEW.md 3.2): only act on the model's call when it clears a
   // confidence band wide enough to beat the round-trip fee cost, converting a raw buy/sell flip

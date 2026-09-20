@@ -3,6 +3,7 @@ import type { PairBook, TradePrint } from "./feed";
 import type { Broker, OrderIntent } from "./engine";
 import type { Action } from "./model";
 import type { Store } from "./db/store";
+import { killSwitch } from "./kill";
 
 /**
  * Paper broker: simulates the execution policy against the real feed and keeps a fee-inclusive
@@ -134,6 +135,7 @@ export class PaperBroker implements Broker {
 
   onIntent(intent: OrderIntent): void {
     if (this.open.get(intent.pair)) return; // one order in flight per pair
+    if (intent.purpose === "entry" && killSwitch.blocked()) return;
     void this.place(intent.pair, intent.side, intent.purpose, intent.decisionId);
   }
 
@@ -231,7 +233,9 @@ export class PaperBroker implements Broker {
     const acct = this.acct.get(pair)!;
     const notional = price * size;
     const fee = feeUsd(notional, liquidity === "maker" ? this.opts.makerFeeBps : this.opts.takerFeeBps);
+    const realizedBefore = acct.realizedUsd;
     acct.apply({ side: order.side, sizeBase: size, notionalUsd: notional, feeUsd: fee });
+    killSwitch.recordUsd(acct.realizedUsd - realizedBefore);
     const counts = this.fillCounts.get(pair)!;
     counts[liquidity]++;
     order.remaining -= size;

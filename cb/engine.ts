@@ -2,6 +2,7 @@ import type { Feed } from "./feed";
 import type { Model, Decision, Action } from "./model";
 import type { Store } from "./db/store";
 import { buildState, type MarketState } from "./state";
+import { killSwitch } from "./kill";
 
 /** A target-position change the broker should act on. */
 export interface OrderIntent {
@@ -123,7 +124,9 @@ export class Engine {
     try {
       const decision = await this.model.decide(state);
       const inferenceUsd = (decision.inputTokens / 1e6) * this.opts.jevUsdPerMTok;
-      const target = targetFor(position, decision.probabilities.buy, this.opts.buyThreshold, this.opts.sellThreshold);
+      let target = targetFor(position, decision.probabilities.buy, this.opts.buyThreshold, this.opts.sellThreshold);
+      const halt = killSwitch.blocked();
+      if (halt) target = "flat";
       const traded = target !== position;
       const id = await this.store.insertDecision({
         run_id: this.runId,
@@ -154,6 +157,7 @@ export class Engine {
           ts: state.ts,
         };
         this.broker.onIntent(intent);
+        if (halt) console.log(`kill ${pair}: ${halt}`);
       }
       this.onDecision(id, decision, state, intent);
     } catch (e) {

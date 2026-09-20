@@ -407,6 +407,34 @@ export class Store {
     return rows.map((r) => r.pair);
   }
 
+  /** Coinbase vs Kuru pairs. Stops MON-USDC from landing on the Coinbase P and L page. */
+  async pairsWithDataForVenue(venue: "paper" | "kuru"): Promise<string[]> {
+    const rows = await this.sql<{ pair: string }[]>`
+      SELECT DISTINCT d.pair
+      FROM decisions d
+      JOIN runs r ON r.id = d.run_id
+      WHERE r.venue = ${venue}
+      ORDER BY d.pair
+    `;
+    return rows.map((r) => r.pair);
+  }
+
+  async earliestUnresolvedTsForVenue(
+    venue: "paper" | "kuru",
+    horizonsSec: readonly number[],
+  ): Promise<Array<{ horizon_sec: number; ts: number | null }>> {
+    const horizons = horizonsSec.map((h) => Number(h));
+    return this.sql`
+      SELECT h.horizon_sec, MIN(d.ts) AS ts
+      FROM unnest(${this.sql.array(horizons, "INTEGER")}::int[]) AS h(horizon_sec)
+      LEFT JOIN decisions d
+        ON d.run_id IN (SELECT id FROM runs WHERE venue = ${venue})
+        AND NOT EXISTS (SELECT 1 FROM outcomes o WHERE o.decision_id = d.id AND o.horizon_sec = h.horizon_sec)
+      GROUP BY h.horizon_sec
+      ORDER BY h.horizon_sec
+    `;
+  }
+
   async snapshotSeries(opts: { pair?: string; fromTs?: number } = {}): Promise<SnapshotRow[]> {
     const pair = opts.pair ?? "TOTAL";
     const fromTs = opts.fromTs ?? 0;

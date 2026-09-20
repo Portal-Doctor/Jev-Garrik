@@ -161,8 +161,8 @@ export async function buildReport(store: Store, opts: { incidentsPerDay?: number
   const tradedHorizonSec = config.horizonSec;
   const roundTripBps = config.makerFeeBps + config.takerFeeBps;
   const perPairBankroll = config.bankrollUsd / (config.pairs.length || 1);
-  const pairs = await store.pairsWithData();
-  const unresolved = await store.earliestUnresolvedTs(MEASURED_HORIZONS_SEC);
+  const pairs = (await store.pairsWithDataForVenue("paper")).filter((p) => p !== "MON-USDC");
+  const unresolved = await store.earliestUnresolvedTsForVenue("paper", MEASURED_HORIZONS_SEC);
   const nextReads: NextRead[] = unresolved.map((r) => ({
     horizonSec: Number(r.horizon_sec),
     at: r.ts != null ? Number(r.ts) + Number(r.horizon_sec) * 1000 : null,
@@ -283,7 +283,7 @@ if (import.meta.main) {
     console.table(
       p.horizons.map((h) => ({
         horizon: `${h.horizonSec / 3600}h`,
-        n: h.n,
+        n: h.n === 0 ? "pending" : h.n,
         accuracy: fmtHorizonCell(h.n, `${(h.accuracy * 100).toFixed(1)}%`),
         wilson95: fmtHorizonCell(h.n, `${(h.wilsonLower * 100).toFixed(1)}-${(h.wilsonUpper * 100).toFixed(1)}%`),
         brier: fmtHorizonCell(h.n, h.brier.toFixed(4)),

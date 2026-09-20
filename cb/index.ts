@@ -35,6 +35,7 @@ await store.insertRun({
   config,
   git_sha: gitSha,
   started_at: startedAt,
+  venue: "paper",
 });
 
 const meta: RunMeta = {
@@ -145,12 +146,10 @@ const shutdown = async () => {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-// Admin "clear paper trades" control (dashboard button -> POST /reset): wipe the DB, then exit so
-// the container's `restart: unless-stopped` policy brings up a fresh process with clean in-memory
-// state (positions, open orders, a new run id). The exit is delayed so the HTTP response reaches
-// the client before the process goes away.
+// Admin "clear paper trades": wipe Coinbase venue rows only, then exit so Docker
+// `restart: unless-stopped` brings up a fresh process. Kuru rows stay put.
 doReset = async () => {
-  await store.resetAll();
+  await store.resetVenue("paper");
   setTimeout(() => void shutdown(), 250);
 };
 
