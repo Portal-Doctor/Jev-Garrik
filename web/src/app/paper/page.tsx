@@ -188,6 +188,8 @@ export default function PaperPage() {
         <Stat label="Inference" value={fmtUsd(-totals.inference, 4)} tone={-1} />
       </section>
 
+      <QuoteHeartbeat pairs={pairs} feedByPair={feed.feed} />
+
       <div className={styles.body}>
         <section className={styles.grid}>
           {pairs.map((pair) => (
@@ -240,6 +242,24 @@ export default function PaperPage() {
         </section>
       </div>
     </div>
+  );
+}
+
+function QuoteHeartbeat({ pairs, feedByPair }: { pairs: string[]; feedByPair: Record<string, PairFeedState> }) {
+  return (
+    <section className={styles.heartbeat}>
+      <div className={styles.hbTape}>
+        {pairs.map((pair) => {
+          const mid = feedByPair[pair]?.mid;
+          return (
+            <span key={pair} className={styles.hbTick}>
+              <span className={styles.hbPair}>{pair.replace("-USD", "")}</span>
+              <span className={styles.hbMid}>{typeof mid === "number" && Number.isFinite(mid) ? fmtPrice(mid) : "-"}</span>
+            </span>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

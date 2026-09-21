@@ -123,3 +123,34 @@ test("a pair with insufficient cash cannot enter a new position (confirms it has
   expect(broker.state(pair).position).toBe("flat");
   expect(broker.state(pair).cashUsd).toBe(500); // untouched
 });
+
+test("start restores inventory and leftover orders after a process restart", async () => {
+  const restorePair = "PAPER-RESTORE-USD";
+  const feed = new FakeFeed();
+  const opts = {
+    notionalUsd: 1000,
+    makerFeeBps: 50,
+    takerFeeBps: 90,
+    fillHaircut: 0.5,
+    entryTimeoutSec: 120,
+    repriceTicks: 2,
+    horizonSec: 14400,
+    bankrollUsd: 10000,
+  };
+  const first = new PaperBroker([restorePair], feed, store, runId, opts);
+  await (first as any).place(restorePair, "buy", "entry", null);
+  const t = Date.now() + 2_000;
+  feed.push({ ts: t, price: 99.9, size: 4, takerSide: "sell" });
+  await (first as any).processOrder(restorePair, t);
+  const size = first.state(restorePair).sizeBase;
+  expect(size).toBeGreaterThan(0);
+  expect(first.state(restorePair).openOrder).not.toBeNull();
+  first.stop();
+
+  const again = new PaperBroker([restorePair], feed, store, `test-${crypto.randomUUID()}`, opts);
+  await again.start();
+  again.stop();
+  expect(again.state(restorePair).position).toBe("long");
+  expect(again.state(restorePair).sizeBase).toBeCloseTo(size, 6);
+  expect(again.state(restorePair).openOrder?.remaining).toBeGreaterThan(0);
+});

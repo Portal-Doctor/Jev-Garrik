@@ -54,6 +54,12 @@ export default function OverviewPage() {
               book measures edge after fees and holds the position through 30 second, 5 minute, and
               30 minute reads.
             </p>
+            <p>
+              The bar for tune or go live is the promotion gate on{" "}
+              <Link href="/paper/report">Coinbase P and L</Link>: at least 200 resolved 4 hour
+              decisions, Wilson lower bound above 52%, net P and L above zero, drawdown under 15%,
+              and a quiet feed.
+            </p>
             <ul>
               <li>Dashboard on port 3001</li>
               <li>Start with bun run cb:restart</li>

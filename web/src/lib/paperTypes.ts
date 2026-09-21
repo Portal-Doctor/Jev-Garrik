@@ -62,6 +62,8 @@ export interface Snapshot {
   decisions: LastDecision[];
   /** Wall-clock ms of the next scheduled decision per pair. */
   nextDecision?: Record<string, number | null>;
+  recentDecisions?: DecisionEvent[];
+  recentFills?: FillEvent[];
 }
 
 export interface DecisionEvent {
@@ -90,6 +92,11 @@ export interface Tick {
   pair: string;
   mid: number | null;
   spreadBps: number | null;
+}
+
+export interface TickFrame {
+  ticks: Tick[];
+  nextDecision?: Record<string, number | null>;
 }
 
 export interface PaperState {

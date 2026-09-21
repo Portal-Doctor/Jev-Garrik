@@ -226,6 +226,38 @@
   color: var(--pnl-neg);
 }
 
+/* Live mids only. The changing prices are the heartbeat. */
+.heartbeat {
+  padding: 10px 24px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.hbTape {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.hbTick {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.hbPair {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.hbMid {
+  font-weight: 600;
+  color: var(--ink);
+}
+
 /* ---- body layout ---- */
 .body {
   display: flex;

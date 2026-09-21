@@ -12,6 +12,7 @@ import type {
   PairFeedState,
   Snapshot,
   Tick,
+  TickFrame,
 } from "./paperTypes";
 
 /** Max recent decisions / fills kept in memory (newest first). */
@@ -23,7 +24,7 @@ const STALE_MS = 45_000;
 
 type Action =
   | { type: "snapshot"; meta: PaperMeta; snapshot: Snapshot }
-  | { type: "tick"; ticks: Tick[] }
+  | { type: "tick"; ticks: Tick[]; nextDecision?: Record<string, number | null> }
   | { type: "decision"; decision: DecisionEvent }
   | { type: "fill"; fill: FillEvent }
   | { type: "equity"; positions: PaperPosition[] }
@@ -64,6 +65,8 @@ function reducer(state: PaperState, action: Action): PaperState {
         positions: byPair(s.positions ?? []),
         lastDecision: byPair(s.decisions ?? []),
         nextDecision: cleanNextDecision(s.nextDecision),
+        recentDecisions: Array.isArray(s.recentDecisions) ? s.recentDecisions : state.recentDecisions,
+        recentFills: Array.isArray(s.recentFills) ? s.recentFills : state.recentFills,
         connection: "live",
       };
     }
@@ -74,7 +77,8 @@ function reducer(state: PaperState, action: Action): PaperState {
         const prev = feed[t.pair] ?? ({ pair: t.pair } as PairFeedState);
         feed[t.pair] = { ...prev, mid: t.mid, spreadBps: t.spreadBps };
       }
-      return { ...state, feed };
+      const nextDecision = action.nextDecision ? { ...state.nextDecision, ...cleanNextDecision(action.nextDecision) } : state.nextDecision;
+      return { ...state, feed, nextDecision };
     }
 
     case "decision": {
@@ -186,7 +190,14 @@ export function usePaperFeed(apiUrl: string): PaperState {
         dispatch({ type: "snapshot", meta, snapshot });
       });
       handle("tick", (data) => {
-        if (Array.isArray(data)) dispatch({ type: "tick", ticks: data as Tick[] });
+        if (Array.isArray(data)) {
+          dispatch({ type: "tick", ticks: data as Tick[] });
+          return;
+        }
+        const frame = data as TickFrame;
+        if (frame && Array.isArray(frame.ticks)) {
+          dispatch({ type: "tick", ticks: frame.ticks, nextDecision: frame.nextDecision });
+        }
       });
       handle("decision", (data) => dispatch({ type: "decision", decision: data as DecisionEvent }));
       handle("fill", (data) => dispatch({ type: "fill", fill: data as FillEvent }));

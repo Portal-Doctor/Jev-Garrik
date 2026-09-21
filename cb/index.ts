@@ -75,6 +75,7 @@ const broker = new PaperBroker(
   (f) => {
     console.log(`FILL ${f.pair} ${f.side.toUpperCase()} ${f.purpose} ${f.sizeBase.toFixed(4)} @ ${f.price} ${f.liquidity} fee $${f.feeUsd.toFixed(4)}`);
     broadcast("fill", f);
+    broadcast("equity", broker.allState());
   },
 );
 await broker.start(config.coinbaseRestUrl);
@@ -110,12 +111,36 @@ const uptimeDays = () => Math.max((Date.now() - startedAt) / 86_400_000, 1 / 144
 const srv = startServer({
   meta,
   store,
-  snapshot: () => ({
-    pairs: feed.allState(),
-    positions: broker.allState(),
-    decisions: [...engine.latest.entries()].map(([pair, v]) => ({ pair, action: v.decision.action, pBuy: v.decision.pBuy, mid: v.state.mid })),
-    nextDecision: Object.fromEntries(config.pairs.map((p) => [p, engine.nextDecisionAt(p)])),
-  }),
+  snapshot: async () => {
+    const [rows, fills] = await Promise.all([
+      store.recentDecisions({ limit: 50, venue: "paper" }),
+      store.recentFills({ limit: 50, venue: "paper" }),
+    ]);
+    return {
+      pairs: feed.allState(),
+      positions: broker.allState(),
+      decisions: [...engine.latest.entries()].map(([pair, v]) => ({ pair, action: v.decision.action, pBuy: v.decision.pBuy, mid: v.state.mid })),
+      nextDecision: Object.fromEntries(config.pairs.map((p) => [p, engine.nextDecisionAt(p)])),
+      recentDecisions: rows.map((d) => ({
+        id: d.id,
+        pair: d.pair,
+        action: d.action,
+        pBuy: Number(d.p_buy),
+        mid: Number(d.mid),
+        ts: Number(d.ts),
+      })),
+      recentFills: fills.map((f) => ({
+        pair: f.pair,
+        side: f.side,
+        purpose: f.side === "buy" ? "entry" : "exit",
+        price: Number(f.price),
+        sizeBase: Number(f.size_base),
+        feeUsd: Number(f.fee_usd),
+        liquidity: f.liquidity,
+        ts: Number(f.traded_at),
+      })),
+    };
+  },
   incidentsPerDay: () => feed.incidents / uptimeDays(),
   reset: () => doReset(),
 });
@@ -124,7 +149,11 @@ const server = srv.server;
 
 // Live streams for the dashboard: per-second ticks and per-minute equity.
 const tickTimer = setInterval(
-  () => broadcast("tick", feed.allState().map((s) => ({ pair: s.pair, mid: s.mid, spreadBps: s.spreadBps }))),
+  () =>
+    broadcast("tick", {
+      ticks: feed.allState().map((s) => ({ pair: s.pair, mid: s.mid, spreadBps: s.spreadBps })),
+      nextDecision: Object.fromEntries(config.pairs.map((p) => [p, engine.nextDecisionAt(p)])),
+    }),
   1_000,
 );
 const equityTimer = setInterval(() => broadcast("equity", broker.allState()), 60_000);

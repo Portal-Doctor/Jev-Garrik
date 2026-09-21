@@ -17,7 +17,7 @@ export interface ServerCtx {
   meta: RunMeta;
   store: Store;
   /** Live snapshot for GET / and the SSE `snapshot` event (feed + positions + last decisions). */
-  snapshot: () => unknown;
+  snapshot: () => unknown | Promise<unknown>;
   incidentsPerDay: () => number;
   /** Wipes all paper-trading tables and restarts the service so in-memory state (positions, open
    *  orders, run id) starts fresh too. Resolves once the DB is cleared; the process exit happens
@@ -69,13 +69,13 @@ export function startServer(ctx: ServerCtx) {
       if (pathname === "/health")
         return json({ status: "ok", runId: meta.runId, ts: Date.now(), uptimeMs: Date.now() - meta.startedAt });
 
-      if (pathname === "/") return json({ ...meta, snapshot: ctx.snapshot() });
+      if (pathname === "/") return json({ ...meta, snapshot: await ctx.snapshot() });
 
       if (pathname === "/events") {
         const stream = new ReadableStream<Uint8Array>({
           start(c) {
             clients.add(c);
-            send(c, "snapshot", { ...meta, snapshot: ctx.snapshot() });
+            void Promise.resolve(ctx.snapshot()).then((snap) => send(c, "snapshot", { ...meta, snapshot: snap }));
           },
           cancel(c) {
             clients.delete(c);
@@ -89,7 +89,7 @@ export function startServer(ctx: ServerCtx) {
       if (pathname === "/decisions") {
         const pair = searchParams.get("pair") ?? undefined;
         const limit = num(searchParams.get("limit"), 100);
-        return json(await store.recentDecisions({ pair, limit }));
+        return json(await store.recentDecisions({ pair, limit, venue: "paper" }));
       }
 
       if (pathname === "/equity") {

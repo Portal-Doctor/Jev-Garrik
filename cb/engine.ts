@@ -55,6 +55,26 @@ export function targetFor(position: "long" | "flat", pBuy: number, buyThreshold:
   return pBuy <= sellThreshold ? "flat" : "long";
 }
 
+/** Reject if `p` has not settled so a hung Jev/429 call cannot pin `busy` and skip later cycles. */
+export function withDeadline<T>(p: Promise<T>, ms: number, label = "operation"): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
+/** Cap on a single Jev call. Gateway 429s can sit until this fires, then the pair is free again. */
+export const DECIDE_DEADLINE_MS = 25_000;
+
 /**
  * One model call per pair every `decideSec`. Same one-in-flight guard as src/trader.ts (`busy`): a
  * cycle that arrives while the previous one for that pair is still running is skipped. A `buy`
@@ -64,6 +84,8 @@ export function targetFor(position: "long" | "flat", pBuy: number, buyThreshold:
  */
 export class Engine {
   private busy = new Map<string, boolean>();
+  /** Bumps when a pair starts a decide so a late return from a timed-out call is ignored. */
+  private decideGen = new Map<string, number>();
   private timers: Array<ReturnType<typeof setInterval>> = [];
   private starters: Array<ReturnType<typeof setTimeout>> = [];
   /** Wall-clock ms of the next scheduled decision per pair (drives the UI countdown). */
@@ -121,8 +143,11 @@ export class Engine {
     });
     if (!state) return; // book not ready
     this.busy.set(pair, true);
+    const gen = (this.decideGen.get(pair) ?? 0) + 1;
+    this.decideGen.set(pair, gen);
     try {
-      const decision = await this.model.decide(state);
+      const decision = await withDeadline(this.model.decide(state), DECIDE_DEADLINE_MS, `decide ${pair}`);
+      if (this.decideGen.get(pair) !== gen) return;
       const inferenceUsd = (decision.inputTokens / 1e6) * this.opts.jevUsdPerMTok;
       let target = targetFor(position, decision.probabilities.buy, this.opts.buyThreshold, this.opts.sellThreshold);
       const halt = killSwitch.blocked();

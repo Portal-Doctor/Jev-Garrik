@@ -14,8 +14,9 @@ export const config = {
   databaseUrl: env("DATABASE_URL", "postgres://cb:cb@localhost:5432/cb")!,
 
   // Strategy (spec section 2). Pairs are config, not code.
-  // AVAX supplements the original four. TAO was dropped after repeated Jev 429s.
-  pairs: list("CB_PAIRS", "SOL-USD,DOGE-USD,SUI-USD,XRP-USD,AVAX-USD"),
+  // AVAX and TAO supplement the original four. Jev 429s time out per cycle (DECIDE_DEADLINE_MS)
+  // instead of pinning a pair, so TAO stays on the board.
+  pairs: list("CB_PAIRS", "SOL-USD,DOGE-USD,SUI-USD,XRP-USD,AVAX-USD,TAO-USD"),
   decideSec: num("CB_DECIDE_SEC", 300),
   horizonSec: num("CB_HORIZON_SEC", 14_400),
   notionalUsd: num("CB_NOTIONAL_USD", 1_000),

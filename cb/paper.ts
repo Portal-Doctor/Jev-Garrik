@@ -110,8 +110,47 @@ export class PaperBroker implements Broker {
 
   async start(restUrl?: string): Promise<void> {
     if (restUrl) await this.loadTicks(restUrl);
+    await this.restore();
     this.tickTimer = setInterval(() => this.tick(), 1_000);
     this.snapTimer = setInterval(() => void this.snapshot(), 60_000);
+  }
+
+  /** Replay paper fills and leftover orders so a container restart does not flatten inventory. */
+  private async restore(): Promise<void> {
+    const fills = await this.store.fillsByVenue("paper");
+    const lastEntryAt = new Map<string, number>();
+    for (const f of fills) {
+      const acct = this.acct.get(f.pair);
+      if (!acct) continue;
+      acct.apply({
+        side: f.side,
+        sizeBase: Number(f.size_base),
+        notionalUsd: Number(f.notional_usd),
+        feeUsd: Number(f.fee_usd),
+      });
+      const counts = this.fillCounts.get(f.pair);
+      if (counts) counts[f.liquidity === "taker" ? "taker" : "maker"]++;
+      if (f.side === "buy") lastEntryAt.set(f.pair, Number(f.traded_at));
+    }
+    for (const [pair, ts] of lastEntryAt) {
+      if (this.positionOf(pair) === "long") {
+        this.horizonExpiresAt.set(pair, ts + this.opts.horizonSec * 1000);
+      }
+    }
+    const opens = await this.store.openOrdersForVenue("paper");
+    for (const o of opens) {
+      if (!this.acct.has(o.pair)) continue;
+      this.open.set(o.pair, {
+        id: o.id,
+        side: o.side,
+        purpose: o.purpose,
+        price: Number(o.price),
+        remaining: Number(o.size_base),
+        createdAt: Number(o.created_at),
+        eligibleAt: Number(o.created_at) + ELIGIBLE_DELAY_MS,
+        decisionId: o.decision_id,
+      });
+    }
   }
 
   stop(): void {

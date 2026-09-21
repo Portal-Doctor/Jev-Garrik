@@ -178,6 +178,18 @@ export class Store {
     return id;
   }
 
+  /** Newest open or partial order per pair for one venue. Used to resume the book after a restart. */
+  async openOrdersForVenue(venue: "paper" | "kuru"): Promise<OrderRow[]> {
+    return this.sql<OrderRow[]>`
+      SELECT DISTINCT ON (o.pair) o.*
+      FROM orders o
+      JOIN runs r ON r.id = o.run_id
+      WHERE r.venue = ${venue}
+        AND o.status IN (${"open"}, ${"partial"})
+      ORDER BY o.pair, o.created_at DESC
+    `;
+  }
+
   async updateOrder(id: string, patch: Partial<Pick<OrderRow, "price" | "size_base" | "status" | "venue_order_id">>, updatedAt: number): Promise<void> {
     await this.sql`
       UPDATE orders SET
@@ -335,11 +347,17 @@ export class Store {
     `;
   }
 
-  async recentDecisions(opts: { pair?: string; limit?: number } = {}): Promise<Array<DecisionRow & { outcomes: OutcomeRow[] }>> {
+  async recentDecisions(opts: { pair?: string; limit?: number; venue?: "paper" | "kuru" } = {}): Promise<Array<DecisionRow & { outcomes: OutcomeRow[] }>> {
     const limit = opts.limit ?? 100;
-    const rows = opts.pair
-      ? await this.sql<DecisionRow[]>`SELECT * FROM decisions WHERE pair = ${opts.pair} ORDER BY ts DESC LIMIT ${limit}`
-      : await this.sql<DecisionRow[]>`SELECT * FROM decisions ORDER BY ts DESC LIMIT ${limit}`;
+    const venue = opts.venue;
+    const pair = opts.pair;
+    const rows = venue && pair
+      ? await this.sql<DecisionRow[]>`SELECT d.* FROM decisions d JOIN runs r ON r.id = d.run_id WHERE r.venue = ${venue} AND d.pair = ${pair} ORDER BY d.ts DESC LIMIT ${limit}`
+      : venue
+        ? await this.sql<DecisionRow[]>`SELECT d.* FROM decisions d JOIN runs r ON r.id = d.run_id WHERE r.venue = ${venue} ORDER BY d.ts DESC LIMIT ${limit}`
+        : pair
+          ? await this.sql<DecisionRow[]>`SELECT * FROM decisions WHERE pair = ${pair} ORDER BY ts DESC LIMIT ${limit}`
+          : await this.sql<DecisionRow[]>`SELECT * FROM decisions ORDER BY ts DESC LIMIT ${limit}`;
     if (!rows.length) return [];
     const ids = rows.map((r) => r.id);
     const outcomes = await this.sql<OutcomeRow[]>`SELECT * FROM outcomes WHERE decision_id IN ${this.sql(ids)}`;
@@ -441,10 +459,18 @@ export class Store {
     return this.sql<SnapshotRow[]>`SELECT * FROM snapshots WHERE pair = ${pair} AND ts >= ${fromTs} ORDER BY ts ASC`;
   }
 
-  async recentFills(opts: { pair?: string; limit?: number } = {}): Promise<FillRow[]> {
+  async recentFills(opts: { pair?: string; limit?: number; venue?: "paper" | "kuru" } = {}): Promise<FillRow[]> {
     const limit = opts.limit ?? 50;
-    return opts.pair
-      ? this.sql<FillRow[]>`SELECT * FROM fills WHERE pair = ${opts.pair} ORDER BY traded_at DESC LIMIT ${limit}`
+    const pair = opts.pair;
+    const venues = opts.venue === "kuru" ? (["kuru"] as const) : opts.venue === "paper" ? (["paper", "coinbase"] as const) : null;
+    if (venues && pair) {
+      return this.sql<FillRow[]>`SELECT * FROM fills WHERE venue IN ${this.sql(venues)} AND pair = ${pair} ORDER BY traded_at DESC LIMIT ${limit}`;
+    }
+    if (venues) {
+      return this.sql<FillRow[]>`SELECT * FROM fills WHERE venue IN ${this.sql(venues)} ORDER BY traded_at DESC LIMIT ${limit}`;
+    }
+    return pair
+      ? this.sql<FillRow[]>`SELECT * FROM fills WHERE pair = ${pair} ORDER BY traded_at DESC LIMIT ${limit}`
       : this.sql<FillRow[]>`SELECT * FROM fills ORDER BY traded_at DESC LIMIT ${limit}`;
   }
 

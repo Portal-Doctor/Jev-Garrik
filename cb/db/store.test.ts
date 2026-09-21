@@ -158,6 +158,9 @@ test("pairsWithDataForVenue hides the other venue", async () => {
   expect(paper).toContain("SOL-USD");
   expect(paper).not.toContain("MON-USDC");
   expect(kuru).toContain("MON-USDC");
+  const paperDecisions = await store.recentDecisions({ venue: "paper", limit: 20 });
+  expect(paperDecisions.some((d) => d.pair === "SOL-USD")).toBe(true);
+  expect(paperDecisions.some((d) => d.pair === "MON-USDC")).toBe(false);
   await store.sql`DELETE FROM decisions WHERE run_id IN ${store.sql([kuruId, paperId])}`;
   await store.sql`DELETE FROM runs WHERE id IN ${store.sql([kuruId, paperId])}`;
 });
