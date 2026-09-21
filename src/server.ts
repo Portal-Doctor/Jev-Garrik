@@ -3,7 +3,21 @@ import type { Fill, Quote } from "./market";
 import type { BlockEvent } from "./trader";
 import { taxLotsCsv, type TaxReport } from "../cb/tax";
 
-interface Meta { model: string; wallet: string | null; dryRun: boolean; market: string; startedAt: number; kuruMode: "maker"; runId?: string }
+interface Meta {
+  model: string;
+  wallet: string | null;
+  dryRun: boolean;
+  market: string;
+  startedAt: number;
+  kuruMode: "maker";
+  runId?: string;
+  maxPositionMon?: number;
+  tradeSizeMon?: number;
+  bankrollUsd?: number;
+  marginMon?: number;
+  marginUsdc?: number;
+  shortCoverBuffer?: number;
+}
 
 const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "GET, POST, OPTIONS" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, "content-type": "application/json" } });

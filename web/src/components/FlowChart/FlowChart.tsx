@@ -200,8 +200,10 @@ export default function FlowChart({
   const pos = shown?.position;
   const stance =
     !pos || pos.side === "flat"
-      ? "flat"
-      : `${pos.side} ${fmtMon(pos.size, Number.isInteger(pos.size) ? 0 : 3)}`;
+      ? "flat 0 MON"
+      : pos.side === "short"
+        ? `short ${fmtMon(pos.size, 1)} (cover to flatten)`
+        : `long ${fmtMon(pos.size, 1)} (sell to flatten)`;
   const pnlMon = shown?.totals?.pnlMon ?? 0;
   const pnlPct = shown?.totals?.pnlPct ?? 0;
 

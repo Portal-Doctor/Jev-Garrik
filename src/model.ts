@@ -1,6 +1,7 @@
 import { experimental_evaluate } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { config } from "./config";
+import type { CycleTA } from "./cycle";
 
 /** Models answer buy or sell. `hold` only appears on late blocks (no decision was made). */
 export type Action = "buy" | "sell" | "hold";
@@ -23,6 +24,8 @@ export interface TradeState {
   /** Taker prints over the last `horizonBlocks`. cvdMon = taker buy volume - taker sell volume. */
   trades: { count: number; buyMon: number; sellMon: number; cvdMon: number; vwap: number | null; lastPrice: number | null; lastSide: "buy" | "sell" | null };
   recentTrades: string[]; // newest last, "block side size @ price"
+  /** 3-block candle TA. Only computed on a decision tick. */
+  ta: CycleTA;
   allowed: { buy: boolean; sell: boolean };
 }
 
@@ -44,9 +47,9 @@ const QUESTIONS = {
     type: "choice",
     instructions: {
       question: "Will MON be higher or lower than the current mid after `horizonBlocks` more blocks?",
-      goal: "Trade MON-USDC on Kuru. Blocks are ~300ms; `horizonBlocks` (~30 s) is the horizon. A decision is made every few blocks and held until the next one. The trade crosses the spread (`spreadBps`), so the move must beat that cost.",
-      timing: "The order executes as an immediate-or-cancel market order in the next block.",
-      inputs: "Taker flow is the strongest signal: `trades.cvdMon` (taker buys minus taker sells over the horizon), `trades.lastSide` and `recentTrades` show who is hitting the book. `depth` and `book` show resting liquidity per side at several distances from mid; thin depth on one side means price moves easily that way. `returnsBps` and `recentMids` show the path over the horizon. If `allowed.buy` is false the trade will be a sell regardless, and vice versa.",
+      goal: "Trade MON-USDC on Kuru as a two-sided maker. Blocks are ~300ms. Price and book volume stream every block; a decision is made every 3 blocks (~900ms) from 3-block candles. Skew quotes toward the side that wins after `horizonBlocks`. Quotes send on a fill or a real touch move, not on every decision.",
+      timing: "Quotes are post-only. Jev only flips the inventory skew (0.60/0.40 band). The engine stands aside when the spread is under the gas hurdle or markout is toxic.",
+      inputs: "Use `ta` first: `ta.book` is resting bid vs ask volume (imbalance > 0 means more bids); `ta.book.deltaBid` / `deltaAsk` is the change vs the last candle. `ta.microprice` / `ta.microDevBps` is the size-weighted touch (negative = bid-heavy). `ta.vwap` / `ta.vwapDevBps` / `ta.vwapSigmaBps` is mid vs VWAP. `ta.emaCross` is a fresh fast/slow EMA cross; `ta.emaGapBps` is the stack. `ta.atrBps` is candle range. `ta.rsi` and `ta.stochRsi` (0..1) flag stretch. `ta.ofi` is last-candle taker flow. `ta.markoutBps` is signed fill markout (negative = adverse). `ta.refMid` / `ta.refDivBps` is Coinbase vs Kuru (positive = Kuru rich). Taker flow (`trades.cvdMon`, `recentTrades`) confirms. `depth` and `book` show near-touch liquidity. If `allowed.buy` is false the trade will be a sell regardless, and vice versa.",
     },
     criteria: {
       buy: "Buy MON now: mid more likely to be higher after `horizonBlocks` blocks, by more than the spread.",
@@ -94,7 +97,13 @@ export class MockModel implements Model {
     const t0 = performance.now();
     // momentum + book imbalance + noise, pulled back toward flat so it trades both ways
     const flow = state.trades.buyMon + state.trades.sellMon ? state.trades.cvdMon / (state.trades.buyMon + state.trades.sellMon) : 0;
-    const signal = state.returnsBps.last20 / 8 + state.bookImbalance * 1.5 + flow * 2 + this.noise(state.block);
+    const ta = state.ta;
+    const rsiPull = ta.rsi != null ? (50 - ta.rsi) / 25 : 0;
+    const stoch = ta.stochRsi != null ? (0.5 - ta.stochRsi) * 2 : 0;
+    const vwap = (ta.vwapDevBps ?? 0) / 12;
+    const ema = ta.emaCross === "bull" ? 1.2 : ta.emaCross === "bear" ? -1.2 : (ta.emaGapBps ?? 0) / 8;
+    const bookVol = ta.book.imbalance * 1.8;
+    const signal = state.returnsBps.last20 / 8 + state.bookImbalance * 0.6 + flow * 1.4 + bookVol + ema - vwap + rsiPull + stoch + this.noise(state.block);
     const buy = 1 / (1 + Math.exp(-signal)); // binary softmax
     const probabilities = { buy, sell: 1 - buy, hold: 0 };
     const action: Action = buy >= 0.5 ? "buy" : "sell";

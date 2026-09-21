@@ -21,16 +21,26 @@ export const config = {
   /** Local engine is maker paper only. The tweet demo is not run here. */
   kuruMode: "maker" as const,
   tradeSizeMon: Number(env("TRADE_SIZE_MON", "200")), // Kuru MON-USDC minimum order is 200 MON
-  maxPositionMon: Number(env("MAX_POSITION_MON", "1000")),
+  maxPositionMon: Number(env("MAX_POSITION_MON", "36000")),
+  /** Adverse mid move assumed when sizing a short so USDC can still buy it back. */
+  shortCoverBuffer: Number(env("KURU_SHORT_COVER_BUFFER", "0.10")),
   bankrollUsd: Number(env("BANKROLL_USD", "100")), // used for pnlPct
   /** Quote this many ticks inside the touch (0 = join the best bid/ask). Never crosses: clamps to the touch when the spread is too tight. */
   quoteInsideTicks: Number(env("QUOTE_INSIDE_TICKS", "1")),
-  /** Maker mode: requote only when the touch moves more than this many ticks. */
-  requoteTicks: Number(env("KURU_REQUOTE_TICKS", "2")),
+  /** Maker mode: requote only when the touch moves more than this many ticks (vs last send, not last block). */
+  requoteTicks: Number(env("KURU_REQUOTE_TICKS", "4")),
+  /** Skip new quotes when the spread is tighter than this. Gas hurdle on a 200 MON clip is about 3 bps. */
+  minSpreadBps: Number(env("KURU_MIN_SPREAD_BPS", "4")),
+  /** Jev skew hysteresis: flip to buy at or above, hold last side in between. */
+  buyThreshold: Number(env("KURU_BUY_THRESHOLD", "0.60")),
+  /** Jev skew hysteresis: flip to sell at or below. */
+  sellThreshold: Number(env("KURU_SELL_THRESHOLD", "0.40")),
+  /** Stand aside when EMA fill markout is worse than minus this many bps. */
+  markoutPullBps: Number(env("KURU_MARKOUT_PULL_BPS", "2")),
   /** Maker paper honesty: share of a crossing print we take (queue position is unknown). */
   fillHaircut: Number(env("KURU_FILL_HAIRCUT", "0.5")),
-  /** Maker mode: ask Jev at least every N blocks (~30 s at 100). Also asked whenever a requote is due. */
-  decideBlocks: Number(env("KURU_DECIDE_BLOCKS", "100")),
+  /** Jev loop every N blocks. Quotes send on fill/touch, not on this tick. Default 3 (~900 ms). */
+  decideBlocks: Number(env("KURU_DECIDE_BLOCKS", "3")),
   /** Optional overrides; unset means use the live market contract values. */
   makerFeeBps: num("KURU_MAKER_FEE_BPS"),
   takerFeeBps: num("KURU_TAKER_FEE_BPS"),
@@ -43,8 +53,8 @@ export const config = {
   /** Same Postgres as cb/. Maker paper writes venue=kuru into the existing tables. */
   databaseUrl: env("DATABASE_URL", "postgres://cb:cb@localhost:5432/cb")!,
   /** Startup deposits into the Kuru margin account, topped up to these balances. Limit orders draw from margin, not the wallet. */
-  marginMon: Number(env("MARGIN_MON", "600")),
-  marginUsdc: Number(env("MARGIN_USDC", "20")),
+  marginMon: Number(env("MARGIN_MON", "36000")),
+  marginUsdc: Number(env("MARGIN_USDC", "1000")),
   // Monad charges gas on the LIMIT, so never estimate per block: estimate once at init (or override) and hardcode.
   gasLimit: num("GAS_LIMIT"),
   gasLimitFallback: 350_000, // batchUpdate: one cancel + one post-only place measured at ~282k for the place alone

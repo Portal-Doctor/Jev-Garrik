@@ -32,7 +32,7 @@
   flex-direction: column;
 }
 
-/* right column: decision panel (fixed) + feed (fills, clips) */
+/* right column: decision panel (fixed) + feed (fills, scrolls) */
 .right {
   width: 470px;
   flex: none;
@@ -44,12 +44,34 @@
   overflow: hidden;
 }
 
+/* Menu hidden: chart stays wide, standing order sits under it. */
+.mainWide {
+  flex: 1 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.mainWide .left,
+.mainWide .chartWrap {
+  flex: none;
+  width: 100%;
+  min-height: min(56vh, 560px);
+  height: min(56vh, 560px);
+}
+
+.mainWide .right {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+}
+
 /* the decision panel keeps its natural height ... */
 .right > :first-child {
   flex: none;
 }
 
-/* ... and the feed takes whatever is left, clipping its own overflow */
+/* ... and the feed takes whatever is left and scrolls */
 .right > :last-child {
   flex: 1;
   min-height: 0;
@@ -69,10 +91,21 @@
   /* no viewport-driven height down here, so give the chart a shape */
   .chartWrap {
     flex: none;
+    min-height: 420px;
     aspect-ratio: 4 / 3;
   }
 
-  .right {
+  .mainWide .left,
+  .mainWide .chartWrap {
+    height: auto;
+    min-height: 420px;
+    aspect-ratio: 4 / 3;
+  }
+
+  .right,
+  .mainWide .right {
     width: 100%;
+    height: auto;
+    min-height: 0;
   }
 }

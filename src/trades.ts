@@ -57,6 +57,7 @@ export class TradeFeed {
   private trades: TradePrint[] = [];
   private fresh: TradePrint[] = []; // appended since the last drainPrints()
   private fills: MakerFill[] = []; // appended since the last drainFills()
+  private taCursor = 0;
   private inFlight = false;
   lastBlock = 0;
 
@@ -99,7 +100,11 @@ export class TradeFeed {
           const t = this.decode(log, !first); // the warm-up window predates our orders: no fills from it
           if (t) { this.trades.push(t); this.fresh.push(t); }
         }
-        if (this.trades.length > RING) this.trades.splice(0, this.trades.length - RING);
+        if (this.trades.length > RING) {
+          const drop = this.trades.length - RING;
+          this.trades.splice(0, drop);
+          this.taCursor = Math.max(0, this.taCursor - drop);
+        }
         this.lastBlock = to;
         from = to + 1;
       }
@@ -147,6 +152,13 @@ export class TradeFeed {
   /** Newest last. */
   recent(n: number): TradePrint[] {
     return this.trades.slice(-n);
+  }
+
+  /** Prints not yet seen by the cycle accumulator. O(new). */
+  pullTaPrints(): TradePrint[] {
+    const out = this.trades.slice(this.taCursor);
+    this.taCursor = this.trades.length;
+    return out;
   }
 
   /** Prints appended since the last call (oldest first). Used to simulate maker fills in a dry run. */

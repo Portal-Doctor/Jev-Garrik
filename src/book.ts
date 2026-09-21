@@ -215,11 +215,15 @@ export function buildBook(l2Hex: string, params: BookParams, vault?: VaultParams
   const within = (levels: Level[], bps: number) => levels.filter((l) => (Math.abs(l[0] - mid) / mid) * 10_000 <= bps).reduce((s, l) => s + l[1], 0);
   const depthBps: Book["depthBps"] = {};
   for (const b of [10, 25, 50]) depthBps[String(b)] = { bid: within(bids, b), ask: within(asks, b) };
+  const bidVol = bids.reduce((s, l) => s + l[1], 0);
+  const askVol = asks.reduce((s, l) => s + l[1], 0);
   return {
     block: l2.block, bid, ask, mid,
     spreadBps: ((ask - bid) / mid) * 10_000,
     imbalance: bidDepth + askDepth ? (bidDepth - askDepth) / (bidDepth + askDepth) : 0,
     levels: { bids: bids.slice(0, 5), asks: asks.slice(-5).reverse() },
     depthBps,
+    bidVol,
+    askVol,
   };
 }

@@ -1,6 +1,5 @@
 /* The feed is the flexible child of the right column: it takes whatever the
-   decision panel leaves and clips. Rows are a fixed 26px so the number that
-   fits is exactly floor(listHeight / 26) (see ROW_H in Feed.tsx). */
+   decision panel leaves and scrolls the rest. */
 
 .feed {
   display: flex;
@@ -26,21 +25,9 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
-}
-
-/* Safety net: if the measured row count is ever off (no ResizeObserver, a
-   mid-resize frame), the bottom of the clipped row fades out instead of
-   being sliced in half. */
-.list::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 14px;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0), var(--bg));
-  pointer-events: none;
+  max-height: 260px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* one line, fixed height, never wraps, never overflows */

@@ -8,7 +8,8 @@ import { TradeFeed, type MakerFill, type TradePrint } from "./trades";
 import { Inventory, feeUsd } from "./accounting";
 import { killSwitch } from "./kill";
 import { KuruLedger } from "./ledger";
-import { makerFillSize, planMakerQuotes, type MakerLast } from "./maker";
+import { makerFillSize, planMakerQuotes, positionCaps, skewSide, type MakerLast, type RequoteReason } from "./maker";
+import { decisionDue, StateAccumulator } from "./cycle";
 
 export interface BlockEvent {
   block: number;
@@ -20,11 +21,22 @@ export interface BlockEvent {
   decision: { action: Action; probabilities: Record<Action, number>; upIn10: number; latencyMs: number; late: boolean } | null;
   /** The order this block put on the book. */
   quote: Quote | null;
+  /** Why this block sent, cancelled, or held. */
+  requoteReason: RequoteReason | null;
   /** Maker fills that landed in this block (aggregated), attached when the trade logs for it arrive. */
   fill: Fill | null;
   /** Our size known to be resting on the book after this block's order. */
   resting: { bidMon: number; askMon: number };
-  position: { side: "long" | "short" | "flat"; size: number; entryPrice: number | null; unrealizedUsd: number; unrealizedMon: number };
+  position: {
+    side: "long" | "short" | "flat";
+    size: number;
+    entryPrice: number | null;
+    unrealizedUsd: number;
+    unrealizedMon: number;
+    maxLongMon: number;
+    maxShortMon: number;
+    coverUsd: number;
+  };
   totals: Totals;
 }
 
@@ -46,6 +58,7 @@ export interface Totals {
   pnlUsd: number;
   pnlMon: number;
   pnlPct: number;
+  requotes: Record<Exclude<RequoteReason, "hold">, number>;
 }
 
 interface Resting { side: Side; price: number; size: number; block: number }
@@ -60,9 +73,11 @@ export interface ActivityFill {
 }
 
 /**
- * Every block: read the book and post. Jev and ledger writes run in the background so a slow
- * gateway or Postgres tick cannot mark the next 300 ms head late. One book-loop in flight; a
- * block that arrives while the previous read/send is still running is emitted as late.
+ * Hot loop every block: read the book, stream mid/volume into the cycle accumulator, poll
+ * prints, emit. Jev runs every `decideBlocks` (default 3, ~900 ms). Quotes send on fill or a
+ * real touch move, not on the Jev tick. Jev stays off the hot path so a slow call cannot mark
+ * the next block late. One book-loop in flight; a block that arrives while the previous read
+ * is still running is emitted as late.
  *
  * Live sends are fire-and-forget: the block event carries the quote as `sent`; its receipt
  * (`placed` with an order id, or `reverted`) is applied when it turns up on a later block. Fills
@@ -71,7 +86,8 @@ export interface ActivityFill {
  */
 export class Trader {
   readonly history: BlockEvent[] = [];
-  private mids: number[] = [];
+  private readonly acc: StateAccumulator;
+  private readonly cycleBlocks: number;
   private busy = false;
   private lastBook: Book | null = null;
   private trades: TradeFeed | null = null;
@@ -81,13 +97,20 @@ export class Trader {
   private inflight = new Map<string, Quote[]>();
   private simId = 0;
   private position = { mon: 0, costUsd: 0 }; // signed inventory and its cost basis
-  private totals: Totals = { blocks: 0, decisions: 0, quotes: 0, fills: 0, reverted: 0, lateBlocks: 0, jevUsd: 0, gasMon: 0, gasUsd: 0, feesUsd: 0, realizedUsd: 0, pnlUsd: 0, pnlMon: 0, pnlPct: 0 };
+  private totals: Totals = {
+    blocks: 0, decisions: 0, quotes: 0, fills: 0, reverted: 0, lateBlocks: 0,
+    jevUsd: 0, gasMon: 0, gasUsd: 0, feesUsd: 0, realizedUsd: 0, pnlUsd: 0, pnlMon: 0, pnlPct: 0,
+    requotes: { init: 0, touch: 0, skew: 0, fill: 0, tight: 0, toxic: 0 },
+  };
   private ledger: KuruLedger | null = null;
   private lastDecisionId: string | null = null;
   private lastDecision: Decision | null = null;
   private lastDecideBlock = 0;
+  private lastAskedBlock = 0;
   private lastMaker: MakerLast | null = null;
+  private skew: "buy" | "sell" = "buy";
   private needFillRequote = false;
+  private refMid: number | null = null;
   private decideInflight = false;
   private latestEvent: BlockEvent | null = null;
   private recentFills: ActivityFill[] = [];
@@ -107,7 +130,10 @@ export class Trader {
     private onEvent: (e: BlockEvent, timing?: Timing) => void,
     private onFill: (block: number, fill: Fill) => void = () => {},
     private onQuote: (block: number, quote: Quote) => void = () => {},
+    cycleBlocks = config.decideBlocks,
   ) {
+    this.cycleBlocks = cycleBlocks;
+    this.acc = new StateAccumulator(cycleBlocks);
     mkdirSync("data", { recursive: true });
   }
 
@@ -118,6 +144,11 @@ export class Trader {
 
   attachLedger(ledger: KuruLedger) {
     this.ledger = ledger;
+  }
+
+  setRefMid(mid: number | null) {
+    this.refMid = mid != null && mid > 0 ? mid : null;
+    this.acc.setRefMid(this.refMid);
   }
 
   async onBlock(block: number) {
@@ -134,9 +165,22 @@ export class Trader {
       const book = await this.market.readBook();
       const readMs = performance.now() - t0;
       this.lastBook = book;
-      this.mids.push(book.mid);
-      if (this.mids.length > 400) this.mids.shift();
-      this.trades?.poll(block).then(() => this.harvest()); // off the hot path: eth_getLogs for prints (and our fills) since the last poll
+      this.acc.addPrints(this.trades?.pullTaPrints() ?? []);
+      this.acc.pushTick({
+        block,
+        mid: book.mid,
+        bidVol: book.bidVol,
+        askVol: book.askVol,
+        bid: book.bid,
+        ask: book.ask,
+        bidSize: book.levels.bids[0]?.[1] ?? 0,
+        askSize: book.levels.asks[0]?.[1] ?? 0,
+        spreadBps: book.spreadBps,
+      });
+      this.trades?.poll(block).then(() => {
+        this.acc.addPrints(this.trades?.pullTaPrints() ?? []);
+        this.harvest();
+      }); // off the hot path: eth_getLogs for prints (and our fills) since the last poll
       void this.ledger?.bar(book.mid);
 
       const timing = { readMs: Math.round(readMs), loopMs: Math.round(performance.now() - t0) };
@@ -191,16 +235,24 @@ export class Trader {
   }
 
   /**
-   * Two-sided maker path. Jev still decides (skew) off the hot path. We only send when the touch
-   * moved, the skew flipped, a fill took a level, or nothing is resting, and only when a side has
-   * size. Paper charges estimated gas at that requote rate so the hurdle is honest.
+   * Every block: plan quotes against the last *sent* book. Jev is asked only on the decide
+   * tick and only flips skew. lastMaker.book is not copied off-cycle, so requoteTicks is a
+   * real deadband. Paper charges estimated gas at the requote rate so the hurdle is honest.
    */
   private async onBlockMaker(block: number, book: Book, timing: Timing) {
+    const dueDecide = decisionDue(block, this.cycleBlocks, this.lastAskedBlock);
+    if (dueDecide) {
+      this.lastAskedBlock = block;
+      this.requestDecide(block, book);
+    }
+    if (this.lastDecision) {
+      this.skew = skewSide(this.skew, this.lastDecision.probabilities.buy, config.buyThreshold, config.sellThreshold);
+    }
+    const decision = this.lastDecision;
+    const ta = this.acc.features();
+    const caps = this.caps(book.mid);
     const priceScale = 10 ** log10(this.market.params.pricePrecision);
     const tickUnits = Number(this.market.params.tickSize.toString());
-    const dueDecide = !this.lastDecision || block - this.lastDecideBlock >= config.decideBlocks;
-    const decision = this.lastDecision;
-    const jevSide: Side = decision ? (decision.action === "sell" ? "sell" : "buy") : "buy";
     const plan = decision
       ? planMakerQuotes({
           book: { bid: book.bid, ask: book.ask },
@@ -209,58 +261,98 @@ export class Trader {
           quoteInsideTicks: config.quoteInsideTicks,
           requoteTicks: config.requoteTicks,
           tradeSizeMon: config.tradeSizeMon,
-          maxPositionMon: config.maxPositionMon,
+          maxPositionMon: caps.maxLongMon,
+          maxShortMon: caps.maxShortMon,
           positionMon: this.position.mon,
-          jevSide,
+          jevSide: this.skew,
           last: this.lastMaker,
           forceFillRequote: this.needFillRequote,
+          spreadBps: book.spreadBps,
+          minSpreadBps: config.minSpreadBps,
+          markoutBps: ta.markoutBps,
+          markoutPullBps: config.markoutPullBps,
+          atrBps: ta.atrBps,
+          refMid: this.refMid,
+          microDevBps: ta.microDevBps,
+          ofiCvd: ta.ofi.cvdMon,
+          emaCross: ta.emaCross,
+          vwapDevBps: ta.vwapDevBps,
+          vwapSigmaBps: ta.vwapSigmaBps,
         })
       : null;
-    const legs = plan ? [plan.bid, plan.ask].filter((x): x is NonNullable<typeof x> => x != null && x.size > 0) : [];
-    const canQuote = legs.length > 0;
-    const wantRequote = !!plan?.requote && canQuote;
-    if (!decision || dueDecide || wantRequote || this.needFillRequote) this.requestDecide(block, book);
 
     let quote: Quote | null = null;
-    if (wantRequote && plan) {
-      this.needFillRequote = false;
-      const cancel = [...this.orders.keys()].filter((id) => id > 0);
-      const quotes = await this.market.sendMany(block, legs, cancel, false);
-      this.totals.quotes += quotes.length;
-      const gasMon = quotes[0]?.gasMon ?? 0;
-      if (!this.market.wallet && gasMon > 0) {
-        this.totals.gasMon += gasMon;
-        this.acct.addGas(gasMon * book.mid);
-        killSwitch.recordUsd(-(gasMon * book.mid));
-      }
-      if (quotes[0]?.status === "sim") {
-        this.orders.clear();
-        for (const q of quotes) {
-          const id = --this.simId;
-          this.orders.set(id, { side: q.side, price: q.price, size: q.size, block });
-          this.ledger?.noteRemaining(id, q.size);
-          void this.ledger?.openOrder(id, q, this.lastDecisionId);
-        }
-      } else if (quotes[0]?.txHash) {
-        this.inflight.set(quotes[0].txHash, quotes);
-      }
-      quote = quotes.find((q) => q.side === jevSide) ?? quotes[0] ?? null;
-      this.lastMaker = {
-        bookBid: book.bid,
-        bookAsk: book.ask,
-        jevSide,
-        bidPrice: plan.bid?.price ?? null,
-        askPrice: plan.ask?.price ?? null,
-      };
-    } else if (decision) {
-      this.needFillRequote = false;
-      if (this.lastMaker) {
-        this.lastMaker = { ...this.lastMaker, bookBid: book.bid, bookAsk: book.ask };
-      }
+    const reason = plan?.reason ?? null;
+    if (plan && (plan.reason === "tight" || plan.reason === "toxic")) {
+      quote = await this.pullQuotes(block, book, plan.reason);
+    } else if (plan?.requote) {
+      const legs = [plan.bid, plan.ask].filter((x): x is NonNullable<typeof x> => x != null && x.size > 0);
+      if (legs.length) quote = await this.sendQuotes(block, book, legs, plan.reason, this.skew);
     }
 
     if (this.totals.blocks % config.refreshBlocks === 0) void this.ledger?.snapshot(book.mid);
-    this.emit(block, book, decision, quote, false, timing);
+    this.emit(block, book, decision, quote, false, timing, reason);
+  }
+
+  private async pullQuotes(block: number, book: Book, reason: "tight" | "toxic"): Promise<Quote | null> {
+    this.needFillRequote = false;
+    this.totals.requotes[reason]++;
+    if (!this.orders.size && !this.inflight.size) {
+      this.lastMaker = null;
+      return null;
+    }
+    const cancel = [...this.orders.keys()].filter((id) => id > 0);
+    if (cancel.length) {
+      const quotes = await this.market.sendMany(block, [], cancel, false);
+      this.chargePaperGas(quotes[0]?.gasMon ?? 0, book.mid);
+      if (quotes[0]?.txHash) this.inflight.set(quotes[0].txHash, quotes);
+    }
+    this.orders.clear();
+    this.lastMaker = null;
+    return null;
+  }
+
+  private async sendQuotes(
+    block: number,
+    book: Book,
+    legs: { side: Side; price: number; size: number }[],
+    reason: RequoteReason,
+    jevSide: Side,
+  ): Promise<Quote | null> {
+    this.needFillRequote = false;
+    if (reason !== "hold") this.totals.requotes[reason]++;
+    const cancel = [...this.orders.keys()].filter((id) => id > 0);
+    const quotes = await this.market.sendMany(block, legs, cancel, false);
+    this.totals.quotes += quotes.filter((q) => q.size > 0).length;
+    this.chargePaperGas(quotes[0]?.gasMon ?? 0, book.mid);
+    if (quotes[0]?.status === "sim") {
+      this.orders.clear();
+      for (const q of quotes) {
+        if (q.size <= 0) continue;
+        const id = --this.simId;
+        this.orders.set(id, { side: q.side, price: q.price, size: q.size, block });
+        this.ledger?.noteRemaining(id, q.size);
+        void this.ledger?.openOrder(id, q, this.lastDecisionId);
+      }
+    } else if (quotes[0]?.txHash) {
+      this.inflight.set(quotes[0].txHash, quotes);
+    }
+    const placed = quotes.filter((q) => q.size > 0);
+    this.lastMaker = {
+      bookBid: book.bid,
+      bookAsk: book.ask,
+      jevSide,
+      bidPrice: placed.find((q) => q.side === "buy")?.price ?? null,
+      askPrice: placed.find((q) => q.side === "sell")?.price ?? null,
+    };
+    return placed.find((q) => q.side === jevSide) ?? placed[0] ?? null;
+  }
+
+  private chargePaperGas(gasMon: number, mid: number) {
+    if (this.market.wallet || gasMon <= 0) return;
+    this.totals.gasMon += gasMon;
+    this.acct.addGas(gasMon * mid);
+    killSwitch.recordUsd(-(gasMon * mid));
   }
 
   /** One eth_getTransactionReceipt per in-flight tx, in parallel with this block's decision. */
@@ -277,7 +369,7 @@ export class Trader {
     if (all.some((q) => q.status === "reverted")) this.totals.reverted++;
     for (const id of canceled) this.orders.delete(id);
     for (const q of all) {
-      if (q.status === "placed" && q.orderId !== null) {
+      if (q.status === "placed" && q.orderId !== null && q.size > 0) {
         this.orders.set(q.orderId, { side: q.side, price: q.price, size: q.size, block });
         this.ledger?.noteRemaining(q.orderId, q.size);
         void this.ledger?.openOrder(q.orderId, q, this.lastDecisionId);
@@ -356,18 +448,33 @@ export class Trader {
     return mon;
   }
 
-  /** Would this order, and everything already resting on its side, keep us inside the cap and (live) inside margin funds? */
+  private caps(mid: number) {
+    return positionCaps({
+      mid,
+      tradeSizeMon: config.tradeSizeMon,
+      maxPositionMon: config.maxPositionMon,
+      marginMon: config.marginMon,
+      marginUsdc: config.marginUsdc,
+      coverBuffer: config.shortCoverBuffer,
+    });
+  }
+
+  /** Would this order, and everything already resting on its side, stay payable and inside margin? */
   private allowed(side: Side, book: Book) {
     const size = config.tradeSizeMon;
-    const exposure = side === "buy" ? this.position.mon + this.restingMon("buy") + size : this.position.mon - this.restingMon("sell") - size;
-    if (Math.abs(exposure) > config.maxPositionMon) return false;
+    const caps = this.caps(book.mid);
+    const next = side === "buy"
+      ? this.position.mon + this.restingMon("buy") + size
+      : this.position.mon - this.restingMon("sell") - size;
+    if (next > caps.maxLongMon + 1e-9) return false;
+    if (-next > caps.maxShortMon + 1e-9) return false;
     if (!this.market.wallet) return true;
     // Kuru debits margin when an order is placed, so the balance already excludes what is resting.
     return side === "buy" ? this.market.margin.usdc >= size * book.ask : this.market.margin.mon >= size;
   }
 
   private buildState(block: number, book: Book): TradeState {
-    const m = this.mids, n = m.length, H = config.horizonBlocks;
+    const m = this.acc.midsArray(), n = m.length, H = config.horizonBlocks;
     const ret = (k: number) => (n > k ? ((m[n - 1]! - m[n - 1 - k]!) / m[n - 1 - k]!) * 10_000 : 0);
     const sampled = m.slice(-H).filter((_, i, a) => (a.length - 1 - i) % 5 === 0); // every 5th block, newest included
     const lvl = (l: [number, number]) => `${l[0].toFixed(6)} x ${round(l[1], 1)}`;
@@ -388,7 +495,46 @@ export class Trader {
       recentMids: sampled.map((x) => x.toFixed(6)).join(" "),
       trades: this.trades ? this.trades.summary(H, block) : empty,
       recentTrades: (this.trades?.recent(10) ?? []).map((t) => `${t.block} ${t.side} ${round(t.size, 1)} @ ${t.price.toFixed(6)}`),
+      ta: this.taPayload(),
       allowed: { buy: this.allowed("buy", book), sell: this.allowed("sell", book) },
+    };
+  }
+
+  private taPayload() {
+    const t = this.acc.features();
+    const n = (x: number | null, d: number) => (x == null || !Number.isFinite(x) ? null : round(x, d));
+    return {
+      ...t,
+      vwap: n(t.vwap, 6),
+      vwapDevBps: n(t.vwapDevBps, 2),
+      vwapSigmaBps: n(t.vwapSigmaBps, 2),
+      emaFast: n(t.emaFast, 6),
+      emaSlow: n(t.emaSlow, 6),
+      emaGapBps: n(t.emaGapBps, 2),
+      rsi: n(t.rsi, 2),
+      stochRsi: n(t.stochRsi, 3),
+      microprice: n(t.microprice, 6),
+      microDevBps: n(t.microDevBps, 2),
+      atr: n(t.atr, 8),
+      atrBps: n(t.atrBps, 2),
+      spreadEmaBps: n(t.spreadEmaBps, 2),
+      spreadVsEmaBps: n(t.spreadVsEmaBps, 2),
+      ofi: {
+        buyMon: round(t.ofi.buyMon, 1),
+        sellMon: round(t.ofi.sellMon, 1),
+        cvdMon: round(t.ofi.cvdMon, 1),
+      },
+      markoutBps: n(t.markoutBps, 2),
+      refMid: n(t.refMid, 6),
+      refDivBps: n(t.refDivBps, 2),
+      book: {
+        bidVol: round(t.book.bidVol, 1),
+        askVol: round(t.book.askVol, 1),
+        imbalance: round(t.book.imbalance, 3),
+        ratio: n(t.book.ratio, 3),
+        deltaBid: round(t.book.deltaBid, 1),
+        deltaAsk: round(t.book.deltaAsk, 1),
+      },
     };
   }
 
@@ -416,13 +562,14 @@ export class Trader {
     killSwitch.recordUsd(this.totals.realizedUsd - realizedBefore - fee);
     this.totals.fills++;
     this.needFillRequote = true;
+    this.acc.noteFill(f.side, f.price);
     void this.ledger?.fill(f.orderId, f, fee);
   }
 
   private entryPrice() { return this.position.mon ? this.position.costUsd / this.position.mon : null; }
   private unrealizedUsd(mid: number) { return this.position.mon ? this.position.mon * (mid - this.entryPrice()!) : 0; }
 
-  private emit(block: number, book: Book, decision: Decision | null, quote: Quote | null, late: boolean, timing?: Timing) {
+  private emit(block: number, book: Book, decision: Decision | null, quote: Quote | null, late: boolean, timing?: Timing, requoteReason: RequoteReason | null = null) {
     const t = this.totals;
     t.gasUsd = t.gasMon * book.mid;
     const unrealized = this.unrealizedUsd(book.mid);
@@ -430,17 +577,22 @@ export class Trader {
     t.pnlMon = t.pnlUsd / book.mid;
     t.pnlPct = (t.pnlUsd / config.bankrollUsd) * 100;
     const size = Math.abs(this.position.mon);
+    const caps = this.caps(book.mid);
     const event: BlockEvent = {
       block, ts: Date.now(), mid: book.mid, bestBid: book.bid, bestAsk: book.ask, spreadBps: round(book.spreadBps, 2),
       decision: late
         ? { action: "hold", probabilities: { buy: 0, sell: 0, hold: 1 }, upIn10: 0.5, latencyMs: 0, late: true }
         : decision && { action: decision.action, probabilities: decision.probabilities, upIn10: decision.upIn10, latencyMs: Math.round(decision.latencyMs), late: false },
       quote,
+      requoteReason: quote || requoteReason === "tight" || requoteReason === "toxic" ? requoteReason : null,
       fill: null,
       resting: { bidMon: round(this.restingMon("buy"), 1), askMon: round(this.restingMon("sell"), 1) },
       position: {
         side: this.position.mon > 0 ? "long" : this.position.mon < 0 ? "short" : "flat",
         size, entryPrice: this.entryPrice(), unrealizedUsd: round(unrealized, 4), unrealizedMon: round(unrealized / book.mid, 4),
+        maxLongMon: round(caps.maxLongMon, 1),
+        maxShortMon: round(caps.maxShortMon, 1),
+        coverUsd: round(caps.coverUsd, 4),
       },
       totals: { ...t, jevUsd: round(t.jevUsd, 6), gasMon: round(t.gasMon, 6), gasUsd: round(t.gasUsd, 6), feesUsd: round(t.feesUsd, 4), realizedUsd: round(t.realizedUsd, 4), pnlUsd: round(t.pnlUsd, 4), pnlMon: round(t.pnlMon, 4), pnlPct: round(t.pnlPct, 3) },
     };

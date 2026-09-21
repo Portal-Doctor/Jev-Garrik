@@ -1,14 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import type { BlockEvent } from "@/lib/types";
 import { fmtInt, fmtPrice, shortTx, txUrl } from "@/lib/format";
 import styles from "./Feed.module.css";
 
-/** Must match `.row { height }` in Feed.module.css. */
-const ROW_H = 26;
 /** Hard ceiling, so a very tall viewport does not render an absurd list. */
-const MAX_ROWS = 40;
+const MAX_ROWS = 10;
 
 type Kind = "buy" | "sell" | "late";
 
@@ -39,33 +36,12 @@ const WORD: Record<Kind, string> = { buy: "BUY", sell: "SELL", late: "LATE" };
  * "rev" if the book moved through the price before it landed.
  */
 export default function Feed({ events }: { events: BlockEvent[] }) {
-  const listRef = useRef<HTMLDivElement | null>(null);
-  // How many whole 26px rows fit in the box the layout gives us. The list
-  // itself clips, so a wrong guess is never a half-drawn row, only a hidden one.
-  const [capacity, setCapacity] = useState(MAX_ROWS);
-
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-
-    const measure = () => {
-      const fits = Math.max(1, Math.min(MAX_ROWS, Math.floor(el.clientHeight / ROW_H)));
-      setCapacity((prev) => (prev === fits ? prev : fits));
-    };
-
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const rows = events.slice(-capacity).reverse();
+  const rows = events.slice(-MAX_ROWS).reverse();
 
   return (
     <section className={styles.feed}>
       <div className={styles.label}>FEED</div>
-      <div className={styles.list} ref={listRef}>
+      <div className={styles.list}>
         {rows.length === 0 ? (
           <div className={styles.empty}>no blocks yet</div>
         ) : (

@@ -185,6 +185,9 @@ function parseMeta(raw: Record<string, unknown> | null): Meta | null {
     startedAt: typeof raw.startedAt === "number" ? raw.startedAt : Date.now(),
     kuruMode: raw.kuruMode === "maker" ? "maker" : undefined,
     runId: typeof raw.runId === "string" ? raw.runId : undefined,
+    maxPositionMon: typeof raw.maxPositionMon === "number" ? raw.maxPositionMon : undefined,
+    tradeSizeMon: typeof raw.tradeSizeMon === "number" ? raw.tradeSizeMon : undefined,
+    bankrollUsd: typeof raw.bankrollUsd === "number" ? raw.bankrollUsd : undefined,
   };
 }
 

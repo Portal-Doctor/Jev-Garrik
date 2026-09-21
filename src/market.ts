@@ -19,6 +19,9 @@ export interface Book {
   levels: { bids: [number, number][]; asks: [number, number][] };
   /** Cumulative MON depth within N bps of mid, per side. */
   depthBps: { [band: string]: { bid: number; ask: number } };
+  /** Resting MON on the full visible ladder (not just the top 5). */
+  bidVol: number;
+  askVol: number;
 }
 
 export type Side = "buy" | "sell";
@@ -158,9 +161,9 @@ export class Market {
    * still charges estimated gas so the paper hurdle matches the requote rate.
    */
   async sendMany(block: number, legs: { side: Side; size: number; price: number }[], cancel: number[], capped: boolean): Promise<Quote[]> {
-    if (!legs.length) return [];
+    if (!legs.length && !cancel.length) return [];
     const gasMon = this.estimatedGasMon();
-    const quotes: Quote[] = legs.map((leg, i) => ({
+    const quotes: Quote[] = (legs.length ? legs : [{ side: "buy" as Side, size: 0, price: 0 }]).map((leg, i) => ({
       side: leg.side,
       price: leg.price,
       size: leg.size,

@@ -45,8 +45,9 @@ const trader = new Trader(
     if (e.decision && !e.decision.late) {
       const p = e.decision.probabilities;
       const q = e.quote;
-      const quote = !q ? " NO QUOTE (cap or funds on both sides)" : ` ${q.side.toUpperCase()} ${q.size} @ ${q.price.toFixed(6)}${q.capped ? " capped" : ""}${q.status === "sim" ? " (sim)" : ` cancel ${q.cancel.length} ${q.txHash}`}`;
-      console.log(`#${e.block} ${e.mid.toFixed(6)} b${(p.buy * 100).toFixed(0)} s${(p.sell * 100).toFixed(0)} ${e.decision.latencyMs}ms${quote} pnl $${e.totals.pnlUsd}${t ? ` · read ${t.readMs}ms loop ${t.loopMs}ms` : ""}`);
+      const why = e.requoteReason ? ` ${e.requoteReason}` : "";
+      const quote = !q ? (e.requoteReason === "tight" || e.requoteReason === "toxic" ? why : " NO QUOTE (cap or funds on both sides)") : `${why} ${q.side.toUpperCase()} ${q.size} @ ${q.price.toFixed(6)}${q.capped ? " capped" : ""}${q.status === "sim" ? " (sim)" : ` cancel ${q.cancel.length} ${q.txHash}`}`;
+      console.log(`#${e.block} ${e.mid.toFixed(6)} b${(p.buy * 100).toFixed(0)} s${(p.sell * 100).toFixed(0)} ${e.decision.latencyMs}ms${quote} pnl $${e.totals.pnlUsd}${t ? ` read ${t.readMs}ms loop ${t.loopMs}ms` : ""}`);
     }
   },
   (block, fill) => {
@@ -70,7 +71,21 @@ resolver?.start();
 const uptimeDays = () => Math.max((Date.now() - startedAt) / 86_400_000, 1 / 1440);
 let doReset: () => Promise<void> = async () => {};
 const server = startServer(
-  { model: model.name, wallet: market.address, dryRun: config.dryRun, market: config.market, startedAt, kuruMode: config.kuruMode, runId: store ? runId : undefined },
+  {
+    model: model.name,
+    wallet: market.address,
+    dryRun: config.dryRun,
+    market: config.market,
+    startedAt,
+    kuruMode: config.kuruMode,
+    runId: store ? runId : undefined,
+    maxPositionMon: config.maxPositionMon,
+    tradeSizeMon: config.tradeSizeMon,
+    bankrollUsd: config.bankrollUsd,
+    marginMon: config.marginMon,
+    marginUsdc: config.marginUsdc,
+    shortCoverBuffer: config.shortCoverBuffer,
+  },
   () => trader.history,
   {
     report: store
@@ -107,15 +122,16 @@ async function shutdown() {
   }
 }
 
-const mode = `maker two-sided requote>${config.requoteTicks} ticks haircut ${config.fillHaircut}`;
-setInterval(() => {
+const mode = `maker two-sided ${config.decideBlocks}-block Jev requote>${config.requoteTicks} ticks minSpread ${config.minSpreadBps} bps haircut ${config.fillHaircut}`;
+const applyRef = (ref: number | null) => {
+  if (ref == null) return;
+  trader.setRefMid(ref);
   const mid = trader.latest?.mid;
   if (!mid) return;
-  void coinbaseRefMid().then((ref) => {
-    if (ref == null) return;
-    console.log(`ref MON-USD ${ref.toFixed(6)} kuru ${mid.toFixed(6)} div ${divergenceBps(mid, ref).toFixed(1)} bps`);
-  });
-}, 60_000);
+  console.log(`ref MON-USD ${ref.toFixed(6)} kuru ${mid.toFixed(6)} div ${divergenceBps(mid, ref).toFixed(1)} bps`);
+};
+void coinbaseRefMid().then(applyRef);
+setInterval(() => { void coinbaseRefMid().then(applyRef); }, 60_000);
 
-console.log(`jev-trader · mode=${config.kuruMode} · ${mode} · model=${model.name} · horizon ${config.horizonBlocks} blocks · ${config.dryRun ? "DRY RUN" : `wallet ${market.address}`} · market ${config.market} · read ${config.readRpcUrl} · :${config.port}`);
+console.log(`jev-trader mode=${config.kuruMode} ${mode} model=${model.name} horizon ${config.horizonBlocks} blocks ${config.dryRun ? "DRY RUN" : `wallet ${market.address}`} market ${config.market} read ${config.readRpcUrl} :${config.port}`);
 startBlockFeed((block) => trader.onBlock(block));
