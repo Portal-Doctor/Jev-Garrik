@@ -1,12 +1,12 @@
-# Always-on local stack: Postgres + Coinbase paper (cb) + Kuru paper (kuru).
-# Both engines use restart: unless-stopped, so they return after a crash or reboot
+# Always-on local stack: Postgres + Coinbase paper (cb). SOL-USD only.
+# Kuru paper is off the default path (compose profile "kuru"). Do not start it.
+# cb uses restart: unless-stopped, so it returns after a crash or reboot
 # (as long as Docker Desktop is set to start on login).
-#   docker compose up -d --build   build + start db, cb, and kuru
-#   docker compose logs -f cb      Coinbase logs
-#   docker compose logs -f kuru    Kuru logs
-#   docker compose restart cb      restart one engine
-#   docker compose down            stop everything (data survives in the named volume)
-#   docker compose down -v         also remove the volume (wipes all paper data)
+#   docker compose up -d --build              build + start db and cb (not kuru)
+#   docker compose logs -f cb                 Coinbase logs
+#   docker compose restart cb                 restart Coinbase
+#   docker compose down                       stop default services (data survives in the named volume)
+#   docker compose down -v                    also remove the volume (wipes all paper data)
 # The dashboard is on-demand: `cd web; bun run dev` (ports 3001 and 3002).
 services:
   db:
@@ -49,6 +49,7 @@ services:
       - ./data:/app/data
 
   kuru:
+    profiles: ["kuru"]
     build:
       context: .
       dockerfile: Dockerfile.kuru

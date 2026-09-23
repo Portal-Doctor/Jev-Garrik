@@ -64,42 +64,72 @@ competition), long-tail listings (wide spreads but scarce, informed fills).
 Pairs are config (`CB_PAIRS`), not code. Every module is written per-pair and the engine runs one
 instance per pair against a shared feed process.
 
-### 2.2 Cadence, horizon, and position model
+### 2.2 Cadence, horizon, and the decision
 
-- Decision cadence: one model call per pair every `CB_DECIDE_SEC` (default 300 s). No per-block
-  anything. At 4 pairs this is ~1,150 Jev calls/day; at the demo's observed pricing that is well
-  under $1/day of inference.
-- Traded horizon: `CB_HORIZON_SEC` (default 14,400 s = 4 h). The model is asked: "will mid be
-  higher or lower than now after `horizon` seconds, by more than round-trip costs?"
+- Trade cadence stays one model call per pair every `CB_DECIDE_SEC` (default 300 s). Features
+  update on each Coinbase tick. Jev's classify time is the only sub-second work. There is no
+  per-block loop. The live book is SOL-USD.
+- The call is one classification with four choices: `market_regime` (expansion, balance,
+  contraction), `direction_bias` (`long` or `flat`; spot cannot short), `toxic_flow_risk`
+  (`low` or `high`), and `liquidity_stress` (`normal` or `stressed`). Confidence is the `long`
+  probability on `direction_bias`. Jev does not place orders and does not compute fees.
+- `long` is stored as action `buy` and `flat` as action `sell`, so the resolver and the report
+  queries stay on buy/sell. Every vector is recorded, including ones the gate refuses, inside
+  `decisions.state`.
+- Traded horizon: `CB_HORIZON_SEC` (default 14,400 s = 4 h). The gate, not the model, decides
+  whether the expected move clears fees.
 - Measured horizons: every decision is also resolved (scored, not traded) at 1 h, 4 h, and 24 h
   so horizon choice is data-driven without running three books.
-- Position model: target-position, long/flat.
-  - `buy` decision: target = long `CB_NOTIONAL_USD` (default $1,000 paper) in the pair.
-  - `sell` decision: target = flat.
-  - Same direction as current position: hold, refresh the horizon clock.
-  - Position is closed when the horizon expires without a refreshing decision.
+- Position model: target-position, long/flat. An approved entry is sized from near-touch depth,
+  capped at `CB_NOTIONAL_USD`. A flatten sells the open position. The same long bias while
+  already long holds and refreshes the horizon clock. The position also closes when the horizon
+  expires without a refreshing long.
 - One decision in flight per pair (same guard pattern as `Trader.busy` in `src/trader.ts`).
 
-### 2.3 Execution policy (paper now, live later, same policy)
+### 2.3 Fee gate and execution policy
 
-- Entry: post-only limit at the touch (join best bid to buy, best ask to sell-to-close). Reprice
-  if the touch moves more than `CB_REPRICE_TICKS` while resting. If unfilled after
-  `CB_ENTRY_TIMEOUT_SEC` (default 120 s), convert to taker (cross the spread) so decisions get
-  exposure and taker costs are honestly measured, unless `CB_NEVER_CROSS_ENTRY=true`, in which
-  case the entry is canceled instead (a missed entry costs nothing; a taker entry costs roughly
-  the whole per-trade edge - see `PL-REVENUE-REVIEW.md` 3.4). Both legs record their actual
-  liquidity flag and fee rate; the fraction of fills that were taker is on the `/report`
-  (`takerFillShare`).
-- Exit at horizon expiry: same ladder, but the taker conversion is mandatory (an unresolved exit
-  would corrupt measurement).
+Entry is approved only when all of these hold. The gate is code (`cb/gate.ts`). Jev does not see it.
+
+- `direction_bias` is `long` and confidence is at least `CB_BUY_THRESHOLD` (default 0.60).
+- `toxic_flow_risk` is `low` and `liquidity_stress` is `normal`.
+- `market_regime` is `expansion`.
+- `expectedYieldBps > hurdleBps`, where
+  `expectedYieldBps = horizonVolBps * max(0, 2 * confidence - 1)` and
+  `hurdleBps = (makerFeeBps + makerFeeBps + halfSpreadBps) * CB_FEE_BUFFER`.
+  Gas is 0 on Coinbase. The exit is priced as taker because a horizon flatten may cross.
+- Size is `min(CB_NOTIONAL_USD, CB_DEPTH_PARTICIPATION * USD depth on levels 1 to 3 of the bid)`.
+  Default participation is 0.25. Below `CB_MIN_SIZE_USD` (default $25) the entry is refused as dust.
+
+Exits are not asked to beat the hurdle. Flatten when confidence falls to `CB_SELL_THRESHOLD`
+(default 0.40), toxic flow is high, the kill switch trips, the horizon expires, or a stop or
+take-profit guard trips.
+
+Stop and take-profit are hard guards on the 1 second tick, measured from the fee-inclusive
+average cost (`costBasisUsd / positionBase`), not the raw fill. Default stop is 150 bps. Default
+take-profit is 250 bps. Boot refuses to start when take-profit is less than or equal to maker plus
+taker fees. A later `long` cannot keep the position open once a guard has fired. The guard cancels
+any resting order and flattens immediately as a taker, tagged `stop` or `take_profit`. A flat pair
+never trips either guard.
+
+Two circuits cancel a resting entry and block new entries. Exits still flatten.
+
+- A fill whose price is more than `CB_MAX_SLIPPAGE_BPS` (default 10) from the mid at placement.
+- The book is unsynced or the websocket is down. A quiet stretch on the public Coinbase tape is
+  not treated as a fault.
+
+Execution, paper now:
+
+- Entry: post-only, one tick inside the touch, clamped so a buy never reaches the ask and a sell
+  never reaches the bid. Reprice if that quote moves more than `CB_REPRICE_TICKS`. Unfilled after
+  `CB_ENTRY_TIMEOUT_SEC` (default 120 s), the entry is canceled. Entries never taker-convert. A
+  missed entry costs nothing.
+- A signal or horizon exit rests post-only first. If it is still open at the timeout it may cross,
+  so inventory does not stick. That cross is the taker cost the gate already required the entry to beat.
+- Stop and take-profit skip the maker rest and cross immediately.
 - Fees: applied per fill from config (`CB_MAKER_FEE_BPS` default 50, `CB_TAKER_FEE_BPS` default
-  90). Fee tier is config, not hardcoded, so results can be re-run under "what if I reach the
-  $100K volume tier" assumptions. The report shows P&L under the configured tier and under 0 bps
-  maker as an upper bound.
-- Decision hysteresis: a raw model flip only trades once p(buy) clears `CB_BUY_THRESHOLD` (default
-  0.6) to enter, or drops to/below `CB_SELL_THRESHOLD` (default 0.4) to exit; in between, the
-  current position is held. With a ~140 bps round-trip cost, this converts marginal flips into
-  fewer, higher-conviction round trips (`PL-REVENUE-REVIEW.md` 3.2).
+  90). Fee tier is config, not hardcoded. The report shows P&L under the configured tier and under
+  0 bps maker as an upper bound. Both legs record their liquidity flag. `takerFillShare` stays on
+  `/report`.
 
 ---
 
@@ -173,46 +203,57 @@ server.ts: REST + SSE ------------------------> web /paper dashboard
 - Sanity cross-check once a minute per pair: REST `GET /api/v3/brokerage/market/products/{id}`
   best bid/ask vs local book; log divergence > 5 bps as an incident (feed bug detector).
 
-## 5. Model layer (`cb/model.ts`)
+## 5. Model layer (`cb/model.ts`, `cb/features.ts`, `cb/state.ts`)
 
-Same shape as `src/model.ts` (interface `Model`, `JevModel` via `experimental_evaluate`,
-deterministic `MockModel` for pipeline testing), with a new state and question:
+`cb/features.ts` updates on every book or trade event: top-5 and top-20 imbalance, spread, Welford
+realized vol scaled to the horizon, Parkinson vol on 1 minute candles, EMA fast/slow, RSI, and
+volume delta. `buildState` sends only that summary. `recentMids` is not in the payload. The mid
+ring in the feed still feeds the resolver. `JSON.stringify(state)` stays under about 1,600
+characters.
+
+`JevModel` calls `experimental_evaluate` once, with the four choice questions in section 2.2.
+`MockModel` builds the same vector from momentum, imbalance, and CVD, plus regime from realized
+vol and stress from the spread versus its EMA. `Bun.sleep(150)` stands in for inference latency.
 
 ```ts
 export interface MarketState {
-  pair: string;                 // "SOL-USD"
+  pair: string;
   ts: number;
-  horizonSec: number;           // the traded horizon (14400)
+  horizonSec: number;
   mid: number;
   spreadBps: number;
-  bookImbalance: number;        // -1..1 within 1% of mid
-  depth: { [band: string]: { bid: number; ask: number } };   // 10/25/50 bps, base units
+  spreadEmaBps: number;
+  imbalance5: number;           // -1..1, top 5 levels
+  imbalance20: number;          // -1..1, top 20 levels
+  volBps: number;               // Welford, scaled to the horizon
+  parkinsonBps: number;
+  emaGapBps: number;
+  emaCross: "above" | "below" | "flat";
+  rsi: number | null;
+  volumeDelta: number;
+  volumeGross: number;
   returnsBps: { m5: number; m30: number; h1: number; h4: number; h24: number };
-  recentMids: string;           // sampled every horizon/60, oldest..newest
-  trades: { count: number; buyBase: number; sellBase: number; cvdBase: number; vwap: number | null };
-  feeBps: { maker: number; taker: number };                  // the model must beat these
-  position: "long" | "flat";    // spot constraint is part of the state
+  feeBps: { maker: number; taker: number };  // shown, not applied by the model
+  position: "long" | "flat";
 }
 ```
 
-The question (`QUESTIONS.direction`) mirrors the Kuru prompt but states the horizon in hours and
-tells the model the round-trip cost in bps explicitly; the criteria require the expected move to
-exceed that cost. `MockModel` uses h1/h4 momentum + imbalance + CVD with seeded noise, and
-`Bun.sleep(150)` as an inference stand-in.
-
 ## 6. Paper broker (`cb/paper.ts`)
 
-Simulates the execution policy against the real feed. Rules, adapted from `Trader.simFills`:
+Simulates the execution policy in section 2.3 against the real feed.
 
-- A simulated maker order at price p becomes eligible one second after placement (models
-  propagation), then fills when a print crosses it: taker sell at <= p for our bid, taker buy at
-  >= p for our ask. Fill size = min(order remainder, print size x `CB_FILL_HAIRCUT`).
+- A simulated maker order rests one tick inside the touch. It becomes eligible one second after
+  placement (models propagation), then fills when a print crosses it: taker sell at <= p for our
+  bid, taker buy at >= p for our ask. Fill size = min(order remainder, print size x
+  `CB_FILL_HAIRCUT`).
 - `CB_FILL_HAIRCUT` (default 0.5) is the honesty knob: we cannot know our queue position, so
   paper fills only take half of each crossing print. The report also computes P&L at haircut 1.0
   and 0.25 to bound the sensitivity. This optimism bias is the single biggest paper-vs-live gap;
   it is stated on the dashboard.
-- Taker conversion after timeout: fills immediately at the current touch, fee at taker bps,
-  slippage = walking the local book for the order size (depth bands make this computable).
+- An unfilled entry is canceled at `CB_ENTRY_TIMEOUT_SEC`. It does not cross. A signal or horizon
+  exit may cross at that timeout, walking the local book, at the taker fee. Stop and take-profit
+  cross on the same 1 second tick that breaches the fee-inclusive entry, and the order purpose
+  is `stop` or `take_profit`.
 - Every simulated fill gets `venue = "paper"`, a synthetic `external_id`
   (`paper-{runId}-{seq}`), its liquidity flag, and the fee actually charged, then flows through
   the same accounting as a real fill would. Live fills later arrive as `venue = "coinbase"` with

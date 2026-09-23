@@ -1,3 +1,4 @@
+import { loadHistoricalBacktest } from "./backtest";
 import { config, MEASURED_HORIZONS_SEC } from "./config";
 import { Store } from "./db/store";
 import { brier, calibration, buildReport } from "./report";
@@ -41,6 +42,7 @@ const num = (v: string | null, fallback: number) => (v == null || v === "" ? fal
  * GET /equity      ?pair=&fromTs=  snapshot series for the equity curve
  * GET /calibration ?pair=&horizon= bucketed calibration data + Brier
  * GET /report      full metrics JSON including the promotion-gate booleans
+ * GET /backtest    ?months=1|3|6&pair=  historical replay and scorecard
  * GET /tax         FIFO lot worksheet for the Coinbase venue (fills, months, pairs)
  * POST /reset       clears all paper-trading data (runs/decisions/outcomes/orders/fills/snapshots)
  *                    and restarts the service; irreversible, meant for the dashboard's admin button
@@ -60,6 +62,8 @@ export function startServer(ctx: ServerCtx) {
 
   const server = Bun.serve({
     port: config.port,
+    // A cold 6 month replay can sit quiet while candles download and the oracle runs.
+    idleTimeout: 120,
     async fetch(req) {
       const url = new URL(req.url);
       const { pathname, searchParams } = url;
@@ -108,6 +112,18 @@ export function startServer(ctx: ServerCtx) {
 
       if (pathname === "/report") {
         return json(await buildReport(store, { incidentsPerDay: ctx.incidentsPerDay(), runId: meta.runId }));
+      }
+
+      if (pathname === "/backtest") {
+        const months = num(searchParams.get("months"), 1);
+        if (months !== 1 && months !== 3 && months !== 6) return json({ error: "months must be 1, 3, or 6" }, 400);
+        const pair = searchParams.get("pair") ?? config.pairs[0] ?? "SOL-USD";
+        try {
+          return json(await loadHistoricalBacktest(pair, months));
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "backtest failed";
+          return json({ error: message }, 502);
+        }
       }
 
       if (pathname === "/tax") {

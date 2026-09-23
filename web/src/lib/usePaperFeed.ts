@@ -75,7 +75,13 @@ function reducer(state: PaperState, action: Action): PaperState {
       const feed = { ...state.feed };
       for (const t of action.ticks) {
         const prev = feed[t.pair] ?? ({ pair: t.pair } as PairFeedState);
-        feed[t.pair] = { ...prev, mid: t.mid, spreadBps: t.spreadBps };
+        feed[t.pair] = {
+          ...prev,
+          mid: t.mid,
+          spreadBps: t.spreadBps,
+          buy: typeof t.buy === "number" ? t.buy : prev.buy,
+          sell: typeof t.sell === "number" ? t.sell : prev.sell,
+        };
       }
       const nextDecision = action.nextDecision ? { ...state.nextDecision, ...cleanNextDecision(action.nextDecision) } : state.nextDecision;
       return { ...state, feed, nextDecision };
@@ -83,7 +89,17 @@ function reducer(state: PaperState, action: Action): PaperState {
 
     case "decision": {
       const d = action.decision;
-      const last: LastDecision = { pair: d.pair, action: d.action, pBuy: d.pBuy, mid: d.mid };
+      const last: LastDecision = {
+        pair: d.pair,
+        action: d.action,
+        pBuy: d.pBuy,
+        mid: d.mid,
+        regime: d.regime,
+        toxic: d.toxic,
+        approved: d.approved,
+        reason: d.reason,
+        hurdleBps: d.hurdleBps,
+      };
       return {
         ...state,
         lastDecision: { ...state.lastDecision, [d.pair]: last },

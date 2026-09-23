@@ -12,11 +12,15 @@ export interface PairFeedState {
   levels: number;
   synced: boolean;
   lastTradeTs: number | null;
+  /** Top-of-book bid share, 0 to 1. Updated on each quote heartbeat. */
+  buy?: number;
+  /** Top-of-book ask share, 0 to 1. */
+  sell?: number;
 }
 
 export interface OpenOrder {
   side: Side;
-  purpose: "entry" | "exit";
+  purpose: "entry" | "exit" | "stop" | "take_profit";
   price: number;
   remaining: number;
   ageMs: number;
@@ -37,6 +41,9 @@ export interface PaperPosition {
   /** This pair's slice of the total bankroll, allocated evenly across configured pairs. */
   bankrollUsd: number;
   openOrder: OpenOrder | null;
+  /** Armed while long, from the fee-inclusive entry. Null when flat. */
+  stopPrice?: number | null;
+  takeProfitPrice?: number | null;
 }
 
 export interface LastDecision {
@@ -44,6 +51,11 @@ export interface LastDecision {
   action: Side;
   pBuy: number;
   mid: number;
+  regime?: string;
+  toxic?: string;
+  approved?: boolean;
+  reason?: string | null;
+  hurdleBps?: number | null;
 }
 
 export interface PaperMeta {
@@ -75,12 +87,17 @@ export interface DecisionEvent {
   ts: number;
   /** Wall-clock ms of the next scheduled decision for this pair. */
   nextTs?: number;
+  regime?: string;
+  toxic?: string;
+  approved?: boolean;
+  reason?: string | null;
+  hurdleBps?: number | null;
 }
 
 export interface FillEvent {
   pair: string;
   side: Side;
-  purpose: "entry" | "exit";
+  purpose: "entry" | "exit" | "stop" | "take_profit";
   price: number;
   sizeBase: number;
   feeUsd: number;
@@ -92,6 +109,8 @@ export interface Tick {
   pair: string;
   mid: number | null;
   spreadBps: number | null;
+  buy?: number;
+  sell?: number;
 }
 
 export interface TickFrame {

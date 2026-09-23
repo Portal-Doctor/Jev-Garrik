@@ -226,7 +226,7 @@
   color: var(--pnl-neg);
 }
 
-/* Live mids only. The changing prices are the heartbeat. */
+/* Live mids plus buy and sell book share. Both move on each quote heartbeat. */
 .heartbeat {
   padding: 10px 24px 12px;
   border-bottom: 1px solid var(--border);
@@ -241,10 +241,46 @@
 
 .hbTick {
   display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
   font-family: var(--font-mono);
   font-size: 12px;
+}
+
+.hbSide {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hbBuyLab {
+  color: var(--buy-ink);
+  font-size: 10px;
+}
+
+.hbSellLab {
+  color: var(--sell-ink);
+  font-size: 10px;
+}
+
+.hbTrack {
+  width: 64px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.25);
+  overflow: hidden;
+}
+
+.hbFill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.hbPct {
+  width: 28px;
+  font-size: 11px;
+  color: var(--ink);
 }
 
 .hbPair {
@@ -371,6 +407,15 @@
   background: var(--buy-bar);
   border-radius: 999px;
   transition: width 0.3s ease;
+}
+
+.decisionMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .probVal {

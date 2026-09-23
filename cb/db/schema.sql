@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS orders (
   decision_id TEXT,
   pair TEXT NOT NULL,
   side TEXT NOT NULL,               -- buy | sell
-  purpose TEXT NOT NULL,            -- entry | exit
+  purpose TEXT NOT NULL,            -- entry | exit | stop | take_profit
   price DOUBLE PRECISION NOT NULL,
   size_base DOUBLE PRECISION NOT NULL,
   status TEXT NOT NULL,             -- open | filled | partial | canceled | converted_taker | expired

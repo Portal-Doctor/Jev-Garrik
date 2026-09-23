@@ -55,7 +55,7 @@ export interface OrderRow {
   decision_id: string | null;
   pair: string;
   side: "buy" | "sell";
-  purpose: "entry" | "exit";
+  purpose: "entry" | "exit" | "stop" | "take_profit";
   price: number;
   size_base: number;
   status: "open" | "filled" | "partial" | "canceled" | "converted_taker" | "expired";
@@ -440,8 +440,22 @@ export class Store {
   async earliestUnresolvedTsForVenue(
     venue: "paper" | "kuru",
     horizonsSec: readonly number[],
+    pairs?: readonly string[],
   ): Promise<Array<{ horizon_sec: number; ts: number | null }>> {
     const horizons = horizonsSec.map((h) => Number(h));
+    if (pairs && pairs.length > 0) {
+      const allowed = [...pairs];
+      return this.sql`
+        SELECT h.horizon_sec, MIN(d.ts) AS ts
+        FROM unnest(${this.sql.array(horizons, "INTEGER")}::int[]) AS h(horizon_sec)
+        LEFT JOIN decisions d
+          ON d.run_id IN (SELECT id FROM runs WHERE venue = ${venue})
+          AND d.pair IN ${this.sql(allowed)}
+          AND NOT EXISTS (SELECT 1 FROM outcomes o WHERE o.decision_id = d.id AND o.horizon_sec = h.horizon_sec)
+        GROUP BY h.horizon_sec
+        ORDER BY h.horizon_sec
+      `;
+    }
     return this.sql`
       SELECT h.horizon_sec, MIN(d.ts) AS ts
       FROM unnest(${this.sql.array(horizons, "INTEGER")}::int[]) AS h(horizon_sec)
@@ -457,6 +471,18 @@ export class Store {
     const pair = opts.pair ?? "TOTAL";
     const fromTs = opts.fromTs ?? 0;
     return this.sql<SnapshotRow[]>`SELECT * FROM snapshots WHERE pair = ${pair} AND ts >= ${fromTs} ORDER BY ts ASC`;
+  }
+
+  /** Recent Coinbase fills with the order purpose (entry, exit, stop, take_profit). */
+  async recentFillsJoined(limit = 50): Promise<Array<FillRow & { purpose: string | null }>> {
+    return this.sql`
+      SELECT f.*, o.purpose AS purpose
+      FROM fills f
+      LEFT JOIN orders o ON o.id = f.order_id
+      WHERE f.venue IN ('paper', 'coinbase')
+      ORDER BY f.traded_at DESC
+      LIMIT ${limit}
+    `;
   }
 
   async recentFills(opts: { pair?: string; limit?: number; venue?: "paper" | "kuru" } = {}): Promise<FillRow[]> {

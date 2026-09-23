@@ -2,6 +2,8 @@ import type { Feed } from "./feed";
 import type { Model, Decision, Action } from "./model";
 import type { Store } from "./db/store";
 import { buildState, type MarketState } from "./state";
+import { depthUsd } from "./features";
+import { evaluateGate, type GateResult } from "./gate";
 import { killSwitch } from "./kill";
 
 /** A target-position change the broker should act on. */
@@ -13,6 +15,8 @@ export interface OrderIntent {
   decisionId: string;
   mid: number;
   ts: number;
+  /** Approved entry size. Exits sell the open position and omit this. */
+  sizeUsd?: number;
 }
 
 /** The engine asks the broker for the current position and hands it intents. Paper broker (M3). */
@@ -38,21 +42,16 @@ export interface EngineOpts {
   makerFeeBps: number;
   takerFeeBps: number;
   jevUsdPerMTok: number;
-  /** Enter long only when p(buy) clears this; exit to flat only when p(buy) drops below sellThreshold. */
   buyThreshold: number;
   sellThreshold: number;
+  feeBuffer: number;
+  notionalUsd: number;
+  depthParticipation: number;
+  minSizeUsd: number;
 }
 
-/**
- * Confidence-band hysteresis on top of the model's raw buy/sell call (PL-REVENUE-REVIEW.md 3.2):
- * with a ~140bps round-trip cost, a flip should only be actioned when the model's conviction
- * clears a band wide enough to plausibly beat that cost. Flat only enters above `buyThreshold`;
- * long only exits below `sellThreshold`; in between, hold the current position. The raw
- * decision/probabilities are still recorded for measurement regardless of this gate.
- */
-export function targetFor(position: "long" | "flat", pBuy: number, buyThreshold: number, sellThreshold: number): "long" | "flat" {
-  if (position === "flat") return pBuy >= buyThreshold ? "long" : "flat";
-  return pBuy <= sellThreshold ? "flat" : "long";
+export interface GatedDecision extends Decision {
+  gate: GateResult;
 }
 
 /** Reject if `p` has not settled so a hung Jev/429 call cannot pin `busy` and skip later cycles. */
@@ -77,10 +76,10 @@ export const DECIDE_DEADLINE_MS = 25_000;
 
 /**
  * One model call per pair every `decideSec`. Same one-in-flight guard as src/trader.ts (`busy`): a
- * cycle that arrives while the previous one for that pair is still running is skipped. A `buy`
- * decision targets a long of the configured notional; a `sell` targets flat. Only a decision that
- * changes the target position is `traded` and emits an intent to the broker. Pairs are staggered
- * across the interval so their calls do not bunch.
+ * cycle that arrives while the previous one for that pair is still running is skipped. The model
+ * returns a decision vector. The gate approves a long or flattens. Only a decision that changes
+ * the target position is `traded` and emits an intent to the broker. Raw probabilities are still
+ * recorded when the gate refuses. Pairs are staggered across the interval so their calls do not bunch.
  */
 export class Engine {
   private busy = new Map<string, boolean>();
@@ -90,7 +89,7 @@ export class Engine {
   private starters: Array<ReturnType<typeof setTimeout>> = [];
   /** Wall-clock ms of the next scheduled decision per pair (drives the UI countdown). */
   private nextAt = new Map<string, number>();
-  readonly latest = new Map<string, { decision: Decision; state: MarketState; id: string }>();
+  readonly latest = new Map<string, { decision: GatedDecision; state: MarketState; id: string }>();
 
   constructor(
     private readonly pairs: string[],
@@ -100,7 +99,7 @@ export class Engine {
     private readonly runId: string,
     private readonly opts: EngineOpts,
     private readonly broker: Broker,
-    private readonly onDecision: (id: string, decision: Decision, state: MarketState, intent?: OrderIntent) => void = () => {},
+    private readonly onDecision: (id: string, decision: GatedDecision, state: MarketState, intent?: OrderIntent) => void = () => {},
   ) {}
 
   start(): void {
@@ -149,9 +148,27 @@ export class Engine {
       const decision = await withDeadline(this.model.decide(state), DECIDE_DEADLINE_MS, `decide ${pair}`);
       if (this.decideGen.get(pair) !== gen) return;
       const inferenceUsd = (decision.inputTokens / 1e6) * this.opts.jevUsdPerMTok;
-      let target = targetFor(position, decision.probabilities.buy, this.opts.buyThreshold, this.opts.sellThreshold);
+      const book = this.feed.book(pair);
       const halt = killSwitch.blocked();
-      if (halt) target = "flat";
+      const gate = evaluateGate({
+        position,
+        vector: decision.vector,
+        horizonVolBps: state.volBps,
+        spreadBps: state.spreadBps,
+        makerFeeBps: this.opts.makerFeeBps,
+        takerFeeBps: this.opts.takerFeeBps,
+        feeBuffer: this.opts.feeBuffer,
+        buyThreshold: this.opts.buyThreshold,
+        sellThreshold: this.opts.sellThreshold,
+        depthUsd: book ? depthUsd(book, "buy", 3) : 0,
+        notionalUsd: this.opts.notionalUsd,
+        participation: this.opts.depthParticipation,
+        minSizeUsd: this.opts.minSizeUsd,
+        halted: halt != null,
+        feedBlocked: !this.feed.feedHealthy(pair),
+      });
+      const gated: GatedDecision = { ...decision, gate };
+      const target = gate.target;
       const traded = target !== position;
       const id = await this.store.insertDecision({
         run_id: this.runId,
@@ -162,13 +179,13 @@ export class Engine {
         p_sell: decision.probabilities.sell,
         mid: state.mid,
         spread_bps: state.spreadBps,
-        state,
+        state: { ...state, vector: decision.vector, gate },
         latency_ms: Math.round(decision.latencyMs),
         input_tokens: decision.inputTokens,
         inference_usd: inferenceUsd,
         traded,
       });
-      this.latest.set(pair, { decision, state, id });
+      this.latest.set(pair, { decision: gated, state, id });
       this.broker.observe(pair, decision.action, inferenceUsd);
       let intent: OrderIntent | undefined;
       if (traded) {
@@ -180,11 +197,12 @@ export class Engine {
           decisionId: id,
           mid: state.mid,
           ts: state.ts,
+          sizeUsd: target === "long" ? gate.sizeUsd : undefined,
         };
         this.broker.onIntent(intent);
         if (halt) console.log(`kill ${pair}: ${halt}`);
       }
-      this.onDecision(id, decision, state, intent);
+      this.onDecision(id, gated, state, intent);
     } catch (e) {
       console.error(`decide ${pair}:`, (e as Error).message);
     } finally {

@@ -5,9 +5,10 @@ model has real, *after-fee* directional edge — with **no capital at risk**. It
 orders. Nothing goes live until the promotion gate passes on real data (see
 [docs/SPEC-COINBASE.md](docs/SPEC-COINBASE.md)).
 
-Every ~300s the model (`mock` heuristic or the real `jev` model) is asked buy/sell for each pair.
-Decisions, simulated fills, and outcomes at 1h/4h/24h horizons are persisted to Postgres; a Bun
-server exposes REST + SSE, and a Next.js dashboard (`/paper`) renders it live.
+Every ~300s the model (`mock` heuristic or the real `jev` model) classifies SOL-USD. A fee gate
+then approves or refuses the entry. Decisions, simulated fills, and outcomes at 1h/4h/24h horizons
+are persisted to Postgres; a Bun server exposes REST + SSE, and a Next.js dashboard (`/paper`)
+renders it live.
 
 > The original Monad/Kuru demo (`src/`) still lives here — see [Legacy: Monad demo](#legacy-monad-demo-src) at the end.
 
@@ -17,9 +18,10 @@ server exposes REST + SSE, and a Next.js dashboard (`/paper`) renders it live.
 
 | Component | Runs as | Port | Notes |
 |---|---|---|---|
-| Trading engine (`cb/`) | Docker container `cb-app` | `3001` | Coinbase WS feed, decide/resolve loops, paper broker, REST+SSE. Always-on. |
+| Trading engine (`cb/`) | Docker container `cb-app` | `3001` | Coinbase WS feed, decide/resolve loops, paper broker, REST+SSE. Always-on. SOL-USD. |
 | Postgres | Docker container `cb-postgres` | `5432` | Data in named volume `cb-pgdata`. |
 | Dashboard (`web/`) | Next.js dev, on demand | `3000` | Viewer only; reads `NEXT_PUBLIC_PAPER_API_URL`. |
+| Kuru paper (`src/`) | Compose profile `kuru` | `3002` | **Stopped.** Not in `docker compose up`. |
 
 Backend and DB use `restart: unless-stopped`, so they survive crashes and reboots (given Docker
 Desktop autostart). Full hosting details, including a cloud alternative, are in
@@ -30,25 +32,33 @@ Desktop autostart). Full hosting details, including a cloud alternative, are in
 ## Decision cadence — how often, and what drives it
 
 **Time-driven, one model call per pair every `CB_DECIDE_SEC` (default 300s / 5 min).** The engine
-(`cb/engine.ts`) is not event-driven: it does not decide on every tick or trade. Instead each pair
-gets its own `setInterval` on a fixed wall-clock cadence, and at each tick it snapshots the current
-in-memory order book + tape and asks the model once.
+(`cb/engine.ts`) does not ask Jev on every tick. Each book and trade event updates an O(1) feature
+accumulator (`cb/features.ts`). On the wall-clock cadence the engine sends that summary to Jev once.
+
+The call is four choices: regime, long or flat, toxic flow, and liquidity stress. Confidence is the
+long probability. A deterministic gate (`cb/gate.ts`) then approves a long only when the bias is
+long, flow is clean, the book is normal, the regime is expansion, and expected yield clears
+maker plus taker plus half the spread. Otherwise the vector is still stored and nothing is bought.
+Size follows near-touch depth, capped at `CB_NOTIONAL_USD`.
 
 - **Per-pair, staggered.** Pairs are offset evenly across the interval (`CB_DECIDE_SEC / n` apart) so
-  their model calls don't bunch. With the default 4 pairs at 300s, a decision fires somewhere about
-  **every ~75s**, and each individual pair is revisited every **300s**.
+  their model calls don't bunch. The live book is **SOL-USD only**, so one decision fires every
+  **300s**. Extra pairs in history stay in Postgres for tax; they are not traded.
 - **One-in-flight guard.** If a pair's previous decision is still running when the next tick arrives,
   that tick is skipped (model latency is normally far under the interval, so this is rare).
-- **Book-ready gate.** A decision is skipped silently until that pair's order book is synced from the
-  feed (`buildState` returns nothing), so early ticks after startup/resync don't produce garbage.
-- **Traded vs. observed.** `buy` targets a long of `CB_NOTIONAL_USD`; `sell` targets flat. *Every*
-  decision is persisted and scored, but only one that **changes** the target position is marked
-  `traded` and emits an order intent to the paper broker.
+- **Book-ready gate.** A decision is skipped silently until that pair's order book has a mid
+  (`buildState` returns nothing), so early ticks after startup don't produce garbage.
+- **Traded vs. observed.** An approved long targets a depth-sized entry. A flatten targets flat.
+  *Every* decision is persisted and scored, but only one that **changes** the target position is
+  marked `traded` and emits an order intent to the paper broker.
+- **Guards do not wait 300s.** While a pair is long, the paper broker checks the fee-inclusive
+  entry every second. A 150 bp stop or a 250 bp take-profit cancels the resting order and flattens
+  as a taker immediately, even if the last classification was still long.
 
 **Cadence is not the horizon.** `CB_DECIDE_SEC` is how often it *decides*; `CB_HORIZON_SEC`
-(default 14400s / 4h) is the forward window the model is asked to predict. Regardless of cadence, the
-resolver scores every decision's outcome at **1h / 4h / 24h** later. So at defaults: a fresh call per
-pair every 5 minutes, each judged against where price actually went 1h/4h/24h afterward.
+(default 14400s / 4h) is the forward window the features and the gate are scaled to. Regardless of
+cadence, the resolver scores every decision's outcome at **1h / 4h / 24h** later. Entries rest one
+tick inside the touch and cancel if they do not fill. They do not cross the spread.
 
 To change the rhythm, set `CB_DECIDE_SEC` (and/or `CB_PAIRS`) in `.env`, then
 `docker compose up -d --build`. Note that with `MODEL=jev`, faster cadence ⇒ more inference cost.
@@ -92,14 +102,18 @@ Engine knobs (defaults in `cb/config.ts`). Change a value, then `docker compose 
 |---|---|---|
 | `MODEL` | `mock` | `mock` heuristic or `jev` (real model). |
 | `AI_GATEWAY_API_KEY` | — | Present ⇒ Jev routes via Vercel AI Gateway as `typesafe-ai/jev`. |
-| `CB_PAIRS` | `SOL-USD,DOGE-USD,SUI-USD,XRP-USD,AVAX-USD,TAO-USD` | Pairs to trade/measure. |
+| `CB_PAIRS` | `SOL-USD` | Pairs to trade/measure. Live book is SOL only. |
 | `CB_DECIDE_SEC` | `300` | Seconds between decisions per pair. |
 | `CB_HORIZON_SEC` | `14400` | Traded horizon (4h). Scored also at 1h/24h. |
 | `CB_NOTIONAL_USD` | `1000` | Notional per position. |
 | `CB_BANKROLL_USD` | `10000` | Starting bankroll for equity. |
 | `CB_MAKER_FEE_BPS` / `CB_TAKER_FEE_BPS` | `50` / `90` | Fee assumptions. |
 | `CB_FILL_HAIRCUT` | `0.5` | Optimism haircut on paper fills. |
-| `CB_ENTRY_TIMEOUT_SEC` / `CB_REPRICE_TICKS` | `120` / `2` | Post-only entry policy. |
+| `CB_ENTRY_TIMEOUT_SEC` / `CB_REPRICE_TICKS` | `120` / `2` | Post-only entry. Unfilled entries cancel. |
+| `CB_BUY_THRESHOLD` / `CB_SELL_THRESHOLD` | `0.6` / `0.4` | Confidence to enter, and to flatten. |
+| `CB_FEE_BUFFER` | `1.5` | Multiplier on the post-only round trip (maker + maker + half spread). |
+| `CB_STOP_LOSS_BPS` / `CB_TAKE_PROFIT_BPS` | `150` / `250` | Hard guards on the fee-inclusive entry. |
+| `CB_DEPTH_PARTICIPATION` / `CB_MIN_SIZE_USD` | `0.25` / `25` | Depth sizing. Dust is refused. |
 
 The dashboard reads `NEXT_PUBLIC_PAPER_API_URL` (default `http://localhost:3001`) from `web/.env`.
 
@@ -190,11 +204,13 @@ cb/
   db/schema.sql    Postgres schema (applied on boot by store.init)
   db/store.ts      Bun.sql store: writes + queries
   feed.ts          Coinbase Advanced Trade WS: per-pair book, tape/CVD, depth, minute bars
-  state.ts         MarketState builder handed to the model
-  model.ts         Model interface, MockModel, JevModel (AI SDK / Vercel Gateway)
-  engine.ts        per-pair decide loop (one-in-flight guard, target position)
+  features.ts      tick accumulator: imbalance, vol, EMA, RSI, volume delta
+  state.ts         compact MarketState handed to the model
+  gate.ts          fee hurdle, depth sizing, stop and take-profit
+  model.ts         four-choice Jev call, MockModel
+  engine.ts        per-pair decide loop (one-in-flight guard, gate, intents)
   resolver.ts      scores outcomes at 1h/4h/24h, restart-idempotent
-  paper.ts         paper broker: post-only, reprice, taker conversion, haircut fills
+  paper.ts         paper broker: inside-touch entries, 1s stop/take-profit, haircut fills
   accounting.ts    fee-inclusive ledger + equity snapshots
   report.ts        accuracy+Wilson, Brier, calibration, capture, sensitivity, promotion gate
   server.ts        Bun.serve REST + SSE
@@ -203,7 +219,7 @@ cb/
 web/               Next.js dashboard; /paper route + usePaperFeed hook
 scripts/           ui-start.ps1 / ui-stop.ps1 (dashboard lifecycle)
 docs/              SPEC, SPEC-COINBASE, DEPLOY
-compose.yml        Postgres + cb-app stack
+compose.yml        Postgres + cb-app (default); Kuru behind profile `kuru`
 Dockerfile.cb      image for the cb backend
 ```
 
@@ -225,11 +241,7 @@ The original demo posts one post-only limit order per Monad block on Kuru MON-US
 spread; a Jev model answers buy/sell each block. It is unrelated to the Coinbase harness and shares
 only the repo and the `ai`/model dependencies.
 
-```powershell
-cp .env.example .env
-bun install
-bun run start          # dry-run with MODEL=mock unless PRIVATE_KEY + MODEL=jev are set
-```
+The demo process stays stopped. There is no start script for it.
 
 Deployed dry-run reference: https://jev-trader-production.up.railway.app
 Layout: `src/{config,chain,book,market,model,trader,server}.ts`. See the file headers for the

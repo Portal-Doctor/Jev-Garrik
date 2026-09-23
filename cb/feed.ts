@@ -1,5 +1,6 @@
 import { config } from "./config";
 import type { Store } from "./db/store";
+import { FeatureAccumulator, emptySnapshot, type FeatureSnapshot } from "./features";
 
 /**
  * Coinbase Advanced Trade market-data feed for all configured pairs on one socket.
@@ -214,6 +215,7 @@ export class Feed {
   private tapes = new Map<string, TradePrint[]>();
   private fresh = new Map<string, TradePrint[]>(); // prints since the last drainPrints, for paper fills
   private mids = new Map<string, { ts: number; mid: number }[]>();
+  private features = new Map<string, FeatureAccumulator>();
   private curBar = new Map<string, MinuteBar | null>();
   private volAccum = new Map<string, number>();
   private lastTrade = new Map<string, number>();
@@ -239,6 +241,7 @@ export class Feed {
       this.tapes.set(p, []);
       this.fresh.set(p, []);
       this.mids.set(p, []);
+      this.features.set(p, new FeatureAccumulator());
       this.curBar.set(p, null);
       this.volAccum.set(p, 0);
     }
@@ -259,6 +262,19 @@ export class Feed {
 
   book(pair: string): PairBook | undefined {
     return this.books.get(pair);
+  }
+
+  /** Compact features for the model. Empty until the first book event. */
+  featureSnapshot(pair: string, horizonSec: number): FeatureSnapshot {
+    return this.features.get(pair)?.snapshot(horizonSec) ?? emptySnapshot();
+  }
+
+  /**
+   * Entries require a synced book and a live socket. A quiet public tape is not a fault.
+   * The 300ms staleness budget belongs to chain RPC, which this feed does not use.
+   */
+  feedHealthy(pair: string): boolean {
+    return this.synced.has(pair) && this.ws?.readyState === WebSocket.OPEN;
   }
 
   state(pair: string): PairFeedState {
@@ -404,6 +420,7 @@ export class Feed {
     for (const u of ev.updates ?? []) {
       book.set(u.side, Number(u.price_level), Number(u.new_quantity));
     }
+    this.features.get(pair)?.onBook(Date.now(), book);
   }
 
   private onTrades(ev: any): void {
@@ -419,6 +436,7 @@ export class Feed {
       const print = { ts, price, size, takerSide };
       tape.push(print);
       this.fresh.get(pair)?.push(print);
+      this.features.get(pair)?.onTrade(ts, size, takerSide);
       this.volAccum.set(pair, (this.volAccum.get(pair) ?? 0) + size);
       this.lastTrade.set(pair, ts);
     }
@@ -436,7 +454,9 @@ export class Feed {
     }
     const minuteTs = Math.floor(now / 60_000) * 60_000;
     for (const pair of this.pairs) {
-      const mid = this.books.get(pair)!.mid();
+      const book = this.books.get(pair)!;
+      this.features.get(pair)?.onBook(now, book);
+      const mid = book.mid();
       const vol = this.volAccum.get(pair) ?? 0;
       this.volAccum.set(pair, 0);
       if (mid === null) continue;

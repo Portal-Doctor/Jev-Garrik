@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { wilson, brier, calibration, edgeBps, maxDrawdownPct, makerFeeSensitivity, pnlFromFills, takerFillShare, fmtHorizonCell } from "./report";
+import { wilson, brier, calibration, edgeBps, maxDrawdownPct, makerFeeSensitivity, pnlFromFills, takerFillShare, fmtHorizonCell, liveReportPairs } from "./report";
 import type { FillRow } from "./db/store";
 
 test("wilson interval brackets the point estimate and tightens with n", () => {
@@ -116,4 +116,11 @@ test("maker fee sensitivity recomputes maker fees, keeping taker fills fixed", (
   // gross = 1000(sell) - 1000(buy) = 0; taker fee 9 fixed.
   expect(at50.netUsd).toBeCloseTo(0 - 9 - (1000 * 50) / 10_000, 9); // -14
   expect(at0.netUsd).toBeCloseTo(0 - 9 - 0, 9); // -9, the maker leg is free
+});
+
+test("live report pairs are the intersection of venue history and config, never MON-USDC", () => {
+  const history = ["DOGE-USD", "MON-USDC", "SOL-USD", "XRP-USD"];
+  expect(liveReportPairs(history, ["SOL-USD"])).toEqual(["SOL-USD"]);
+  expect(liveReportPairs(history, ["SOL-USD", "DOGE-USD"])).toEqual(["DOGE-USD", "SOL-USD"]);
+  expect(liveReportPairs(["MON-USDC"], ["MON-USDC"])).toEqual([]);
 });

@@ -3,15 +3,16 @@ import type { PairBook, TradePrint } from "./feed";
 import type { Broker, OrderIntent } from "./engine";
 import type { Action } from "./model";
 import type { Store } from "./db/store";
+import { guardTrip } from "./gate";
 import { killSwitch } from "./kill";
 
 /**
  * Paper broker: simulates the execution policy against the real feed and keeps a fee-inclusive
  * ledger. Rules adapted from Trader.simFills (src/trader.ts) with an honesty haircut:
  *
- * - Entry: post-only limit at the touch (join best bid to buy, best ask to sell-to-close). Reprice
- *   if the touch moves more than `repriceTicks` while resting. Unfilled after `entryTimeoutSec`,
- *   convert to taker (cross the spread) so decisions get exposure and taker costs are measured.
+ * - Entry: post-only, one tick inside the touch, clamped so a buy never reaches the ask and a
+ *   sell never reaches the bid. Reprice if that quote moves more than `repriceTicks`. An entry
+ *   that is still open after `entryTimeoutSec` is canceled. Entries never taker-convert.
  * - A resting maker order is eligible one second after placement (models propagation), then fills
  *   when a print crosses it: a taker sell at or below our bid, a taker buy at or above our ask.
  *   Fill size is `min(remaining, printSize * fillHaircut)`. The haircut is the single biggest
@@ -34,15 +35,33 @@ export function makerFillSize(remaining: number, printSize: number, haircut: num
   return Math.min(remaining, printSize * haircut);
 }
 
+/**
+ * One tick inside the touch. A buy that would reach the ask stays on the bid.
+ * A sell that would reach the bid stays on the ask. `tick` is the product quote increment.
+ */
+export function insideTouchPrice(side: "buy" | "sell", bid: number, ask: number, tick: number): number {
+  if (!(bid > 0) || !(ask > 0) || !(tick > 0) || ask <= bid) return side === "buy" ? bid : ask;
+  const bidU = Math.round(bid / tick);
+  const askU = Math.round(ask / tick);
+  let p = side === "buy" ? bidU + 1 : askU - 1;
+  if (side === "buy" && p >= askU) p = bidU;
+  if (side === "sell" && p <= bidU) p = askU;
+  return p * tick;
+}
+
+export type OrderPurpose = "entry" | "exit" | "stop" | "take_profit";
+
 interface OpenOrder {
   id: string;
   side: "buy" | "sell";
-  purpose: "entry" | "exit";
+  purpose: OrderPurpose;
   price: number;
   remaining: number;
   createdAt: number;
   eligibleAt: number;
   decisionId: string | null;
+  /** Mid when the order was placed. Slippage is measured against this, not an older decision. */
+  refMid: number | null;
 }
 
 /** Minimal feed surface the broker needs; the real Feed satisfies it, and tests can fake it. */
@@ -60,15 +79,20 @@ export interface PaperOpts {
   repriceTicks: number;
   horizonSec: number;
   bankrollUsd: number;
-  /** If true, an unfilled entry is canceled at entryTimeoutSec instead of taker-converted. Exits
-   *  always taker-convert regardless (an unresolved exit would corrupt measurement). */
+  /** Kept for config compatibility. Entries never cross, whatever this is set to. */
   neverCrossEntry?: boolean;
+  stopLossBps?: number;
+  takeProfitBps?: number;
+  /** Fill farther than this from `refMid` cancels the rest and blocks new entries. */
+  maxSlippageBps?: number;
+  /** When this returns false, resting entries are canceled and new entries are refused. */
+  feedHealthy?: (pair: string) => boolean;
 }
 
 export interface FillEvent {
   pair: string;
   side: "buy" | "sell";
-  purpose: "entry" | "exit";
+  purpose: OrderPurpose;
   price: number;
   sizeBase: number;
   feeUsd: number;
@@ -86,6 +110,9 @@ export class PaperBroker implements Broker {
   /** Fill-liquidity counters per pair, instrumenting how much entry edge is lost to taker fallback (PL-REVENUE-REVIEW.md 3.4). */
   private fillCounts = new Map<string, { maker: number; taker: number }>();
   private seq = 0;
+  /** Latched by a fill that slipped too far from the placement mid. Exits still flatten. */
+  private entryBlocked = new Map<string, boolean>();
+  private stepping = new Map<string, boolean>();
   /** Per-instance token so synthetic external ids stay unique even if a runId is ever reused. */
   private readonly instance = crypto.randomUUID().slice(0, 8);
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -149,6 +176,7 @@ export class PaperBroker implements Broker {
         createdAt: Number(o.created_at),
         eligibleAt: Number(o.created_at) + ELIGIBLE_DELAY_MS,
         decisionId: o.decision_id,
+        refMid: null,
       });
     }
   }
@@ -174,25 +202,39 @@ export class PaperBroker implements Broker {
 
   onIntent(intent: OrderIntent): void {
     if (this.open.get(intent.pair)) return; // one order in flight per pair
-    if (intent.purpose === "entry" && killSwitch.blocked()) return;
-    void this.place(intent.pair, intent.side, intent.purpose, intent.decisionId);
+    if (intent.purpose === "entry") {
+      if (killSwitch.blocked()) return;
+      if (this.entryBlocked.get(intent.pair)) return;
+      if (this.opts.feedHealthy && !this.opts.feedHealthy(intent.pair)) return;
+    }
+    void this.place(intent.pair, intent.side, intent.purpose, intent.decisionId, intent.sizeUsd, intent.mid);
   }
 
   // --- order lifecycle -------------------------------------------------------
 
-  private async place(pair: string, side: "buy" | "sell", purpose: "entry" | "exit", decisionId: string | null): Promise<void> {
+  private async place(
+    pair: string,
+    side: "buy" | "sell",
+    purpose: OrderPurpose,
+    decisionId: string | null,
+    sizeUsd?: number,
+    refMid?: number | null,
+  ): Promise<void> {
     const book = this.feed.book(pair);
     if (!book) return;
-    const touch = side === "buy" ? book.bestBid() : book.bestAsk();
-    if (touch == null) return;
+    const bid = book.bestBid();
+    const ask = book.bestAsk();
+    if (bid == null || ask == null) return;
+    const tick = this.tickFor(pair, book.mid() ?? bid);
+    const price = insideTouchPrice(side, bid, ask, tick);
+    if (!(price > 0)) return;
     const acct = this.acct.get(pair)!;
-    const sizeBase = side === "buy" ? this.opts.notionalUsd / touch : acct.positionBase;
+    const usd = sizeUsd != null && sizeUsd > 0 ? sizeUsd : this.opts.notionalUsd;
+    const sizeBase = side === "buy" ? usd / price : acct.positionBase;
     if (sizeBase <= 0) return;
-    // A buy needs cash on hand for its full notional plus the worst-case fee it might pay if it
-    // later converts to taker; a sell only ever closes existing inventory and never needs new cash.
+    // A buy needs cash for its notional plus the maker fee. Entries do not convert to taker.
     if (side === "buy") {
-      const worstFeeBps = Math.max(this.opts.makerFeeBps, this.opts.takerFeeBps);
-      const requiredCashUsd = this.opts.notionalUsd * (1 + worstFeeBps / 10_000);
+      const requiredCashUsd = usd * (1 + this.opts.makerFeeBps / 10_000);
       if (acct.cashUsd() < requiredCashUsd) {
         console.warn(`${pair}: skipping ${purpose} buy, insufficient cash ($${acct.cashUsd().toFixed(2)} < $${requiredCashUsd.toFixed(2)} needed)`);
         return;
@@ -205,26 +247,113 @@ export class PaperBroker implements Broker {
       pair,
       side,
       purpose,
-      price: touch,
+      price,
       size_base: sizeBase,
       status: "open",
       venue_order_id: null,
       created_at: now,
       updated_at: now,
     });
-    this.open.set(pair, { id, side, purpose, price: touch, remaining: sizeBase, createdAt: now, eligibleAt: now + ELIGIBLE_DELAY_MS, decisionId });
+    this.open.set(pair, {
+      id,
+      side,
+      purpose,
+      price,
+      remaining: sizeBase,
+      createdAt: now,
+      eligibleAt: now + ELIGIBLE_DELAY_MS,
+      decisionId,
+      refMid: refMid ?? book.mid(),
+    });
   }
 
   private tick(now = Date.now()): void {
-    for (const pair of this.pairs) {
-      void this.processOrder(pair, now);
-      // Horizon expiry: close a long that no refreshing buy kept alive (mandatory taker at timeout).
+    for (const pair of this.pairs) void this.tickPair(pair, now);
+  }
+
+  /** One second of broker work for a pair: feed circuit, guards, resting order, horizon. */
+  private async tickPair(pair: string, now: number): Promise<void> {
+    if (this.stepping.get(pair)) return;
+    this.stepping.set(pair, true);
+    try {
+      await this.cancelEntryIfFeedDown(pair, now);
+      await this.enforceGuards(pair, now);
+      await this.processOrder(pair, now);
+      await this.enforceGuards(pair, now);
       const expiresAt = this.horizonExpiresAt.get(pair);
       if (this.positionOf(pair) === "long" && !this.open.get(pair) && expiresAt != null && now >= expiresAt) {
         this.horizonExpiresAt.set(pair, null);
-        void this.place(pair, "sell", "exit", null);
+        await this.place(pair, "sell", "exit", null);
       }
+    } finally {
+      this.stepping.set(pair, false);
     }
+  }
+
+  private async cancelEntryIfFeedDown(pair: string, now: number): Promise<void> {
+    if (!this.opts.feedHealthy || this.opts.feedHealthy(pair)) return;
+    const order = this.open.get(pair);
+    if (!order || order.purpose !== "entry") return;
+    await this.store.updateOrder(order.id, { status: "canceled" }, now);
+    this.open.set(pair, null);
+  }
+
+  /**
+   * Stop and take-profit on the 1 second tick. A later long classification cannot hold through
+   * a breach: the guard cancels the resting order and flattens as a taker immediately.
+   * A flat pair has no entry price, so neither guard can trip.
+   */
+  private async enforceGuards(pair: string, now: number): Promise<void> {
+    const stop = this.opts.stopLossBps;
+    const take = this.opts.takeProfitBps;
+    if (stop == null || take == null) return;
+    if (this.positionOf(pair) !== "long") return;
+    const entry = this.acct.get(pair)?.entryPrice();
+    const mid = this.feed.book(pair)?.mid();
+    if (entry == null || mid == null) return;
+    const trip = guardTrip(entry, mid, stop, take);
+    if (!trip) return;
+    await this.takerFlatten(pair, trip, now);
+  }
+
+  private async takerFlatten(pair: string, purpose: "stop" | "take_profit", now: number): Promise<void> {
+    const resting = this.open.get(pair);
+    if (resting) {
+      await this.store.updateOrder(resting.id, { status: "canceled" }, now);
+      this.open.set(pair, null);
+    }
+    const book = this.feed.book(pair);
+    const acct = this.acct.get(pair);
+    if (!book || !acct || acct.positionBase <= 0) return;
+    const size = acct.positionBase;
+    const price = book.walk("sell", size) ?? book.bestBid();
+    if (price == null || !(price > 0)) return;
+    const id = await this.store.insertOrder({
+      run_id: this.runId,
+      decision_id: null,
+      pair,
+      side: "sell",
+      purpose,
+      price,
+      size_base: size,
+      status: "open",
+      venue_order_id: null,
+      created_at: now,
+      updated_at: now,
+    });
+    const order: OpenOrder = {
+      id,
+      side: "sell",
+      purpose,
+      price,
+      remaining: size,
+      createdAt: now,
+      eligibleAt: now,
+      decisionId: null,
+      refMid: book.mid(),
+    };
+    this.open.set(pair, order);
+    await this.fill(pair, order, size, price, "taker", now, true);
   }
 
   private async processOrder(pair: string, now: number): Promise<void> {
@@ -232,13 +361,22 @@ export class PaperBroker implements Broker {
     const book = this.feed.book(pair);
     if (!order || !book) return;
 
-    // Reprice if the touch moved more than repriceTicks while resting (resets eligibility).
-    const touch = order.side === "buy" ? book.bestBid() : book.bestAsk();
-    const tick = this.tickFor(pair, book.mid() ?? touch ?? 0);
-    if (touch != null && Math.abs(touch - order.price) > this.opts.repriceTicks * tick) {
-      order.price = touch;
+    // A guard that was inserted and not filled (restart) crosses immediately.
+    if (order.purpose === "stop" || order.purpose === "take_profit") {
+      const cross = book.walk(order.side, order.remaining) ?? (order.side === "sell" ? book.bestBid() : book.bestAsk()) ?? order.price;
+      await this.fill(pair, order, order.remaining, cross, "taker", now, true);
+      return;
+    }
+
+    // Reprice to one tick inside the touch when that quote moves more than repriceTicks.
+    const bid = book.bestBid();
+    const ask = book.bestAsk();
+    const tick = this.tickFor(pair, book.mid() ?? bid ?? ask ?? 0);
+    const quote = bid != null && ask != null ? insideTouchPrice(order.side, bid, ask, tick) : order.side === "buy" ? bid : ask;
+    if (quote != null && Math.abs(quote - order.price) > this.opts.repriceTicks * tick) {
+      order.price = quote;
       order.eligibleAt = now + ELIGIBLE_DELAY_MS;
-      await this.store.updateOrder(order.id, { price: touch }, now);
+      await this.store.updateOrder(order.id, { price: quote }, now);
     }
 
     // Maker fills from crossing prints that arrived after the order became eligible.
@@ -253,17 +391,17 @@ export class PaperBroker implements Broker {
       }
     }
 
-    // After the timeout: exits always taker-convert (an unresolved exit would corrupt
-    // measurement). Entries taker-convert too, unless neverCrossEntry is set, in which case a
-    // missed entry is canceled for free instead of paying the taker fee.
+    // After the timeout: entries cancel (a missed entry costs nothing). A signal or horizon
+    // exit may cross so inventory does not stick. That cross is the taker cost the gate
+    // already required the entry to beat. Stop and take-profit never rest, so they are not here.
     const current = this.open.get(pair);
     if (current && current.id === order.id && current.remaining > 1e-12 && now - current.createdAt >= this.opts.entryTimeoutSec * 1000) {
-      if (current.purpose === "entry" && this.opts.neverCrossEntry) {
+      if (current.purpose === "entry") {
         await this.store.updateOrder(current.id, { status: "canceled" }, now);
         this.open.set(pair, null);
         return;
       }
-      const price = book.walk(current.side, current.remaining) ?? touch ?? current.price;
+      const price = book.walk(current.side, current.remaining) ?? quote ?? current.price;
       await this.fill(pair, current, current.remaining, price, "taker", now, true);
     }
   }
@@ -278,8 +416,12 @@ export class PaperBroker implements Broker {
     const counts = this.fillCounts.get(pair)!;
     counts[liquidity]++;
     order.remaining -= size;
-    const done = order.remaining <= 1e-12;
-    const status = done ? (converted ? "converted_taker" : "filled") : "partial";
+    const maxSlip = this.opts.maxSlippageBps ?? 10;
+    const ref = order.refMid;
+    const slipped = ref != null && ref > 0 && (Math.abs(price - ref) / ref) * 10_000 > maxSlip;
+    if (slipped) this.entryBlocked.set(pair, true);
+    const done = order.remaining <= 1e-12 || slipped;
+    const status = slipped && order.remaining > 1e-12 ? "canceled" : done ? (converted ? "converted_taker" : "filled") : "partial";
 
     await this.store.upsertFill({
       run_id: this.runId,
@@ -299,7 +441,7 @@ export class PaperBroker implements Broker {
       traded_at: now,
       recorded_at: now,
     });
-    await this.store.updateOrder(order.id, { status, size_base: order.remaining }, now);
+    await this.store.updateOrder(order.id, { status, size_base: slipped ? 0 : order.remaining }, now);
     if (done) this.open.set(pair, null);
 
     if (order.purpose === "entry" && this.positionOf(pair) === "long") {
@@ -332,6 +474,8 @@ export class PaperBroker implements Broker {
       cashUsd: acct.cashUsd(),
       bankrollUsd: acct.bankrollUsd,
       openOrder: order ? { side: order.side, purpose: order.purpose, price: order.price, remaining: order.remaining, ageMs: Date.now() - order.createdAt } : null,
+      stopPrice: this.guardPrice(pair, "stop"),
+      takeProfitPrice: this.guardPrice(pair, "take_profit"),
       makerFills: counts.maker,
       takerFills: counts.taker,
       takerFillShare: totalFills > 0 ? counts.taker / totalFills : 0,
@@ -382,6 +526,14 @@ export class PaperBroker implements Broker {
       inference_usd: inference,
       equity_usd: this.opts.bankrollUsd + realized + unrealized - inference,
     });
+  }
+
+  private guardPrice(pair: string, which: "stop" | "take_profit"): number | null {
+    if (this.positionOf(pair) !== "long") return null;
+    const entry = this.acct.get(pair)?.entryPrice();
+    const bps = which === "stop" ? this.opts.stopLossBps : this.opts.takeProfitBps;
+    if (entry == null || !(entry > 0) || bps == null) return null;
+    return which === "stop" ? entry * (1 - bps / 10_000) : entry * (1 + bps / 10_000);
   }
 
   private tickFor(pair: string, mid: number): number {

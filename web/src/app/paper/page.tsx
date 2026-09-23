@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePaperFeed } from "@/lib/usePaperFeed";
 import { useUptime } from "@/lib/useUptime";
@@ -129,7 +130,10 @@ export default function PaperPage() {
   const { resetting, triggerReset } = useResetControl(API_URL, health);
 
   const pairs = feed.meta?.pairs ?? Object.keys(feed.feed);
-  const positions = Object.values(feed.positions);
+  const live = new Set(pairs);
+  const positions = Object.values(feed.positions).filter((p) => live.has(p.pair));
+  const recentDecisions = live.size ? feed.recentDecisions.filter((d) => live.has(d.pair)) : feed.recentDecisions;
+  const recentFills = live.size ? feed.recentFills.filter((f) => live.has(f.pair)) : feed.recentFills;
 
   const totals = useMemo(() => {
     return positions.reduce(
@@ -173,6 +177,9 @@ export default function PaperPage() {
           <span className={`${styles.dot} ${styles[feed.connection]}`} title={feed.connection}>
             <i /> {feed.connection}
           </span>
+          <Link href="/paper/backtest" className={styles.reportBtn}>
+            Backtest
+          </Link>
           <button type="button" className={styles.resetBtn} onClick={triggerReset} disabled={resetting} title="Flush all paper trading data and restart">
             {resetting && <span className={styles.spinner} />}
             {resetting ? "Restarting…" : "Clear paper trades"}
@@ -211,8 +218,8 @@ export default function PaperPage() {
           <div className={styles.panel}>
             <h2>Decisions</h2>
             <ul className={styles.log}>
-              {feed.recentDecisions.length === 0 && <li className={styles.empty}>waiting for the first decision…</li>}
-              {feed.recentDecisions.map((d) => (
+              {recentDecisions.length === 0 && <li className={styles.empty}>waiting for the first decision…</li>}
+              {recentDecisions.map((d) => (
                 <li key={d.id}>
                   <span className={styles.logPair}>{d.pair}</span>
                   <span className={`${styles.tag} ${d.action === "buy" ? styles.buy : styles.sell}`}>{d.action}</span>
@@ -226,8 +233,8 @@ export default function PaperPage() {
           <div className={styles.panel}>
             <h2>Fills</h2>
             <ul className={styles.log}>
-              {feed.recentFills.length === 0 && <li className={styles.empty}>no fills yet</li>}
-              {feed.recentFills.map((f, i) => (
+              {recentFills.length === 0 && <li className={styles.empty}>no fills yet</li>}
+              {recentFills.map((f, i) => (
                 <li key={`${f.pair}-${f.ts}-${i}`}>
                   <span className={styles.logPair}>{f.pair}</span>
                   <span className={`${styles.tag} ${f.side === "buy" ? styles.buy : styles.sell}`}>{f.side}</span>
@@ -245,16 +252,34 @@ export default function PaperPage() {
   );
 }
 
+function SideBar({ label, value, fill }: { label: "buy" | "sell"; value: number; fill: string }) {
+  const pct = Math.round(Math.min(1, Math.max(0, value)) * 100);
+  return (
+    <span className={styles.hbSide}>
+      <span className={label === "buy" ? styles.hbBuyLab : styles.hbSellLab}>{label}</span>
+      <span className={styles.hbTrack}>
+        <span className={styles.hbFill} style={{ width: `${pct}%`, background: fill }} />
+      </span>
+      <span className={styles.hbPct}>{pct}%</span>
+    </span>
+  );
+}
+
 function QuoteHeartbeat({ pairs, feedByPair }: { pairs: string[]; feedByPair: Record<string, PairFeedState> }) {
   return (
     <section className={styles.heartbeat}>
       <div className={styles.hbTape}>
         {pairs.map((pair) => {
-          const mid = feedByPair[pair]?.mid;
+          const row = feedByPair[pair];
+          const mid = row?.mid;
+          const buy = typeof row?.buy === "number" ? row.buy : 0.5;
+          const sell = typeof row?.sell === "number" ? row.sell : 1 - buy;
           return (
             <span key={pair} className={styles.hbTick}>
               <span className={styles.hbPair}>{pair.replace("-USD", "")}</span>
               <span className={styles.hbMid}>{typeof mid === "number" && Number.isFinite(mid) ? fmtPrice(mid) : "-"}</span>
+              <SideBar label="buy" value={buy} fill="var(--buy-bar)" />
+              <SideBar label="sell" value={sell} fill="var(--sell-bar)" />
             </span>
           );
         })}
@@ -341,9 +366,28 @@ function PairCard({
         <span className={styles.probVal}>p(up) {Math.round(pBuy * 100)}%</span>
       </div>
 
+      {decision?.regime && (
+        <div className={styles.decisionMeta}>
+          <span>{decision.regime}</span>
+          <span>flow {decision.toxic}</span>
+          <span>
+            {decision.approved
+              ? "approved"
+              : decision.reason
+                ? `${decision.reason} hurdle ${Math.round(decision.hurdleBps ?? 0)} bps`
+                : "hold"}
+          </span>
+        </div>
+      )}
+
       <div className={styles.posRow}>
         <span className={`${styles.posTag} ${isLong ? styles.buy : styles.flat}`}>{isLong ? "LONG" : "FLAT"}</span>
         {isLong && position?.entryPrice != null && <span className={styles.posDetail}>@ {fmtPrice(position.entryPrice)}</span>}
+        {isLong && position?.stopPrice != null && position.takeProfitPrice != null && (
+          <span className={styles.posDetail}>
+            stop {fmtPrice(position.stopPrice)} take profit {fmtPrice(position.takeProfitPrice)}
+          </span>
+        )}
         {position && (
           <span className={`${styles.posPnl} ${position.unrealizedUsd >= 0 ? styles.pos : styles.neg}`}>
             {fmtUsd(position.unrealizedUsd + position.realizedUsd, 2)}

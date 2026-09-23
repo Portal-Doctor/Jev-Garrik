@@ -65,6 +65,12 @@ export interface Report {
 
 const Z = 1.96; // 95%
 
+/** Live campaign pairs: venue history intersected with the current config list. Drops MON-USDC. */
+export function liveReportPairs(venuePairs: string[], configured: readonly string[]): string[] {
+  const allow = new Set(configured);
+  return venuePairs.filter((p) => p !== "MON-USDC" && allow.has(p));
+}
+
 /** Wilson score interval for a binomial proportion. */
 export function wilson(successes: number, n: number, z = Z): { p: number; lower: number; upper: number } {
   if (n === 0) return { p: 0, lower: 0, upper: 0 };
@@ -161,8 +167,8 @@ export async function buildReport(store: Store, opts: { incidentsPerDay?: number
   const tradedHorizonSec = config.horizonSec;
   const roundTripBps = config.makerFeeBps + config.takerFeeBps;
   const perPairBankroll = config.bankrollUsd / (config.pairs.length || 1);
-  const pairs = (await store.pairsWithDataForVenue("paper")).filter((p) => p !== "MON-USDC");
-  const unresolved = await store.earliestUnresolvedTsForVenue("paper", MEASURED_HORIZONS_SEC);
+  const pairs = liveReportPairs(await store.pairsWithDataForVenue("paper"), config.pairs);
+  const unresolved = await store.earliestUnresolvedTsForVenue("paper", MEASURED_HORIZONS_SEC, pairs);
   const nextReads: NextRead[] = unresolved.map((r) => ({
     horizonSec: Number(r.horizon_sec),
     at: r.ts != null ? Number(r.ts) + Number(r.horizon_sec) * 1000 : null,

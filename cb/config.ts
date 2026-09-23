@@ -13,10 +13,8 @@ export const config = {
   // Persistence: Postgres only (Bun.sql). Docker Compose serves this by default.
   databaseUrl: env("DATABASE_URL", "postgres://cb:cb@localhost:5432/cb")!,
 
-  // Strategy (spec section 2). Pairs are config, not code.
-  // AVAX and TAO supplement the original four. Jev 429s time out per cycle (DECIDE_DEADLINE_MS)
-  // instead of pinning a pair, so TAO stays on the board.
-  pairs: list("CB_PAIRS", "SOL-USD,DOGE-USD,SUI-USD,XRP-USD,AVAX-USD,TAO-USD"),
+  // Strategy (spec section 2). Pairs are config, not code. SOL-USD is the live paper book.
+  pairs: list("CB_PAIRS", "SOL-USD"),
   decideSec: num("CB_DECIDE_SEC", 300),
   horizonSec: num("CB_HORIZON_SEC", 14_400),
   notionalUsd: num("CB_NOTIONAL_USD", 1_000),
@@ -42,6 +40,21 @@ export const config = {
   // into fewer, higher-conviction round trips. Holding position when p(buy) is between the two.
   buyThreshold: num("CB_BUY_THRESHOLD", 0.6),
   sellThreshold: num("CB_SELL_THRESHOLD", 0.4),
+  /**
+   * Multiplier on the post-only round trip (maker + maker + half spread).
+   * 1.5 keeps a margin over raw cost and still lets a real expected move through.
+   */
+  feeBuffer: num("CB_FEE_BUFFER", 1.5),
+  /** Hard stop, in bps of the fee-inclusive entry. No fee floor. */
+  stopLossBps: num("CB_STOP_LOSS_BPS", 150),
+  /** Hard take-profit, in bps of the fee-inclusive entry. Must clear maker + taker. */
+  takeProfitBps: num("CB_TAKE_PROFIT_BPS", 250),
+  /** A fill farther than this from the mid at placement blocks new entries. */
+  maxSlippageBps: num("CB_MAX_SLIPPAGE_BPS", 10),
+  /** Fraction of near-touch USD depth a new entry may be. */
+  depthParticipation: num("CB_DEPTH_PARTICIPATION", 0.25),
+  /** Below this, an entry is dust and cannot clear the fee hurdle. */
+  minSizeUsd: num("CB_MIN_SIZE_USD", 25),
 
   // Model (shared with the demo).
   model: (env("MODEL", "mock") as "mock" | "jev"),

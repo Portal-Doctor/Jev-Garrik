@@ -30,7 +30,7 @@ export default function OverviewPage() {
             </p>
             <ul>
               <li>Dashboard on port 3002</li>
-              <li>Start with bun run kuru:start</li>
+              <li>Engine stays stopped</li>
               <li>Promotion gate before any live size</li>
             </ul>
             <div className={styles.links}>

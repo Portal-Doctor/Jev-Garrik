@@ -7,9 +7,10 @@ alongside Postgres. The `/paper` dashboard is a plain Next.js app you start on d
 
 | Component | Where | Notes |
 |---|---|---|
-| `cb/` backend | **Local Docker** (`cb-app`) | `restart: unless-stopped`; rebuilds books from the feed on start. |
+| `cb/` backend | **Local Docker** (`cb-app`) | `restart: unless-stopped`; SOL-USD paper. Rebuilds books from the feed on start. |
 | Postgres | **Local Docker** (`cb-postgres`) | Data in the named volume `cb-pgdata`. |
 | `web/` dashboard | **On demand** (`bun run dev`) | Viewer only; reads `NEXT_PUBLIC_PAPER_API_URL`. |
+| Kuru paper | **Off by default** | Compose profile `kuru`. Not started by `docker compose up`. |
 
 ## Prerequisites
 
@@ -21,11 +22,13 @@ alongside Postgres. The `/paper` dashboard is a plain Next.js app you start on d
 ## Start / build
 
 ```powershell
-docker compose up -d --build     # build the cb image + start DB and backend
+docker compose up -d --build     # build the cb image + start DB and Coinbase backend (not Kuru)
 docker compose logs -f cb        # watch it boot: expect model=typesafe-ai/jev, "synced":true
 ```
 
-Both services use `restart: unless-stopped`, so they auto-restart on crash and return after a
+Default compose is Postgres + Coinbase paper. Kuru is compose profile `kuru` and stays off.
+
+cb and db use `restart: unless-stopped`, so they auto-restart on crash and return after a
 reboot (given Docker Desktop autostart). The schema is applied on boot by `store.init()`.
 
 ## View the dashboard (on demand)
@@ -78,7 +81,7 @@ docker exec cb-postgres pg_restore -U cb -d cb --clean --if-exists /tmp/restore.
 
 ## Notes
 
-- `MODEL=jev` runs real inferences continuously (~4 decisions / 300s across the pairs) — a small
+- `MODEL=jev` runs real inferences continuously (one SOL-USD decision every 300s) — a small
   but ongoing gateway cost while the stack is up.
 - Production cadence is 300s decide / 4h horizon, so promotion-gate metrics need **days** of data
   before they mean anything.
