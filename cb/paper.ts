@@ -1,3 +1,4 @@
+import { findBook } from "./books";
 import { Accounting, feeUsd } from "./accounting";
 import type { PairBook, TradePrint } from "./feed";
 import type { Broker, OrderIntent } from "./engine";
@@ -8,7 +9,7 @@ import { killSwitch } from "./kill";
 
 /**
  * Paper broker: simulates the execution policy against the real feed and keeps a fee-inclusive
- * ledger. Rules adapted from Trader.simFills (src/trader.ts) with an honesty haircut:
+ * ledger. An honesty haircut stands in for unknown queue position:
  *
  * - Entry: post-only, one tick inside the touch, clamped so a buy never reaches the ask and a
  *   sell never reaches the bid. Reprice if that quote moves more than `repriceTicks`. An entry
@@ -83,6 +84,10 @@ export interface PaperOpts {
   neverCrossEntry?: boolean;
   stopLossBps?: number;
   takeProfitBps?: number;
+  /** Book-level cap on open longs plus resting entries. Omit to leave size uncapped. */
+  maxGrossUsd?: number;
+  /** Residual under this is not posted when the gross cap is on. */
+  minSizeUsd?: number;
   /** Fill farther than this from `refMid` cancels the rest and blocks new entries. */
   maxSlippageBps?: number;
   /** When this returns false, resting entries are canceled and new entries are refused. */
@@ -112,6 +117,8 @@ export class PaperBroker implements Broker {
   private seq = 0;
   /** Latched by a fill that slipped too far from the placement mid. Exits still flatten. */
   private entryBlocked = new Map<string, boolean>();
+  /** Buy notional reserved before the order row exists, so two pairs cannot both clear the cap. */
+  private reservedUsd = new Map<string, number>();
   private stepping = new Map<string, boolean>();
   /** Per-instance token so synthetic external ids stay unique even if a runId is ever reused. */
   private readonly instance = crypto.randomUUID().slice(0, 8);
@@ -192,12 +199,36 @@ export class PaperBroker implements Broker {
     return (this.acct.get(pair)?.positionBase ?? 0) > 0 ? "long" : "flat";
   }
 
-  observe(pair: string, action: Action, inferenceUsd: number): void {
-    this.acct.get(pair)?.addInference(inferenceUsd);
-    // A refreshing buy while long resets the horizon clock (hold, do not re-enter).
-    if (action === "buy" && this.positionOf(pair) === "long") {
-      this.horizonExpiresAt.set(pair, Date.now() + this.opts.horizonSec * 1000);
+  /** Mark of every open long, plus resting and reserved entry notionals. */
+  openGrossUsd(): number {
+    let sum = 0;
+    for (const pair of this.pairs) {
+      const acct = this.acct.get(pair);
+      if (!acct) continue;
+      if (acct.positionBase > 0) {
+        const mid = this.feed.book(pair)?.mid() ?? acct.entryPrice() ?? 0;
+        if (mid > 0) sum += acct.positionBase * mid;
+        continue;
+      }
+      const order = this.open.get(pair);
+      if (order && order.purpose === "entry" && order.side === "buy") sum += order.remaining * order.price;
     }
+    for (const usd of this.reservedUsd.values()) sum += usd;
+    return sum;
+  }
+
+  private risk(pair: string): { stopLossBps?: number; takeProfitBps?: number; notionalUsd: number } {
+    const book = findBook(pair);
+    return {
+      stopLossBps: book?.stopLossBps ?? this.opts.stopLossBps,
+      takeProfitBps: book?.takeProfitBps ?? this.opts.takeProfitBps,
+      notionalUsd: book?.notionalUsd ?? this.opts.notionalUsd,
+    };
+  }
+
+  observe(pair: string, _action: Action, inferenceUsd: number): void {
+    this.acct.get(pair)?.addInference(inferenceUsd);
+    // The hold clock starts when the entry fills and is not extended by a later buy.
   }
 
   onIntent(intent: OrderIntent): void {
@@ -229,42 +260,61 @@ export class PaperBroker implements Broker {
     const price = insideTouchPrice(side, bid, ask, tick);
     if (!(price > 0)) return;
     const acct = this.acct.get(pair)!;
-    const usd = sizeUsd != null && sizeUsd > 0 ? sizeUsd : this.opts.notionalUsd;
+    const risk = this.risk(pair);
+    let usd = sizeUsd != null && sizeUsd > 0 ? sizeUsd : risk.notionalUsd;
+    let reserved = false;
+    if (side === "buy" && this.opts.maxGrossUsd != null) {
+      const room = this.opts.maxGrossUsd - this.openGrossUsd();
+      const min = this.opts.minSizeUsd ?? 0;
+      if (!(room > 0) || room < min) return;
+      usd = Math.min(usd, room);
+      if (usd < min) return;
+      this.reservedUsd.set(pair, usd);
+      reserved = true;
+    }
     const sizeBase = side === "buy" ? usd / price : acct.positionBase;
-    if (sizeBase <= 0) return;
+    if (sizeBase <= 0) {
+      if (reserved) this.reservedUsd.delete(pair);
+      return;
+    }
     // A buy needs cash for its notional plus the maker fee. Entries do not convert to taker.
     if (side === "buy") {
       const requiredCashUsd = usd * (1 + this.opts.makerFeeBps / 10_000);
       if (acct.cashUsd() < requiredCashUsd) {
+        if (reserved) this.reservedUsd.delete(pair);
         console.warn(`${pair}: skipping ${purpose} buy, insufficient cash ($${acct.cashUsd().toFixed(2)} < $${requiredCashUsd.toFixed(2)} needed)`);
         return;
       }
     }
     const now = Date.now();
-    const id = await this.store.insertOrder({
-      run_id: this.runId,
-      decision_id: decisionId,
-      pair,
-      side,
-      purpose,
-      price,
-      size_base: sizeBase,
-      status: "open",
-      venue_order_id: null,
-      created_at: now,
-      updated_at: now,
-    });
-    this.open.set(pair, {
-      id,
-      side,
-      purpose,
-      price,
-      remaining: sizeBase,
-      createdAt: now,
-      eligibleAt: now + ELIGIBLE_DELAY_MS,
-      decisionId,
-      refMid: refMid ?? book.mid(),
-    });
+    try {
+      const id = await this.store.insertOrder({
+        run_id: this.runId,
+        decision_id: decisionId,
+        pair,
+        side,
+        purpose,
+        price,
+        size_base: sizeBase,
+        status: "open",
+        venue_order_id: null,
+        created_at: now,
+        updated_at: now,
+      });
+      this.open.set(pair, {
+        id,
+        side,
+        purpose,
+        price,
+        remaining: sizeBase,
+        createdAt: now,
+        eligibleAt: now + ELIGIBLE_DELAY_MS,
+        decisionId,
+        refMid: refMid ?? book.mid(),
+      });
+    } finally {
+      if (reserved) this.reservedUsd.delete(pair);
+    }
   }
 
   private tick(now = Date.now()): void {
@@ -304,8 +354,9 @@ export class PaperBroker implements Broker {
    * A flat pair has no entry price, so neither guard can trip.
    */
   private async enforceGuards(pair: string, now: number): Promise<void> {
-    const stop = this.opts.stopLossBps;
-    const take = this.opts.takeProfitBps;
+    const risk = this.risk(pair);
+    const stop = risk.stopLossBps;
+    const take = risk.takeProfitBps;
     if (stop == null || take == null) return;
     if (this.positionOf(pair) !== "long") return;
     const entry = this.acct.get(pair)?.entryPrice();
@@ -476,6 +527,9 @@ export class PaperBroker implements Broker {
       openOrder: order ? { side: order.side, purpose: order.purpose, price: order.price, remaining: order.remaining, ageMs: Date.now() - order.createdAt } : null,
       stopPrice: this.guardPrice(pair, "stop"),
       takeProfitPrice: this.guardPrice(pair, "take_profit"),
+      stopLossBps: this.risk(pair).stopLossBps ?? null,
+      takeProfitBps: this.risk(pair).takeProfitBps ?? null,
+      notionalUsd: this.risk(pair).notionalUsd,
       makerFills: counts.maker,
       takerFills: counts.taker,
       takerFillShare: totalFills > 0 ? counts.taker / totalFills : 0,
@@ -531,7 +585,8 @@ export class PaperBroker implements Broker {
   private guardPrice(pair: string, which: "stop" | "take_profit"): number | null {
     if (this.positionOf(pair) !== "long") return null;
     const entry = this.acct.get(pair)?.entryPrice();
-    const bps = which === "stop" ? this.opts.stopLossBps : this.opts.takeProfitBps;
+    const risk = this.risk(pair);
+    const bps = which === "stop" ? risk.stopLossBps : risk.takeProfitBps;
     if (entry == null || !(entry > 0) || bps == null) return null;
     return which === "stop" ? entry * (1 - bps / 10_000) : entry * (1 + bps / 10_000);
   }

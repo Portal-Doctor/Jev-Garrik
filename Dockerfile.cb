@@ -1,7 +1,7 @@
 FROM oven/bun:1.3
 WORKDIR /app
 
-# Install deps against the root manifest (cb/ shares it with the demo).
+# Install deps against the root manifest.
 COPY package.json bun.lock bunfig.toml ./
 RUN bun install --frozen-lockfile --production
 

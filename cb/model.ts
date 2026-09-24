@@ -23,15 +23,15 @@ export interface Model {
 }
 
 /**
- * One classification, four choices. Jev judges regime, toxic flow, and direction.
- * It does not place orders and it does not compute fees. The gate owns the hurdle.
+ * One classification, four choices. Regime, toxic flow, and liquidity stress are vetoes.
+ * Direction is recorded and is not the order. Jev does not set a price target or a fee.
  */
 const QUESTIONS = {
   market_regime: {
     type: "choice",
     instructions: {
-      question: "What regime is this pair in over `horizonSec`?",
-      goal: "Judge the spot market. You do not place orders and you do not compute fees.",
+      question: "What regime is this pair in?",
+      goal: "This label is a veto. Contraction blocks a new long and flattens an open long. You do not place orders, set a price target, or compute a fee.",
       timing: "The label is read now and reevaluated each cycle.",
       inputs: "`volBps` is realized volatility scaled to the horizon. `parkinsonBps` is high-low vol from 1 minute candles. `returnsBps` is the path. Expansion is a directional, volatile tape. Balance is a two-way range. Contraction is a quiet tape.",
     },
@@ -44,9 +44,9 @@ const QUESTIONS = {
   direction_bias: {
     type: "choice",
     instructions: {
-      question: "Is the bias over `horizonSec` long or flat? Coinbase spot cannot short.",
-      goal: "Judge direction only. You do not place orders and you do not compute fees. A `long` is a bias that mid is higher after the horizon. A `flat` is no long.",
-      timing: "The bias is read now. Whether it becomes an order is decided outside this call.",
+      question: "Is the recorded bias long or flat? Coinbase spot cannot short.",
+      goal: "Record direction only. The order is not yours. A long bias is not an instruction to buy, and a flat bias is not an instruction to sell. You do not place orders, set a price target, or compute a fee.",
+      timing: "The bias is read now. Code decides whether a long is opened.",
       inputs: "`imbalance5` and `imbalance20` are resting pressure at the top of book, from -1 (asks) to 1 (bids). `volumeDelta` is taker buy minus taker sell over the feature window, and `volumeGross` is the total. `emaCross` and `emaGapBps` are the fast versus slow average. `rsi` is Wilder RSI on 1 minute closes. `position` is current spot exposure.",
     },
     criteria: {
@@ -58,7 +58,7 @@ const QUESTIONS = {
     type: "choice",
     instructions: {
       question: "Is taker flow toxic or ordinary?",
-      goal: "Judge whether aggressive flow is likely to run a maker quote. You do not place orders and you do not compute fees.",
+      goal: "This label is a veto. High toxic flow blocks a new long and flattens an open long. You do not place orders, set a price target, or compute a fee.",
       timing: "The label is read now.",
       inputs: "`volumeDelta` against `imbalance5` is the tell: heavy taker flow pushing through resting size is toxic. Quiet or agreeing flow is low risk.",
     },
@@ -71,7 +71,7 @@ const QUESTIONS = {
     type: "choice",
     instructions: {
       question: "Is the book normally liquid or stressed?",
-      goal: "Judge liquidity only. You do not place orders and you do not compute fees.",
+      goal: "This label is a veto on a new long. A stressed book blocks the entry. You do not place orders, set a price target, or compute a fee.",
       timing: "The label is read now.",
       inputs: "`spreadBps` against `spreadEmaBps`, plus thin size behind `imbalance5`, marks a stressed book. A spread sitting on its average is normal.",
     },

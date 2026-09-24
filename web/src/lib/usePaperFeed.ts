@@ -99,6 +99,7 @@ function reducer(state: PaperState, action: Action): PaperState {
         approved: d.approved,
         reason: d.reason,
         hurdleBps: d.hurdleBps,
+        horizonVolBps: d.horizonVolBps,
       };
       return {
         ...state,

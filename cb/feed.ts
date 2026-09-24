@@ -12,9 +12,6 @@ import { FeatureAccumulator, emptySnapshot, type FeatureSnapshot } from "./featu
  * next level2 snapshot; a heartbeat gap beyond 15 s forces a reconnect. Once a minute it cross-checks
  * the local book against the REST best bid/ask and logs divergence over a spread-scaled threshold.
  *
- * Mirrors the role of src/book.ts + src/trades.ts for the demo, so the MarketState the model later
- * sees is structurally familiar.
- *
  * `Feed.incidents` (SENIOR-DEV-REPORT-2026-09-19.md item 1) only counts signals that indicate an
  * actual feed defect: WS reconnects, heartbeat-gap forced reconnects, mid-stream book resyncs
  * (outside of the initial sync), and REST/WS mid divergence that persists across two consecutive

@@ -18,8 +18,8 @@ export interface RunRow {
   git_sha: string | null;
   started_at: number;
   stopped_at: number | null;
-  /** `paper` (Coinbase campaign) or `kuru`. Defaults to paper for existing rows. */
-  venue?: "paper" | "kuru";
+  /** Coinbase paper campaign. */
+  venue?: "paper";
 }
 
 export interface DecisionRow {
@@ -68,7 +68,7 @@ export interface FillRow {
   id: string;
   run_id: string;
   order_id: string | null;
-  venue: "paper" | "coinbase" | "kuru";
+  venue: "paper" | "coinbase";
   external_id: string;
   pair: string;
   side: "buy" | "sell";
@@ -79,7 +79,7 @@ export interface FillRow {
   liquidity: "maker" | "taker";
   cost_basis_usd: number;
   proceeds_usd: number;
-  source: "paper_sim" | "coinbase_sync" | "kuru_sim" | "kuru_live";
+  source: "paper_sim" | "coinbase_sync";
   traded_at: number;
   recorded_at: number;
   raw?: unknown;
@@ -179,7 +179,7 @@ export class Store {
   }
 
   /** Newest open or partial order per pair for one venue. Used to resume the book after a restart. */
-  async openOrdersForVenue(venue: "paper" | "kuru"): Promise<OrderRow[]> {
+  async openOrdersForVenue(venue: "paper"): Promise<OrderRow[]> {
     return this.sql<OrderRow[]>`
       SELECT DISTINCT ON (o.pair) o.*
       FROM orders o
@@ -347,7 +347,7 @@ export class Store {
     `;
   }
 
-  async recentDecisions(opts: { pair?: string; limit?: number; venue?: "paper" | "kuru" } = {}): Promise<Array<DecisionRow & { outcomes: OutcomeRow[] }>> {
+  async recentDecisions(opts: { pair?: string; limit?: number; venue?: "paper" } = {}): Promise<Array<DecisionRow & { outcomes: OutcomeRow[] }>> {
     const limit = opts.limit ?? 100;
     const venue = opts.venue;
     const pair = opts.pair;
@@ -379,14 +379,13 @@ export class Store {
       : this.sql<FillRow[]>`SELECT * FROM fills ORDER BY traded_at ASC`;
   }
 
-  /** Fills for one engine. Coinbase uses venue paper (and coinbase if live). */
-  async fillsByVenue(venue: "paper" | "kuru"): Promise<FillRow[]> {
-    return venue === "kuru"
-      ? this.sql<FillRow[]>`SELECT * FROM fills WHERE venue = ${"kuru"} ORDER BY traded_at ASC`
-      : this.sql<FillRow[]>`SELECT * FROM fills WHERE venue IN (${"paper"}, ${"coinbase"}) ORDER BY traded_at ASC`;
+  /** Coinbase paper fills, plus any row already tagged coinbase. */
+  async fillsByVenue(venue: "paper"): Promise<FillRow[]> {
+    void venue;
+    return this.sql<FillRow[]>`SELECT * FROM fills WHERE venue IN (${"paper"}, ${"coinbase"}) ORDER BY traded_at ASC`;
   }
 
-  async inferenceUsdForVenue(venue: "paper" | "kuru"): Promise<number> {
+  async inferenceUsdForVenue(venue: "paper"): Promise<number> {
     const rows = await this.sql<{ s: number | null }[]>`
       SELECT SUM(d.inference_usd) AS s
       FROM decisions d
@@ -397,7 +396,7 @@ export class Store {
   }
 
   /** Latest cumulative gas per run, summed for the venue. */
-  async lastGasUsdForVenue(venue: "paper" | "kuru"): Promise<number> {
+  async lastGasUsdForVenue(venue: "paper"): Promise<number> {
     const rows = await this.sql<{ s: number | null }[]>`
       SELECT SUM(x.gas_usd) AS s FROM (
         SELECT DISTINCT ON (run_id) gas_usd
@@ -425,8 +424,8 @@ export class Store {
     return rows.map((r) => r.pair);
   }
 
-  /** Coinbase vs Kuru pairs. Stops MON-USDC from landing on the Coinbase P and L page. */
-  async pairsWithDataForVenue(venue: "paper" | "kuru"): Promise<string[]> {
+  /** Pairs that have a decision on the Coinbase paper book. */
+  async pairsWithDataForVenue(venue: "paper"): Promise<string[]> {
     const rows = await this.sql<{ pair: string }[]>`
       SELECT DISTINCT d.pair
       FROM decisions d
@@ -438,7 +437,7 @@ export class Store {
   }
 
   async earliestUnresolvedTsForVenue(
-    venue: "paper" | "kuru",
+    venue: "paper",
     horizonsSec: readonly number[],
     pairs?: readonly string[],
   ): Promise<Array<{ horizon_sec: number; ts: number | null }>> {
@@ -473,6 +472,24 @@ export class Store {
     return this.sql<SnapshotRow[]>`SELECT * FROM snapshots WHERE pair = ${pair} AND ts >= ${fromTs} ORDER BY ts ASC`;
   }
 
+  /** Decisions for one pair, oldest first, including the gate stored on `state`. */
+  async decisionsForPair(pair: string): Promise<Array<{ ts: number; action: "buy" | "sell"; traded: boolean; mid: number; state: unknown }>> {
+    return this.sql`
+      SELECT ts, action, traded, mid, state FROM decisions WHERE pair = ${pair} ORDER BY ts ASC
+    `;
+  }
+
+  /** Fills with the order purpose and the decision that placed the order, oldest first. */
+  async fillsWithPurpose(pair: string): Promise<Array<FillRow & { purpose: string | null; decision_id: string | null }>> {
+    return this.sql`
+      SELECT f.*, o.purpose AS purpose, o.decision_id AS decision_id
+      FROM fills f
+      LEFT JOIN orders o ON o.id = f.order_id
+      WHERE f.pair = ${pair}
+      ORDER BY f.traded_at ASC
+    `;
+  }
+
   /** Recent Coinbase fills with the order purpose (entry, exit, stop, take_profit). */
   async recentFillsJoined(limit = 50): Promise<Array<FillRow & { purpose: string | null }>> {
     return this.sql`
@@ -485,10 +502,10 @@ export class Store {
     `;
   }
 
-  async recentFills(opts: { pair?: string; limit?: number; venue?: "paper" | "kuru" } = {}): Promise<FillRow[]> {
+  async recentFills(opts: { pair?: string; limit?: number; venue?: "paper" } = {}): Promise<FillRow[]> {
     const limit = opts.limit ?? 50;
     const pair = opts.pair;
-    const venues = opts.venue === "kuru" ? (["kuru"] as const) : opts.venue === "paper" ? (["paper", "coinbase"] as const) : null;
+    const venues = opts.venue === "paper" ? (["paper", "coinbase"] as const) : null;
     if (venues && pair) {
       return this.sql<FillRow[]>`SELECT * FROM fills WHERE venue IN ${this.sql(venues)} AND pair = ${pair} ORDER BY traded_at DESC LIMIT ${limit}`;
     }
@@ -516,7 +533,7 @@ export class Store {
   }
 
   /** Wipe one venue's trading state. Leaves the other venue and `bars` alone. */
-  async resetVenue(venue: "paper" | "kuru"): Promise<void> {
+  async resetVenue(venue: "paper"): Promise<void> {
     await this.sql`DELETE FROM fills WHERE run_id IN (SELECT id FROM runs WHERE venue = ${venue}) OR venue = ${venue}`;
     await this.sql`DELETE FROM orders WHERE run_id IN (SELECT id FROM runs WHERE venue = ${venue})`;
     await this.sql`DELETE FROM outcomes WHERE decision_id IN (SELECT d.id FROM decisions d JOIN runs r ON r.id = d.run_id WHERE r.venue = ${venue})`;

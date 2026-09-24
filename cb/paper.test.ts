@@ -247,3 +247,23 @@ test("a flat pair never trips a stop or a take-profit", async () => {
   const rows = await store.sql<{ purpose: string }[]>`SELECT purpose FROM orders WHERE run_id = ${runId} AND pair = ${flatPair}`;
   expect(rows.length).toBe(0);
 });
+
+test("five resting clips stay inside the gross cap and a sixth is refused", async () => {
+  const names = ["G1-USD", "G2-USD", "G3-USD", "G4-USD", "G5-USD", "G6-USD"];
+  const feed = new FakeFeed();
+  const broker = new PaperBroker(names, feed, store, runId, {
+    ...guardOpts,
+    notionalUsd: 600,
+    bankrollUsd: 12_000,
+    maxGrossUsd: 3_000,
+    minSizeUsd: 25,
+  });
+  for (const name of names.slice(0, 5)) {
+    await (broker as any).place(name, "buy", "entry", null, 600);
+    expect(broker.state(name).openOrder).not.toBeNull();
+  }
+  expect(broker.openGrossUsd()).toBeLessThanOrEqual(3_000 + 1);
+  await (broker as any).place(names[5]!, "buy", "entry", null, 600);
+  expect(broker.state(names[5]!).openOrder).toBeNull();
+  expect(broker.state(names[5]!).position).toBe("flat");
+});

@@ -10,8 +10,6 @@ then approves or refuses the entry. Decisions, simulated fills, and outcomes at 
 are persisted to Postgres; a Bun server exposes REST + SSE, and a Next.js dashboard (`/paper`)
 renders it live.
 
-> The original Monad/Kuru demo (`src/`) still lives here — see [Legacy: Monad demo](#legacy-monad-demo-src) at the end.
-
 ---
 
 ## System at a glance
@@ -21,7 +19,6 @@ renders it live.
 | Trading engine (`cb/`) | Docker container `cb-app` | `3001` | Coinbase WS feed, decide/resolve loops, paper broker, REST+SSE. Always-on. SOL-USD. |
 | Postgres | Docker container `cb-postgres` | `5432` | Data in named volume `cb-pgdata`. |
 | Dashboard (`web/`) | Next.js dev, on demand | `3000` | Viewer only; reads `NEXT_PUBLIC_PAPER_API_URL`. |
-| Kuru paper (`src/`) | Compose profile `kuru` | `3002` | **Stopped.** Not in `docker compose up`. |
 
 Backend and DB use `restart: unless-stopped`, so they survive crashes and reboots (given Docker
 Desktop autostart). Full hosting details, including a cloud alternative, are in
@@ -219,7 +216,7 @@ cb/
 web/               Next.js dashboard; /paper route + usePaperFeed hook
 scripts/           ui-start.ps1 / ui-stop.ps1 (dashboard lifecycle)
 docs/              SPEC, SPEC-COINBASE, DEPLOY
-compose.yml        Postgres + cb-app (default); Kuru behind profile `kuru`
+compose.yml        Postgres + cb-app
 Dockerfile.cb      image for the cb backend
 ```
 
@@ -232,17 +229,3 @@ The point of the harness is to let the data say no cheaply. Run it unattended, r
 calibration, cost drag (fees + inference), max drawdown, and the gate booleans. Because the traded
 horizon is 4h, gate metrics need **days-to-weeks** of data before they mean anything. Only after the
 gate passes do we design a separately-reviewed live adapter — that work is out of scope until then.
-
----
-
-## Legacy: Monad demo (`src/`)
-
-The original demo posts one post-only limit order per Monad block on Kuru MON-USDC, earning the
-spread; a Jev model answers buy/sell each block. It is unrelated to the Coinbase harness and shares
-only the repo and the `ai`/model dependencies.
-
-The demo process stays stopped. There is no start script for it.
-
-Deployed dry-run reference: https://jev-trader-production.up.railway.app
-Layout: `src/{config,chain,book,market,model,trader,server}.ts`. See the file headers for the
-300 ms hot-loop design and the SSE event schema.

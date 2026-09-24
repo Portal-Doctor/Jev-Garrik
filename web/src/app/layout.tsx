@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Paper books",
-  description: "Kuru and Coinbase paper engines. No capital at risk.",
+  description: "Coinbase paper engine. No capital at risk.",
 };
 
 export const viewport: Viewport = {

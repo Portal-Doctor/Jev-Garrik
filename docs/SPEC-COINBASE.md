@@ -1,8 +1,8 @@
 # SPEC: Coinbase paper trading port ("cb")
 
-A longer-horizon directional strategy on Coinbase Advanced Trade, driven by the same Jev decision
-layer as the Kuru demo, with paper trading, a measurement harness, a trade-tracking database
-(SQLite or PostgreSQL), and a dashboard that shows exactly what is going on.
+A longer-horizon directional strategy on Coinbase Advanced Trade, with paper trading, a measurement
+harness, a trade-tracking database (SQLite or PostgreSQL), and a dashboard that shows exactly what
+is going on.
 
 Status: design, ready to build. Audience: a senior developer. Estimated effort: 7 to 10 dev days
 to the end of M4 (paper trading with full UI), live trading explicitly out of scope until the
@@ -12,8 +12,7 @@ promotion gate passes.
 
 ## 1. Why this exists and what it must prove
 
-The Kuru demo places an order every 300 ms block; its economics are gas-dominated and it is not
-meant to make money. On Coinbase the costs invert: no gas, but US entry-tier fees are
+On Coinbase there is no gas, but US entry-tier fees are
 0.50% maker / 0.90% taker (schedule of Sept 16, 2026). A round trip as maker costs ~100 bps.
 
 Volatility scales with sqrt(time). At an 8% daily-volatility pair, the expected 30 second move is
@@ -29,9 +28,7 @@ question.
 
 ### Non-goals and constraints
 
-- Do not touch the existing Kuru demo. `src/`, `web/src/app/page.tsx` and the four demo claims in
-  `CLAUDE.md` stay intact. All new backend code lives in a new `cb/` directory; the new UI is a
-  new route in the existing `web/` app.
+- Backend code lives in `cb/`. The dashboard lives in `web/`. There is no second venue.
 - Spot only, long/flat. US Coinbase spot cannot short. A `buy` decision targets a long position,
   a `sell` decision targets flat. Sell-call accuracy is still measured even when already flat.
 - No live orders in this phase. The live adapter is a thin, separately reviewed follow-up (M5)
@@ -51,15 +48,20 @@ Chosen for volatility relative to the fee hurdle, real retail taker flow (the mo
 CVD, book imbalance, and momentum, which are retail-flow signals), and Coinbase liquidity
 (volumes as of Sept 2026):
 
-| Pair | Daily vol | Coinbase 24h volume | Role |
-|------|-----------|---------------------|------|
-| SOL-USD | 5-8% | $74-94M | Primary. Best volatility-to-liquidity balance. |
-| DOGE-USD | 7-11% | $24-40M | Best signal fit (retail sentiment flow). Spiky; smaller size. |
-| SUI-USD | ~8% | $18-22M | Most volatility per unit liquidity. Smaller size. |
-| XRP-USD | 4-7% | High | Diversification; uncorrelated news cycle. |
+| Pair | 4h sigma | Stop / take-profit | Notional | Role |
+|------|-----------|--------------------|----------|------|
+| UNI-USD | 295 bps | 295 / 1180 | $600 | Liquid tape. Trades when the average stack is up. |
+| NEAR-USD | 331 bps | 331 / 1324 | $600 | Same class, slightly larger move. |
+| BCH-USD | 242 bps | 242 / 968 | $500 | Large tape, quieter than UNI. |
+| SUI-USD | 219 bps | 219 / 876 | $400 | Tightest after-fee payoff. Still above 2 to 1 at 50 and 90. |
+| AVAX-USD | 227 bps | 227 / 908 | $400 | Same class as SUI. |
+| ARB-USD | 390 bps | 390 / 1560 | $300 | Largest liquid 4h move. Smallest clip. |
 
-Excluded: BTC-USD and ETH-USD (volatility too low against the fee hurdle, hardest professional
-competition), long-tail listings (wide spreads but scarce, informed fills).
+Stop is 1.0 sigma and take-profit is 4.0 sigma (`cb/books.ts`). The table is the risk book.
+`CB_PAIRS` selects which enabled rows run. A name missing from the table refuses boot.
+
+Excluded: SOL-USD, ETH-USD, and BTC-USD (typical 4h sigma sits under the fee hurdle), XRP-USD
+(needs a near-certain call), and thin meme tapes where a post-only clip is the book.
 
 Pairs are config (`CB_PAIRS`), not code. Every module is written per-pair and the engine runs one
 instance per pair against a shared feed process.
@@ -68,46 +70,52 @@ instance per pair against a shared feed process.
 
 - Trade cadence stays one model call per pair every `CB_DECIDE_SEC` (default 300 s). Features
   update on each Coinbase tick. Jev's classify time is the only sub-second work. There is no
-  per-block loop. The live book is SOL-USD.
+  per-block loop. The live book is UNI, NEAR, BCH, SUI, AVAX, and ARB. Calls are staggered by
+  `decideSec / n` (50 s at six pairs). The 25 s decide deadline stays under that stagger.
 - The call is one classification with four choices: `market_regime` (expansion, balance,
   contraction), `direction_bias` (`long` or `flat`; spot cannot short), `toxic_flow_risk`
   (`low` or `high`), and `liquidity_stress` (`normal` or `stressed`). Confidence is the `long`
   probability on `direction_bias`. Jev does not place orders and does not compute fees.
-- `long` is stored as action `buy` and `flat` as action `sell`, so the resolver and the report
-  queries stay on buy/sell. Every vector is recorded, including ones the gate refuses, inside
-  `decisions.state`.
-- Traded horizon: `CB_HORIZON_SEC` (default 14,400 s = 4 h). The gate, not the model, decides
-  whether the expected move clears fees.
-- Measured horizons: every decision is also resolved (scored, not traded) at 1 h, 4 h, and 24 h
-  so horizon choice is data-driven without running three books.
+- An approved entry is stored as action `buy` because code entered. Jev's own `direction_bias`
+  and confidence stay on `decisions.state`. Every vector is recorded, including ones the gate
+  refuses.
+- Traded horizon: `CB_HORIZON_SEC` (default 86,400 s = 24 h). That is the position timer. The
+  decide cadence stays 300 s. A long is not closed because the next classify lost confidence.
+- Measured horizons: every decision is also resolved (scored, not traded) at 30 m, 1 h, 2 h, 4 h,
+  and 24 h. 30 m, 1 h, 2 h, and 4 h are not the hold clock.
 - Position model: target-position, long/flat. An approved entry is sized from near-touch depth,
-  capped at `CB_NOTIONAL_USD`. A flatten sells the open position. The same long bias while
-  already long holds and refreshes the horizon clock. The position also closes when the horizon
-  expires without a refreshing long.
+  capped at the pair notional. A flatten sells the open position. The hold clock starts at the
+  entry fill and is not extended by a later buy. The position closes on stop, take-profit, toxic
+  flow, contraction, halt, or the 24 hour clock.
 - One decision in flight per pair (same guard pattern as `Trader.busy` in `src/trader.ts`).
 
 ### 2.3 Fee gate and execution policy
 
 Entry is approved only when all of these hold. The gate is code (`cb/gate.ts`). Jev does not see it.
 
-- `direction_bias` is `long` and confidence is at least `CB_BUY_THRESHOLD` (default 0.60).
-- `toxic_flow_risk` is `low` and `liquidity_stress` is `normal`.
-- `market_regime` is `expansion`.
-- `expectedYieldBps > hurdleBps`, where
-  `expectedYieldBps = horizonVolBps * max(0, 2 * confidence - 1)` and
-  `hurdleBps = (makerFeeBps + makerFeeBps + halfSpreadBps) * CB_FEE_BUFFER`.
-  Gas is 0 on Coinbase. The exit is priced as taker because a horizon flatten may cross.
-- Size is `min(CB_NOTIONAL_USD, CB_DEPTH_PARTICIPATION * USD depth on levels 1 to 3 of the bid)`.
+- `emaCross` is `above`. Otherwise the reason is `trend`.
+- `toxic_flow_risk` is not `high`, `liquidity_stress` is not `stressed`, and `market_regime` is
+  not `contraction`. Those three are vetoes. Direction and confidence are recorded and do not
+  open or close the trade.
+- The 4 hour return is not already past that pair's stop. Otherwise the reason is `chase`.
+- After-fee winner is at least twice the after-fee loser at the configured maker and taker fees:
+  `winner = takeProfit - maker - taker`, `loser = stop + maker + taker`. Otherwise the reason is
+  `payoff`. A book that booted has already passed this at 50 and 90.
+- Size is `min(pair notional, CB_DEPTH_PARTICIPATION * USD depth on levels 1 to 3 of the bid, remaining gross)`.
   Default participation is 0.25. Below `CB_MIN_SIZE_USD` (default $25) the entry is refused as dust.
+  If the residual under `CB_MAX_GROSS_USD` (default $3,000) is under that minimum, the reason is `gross cap`.
+- Halt and a blocked feed still refuse.
 
-Exits are not asked to beat the hurdle. Flatten when confidence falls to `CB_SELL_THRESHOLD`
-(default 0.40), toxic flow is high, the kill switch trips, the horizon expires, or a stop or
-take-profit guard trips.
+`expectedYieldBps` is still computed and stored. It does not approve or refuse.
+
+Exits while long: toxic flow, contraction, the kill switch, the 24 hour clock, or a stop or
+take-profit guard. A confidence dip does not flatten.
 
 Stop and take-profit are hard guards on the 1 second tick, measured from the fee-inclusive
-average cost (`costBasisUsd / positionBase`), not the raw fill. Default stop is 150 bps. Default
-take-profit is 250 bps. Boot refuses to start when take-profit is less than or equal to maker plus
-taker fees. A later `long` cannot keep the position open once a guard has fired. The guard cancels
+average cost (`costBasisUsd / positionBase`), not the raw fill. Each pair uses its own stop and
+take-profit from `cb/books.ts`. Boot refuses a pair missing from that table, a take-profit at or
+below maker plus taker, a stop below the hurdle at a 2 bp spread, or an after-fee winner under
+twice the after-fee loser. A later `long` cannot keep the position open once a guard has fired. The guard cancels
 any resting order and flattens immediately as a taker, tagged `stop` or `take_profit`. A flat pair
 never trips either guard.
 
@@ -315,7 +323,7 @@ CREATE INDEX IF NOT EXISTS idx_decisions_pair_ts ON decisions(pair, ts);
 -- One row per (decision, measured horizon). Written by the resolver when ts + horizon passes.
 CREATE TABLE IF NOT EXISTS outcomes (
   decision_id TEXT NOT NULL,
-  horizon_sec INTEGER NOT NULL,   -- 3600 | 14400 | 86400
+  horizon_sec INTEGER NOT NULL,   -- 1800 | 3600 | 7200 | 14400 | 86400
   resolved_at INTEGER NOT NULL,
   mid_then REAL NOT NULL,
   mid_at_horizon REAL NOT NULL,
@@ -470,18 +478,19 @@ Additions to `.env.example` (root) and `web/.env.example`:
 
 ```
 # cb (Coinbase paper trading)
-CB_PAIRS=SOL-USD,DOGE-USD,SUI-USD,XRP-USD
+CB_PAIRS=UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD
 CB_DECIDE_SEC=300
-CB_HORIZON_SEC=14400
+CB_HORIZON_SEC=86400
 CB_NOTIONAL_USD=1000
-CB_BANKROLL_USD=10000
+CB_BANKROLL_USD=12000
+CB_MAX_GROSS_USD=3000
 CB_MAKER_FEE_BPS=50
 CB_TAKER_FEE_BPS=90
 CB_FILL_HAIRCUT=0.5
 CB_ENTRY_TIMEOUT_SEC=120
 CB_REPRICE_TICKS=2
 CB_NEVER_CROSS_ENTRY=false
-CB_BUY_THRESHOLD=0.6
+CB_BUY_THRESHOLD=0.70
 CB_SELL_THRESHOLD=0.4
 CB_PORT=3001
 CB_DB_PATH=data/cb.db

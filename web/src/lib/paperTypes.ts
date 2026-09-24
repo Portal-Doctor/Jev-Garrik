@@ -44,6 +44,11 @@ export interface PaperPosition {
   /** Armed while long, from the fee-inclusive entry. Null when flat. */
   stopPrice?: number | null;
   takeProfitPrice?: number | null;
+  /** Armed stop and take-profit, in bps, including while flat. */
+  stopLossBps?: number | null;
+  takeProfitBps?: number | null;
+  /** This pair's clip. Falls back to the global notional when the pair has no book. */
+  notionalUsd?: number;
 }
 
 export interface LastDecision {
@@ -56,6 +61,7 @@ export interface LastDecision {
   approved?: boolean;
   reason?: string | null;
   hurdleBps?: number | null;
+  horizonVolBps?: number | null;
 }
 
 export interface PaperMeta {
@@ -92,6 +98,7 @@ export interface DecisionEvent {
   approved?: boolean;
   reason?: string | null;
   hurdleBps?: number | null;
+  horizonVolBps?: number | null;
 }
 
 export interface FillEvent {
@@ -158,6 +165,41 @@ export interface PairReport {
     passes: boolean;
     values: { n: number; wilsonLower: number; netUsd: number; maxDrawdownPct: number; incidentsPerDay: number };
   };
+  diagnostics?: PairDiagnostics;
+}
+
+export interface PairDiagnostics {
+  decisions: number;
+  approved: number;
+  refused: {
+    quiet: number;
+    yield: number;
+    toxic: number;
+    stress: number;
+    regime: number;
+    bias: number;
+    confidence: number;
+    dust: number;
+    grossCap: number;
+  };
+  fills: {
+    entry: number;
+    exitSignal: number;
+    exitHorizon: number;
+    stop: number;
+    takeProfit: number;
+  };
+  holdMs: { p50: number | null; p90: number | null };
+  makerFeesUsd: number;
+  takerFeesUsd: number;
+  netUsd: number;
+  grossUsd: number;
+  edgeRatio: number | null;
+  stopRate: number;
+  takeProfitRate: number;
+  adverseNextHour: number | null;
+  score: number;
+  demote: boolean;
 }
 
 /** When the next outcome at a horizon becomes resolvable; `at` is null when nothing is pending. */

@@ -12,7 +12,7 @@ const API_URL = process.env.NEXT_PUBLIC_PAPER_API_URL ?? "http://localhost:3001"
 
 /** Price precision that adapts to the pair's scale (SOL ~113 vs DOGE ~0.08). */
 function fmtPrice(n: number | null | undefined): string {
-  if (typeof n !== "number" || !Number.isFinite(n)) return "—";
+  if (typeof n !== "number" || !Number.isFinite(n)) return "-";
   const abs = Math.abs(n);
   const d = abs >= 100 ? 2 : abs >= 1 ? 3 : abs >= 0.01 ? 5 : 7;
   return n.toFixed(d);
@@ -25,7 +25,7 @@ const baseSymbol = (pair: string) => pair.split("-")[0] ?? pair;
 
 /** Coin-quantity precision that adapts to scale (SOL ~9 vs DOGE ~11,000). */
 function fmtQty(n: number): string {
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "-";
   const abs = Math.abs(n);
   const d = abs >= 1000 ? 2 : abs >= 1 ? 4 : 6;
   return n.toFixed(d);
@@ -170,7 +170,7 @@ export default function PaperPage() {
           <span className={styles.uptime}>{uptime}</span>
           <span
             className={`${styles.chip} ${health === "connected" ? styles.chipOk : health === "disconnected" ? styles.chipDown : styles.chipChecking}`}
-            title={`backend ${health} · /health polled every 15s`}
+            title={`backend ${health}, /health polled every 15s`}
           >
             <i /> backend {health}
           </span>
@@ -207,7 +207,7 @@ export default function PaperPage() {
               decision={feed.lastDecision[pair]}
               report={reportByPair[pair]}
               tradedHorizonSec={report?.tradedHorizonSec ?? 14_400}
-              notionalUsd={report?.config.notionalUsd ?? 1_000}
+              notionalUsd={feed.positions[pair]?.notionalUsd ?? report?.config.notionalUsd ?? 600}
               nextTs={feed.nextDecision[pair]}
               decideSec={feed.meta?.decideSec ?? 300}
             />
@@ -223,6 +223,7 @@ export default function PaperPage() {
                 <li key={d.id}>
                   <span className={styles.logPair}>{d.pair}</span>
                   <span className={`${styles.tag} ${d.action === "buy" ? styles.buy : styles.sell}`}>{d.action}</span>
+                  <span className={styles.logMuted}>{d.approved ? "approved" : d.reason ?? "hold"}</span>
                   <span className={styles.logMuted}>p(up) {Math.round(d.pBuy * 100)}%</span>
                   <span className={styles.logMono}>{fmtPrice(d.mid)}</span>
                 </li>
@@ -355,7 +356,7 @@ function PairCard({
         <span className={styles.pairName}>{pair}</span>
         <span className={`${styles.syncDot} ${feed?.synced ? styles.synced : styles.unsynced}`} title={feed?.synced ? "synced" : "syncing"} />
         <span className={styles.mid}>{fmtPrice(feed?.mid)}</span>
-        <span className={styles.spread}>{feed?.spreadBps != null ? `${feed.spreadBps.toFixed(1)} bps` : "—"}</span>
+        <span className={styles.spread}>{feed?.spreadBps != null ? `${feed.spreadBps.toFixed(1)} bps` : "-"}</span>
         <Countdown nextTs={nextTs} decideSec={decideSec} />
       </div>
 
@@ -377,8 +378,15 @@ function PairCard({
                 ? `${decision.reason} hurdle ${Math.round(decision.hurdleBps ?? 0)} bps`
                 : "hold"}
           </span>
+          <span>vol {decision.horizonVolBps != null ? `${Math.round(decision.horizonVolBps)} bps` : "-"}</span>
         </div>
       )}
+
+      <div className={styles.decisionMeta}>
+        <span>stop {position?.stopLossBps != null ? `${position.stopLossBps} bps` : "-"}</span>
+        <span>take profit {position?.takeProfitBps != null ? `${position.takeProfitBps} bps` : "-"}</span>
+        <span>hurdle {decision?.hurdleBps != null ? `${Math.round(decision.hurdleBps)} bps` : "-"}</span>
+      </div>
 
       <div className={styles.posRow}>
         <span className={`${styles.posTag} ${isLong ? styles.buy : styles.flat}`}>{isLong ? "LONG" : "FLAT"}</span>
@@ -421,9 +429,9 @@ function PairCard({
 
       {traded && (
         <div className={styles.metricRow}>
-          <Metric label={`acc ${hhLabel(tradedHorizonSec)}`} value={traded.n > 0 ? `${(traded.accuracy * 100).toFixed(0)}%` : "—"} />
-          <Metric label="wilson↓" value={traded.n > 0 ? `${(traded.wilsonLower * 100).toFixed(0)}%` : "—"} />
-          <Metric label="edge" value={traded.n > 0 ? `${traded.edgeBps.toFixed(0)}bps` : "—"} tone={traded.edgeBps} />
+          <Metric label={`acc ${hhLabel(tradedHorizonSec)}`} value={traded.n > 0 ? `${(traded.accuracy * 100).toFixed(0)}%` : "-"} />
+          <Metric label="wilson" value={traded.n > 0 ? `${(traded.wilsonLower * 100).toFixed(0)}%` : "-"} />
+          <Metric label="edge" value={traded.n > 0 ? `${traded.edgeBps.toFixed(0)}bps` : "-"} tone={traded.edgeBps} />
           <Metric label="n" value={String(traded.n)} />
         </div>
       )}
@@ -432,8 +440,8 @@ function PairCard({
         <div className={`${styles.gate} ${report.gate.passes ? styles.gatePass : styles.gateFail}`}>
           {report.gate.passes ? "PROMOTION GATE: PASS" : "GATE: measuring"}
           <span className={styles.gateDetail}>
-            net {fmtUsd(report.pnl.netUsd, 2)} · dd {report.maxDrawdownPct.toFixed(1)}%
-            {report.pnl.capture != null && ` · capture ${(report.pnl.capture * 100).toFixed(0)}%`}
+            net {fmtUsd(report.pnl.netUsd, 2)}, dd {report.maxDrawdownPct.toFixed(1)}%
+            {report.pnl.capture != null && `, capture ${(report.pnl.capture * 100).toFixed(0)}%`}
           </span>
         </div>
       )}

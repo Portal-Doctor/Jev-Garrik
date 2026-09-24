@@ -8,62 +8,30 @@ export default function OverviewPage() {
         <div className={styles.title}>
           <h1>Paper books</h1>
           <span className={styles.sub}>
-            Two engines. Jev still picks the side. <mark className={styles.safe}>no capital at risk</mark>
+            Coinbase spot. <mark className={styles.safe}>no capital at risk</mark>
           </span>
         </div>
       </header>
 
       <div className={styles.body}>
         <p className={styles.lead}>
-          This dashboard is for the paper soak, not the public tweet demo. Each engine writes its own
-          book and P and L. Use the side menu to move between live views and reports.
+          This dashboard is the Coinbase paper book. Jev classifies the tape. Code places the
+          paper order. Use the side menu for the live view, the report, and the tax worksheet.
         </p>
 
         <div className={styles.engines}>
           <article className={styles.engine}>
-            <h2>Kuru</h2>
-            <p className={styles.tag}>Monad on-chain book</p>
-            <p>
-              Two-sided maker quotes on MON-USDC. Jev chooses buy or sell from the price feed. The
-              engine posts on Kuru and only counts a paper fill when a real print crosses the resting
-              quote. Fees and a 0.5 percent haircut are applied so the report is honest.
-            </p>
-            <ul>
-              <li>Dashboard on port 3002</li>
-              <li>Engine stays stopped</li>
-              <li>Promotion gate before any live size</li>
-            </ul>
-            <div className={styles.links}>
-              <Link href="/kuru" className={styles.primary}>
-                Open Kuru
-              </Link>
-              <Link href="/kuru/report" className={styles.secondary}>
-                Kuru P and L
-              </Link>
-              <Link href="/tax/kuru" className={styles.secondary}>
-                Kuru tax
-              </Link>
-            </div>
-          </article>
-
-          <article className={styles.engine}>
             <h2>Coinbase</h2>
             <p className={styles.tag}>Spot pairs</p>
             <p>
-              Directional paper on Coinbase spot. Jev decides buy or sell from each pair feed. The
-              book measures edge after fees and holds the position through 30 second, 5 minute, and
-              30 minute reads.
-            </p>
-            <p>
-              The bar for tune or go live is the promotion gate on{" "}
-              <Link href="/paper/report">Coinbase P and L</Link>: at least 200 resolved 4 hour
-              decisions, Wilson lower bound above 52%, net P and L above zero, drawdown under 15%,
-              and a quiet feed.
+              Directional paper on six Coinbase pairs. A long is held until the stop, the
+              take-profit, a veto, or the 24 hour clock. The backtest page compares that fixed
+              target with a trailing stop.
             </p>
             <ul>
-              <li>Dashboard on port 3001</li>
+              <li>Engine on port 3001</li>
               <li>Start with bun run cb:restart</li>
-              <li>Same Postgres, venue paper</li>
+              <li>Postgres venue paper</li>
             </ul>
             <div className={styles.links}>
               <Link href="/paper" className={styles.primary}>
@@ -72,22 +40,15 @@ export default function OverviewPage() {
               <Link href="/paper/report" className={styles.secondary}>
                 Coinbase P and L
               </Link>
+              <Link href="/paper/backtest" className={styles.secondary}>
+                Backtest
+              </Link>
               <Link href="/tax/paper" className={styles.secondary}>
                 Coinbase tax
               </Link>
             </div>
           </article>
         </div>
-
-        <section className={styles.note}>
-          <h2>Why the root Jev Trader is off</h2>
-          <p>
-            The original tweet path placed an order on every 300 ms Monad block and kept a live
-            dashboard at this URL. That loop is not needed for paper measurement and it spent a
-            full book cycle plus a Jev call we already run inside the Kuru maker engine. The public
-            demo is not started here.
-          </p>
-        </section>
       </div>
     </div>
   );

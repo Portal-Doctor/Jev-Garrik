@@ -3,6 +3,7 @@ import type { Model, Decision, Action } from "./model";
 import type { Store } from "./db/store";
 import { buildState, type MarketState } from "./state";
 import { depthUsd } from "./features";
+import { findBook } from "./books";
 import { evaluateGate, type GateResult } from "./gate";
 import { killSwitch } from "./kill";
 
@@ -22,6 +23,8 @@ export interface OrderIntent {
 /** The engine asks the broker for the current position and hands it intents. Paper broker (M3). */
 export interface Broker {
   positionOf(pair: string): "long" | "flat";
+  /** Mark of open longs plus resting entries, in USD. */
+  openGrossUsd(): number;
   /** Called on every decision (traded or not), so the broker can refresh the horizon clock and accrue inference cost. */
   observe(pair: string, action: Action, inferenceUsd: number): void;
   onIntent(intent: OrderIntent): void;
@@ -31,6 +34,9 @@ export interface Broker {
 export class FlatBroker implements Broker {
   positionOf(): "long" | "flat" {
     return "flat";
+  }
+  openGrossUsd(): number {
+    return 0;
   }
   observe(): void {}
   onIntent(): void {}
@@ -48,6 +54,8 @@ export interface EngineOpts {
   notionalUsd: number;
   depthParticipation: number;
   minSizeUsd: number;
+  /** Book-level cap. Omit to leave size uncapped. */
+  maxGrossUsd?: number;
 }
 
 export interface GatedDecision extends Decision {
@@ -75,7 +83,7 @@ export function withDeadline<T>(p: Promise<T>, ms: number, label = "operation"):
 export const DECIDE_DEADLINE_MS = 25_000;
 
 /**
- * One model call per pair every `decideSec`. Same one-in-flight guard as src/trader.ts (`busy`): a
+ * One model call per pair every `decideSec`. One-in-flight guard (`busy`): a
  * cycle that arrives while the previous one for that pair is still running is skipped. The model
  * returns a decision vector. The gate approves a long or flattens. Only a decision that changes
  * the target position is `traded` and emits an intent to the broker. Raw probabilities are still
@@ -150,6 +158,9 @@ export class Engine {
       const inferenceUsd = (decision.inputTokens / 1e6) * this.opts.jevUsdPerMTok;
       const book = this.feed.book(pair);
       const halt = killSwitch.blocked();
+      const risk = findBook(pair);
+      const maxGross = this.opts.maxGrossUsd;
+      const remainingGrossUsd = maxGross == null ? Number.POSITIVE_INFINITY : Math.max(0, maxGross - this.broker.openGrossUsd());
       const gate = evaluateGate({
         position,
         vector: decision.vector,
@@ -161,20 +172,26 @@ export class Engine {
         buyThreshold: this.opts.buyThreshold,
         sellThreshold: this.opts.sellThreshold,
         depthUsd: book ? depthUsd(book, "buy", 3) : 0,
-        notionalUsd: this.opts.notionalUsd,
+        notionalUsd: risk?.notionalUsd ?? this.opts.notionalUsd,
         participation: this.opts.depthParticipation,
         minSizeUsd: this.opts.minSizeUsd,
+        remainingGrossUsd,
         halted: halt != null,
         feedBlocked: !this.feed.feedHealthy(pair),
+        emaCross: state.emaCross,
+        h4ReturnBps: state.returnsBps.h4,
+        stopLossBps: risk?.stopLossBps ?? 0,
+        takeProfitBps: risk?.takeProfitBps ?? 0,
       });
-      const gated: GatedDecision = { ...decision, gate };
+      const action = gate.approved ? "buy" : decision.action;
+      const gated: GatedDecision = { ...decision, action, gate };
       const target = gate.target;
       const traded = target !== position;
       const id = await this.store.insertDecision({
         run_id: this.runId,
         pair,
         ts: state.ts,
-        action: decision.action,
+        action,
         p_buy: decision.probabilities.buy,
         p_sell: decision.probabilities.sell,
         mid: state.mid,
@@ -186,7 +203,7 @@ export class Engine {
         traded,
       });
       this.latest.set(pair, { decision: gated, state, id });
-      this.broker.observe(pair, decision.action, inferenceUsd);
+      this.broker.observe(pair, action, inferenceUsd);
       let intent: OrderIntent | undefined;
       if (traded) {
         intent = {

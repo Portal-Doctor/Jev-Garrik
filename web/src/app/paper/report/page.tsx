@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Report } from "@/lib/paperTypes";
+import type { PairDiagnostics, PairReport, Report } from "@/lib/paperTypes";
 import { fmtUsd } from "@/lib/format";
 import styles from "./report.module.css";
 
@@ -85,7 +85,7 @@ export default function ReportPage() {
         <div className={styles.title}>
           <h1>P&amp;L Report</h1>
           <span className={styles.sub}>
-            Realized from the fills ledger, after fees and inference · traded horizon {hhLabel(th)}
+            Realized from the fills ledger, after fees and inference. Traded horizon {hhLabel(th)}
           </span>
         </div>
         <div className={styles.actions}>
@@ -103,7 +103,7 @@ export default function ReportPage() {
       ) : !hasData ? (
         <p className={styles.note}>
           No decisions recorded yet, so there is nothing to report. Once the engine has traded and outcomes resolve, the
-          P&amp;L breakdown appears here. (Report shape is live — it is simply empty.)
+          P&amp;L breakdown appears here. (Report shape is live. It is simply empty.)
         </p>
       ) : (
         <>
@@ -112,7 +112,7 @@ export default function ReportPage() {
             <Stat label="Gross (price)" value={fmtUsd(totals.gross, 2)} tone={totals.gross} />
             <Stat label="Fees" value={fmtUsd(-totals.fees, 2)} tone={-1} />
             <Stat label="Inference" value={fmtUsd(-totals.inference, 4)} tone={-1} />
-            <Stat label="Capture" value={totals.capture == null ? "—" : pct(totals.capture)} />
+            <Stat label="Capture" value={totals.capture == null ? "-" : pct(totals.capture)} />
             <Stat label="Gates passing" value={`${totals.gatesPassing}/${totals.nPairs}`} />
             {nextReads.map((r) => (
               <Stat key={r.horizonSec} label={`Next ${hhLabel(r.horizonSec)} read`} value={fmtNextRead(r.at, updatedAt ?? Date.now())} />
@@ -143,7 +143,7 @@ export default function ReportPage() {
                     <td className={styles.num}>{fmtUsd(p.pnl.grossUsd, 2)}</td>
                     <td className={styles.num}>{fmtUsd(p.pnl.feesUsd, 2)}</td>
                     <td className={styles.num}>{fmtUsd(p.pnl.inferenceUsd, 4)}</td>
-                    <td className={styles.num}>{p.pnl.capture == null ? "—" : pct(p.pnl.capture)}</td>
+                    <td className={styles.num}>{p.pnl.capture == null ? "-" : pct(p.pnl.capture)}</td>
                     <td className={styles.num}>{pct(p.takerFillShare, 0)}</td>
                     <td className={styles.num}>{p.maxDrawdownPct.toFixed(1)}%</td>
                     <td>
@@ -158,7 +158,7 @@ export default function ReportPage() {
           </section>
 
           <section className={styles.block}>
-            <h2>Directional accuracy · traded horizon {hhLabel(th)}</h2>
+            <h2>Directional accuracy, traded horizon {hhLabel(th)}</h2>
             <table className={styles.table}>
               <thead>
                 <tr>
@@ -177,11 +177,11 @@ export default function ReportPage() {
                     <tr key={p.pair}>
                       <td className={styles.pair}>{p.pair}</td>
                       <td className={styles.num}>{h?.n ?? 0}</td>
-                      <td className={styles.num}>{h && h.n > 0 ? pct(h.accuracy) : "—"}</td>
-                      <td className={styles.num}>{h && h.n > 0 ? `${pct(h.wilsonLower)}–${pct(h.wilsonUpper)}` : "—"}</td>
-                      <td className={styles.num}>{h && h.n > 0 ? h.brier.toFixed(4) : "—"}</td>
+                      <td className={styles.num}>{h && h.n > 0 ? pct(h.accuracy) : "-"}</td>
+                      <td className={styles.num}>{h && h.n > 0 ? `${pct(h.wilsonLower)} to ${pct(h.wilsonUpper)}` : "-"}</td>
+                      <td className={styles.num}>{h && h.n > 0 ? h.brier.toFixed(4) : "-"}</td>
                       <td className={`${styles.num} ${h && h.edgeBps >= 0 ? styles.pos : styles.neg}`}>
-                        {h && h.n > 0 ? h.edgeBps.toFixed(1) : "—"}
+                        {h && h.n > 0 ? h.edgeBps.toFixed(1) : "-"}
                       </td>
                     </tr>
                   );
@@ -191,7 +191,7 @@ export default function ReportPage() {
           </section>
 
           <section className={styles.block}>
-            <h2>Maker-fee sensitivity · net P&amp;L</h2>
+            <h2>Maker-fee sensitivity, net P&amp;L</h2>
             <table className={styles.table}>
               <thead>
                 <tr>
@@ -217,6 +217,9 @@ export default function ReportPage() {
               </tbody>
             </table>
           </section>
+
+          <HorizonComparison pairs={report!.pairs} />
+          <DiagnosticsTable pairs={report!.pairs} />
 
           <section className={styles.block}>
             <h2>Promotion gate</h2>
@@ -254,6 +257,98 @@ export default function ReportPage() {
         </>
       )}
     </div>
+  );
+}
+
+function fmtHold(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return "-";
+  const mins = Math.round(ms / 60_000);
+  if (mins < 60) return `${mins}m`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+function fmtRatio(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "-";
+  return n.toFixed(2);
+}
+
+function HorizonComparison({ pairs }: { pairs: PairReport[] }) {
+  const horizons = pairs[0]?.horizons ?? [];
+  if (horizons.length === 0) return null;
+  return (
+    <section className={styles.block}>
+      <h2>Horizon comparison</h2>
+      <p className={styles.note}>Scored only. The traded hold stays 4h until a later week picks a winner with n at least 200.</p>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th>Pair</th>
+            {horizons.map((h) => (
+              <th key={h.horizonSec} className={styles.num}>
+                {hhLabel(h.horizonSec)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {pairs.map((p) => (
+            <tr key={p.pair}>
+              <td className={styles.pair}>{p.pair}</td>
+              {p.horizons.map((h) => (
+                <td key={h.horizonSec} className={styles.num}>
+                  {h.n > 0 ? `${h.n} / ${h.edgeBps.toFixed(1)} bps` : "-"}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function DiagnosticsTable({ pairs }: { pairs: PairReport[] }) {
+  const rows = pairs.filter((p): p is PairReport & { diagnostics: PairDiagnostics } => p.diagnostics != null);
+  if (rows.length === 0) return null;
+  return (
+    <section className={styles.block}>
+      <h2>Pair diagnostics</h2>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th>Pair</th>
+            <th className={styles.num}>Score</th>
+            <th className={styles.num}>Quiet</th>
+            <th className={styles.num}>Yield</th>
+            <th className={styles.num}>Entries</th>
+            <th className={styles.num}>Stops</th>
+            <th className={styles.num}>Take profit</th>
+            <th className={styles.num}>Hold p50</th>
+            <th className={styles.num}>Edge</th>
+            <th className={styles.num}>Net</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => {
+            const d = p.diagnostics;
+            return (
+              <tr key={p.pair}>
+                <td className={styles.pair}>{p.pair}{d.demote ? " demote" : ""}</td>
+                <td className={styles.num}>{d.score}</td>
+                <td className={styles.num}>{d.refused.quiet}</td>
+                <td className={styles.num}>{d.refused.yield}</td>
+                <td className={styles.num}>{d.fills.entry}</td>
+                <td className={styles.num}>{d.fills.stop}</td>
+                <td className={styles.num}>{d.fills.takeProfit}</td>
+                <td className={styles.num}>{fmtHold(d.holdMs.p50)}</td>
+                <td className={styles.num}>{fmtRatio(d.edgeRatio)}</td>
+                <td className={`${styles.num} ${d.netUsd >= 0 ? styles.pos : styles.neg}`}>{fmtUsd(d.netUsd, 2)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
   );
 }
 

@@ -10,7 +10,6 @@ alongside Postgres. The `/paper` dashboard is a plain Next.js app you start on d
 | `cb/` backend | **Local Docker** (`cb-app`) | `restart: unless-stopped`; SOL-USD paper. Rebuilds books from the feed on start. |
 | Postgres | **Local Docker** (`cb-postgres`) | Data in the named volume `cb-pgdata`. |
 | `web/` dashboard | **On demand** (`bun run dev`) | Viewer only; reads `NEXT_PUBLIC_PAPER_API_URL`. |
-| Kuru paper | **Off by default** | Compose profile `kuru`. Not started by `docker compose up`. |
 
 ## Prerequisites
 
@@ -22,11 +21,11 @@ alongside Postgres. The `/paper` dashboard is a plain Next.js app you start on d
 ## Start / build
 
 ```powershell
-docker compose up -d --build     # build the cb image + start DB and Coinbase backend (not Kuru)
+docker compose up -d --build     # build the cb image + start DB and Coinbase backend
 docker compose logs -f cb        # watch it boot: expect model=typesafe-ai/jev, "synced":true
 ```
 
-Default compose is Postgres + Coinbase paper. Kuru is compose profile `kuru` and stays off.
+Default compose is Postgres + Coinbase paper.
 
 cb and db use `restart: unless-stopped`, so they auto-restart on crash and return after a
 reboot (given Docker Desktop autostart). The schema is applied on boot by `store.init()`.

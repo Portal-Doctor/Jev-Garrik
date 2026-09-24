@@ -1,6 +1,8 @@
+import { Accounting } from "./accounting";
+import { findBook } from "./books";
 import { config, MEASURED_HORIZONS_SEC } from "./config";
 import { Store, type FillRow } from "./db/store";
-import { Accounting } from "./accounting";
+import { gateFromState } from "./gate";
 
 /**
  * Measurement report: the point of the whole harness. Directional accuracy with a Wilson interval,
@@ -46,6 +48,41 @@ export interface PairReport {
     passes: boolean;
     values: { n: number; wilsonLower: number; netUsd: number; maxDrawdownPct: number; incidentsPerDay: number };
   };
+  diagnostics: PairDiagnostics;
+}
+
+export interface PairDiagnostics {
+  decisions: number;
+  approved: number;
+  refused: {
+    quiet: number;
+    yield: number;
+    toxic: number;
+    stress: number;
+    regime: number;
+    bias: number;
+    confidence: number;
+    dust: number;
+    grossCap: number;
+  };
+  fills: {
+    entry: number;
+    exitSignal: number;
+    exitHorizon: number;
+    stop: number;
+    takeProfit: number;
+  };
+  holdMs: { p50: number | null; p90: number | null };
+  makerFeesUsd: number;
+  takerFeesUsd: number;
+  netUsd: number;
+  grossUsd: number;
+  edgeRatio: number | null;
+  stopRate: number;
+  takeProfitRate: number;
+  adverseNextHour: number | null;
+  score: number;
+  demote: boolean;
 }
 
 /** When the next outcome at a horizon becomes resolvable: oldest unresolved decision ts + horizon.
@@ -69,6 +106,173 @@ const Z = 1.96; // 95%
 export function liveReportPairs(venuePairs: string[], configured: readonly string[]): string[] {
   const allow = new Set(configured);
   return venuePairs.filter((p) => p !== "MON-USDC" && allow.has(p));
+}
+
+/** Enabled books in config, plus any of those that already have history. */
+export function campaignPairs(configured: readonly string[], historical: readonly string[]): string[] {
+  const live = configured.filter((p) => findBook(p)?.enabled);
+  const allow = new Set(live);
+  const extra = historical.filter((p) => allow.has(p) && !live.includes(p));
+  return [...live, ...extra];
+}
+
+const WEEK_MS = 7 * 86_400_000;
+
+/** Same ratio as predictiveEdge: (avg win * win rate) / (avg loss * loss rate). */
+export function edgeRatioFromMoves(movesBps: number[]): number | null {
+  const wins: number[] = [];
+  const losses: number[] = [];
+  for (const m of movesBps) {
+    if (m > 0) wins.push(m);
+    else losses.push(-m);
+  }
+  const n = wins.length + losses.length;
+  if (n === 0) return null;
+  const winRate = wins.length / n;
+  const lossRate = losses.length / n;
+  const avgWin = wins.length ? wins.reduce((a, b) => a + b, 0) / wins.length : 0;
+  const avgLoss = losses.length ? losses.reduce((a, b) => a + b, 0) / losses.length : 0;
+  const den = avgLoss * lossRate;
+  if (!(den > 0)) return wins.length > 0 ? Number.POSITIVE_INFINITY : null;
+  return (avgWin * winRate) / den;
+}
+
+export function weeklyPairScore(input: {
+  netUsd: number;
+  edgeRatio: number | null;
+  stopRate: number;
+  takerFillShare: number;
+  quiet: number;
+  refusals: number;
+  entries: number;
+  maxDrawdownPct: number;
+  mature: boolean;
+}): { score: number; demote: boolean } {
+  let score = 0;
+  if (input.netUsd > 0) score += 2;
+  if (input.edgeRatio != null && input.edgeRatio > 1.3) score += 1;
+  if (input.stopRate < 0.35) score += 1;
+  if (input.takerFillShare < 0.25) score += 1;
+  const quietMajority = input.refusals > 0 && input.quiet * 2 > input.refusals;
+  if (!quietMajority) score += 1;
+  if (input.netUsd < 0 && input.entries >= 20) score -= 2;
+  if (input.maxDrawdownPct > 15) score -= 2;
+  return { score, demote: input.mature && input.entries >= 20 && score <= 0 };
+}
+
+function percentile(sorted: number[], p: number): number | null {
+  if (sorted.length === 0) return null;
+  const i = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+  return sorted[i]!;
+}
+
+function refuseKey(reason: string | null): keyof PairDiagnostics["refused"] | null {
+  switch (reason) {
+    case "quiet":
+      return "quiet";
+    case "yield":
+      return "yield";
+    case "toxic flow":
+      return "toxic";
+    case "liquidity stress":
+      return "stress";
+    case "regime":
+      return "regime";
+    case "bias":
+      return "bias";
+    case "confidence":
+      return "confidence";
+    case "dust":
+      return "dust";
+    case "gross cap":
+      return "grossCap";
+    default:
+      return null;
+  }
+}
+
+export function buildPairDiagnostics(input: {
+  decisions: Array<{ ts: number; state: unknown }>;
+  fills: Array<{ purpose: string | null; decision_id: string | null; liquidity: string; fee_usd: number; side: string; traded_at: number }>;
+  moves: Array<{ action: "buy" | "sell"; traded: boolean; horizon_sec: number; move_bps: number }>;
+  tradedHorizonSec: number;
+  netUsd: number;
+  grossUsd: number;
+  takerFillShare: number;
+  maxDrawdownPct: number;
+  now?: number;
+}): PairDiagnostics {
+  const refused = { quiet: 0, yield: 0, toxic: 0, stress: 0, regime: 0, bias: 0, confidence: 0, dust: 0, grossCap: 0 };
+  let approved = 0;
+  for (const d of input.decisions) {
+    const gate = gateFromState(d.state);
+    if (gate.approved) approved += 1;
+    const key = refuseKey(gate.reason);
+    if (key) refused[key] += 1;
+  }
+  const fills = { entry: 0, exitSignal: 0, exitHorizon: 0, stop: 0, takeProfit: 0 };
+  let makerFeesUsd = 0;
+  let takerFeesUsd = 0;
+  const holds: number[] = [];
+  let openAt: number | null = null;
+  for (const f of input.fills) {
+    if (f.liquidity === "taker") takerFeesUsd += Number(f.fee_usd);
+    else makerFeesUsd += Number(f.fee_usd);
+    if (f.purpose === "entry") {
+      fills.entry += 1;
+      if (openAt == null) openAt = Number(f.traded_at);
+    } else if (f.purpose === "stop") fills.stop += 1;
+    else if (f.purpose === "take_profit") fills.takeProfit += 1;
+    else if (f.purpose === "exit") {
+      if (f.decision_id) fills.exitSignal += 1;
+      else fills.exitHorizon += 1;
+    }
+    if (f.side === "sell" && openAt != null && (f.purpose === "exit" || f.purpose === "stop" || f.purpose === "take_profit")) {
+      holds.push(Number(f.traded_at) - openAt);
+      openAt = null;
+    }
+  }
+  holds.sort((a, b) => a - b);
+  const hour = input.moves.filter((m) => m.traded && m.action === "buy" && Number(m.horizon_sec) === 3600);
+  const tradedMoves = input.moves
+    .filter((m) => m.traded && m.action === "buy" && Number(m.horizon_sec) === input.tradedHorizonSec)
+    .map((m) => Number(m.move_bps));
+  const edgeRatio = edgeRatioFromMoves(tradedMoves);
+  const entries = fills.entry;
+  const stopRate = entries > 0 ? fills.stop / entries : 0;
+  const takeProfitRate = entries > 0 ? fills.takeProfit / entries : 0;
+  const refusals = Object.values(refused).reduce((s, n) => s + n, 0);
+  const firstTs = input.decisions.length ? Number(input.decisions[0]!.ts) : null;
+  const now = input.now ?? Date.now();
+  const mature = firstTs != null && now - firstTs >= WEEK_MS;
+  const scored = weeklyPairScore({
+    netUsd: input.netUsd,
+    edgeRatio,
+    stopRate,
+    takerFillShare: input.takerFillShare,
+    quiet: refused.quiet,
+    refusals,
+    entries,
+    maxDrawdownPct: input.maxDrawdownPct,
+    mature,
+  });
+  return {
+    decisions: input.decisions.length,
+    approved,
+    refused,
+    fills,
+    holdMs: { p50: percentile(holds, 50), p90: percentile(holds, 90) },
+    makerFeesUsd,
+    takerFeesUsd,
+    netUsd: input.netUsd,
+    grossUsd: input.grossUsd,
+    edgeRatio,
+    stopRate,
+    takeProfitRate,
+    adverseNextHour: hour.length ? hour.filter((m) => Number(m.move_bps) < 0).length / hour.length : null,
+    score: scored.score,
+    demote: scored.demote,
+  };
 }
 
 /** Wilson score interval for a binomial proportion. */
@@ -167,7 +371,7 @@ export async function buildReport(store: Store, opts: { incidentsPerDay?: number
   const tradedHorizonSec = config.horizonSec;
   const roundTripBps = config.makerFeeBps + config.takerFeeBps;
   const perPairBankroll = config.bankrollUsd / (config.pairs.length || 1);
-  const pairs = liveReportPairs(await store.pairsWithDataForVenue("paper"), config.pairs);
+  const pairs = campaignPairs(config.pairs, liveReportPairs(await store.pairsWithDataForVenue("paper"), config.pairs));
   const unresolved = await store.earliestUnresolvedTsForVenue("paper", MEASURED_HORIZONS_SEC, pairs);
   const nextReads: NextRead[] = unresolved.map((r) => ({
     horizonSec: Number(r.horizon_sec),
@@ -213,8 +417,9 @@ export async function buildReport(store: Store, opts: { incidentsPerDay?: number
     const runInference = opts.runId ? await store.inferenceUsdTotal(pair, opts.runId) : inference;
     const gatePnl = opts.runId ? pnlFromFills(runFills, runInference, lastMid) : pnlSplit;
     // Oracle: what traded decisions resolved at the traded horizon would earn if every call were correct.
+    const bookNotional = findBook(pair)?.notionalUsd ?? config.notionalUsd;
     const tradedRows = resolved.filter((r) => r.traded && Number(r.horizon_sec) === tradedHorizonSec);
-    const oracleUsd = tradedRows.reduce((s, r) => s + (Math.abs(Number(r.move_bps)) / 10_000) * config.notionalUsd, 0);
+    const oracleUsd = tradedRows.reduce((s, r) => s + (Math.abs(Number(r.move_bps)) / 10_000) * bookNotional, 0);
     const capture = oracleUsd > 0 ? pnlSplit.grossUsd / oracleUsd : null;
     const dd = maxDrawdownPct(snaps.map((s) => Number(s.equity_usd)), perPairBankroll);
 
@@ -232,13 +437,27 @@ export async function buildReport(store: Store, opts: { incidentsPerDay?: number
     };
     gate.passes = gate.resolved200 && gate.accuracyLowerAbove52 && gate.netPnlPositive && gate.drawdownUnder15 && gate.incidentsUnder1PerDay;
 
+    const [decisionRows, purposeFills] = await Promise.all([store.decisionsForPair(pair), store.fillsWithPurpose(pair)]);
+    const share = takerFillShare(fills);
+    const diagnostics = buildPairDiagnostics({
+      decisions: decisionRows,
+      fills: purposeFills,
+      moves: resolved,
+      tradedHorizonSec,
+      netUsd: pnlSplit.netUsd,
+      grossUsd: pnlSplit.grossUsd,
+      takerFillShare: share,
+      maxDrawdownPct: dd,
+    });
+
     pairReports.push({
       pair,
       horizons,
       calibration: cal,
       pnl: { ...pnlSplit, oracleUsd, capture },
-      takerFillShare: takerFillShare(fills),
+      takerFillShare: share,
       maxDrawdownPct: dd,
+      diagnostics,
       makerFeeSensitivity: makerFeeSensitivity(fills, [50, 25, 10, 0], inference),
       gate,
     });
@@ -288,7 +507,7 @@ if (import.meta.main) {
     console.log(`${p.pair}`);
     console.table(
       p.horizons.map((h) => ({
-        horizon: `${h.horizonSec / 3600}h`,
+        horizon: h.horizonSec % 3600 === 0 ? `${h.horizonSec / 3600}h` : `${Math.round(h.horizonSec / 60)}m`,
         n: h.n === 0 ? "pending" : h.n,
         accuracy: fmtHorizonCell(h.n, `${(h.accuracy * 100).toFixed(1)}%`),
         wilson95: fmtHorizonCell(h.n, `${(h.wilsonLower * 100).toFixed(1)}-${(h.wilsonUpper * 100).toFixed(1)}%`),
@@ -299,7 +518,8 @@ if (import.meta.main) {
     console.log(
       `  pnl net $${p.pnl.netUsd.toFixed(2)} (gross $${p.pnl.grossUsd.toFixed(2)}, fees $${p.pnl.feesUsd.toFixed(2)}, unrealized $${p.pnl.unrealizedUsd.toFixed(2)}, inference $${p.pnl.inferenceUsd.toFixed(4)}) | capture ${p.pnl.capture == null ? "n/a" : (p.pnl.capture * 100).toFixed(1) + "%"} | taker fills ${(p.takerFillShare * 100).toFixed(0)}% | maxDD ${p.maxDrawdownPct.toFixed(1)}%`,
     );
-    console.log(`  gate ${p.gate.passes ? "PASS" : "FAIL"}: n>=200 ${p.gate.resolved200} | lower>52% ${p.gate.accuracyLowerAbove52} | net>0 ${p.gate.netPnlPositive} | dd<15% ${p.gate.drawdownUnder15} | incidents<1/day ${p.gate.incidentsUnder1PerDay}\n`);
+    console.log(`  gate ${p.gate.passes ? "PASS" : "FAIL"}: n>=200 ${p.gate.resolved200} | lower>52% ${p.gate.accuracyLowerAbove52} | net>0 ${p.gate.netPnlPositive} | dd<15% ${p.gate.drawdownUnder15} | incidents<1/day ${p.gate.incidentsUnder1PerDay}`);
+    console.log(`  score ${p.diagnostics.score}${p.diagnostics.demote ? " demote" : ""} | quiet ${p.diagnostics.refused.quiet} | stops ${p.diagnostics.fills.stop} | take profit ${p.diagnostics.fills.takeProfit}\n`);
   }
   await store.close();
 }

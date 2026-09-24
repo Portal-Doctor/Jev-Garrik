@@ -1,0 +1,160 @@
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.title h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.safe {
+  background: rgba(74, 222, 128, 0.16);
+  color: var(--live-dot, #4ade80);
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+.body {
+  padding: 20px 24px 8px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+}
+
+.lead {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  max-width: 72ch;
+}
+
+.engines {
+  display: grid;
+  grid-template-columns: minmax(0, 520px);
+  gap: 16px;
+}
+
+.engine {
+  border: 1px solid var(--border-2);
+  border-radius: 16px;
+  padding: 16px 18px 18px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.engine h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.tag {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.engine p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.engine p a {
+  color: var(--ink);
+  font-weight: 600;
+  text-underline-offset: 2px;
+}
+
+.engine ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+
+.primary,
+.secondary {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 999px;
+  text-decoration: none;
+}
+
+.primary {
+  color: var(--live-dot, #4ade80);
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.4);
+}
+
+.secondary {
+  color: var(--ink-2);
+  background: var(--bg);
+  border: 1px solid var(--border-2);
+}
+
+.note {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+.note h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.note p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  max-width: 80ch;
+}
+
+@media (max-width: 899.98px) {
+  .engines {
+    grid-template-columns: 1fr;
+  }
+}

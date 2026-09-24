@@ -1,0 +1,226 @@
+/* Side menu for Coinbase, P&L, and tax. No blink, no pulse. */
+
+.shell {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  width: calc(100% - 32px);
+  max-width: min(calc(var(--card-max) + 200px), calc(100% - 32px));
+  margin: 16px auto;
+}
+
+.shellWide {
+  max-width: calc(100% - 32px);
+}
+
+.nav {
+  width: 188px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+}
+
+.navTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.brand {
+  padding: 2px 8px 2px;
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.toggle:hover {
+  background: var(--panel);
+  color: var(--ink);
+  border-color: var(--border);
+}
+
+.toggle svg {
+  display: block;
+}
+
+.rail {
+  width: 44px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+}
+
+.brandName {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.brandSub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.item,
+.subItem {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  border: 1px solid transparent;
+}
+
+.item:hover,
+.subItem:hover {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.active {
+  background: var(--panel);
+  color: var(--ink);
+  font-weight: 600;
+  border-color: var(--border-2);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.groupLabel {
+  padding: 8px 10px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.subItem {
+  margin-left: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.stage > :global(.card) {
+  margin: 0;
+  max-width: none;
+  width: 100%;
+}
+
+.stageScroll {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stageScroll > :global(.card) {
+  overflow: auto;
+}
+
+@media (min-width: 900px) {
+  .shell {
+    height: calc(100vh - 32px);
+  }
+
+  .stage > :global(.card) {
+    height: 100%;
+  }
+
+  .stageScroll > :global(.card) {
+    height: 100%;
+    min-height: 0;
+  }
+}
+
+@media (max-width: 899px) {
+  .shell {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .nav {
+    width: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 14px;
+  }
+
+  .navTop {
+    width: 100%;
+    align-items: center;
+    margin-bottom: 0;
+  }
+
+  .rail {
+    width: auto;
+    flex-direction: row;
+    padding: 8px 12px;
+  }
+
+  .brand {
+    padding: 0 8px 0 0;
+    margin-right: 4px;
+  }
+
+  .group {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 0;
+    gap: 4px;
+  }
+
+  .groupLabel {
+    padding: 6px 6px 6px 10px;
+  }
+
+  .subItem {
+    margin-left: 0;
+  }
+}

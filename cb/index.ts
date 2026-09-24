@@ -1,7 +1,15 @@
+import { activePairs, assertPairBooks } from "./books";
 import { config, MEASURED_HORIZONS_SEC } from "./config";
-import { assertTakeProfitClearsFees } from "./gate";
+import { assertTakeProfitClearsFees, gateFromState } from "./gate";
 
 assertTakeProfitClearsFees(config.takeProfitBps, config.makerFeeBps, config.takerFeeBps);
+assertPairBooks(config.pairs, {
+  makerFeeBps: config.makerFeeBps,
+  takerFeeBps: config.takerFeeBps,
+  feeBuffer: config.feeBuffer,
+});
+const pairs = activePairs(config.pairs);
+if (pairs.length === 0) throw new Error("CB_PAIRS has no enabled book");
 import { Store } from "./db/store";
 import { Feed } from "./feed";
 import { createModel } from "./model";
@@ -34,7 +42,7 @@ await store.insertRun({
   id: runId,
   mode: "paper",
   model: modelLabel,
-  pairs: config.pairs.join(","),
+  pairs: pairs.join(","),
   config,
   git_sha: gitSha,
   started_at: startedAt,
@@ -45,12 +53,12 @@ const meta: RunMeta = {
   runId,
   mode: "paper",
   model: modelLabel,
-  pairs: config.pairs,
+  pairs,
   startedAt,
   decideSec: config.decideSec,
 };
 
-const feed = new Feed(config.pairs, store);
+const feed = new Feed(pairs, store);
 feed.start();
 
 // Assigned once the server is up; broker/engine hooks push through it.
@@ -60,7 +68,7 @@ let doReset: () => Promise<void> = async () => {};
 
 const model = createModel();
 const broker = new PaperBroker(
-  config.pairs,
+  pairs,
   feed,
   store,
   runId,
@@ -76,6 +84,8 @@ const broker = new PaperBroker(
     neverCrossEntry: config.neverCrossEntry,
     stopLossBps: config.stopLossBps,
     takeProfitBps: config.takeProfitBps,
+    maxGrossUsd: config.maxGrossUsd,
+    minSizeUsd: config.minSizeUsd,
     maxSlippageBps: config.maxSlippageBps,
     feedHealthy: (pair) => feed.feedHealthy(pair),
   },
@@ -88,7 +98,7 @@ const broker = new PaperBroker(
 await broker.start(config.coinbaseRestUrl);
 
 const engine = new Engine(
-  config.pairs,
+  pairs,
   feed,
   model,
   store,
@@ -105,6 +115,7 @@ const engine = new Engine(
     notionalUsd: config.notionalUsd,
     depthParticipation: config.depthParticipation,
     minSizeUsd: config.minSizeUsd,
+    maxGrossUsd: config.maxGrossUsd,
   },
   broker,
   (id, decision, state, intent) => {
@@ -124,6 +135,7 @@ const engine = new Engine(
       approved: gate.approved,
       reason: gate.reason,
       hurdleBps: gate.hurdleBps,
+      horizonVolBps: state.volBps,
     });
     if (intent) broadcast("order", intent);
   },
@@ -149,7 +161,7 @@ const srv = startServer({
       store.recentDecisions({ limit: 50, venue: "paper" }),
       store.recentFillsJoined(50),
     ]);
-    const live = new Set(config.pairs);
+    const live = new Set(pairs);
     return {
       pairs: feed.allState().map((s) => ({ ...s, ...bookSides(s.pair) })),
       positions: broker.allState(),
@@ -163,16 +175,23 @@ const srv = startServer({
         approved: v.decision.gate.approved,
         reason: v.decision.gate.reason,
         hurdleBps: v.decision.gate.hurdleBps,
+        horizonVolBps: v.state.volBps,
       })),
-      nextDecision: Object.fromEntries(config.pairs.map((p) => [p, engine.nextDecisionAt(p)])),
-      recentDecisions: rows.filter((d) => live.has(d.pair)).map((d) => ({
-        id: d.id,
-        pair: d.pair,
-        action: d.action,
-        pBuy: Number(d.p_buy),
-        mid: Number(d.mid),
-        ts: Number(d.ts),
-      })),
+      nextDecision: Object.fromEntries(pairs.map((p) => [p, engine.nextDecisionAt(p)])),
+      recentDecisions: rows.filter((d) => live.has(d.pair)).map((d) => {
+        const gate = gateFromState(d.state);
+        return {
+          id: d.id,
+          pair: d.pair,
+          action: d.action,
+          pBuy: Number(d.p_buy),
+          mid: Number(d.mid),
+          ts: Number(d.ts),
+          approved: gate.approved,
+          reason: gate.reason,
+          hurdleBps: gate.hurdleBps,
+        };
+      }),
       recentFills: fills.filter((f) => live.has(f.pair)).map((f) => ({
         pair: f.pair,
         side: f.side,
@@ -196,7 +215,7 @@ const tickTimer = setInterval(
   () =>
     broadcast("tick", {
       ticks: feed.allState().map((s) => ({ pair: s.pair, mid: s.mid, spreadBps: s.spreadBps, ...bookSides(s.pair) })),
-      nextDecision: Object.fromEntries(config.pairs.map((p) => [p, engine.nextDecisionAt(p)])),
+      nextDecision: Object.fromEntries(pairs.map((p) => [p, engine.nextDecisionAt(p)])),
     }),
   1_000,
 );
@@ -219,13 +238,13 @@ const shutdown = async () => {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-// Admin "clear paper trades": wipe Coinbase venue rows only, then exit so Docker
-// `restart: unless-stopped` brings up a fresh process. Kuru rows stay put.
+// Admin "clear paper trades": wipe Coinbase venue rows, then exit so Docker
+// `restart: unless-stopped` brings up a fresh process.
 doReset = async () => {
   await store.resetVenue("paper");
   setTimeout(() => void shutdown(), 250);
 };
 
 console.log(
-  `cb paper trader | run ${runId} | model=${meta.model} | pairs=${config.pairs.join(",")} | db=${config.databaseUrl.replace(/:[^:@/]*@/, ":****@")} | http://localhost:${server.port}`,
+  `cb paper trader | run ${runId} | model=${meta.model} | pairs=${pairs.join(",")} | db=${config.databaseUrl.replace(/:[^:@/]*@/, ":****@")} | http://localhost:${server.port}`,
 );

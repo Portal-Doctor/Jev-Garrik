@@ -1,6 +1,6 @@
 {
   "name": "jev-trader",
-  "module": "src/index.ts",
+  "module": "cb/index.ts",
   "type": "module",
   "private": true,
   "license": "MIT",
@@ -12,9 +12,7 @@
   },
   "dependencies": {
     "@ai-sdk/typesafe-ai": "^3.0.0",
-    "@kuru-labs/kuru-sdk": "^0.0.95",
-    "ai": "^7.0.107",
-    "ethers": "5"
+    "ai": "^7.0.107"
   },
   "scripts": {
     "cb": "bun run cb/index.ts",
@@ -27,15 +25,8 @@
     "cb:restart": "docker compose restart cb",
     "engines:up": "docker compose up -d --build",
     "engines:down": "docker compose stop cb",
-    "wallet:new": "bun run scripts/generate-wallet.ts",
-    "kuru:fees": "bun run scripts/probe-kuru-fees.ts",
-    "kuru:report": "bun run src/report.ts",
-    "kuru:stop": "docker compose stop kuru",
-    "kuru:logs": "docker compose logs -f kuru",
-    "cctp": "bun run scripts/cctp-to-monad.ts",
-    "fund": "bun run scripts/fund-usdc-to-mon.ts",
     "ui:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ui-start.ps1",
     "ui:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ui-stop.ps1",
-    "test": "bun test cb src"
+    "test": "bun test cb"
   }
 }

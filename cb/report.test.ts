@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { wilson, brier, calibration, edgeBps, maxDrawdownPct, makerFeeSensitivity, pnlFromFills, takerFillShare, fmtHorizonCell, liveReportPairs } from "./report";
+import { wilson, brier, calibration, edgeBps, maxDrawdownPct, makerFeeSensitivity, pnlFromFills, takerFillShare, fmtHorizonCell, liveReportPairs, buildPairDiagnostics, weeklyPairScore, edgeRatioFromMoves, campaignPairs } from "./report";
 import type { FillRow } from "./db/store";
 
 test("wilson interval brackets the point estimate and tightens with n", () => {
@@ -123,4 +123,73 @@ test("live report pairs are the intersection of venue history and config, never 
   expect(liveReportPairs(history, ["SOL-USD"])).toEqual(["SOL-USD"]);
   expect(liveReportPairs(history, ["SOL-USD", "DOGE-USD"])).toEqual(["DOGE-USD", "SOL-USD"]);
   expect(liveReportPairs(["MON-USDC"], ["MON-USDC"])).toEqual([]);
+});
+
+test("campaign pairs are the enabled books, never SOL", () => {
+  const six = ["UNI-USD", "NEAR-USD", "BCH-USD", "SUI-USD", "AVAX-USD", "ARB-USD"];
+  expect(campaignPairs(six, ["SOL-USD", "UNI-USD"])).toEqual(six);
+  expect(campaignPairs(["SOL-USD"], ["SOL-USD"])).toEqual([]);
+});
+
+test("edge ratio matches win and loss rates on signed moves", () => {
+  expect(edgeRatioFromMoves([])).toBeNull();
+  expect(edgeRatioFromMoves([10, 10, -5, -5])).toBeCloseTo((10 * 0.5) / (5 * 0.5), 6);
+});
+
+test("weekly score demotes a losing book after it is mature", () => {
+  const losing = weeklyPairScore({
+    netUsd: -10,
+    edgeRatio: 1,
+    stopRate: 0.5,
+    takerFillShare: 0.4,
+    quiet: 1,
+    refusals: 1,
+    entries: 20,
+    maxDrawdownPct: 20,
+    mature: true,
+  });
+  expect(losing.score).toBeLessThanOrEqual(0);
+  expect(losing.demote).toBe(true);
+  const young = weeklyPairScore({ ...{
+    netUsd: -10,
+    edgeRatio: 1,
+    stopRate: 0.5,
+    takerFillShare: 0.4,
+    quiet: 1,
+    refusals: 1,
+    entries: 20,
+    maxDrawdownPct: 20,
+    mature: false,
+  } });
+  expect(young.demote).toBe(false);
+});
+
+test("diagnostics keep quiet separate from yield and score a green book", () => {
+  const d = buildPairDiagnostics({
+    decisions: [
+      { ts: 1, state: { gate: { approved: false, reason: "quiet" } } },
+      { ts: 2, state: { gate: { approved: false, reason: "yield" } } },
+      { ts: 3, state: { gate: { approved: true, reason: null } } },
+    ],
+    fills: [
+      { purpose: "entry", decision_id: "d", liquidity: "maker", fee_usd: 1, side: "buy", traded_at: 10 },
+      { purpose: "exit", decision_id: null, liquidity: "maker", fee_usd: 1, side: "sell", traded_at: 4_000 },
+    ],
+    moves: [{ action: "buy", traded: true, horizon_sec: 3600, move_bps: -12 }],
+    tradedHorizonSec: 14400,
+    netUsd: 5,
+    grossUsd: 8,
+    takerFillShare: 0,
+    maxDrawdownPct: 1,
+    now: 10,
+  });
+  expect(d.refused.quiet).toBe(1);
+  expect(d.refused.yield).toBe(1);
+  expect(d.approved).toBe(1);
+  expect(d.fills.entry).toBe(1);
+  expect(d.fills.exitHorizon).toBe(1);
+  expect(d.holdMs.p50).toBe(3990);
+  expect(d.adverseNextHour).toBe(1);
+  expect(d.score).toBeGreaterThan(0);
+  expect(d.demote).toBe(false);
 });
