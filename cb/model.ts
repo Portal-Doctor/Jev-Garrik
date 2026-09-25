@@ -58,7 +58,7 @@ const QUESTIONS = {
     type: "choice",
     instructions: {
       question: "Is taker flow toxic or ordinary?",
-      goal: "This label is a veto. High toxic flow blocks a new long and flattens an open long. You do not place orders, set a price target, or compute a fee.",
+      goal: "This label is a veto. High toxic flow blocks a new long. You do not place orders, set a price target, or compute a fee.",
       timing: "The label is read now.",
       inputs: "`volumeDelta` against `imbalance5` is the tell: heavy taker flow pushing through resting size is toxic. Quiet or agreeing flow is low risk.",
     },
@@ -108,8 +108,10 @@ function fromAnswers(answers: {
   const regime = expectOne(readChoice(answers.market_regime, "market_regime").choice, REGIMES, "market_regime") as Regime;
   const bias = readChoice(answers.direction_bias, "direction_bias");
   const direction = expectOne(bias.choice, ["long", "flat"] as const, "direction_bias");
-  const toxic = expectOne(readChoice(answers.toxic_flow_risk, "toxic_flow_risk").choice, TOXIC, "toxic_flow_risk") as ToxicFlow;
-  const stress = expectOne(readChoice(answers.liquidity_stress, "liquidity_stress").choice, STRESS, "liquidity_stress") as LiquidityStress;
+  const toxicAns = readChoice(answers.toxic_flow_risk, "toxic_flow_risk");
+  const toxic = expectOne(toxicAns.choice, TOXIC, "toxic_flow_risk") as ToxicFlow;
+  const stressAns = readChoice(answers.liquidity_stress, "liquidity_stress");
+  const stress = expectOne(stressAns.choice, STRESS, "liquidity_stress") as LiquidityStress;
   const confidence = bias.probabilities.long ?? (direction === "long" ? 1 : 0);
   const flatP = bias.probabilities.flat ?? 1 - confidence;
   return {
@@ -122,6 +124,8 @@ function fromAnswers(answers: {
       toxic_flow_risk: toxic,
       liquidity_stress: stress,
       confidence,
+      toxicPHigh: toxicAns.probabilities.high ?? (toxic === "high" ? 1 : 0),
+      stressPStressed: stressAns.probabilities.stressed ?? (stress === "stressed" ? 1 : 0),
     },
   };
 }
@@ -184,6 +188,8 @@ export function classifyDeterministic(state: MarketState): {
     toxic_flow_risk: toxic,
     liquidity_stress: (stressed ? "stressed" : "normal") as LiquidityStress,
     confidence,
+    toxicPHigh: toxic === "high" ? 1 : 0,
+    stressPStressed: stressed ? 1 : 0,
   };
   return {
     action: direction === "long" ? "buy" : "sell",

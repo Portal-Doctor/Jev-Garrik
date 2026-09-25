@@ -1,11 +1,12 @@
 import type { Feed } from "./feed";
-import type { Model, Decision, Action } from "./model";
+import { classifyDeterministic, type Model, type Decision, type Action } from "./model";
 import type { Store } from "./db/store";
 import { buildState, type MarketState } from "./state";
 import { depthUsd } from "./features";
 import { findBook } from "./books";
-import { evaluateGate, type GateResult } from "./gate";
+import { evaluateGate, type DecisionVector, type GateResult } from "./gate";
 import { killSwitch } from "./kill";
+import { PairVetoes, sampleFromState, VETO_RING_MS, type VetoDecision } from "./vetoes";
 
 /** A target-position change the broker should act on. */
 export interface OrderIntent {
@@ -98,6 +99,7 @@ export class Engine {
   /** Wall-clock ms of the next scheduled decision per pair (drives the UI countdown). */
   private nextAt = new Map<string, number>();
   readonly latest = new Map<string, { decision: GatedDecision; state: MarketState; id: string }>();
+  private readonly vetoes = new Map<string, PairVetoes>();
 
   constructor(
     private readonly pairs: string[],
@@ -108,7 +110,23 @@ export class Engine {
     private readonly opts: EngineOpts,
     private readonly broker: Broker,
     private readonly onDecision: (id: string, decision: GatedDecision, state: MarketState, intent?: OrderIntent) => void = () => {},
-  ) {}
+  ) {
+    for (const pair of pairs) this.vetoes.set(pair, new PairVetoes());
+  }
+
+  /** Seed 7-day rings from persisted decisions so a restart does not reset calibration. */
+  async seedVetoes(): Promise<void> {
+    const since = Date.now() - VETO_RING_MS;
+    for (const pair of this.pairs) {
+      const rows = await this.store.vetoRingForPair(pair, since);
+      const samples = [];
+      for (const row of rows) {
+        const sample = sampleFromState(Number(row.ts), row.state);
+        if (sample) samples.push(sample);
+      }
+      this.vetoes.get(pair)?.seed(samples);
+    }
+  }
 
   start(): void {
     const n = this.pairs.length || 1;
@@ -161,9 +179,18 @@ export class Engine {
       const risk = findBook(pair);
       const maxGross = this.opts.maxGrossUsd;
       const remainingGrossUsd = maxGross == null ? Number.POSITIVE_INFINITY : Math.max(0, maxGross - this.broker.openGrossUsd());
+      const rule = classifyDeterministic(state).vector;
+      const veto = (this.vetoes.get(pair) ?? new PairVetoes()).decide({
+        ts: state.ts,
+        toxicPHigh: decision.vector.toxicPHigh,
+        stressPStressed: decision.vector.stressPStressed,
+        ruleToxic: rule.toxic_flow_risk === "high",
+        ruleStress: rule.liquidity_stress === "stressed",
+      });
+      const gatedVector = applyEntryVetoes(decision.vector, veto);
       const gate = evaluateGate({
         position,
-        vector: decision.vector,
+        vector: gatedVector,
         horizonVolBps: state.volBps,
         spreadBps: state.spreadBps,
         makerFeeBps: this.opts.makerFeeBps,
@@ -196,7 +223,17 @@ export class Engine {
         p_sell: decision.probabilities.sell,
         mid: state.mid,
         spread_bps: state.spreadBps,
-        state: { ...state, vector: decision.vector, gate },
+        state: {
+          ...state,
+          vector: decision.vector,
+          gate: {
+            ...gate,
+            toxicVeto: veto.toxicVeto,
+            toxicSource: veto.toxicSource,
+            stressVeto: veto.stressVeto,
+            stressSource: veto.stressSource,
+          },
+        },
         latency_ms: Math.round(decision.latencyMs),
         input_tokens: decision.inputTokens,
         inference_usd: inferenceUsd,
@@ -226,4 +263,12 @@ export class Engine {
       this.busy.set(pair, false);
     }
   }
+}
+
+function applyEntryVetoes(vector: DecisionVector, veto: VetoDecision): DecisionVector {
+  return {
+    ...vector,
+    toxic_flow_risk: veto.toxicVeto ? "high" : "low",
+    liquidity_stress: veto.stressVeto ? "stressed" : "normal",
+  };
 }

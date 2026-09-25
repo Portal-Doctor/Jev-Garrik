@@ -472,6 +472,19 @@ export class Store {
     return this.sql<SnapshotRow[]>`SELECT * FROM snapshots WHERE pair = ${pair} AND ts >= ${fromTs} ORDER BY ts ASC`;
   }
 
+  /**
+   * Last 7 days of decision state for a pair. `state` is JSON text inside JSONB,
+   * so unwrap with `(state #>> '{}')::jsonb` before reading vector probabilities.
+   */
+  async vetoRingForPair(pair: string, sinceTs: number): Promise<Array<{ ts: number; state: unknown }>> {
+    return this.sql`
+      SELECT d.ts, (d.state #>> '{}')::jsonb AS state
+      FROM decisions d
+      WHERE d.pair = ${pair} AND d.ts >= ${sinceTs}
+      ORDER BY d.ts ASC
+    `;
+  }
+
   /** Decisions for one pair, oldest first, including the gate stored on `state`. */
   async decisionsForPair(pair: string): Promise<Array<{ ts: number; action: "buy" | "sell"; traded: boolean; mid: number; state: unknown }>> {
     return this.sql`

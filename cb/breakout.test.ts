@@ -23,6 +23,8 @@ const clearVector: DecisionVector = {
   toxic_flow_risk: "low",
   liquidity_stress: "normal",
   confidence: 0.4,
+  toxicPHigh: 0,
+  stressPStressed: 0,
 };
 
 function opts(over: Partial<BreakoutOpts> = {}): BreakoutOpts {

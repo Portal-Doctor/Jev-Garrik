@@ -59,15 +59,15 @@ export const config = {
   depthParticipation: num("CB_DEPTH_PARTICIPATION", 0.25),
   /** Below this, an entry is dust and cannot clear the fee hurdle. */
   minSizeUsd: num("CB_MIN_SIZE_USD", 25),
-  /** Donchian lookback, in completed 4-hour bars. Backtest comparison only. */
+  /** Donchian lookback. Locked after the 3-month $300 gate: official 20. */
   breakoutBars: num("CB_BREAKOUT_BARS", 20),
-  /** 4-hour EMA length. A breakout close must sit above it. */
+  /** 4-hour EMA length. Locked after the 3-month $300 gate: official 50. */
   trendEmaBars: num("CB_TREND_EMA_BARS", 50),
   /** Wilder ATR length, in completed 4-hour bars. */
   atrBars: num("CB_ATR_BARS", 14),
-  /** Trail distance, in ATRs under the highest 4-hour close since entry. */
+  /** Trail distance in ATRs. Locked after the 3-month $300 gate: official 3. */
   trailAtr: num("CB_TRAIL_ATR", 3),
-  /** Breakout position cap. The live hold clock stays CB_HORIZON_SEC. */
+  /** Breakout hold cap. Locked at 14 days (1_209_600s) after the 3-month gate. */
   breakoutMaxHoldSec: num("CB_BREAKOUT_MAX_HOLD_SEC", 1_209_600),
 
   // Model (shared with the demo).

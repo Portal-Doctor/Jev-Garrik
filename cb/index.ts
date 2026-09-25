@@ -140,6 +140,7 @@ const engine = new Engine(
     if (intent) broadcast("order", intent);
   },
 );
+await engine.seedVetoes();
 engine.start();
 
 const resolver = new Resolver(store, MEASURED_HORIZONS_SEC, 60_000, (n) => console.log(`resolved ${n} outcome(s)`));

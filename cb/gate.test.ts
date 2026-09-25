@@ -10,6 +10,8 @@ function input(over: Partial<GateInput> = {}): GateInput {
       toxic_flow_risk: "low",
       liquidity_stress: "normal",
       confidence: 0.9,
+      toxicPHigh: 0,
+      stressPStressed: 0,
     },
     horizonVolBps: 800,
     spreadBps: 2,
@@ -104,11 +106,11 @@ test("a long stays open when confidence falls and flattens when the regime contr
   const toxic = evaluateGate(
     input({
       position: "long",
-      vector: { ...input().vector, toxic_flow_risk: "high", confidence: 0.95 },
+      vector: { ...input().vector, toxic_flow_risk: "high", toxicPHigh: 1, confidence: 0.95 },
     }),
   );
-  expect(toxic.target).toBe("flat");
-  expect(toxic.reason).toBe("toxic flow");
+  expect(toxic.target).toBe("long");
+  expect(toxic.reason).toBeNull();
 
   const contracted = evaluateGate(
     input({
