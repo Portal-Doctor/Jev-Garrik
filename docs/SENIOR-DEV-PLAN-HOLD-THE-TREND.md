@@ -13,7 +13,7 @@ todos:
     status: pending
   - id: maker-tp
     content: Rest a post-only take-profit ask as soon as an entry fills. Stops still cross on the 1 second tick
-    status: pending
+    status: completed
   - id: backtest-align
     content: Make the fixed-target backtest fill take-profit as maker and use the same 4 hour trend check
     status: pending
