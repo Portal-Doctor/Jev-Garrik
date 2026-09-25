@@ -4,10 +4,10 @@ overview: "The 12 hour review showed the book could not hold a move. The toxic f
 todos:
   - id: exit-toxic
     content: Remove toxic flow as a reason to flatten an open long in evaluateGate. Keep halt and contraction
-    status: pending
+    status: completed
   - id: veto-calibrate
     content: Record Jev's probability of toxic and stressed, veto only above a per-pair rolling 85th percentile, and fall back to the deterministic label until warm
-    status: pending
+    status: completed
   - id: htf-trend
     content: Add a 4 hour trend state seeded from Coinbase hourly candles at boot, use it for the entry trend check and a post-only trend exit, and stop gating on the 1 minute EMA cross
     status: pending
@@ -202,3 +202,17 @@ Checks after deploy:
 - Kuru, `src/`, and the `kuru` compose profile.
 
 The oracle's $282 is hindsight on every wiggle and is not the target. Holding the move that all six pairs made together is. This pass is done when a long can survive its first five minutes, the trend check stops refusing every dip, and a winning exit pays the maker fee.
+
+## Result
+
+3-month gate (UTC 2026-07 through 2026-09). Pass if at most 2 of those 3 months miss a $300 six-pair closed-trade sum. Fees 50 bps maker / 90 bps taker. Yearly miss budget: 2.
+
+| Book | Jul / Aug / Sep vs $300 | Misses | Gate |
+|---|---|---:|---|
+| Official breakout Donchian 20 / trail 3 ATR / EMA 50 / hold 14d / veto on (LOCKED) | -124.04 / 269.93 / 480.78 | 2 | PASS |
+| Official HTF paper (4h trend, maker take-profit) | -778.59 / -636.81 / -333.23 | 3 | FAIL |
+| Sweep 40 / 2 / no-EMA | -153.77 / 387.77 / 151.81 | 2 | PASS, not locked |
+
+Locked defaults stay `CB_BREAKOUT_BARS=20`, `CB_TRAIL_ATR=3`, `CB_TREND_EMA_BARS=50`, `CB_BREAKOUT_MAX_HOLD_SEC=1209600`. August official is $30.07 short of $300; that is one of the two allowed misses. The 6-month tape (2026-04 through 2026-09) is informational only and does not block.
+
+Live §3 vetoes are on (`cb/vetoes.ts`). Historical backtest and breakout still use deterministic labels. Sections 5 and 7 are not in this slice.

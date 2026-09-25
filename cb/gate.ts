@@ -17,6 +17,10 @@ export interface DecisionVector {
   liquidity_stress: LiquidityStress;
   /** Probability of `long` on direction_bias. Not a number the model invents. */
   confidence: number;
+  /** Jev p(toxic_flow_risk = high). Mock and backtest set 1 or 0 from the label. */
+  toxicPHigh: number;
+  /** Jev p(liquidity_stress = stressed). Mock and backtest set 1 or 0 from the label. */
+  stressPStressed: number;
 }
 
 export interface GateInput {
@@ -125,7 +129,6 @@ export function evaluateGate(input: GateInput): GateResult {
 
   if (input.position === "long") {
     if (input.halted) return { ...base, target: "flat", reason: "halt", sizeUsd: 0 };
-    if (input.vector.toxic_flow_risk === "high") return { ...base, target: "flat", reason: "toxic flow", sizeUsd: 0 };
     if (input.vector.market_regime === "contraction") return { ...base, target: "flat", reason: "regime", sizeUsd: 0 };
     return { ...base, target: "long", reason: null, sizeUsd: 0 };
   }
