@@ -486,9 +486,19 @@ export class Store {
   }
 
   /** Decisions for one pair, oldest first, including the gate stored on `state`. */
-  async decisionsForPair(pair: string): Promise<Array<{ ts: number; action: "buy" | "sell"; traded: boolean; mid: number; state: unknown }>> {
+  async decisionsForPair(pair: string): Promise<Array<{ id: string; run_id: string; ts: number; action: "buy" | "sell"; traded: boolean; mid: number; state: unknown }>> {
     return this.sql`
-      SELECT ts, action, traded, mid, state FROM decisions WHERE pair = ${pair} ORDER BY ts ASC
+      SELECT id, run_id, ts, action, traded, mid, state FROM decisions WHERE pair = ${pair} ORDER BY ts ASC
+    `;
+  }
+
+  /** 1 hour and 4 hour outcomes for hold-the-trend veto comparison. */
+  async holdTrendOutcomes(pair: string): Promise<Array<{ decision_id: string; horizon_sec: number; move_bps: number }>> {
+    return this.sql`
+      SELECT o.decision_id, o.horizon_sec, o.move_bps
+      FROM outcomes o
+      JOIN decisions d ON d.id = o.decision_id
+      WHERE d.pair = ${pair} AND o.horizon_sec IN (${3600}, ${14400})
     `;
   }
 
