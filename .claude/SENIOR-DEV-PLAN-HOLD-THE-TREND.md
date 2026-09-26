@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: backtest-align
     content: Make the fixed-target backtest fill take-profit as maker and use the same 4 hour trend check
-    status: pending
+    status: completed
   - id: measure
     content: Add veto rate, hold time, take-profit maker share, and sized-versus-clip ratio to /report, then run the 24 hour and 30 day checks in section 8
     status: completed
