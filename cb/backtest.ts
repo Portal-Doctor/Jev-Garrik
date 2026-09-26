@@ -174,6 +174,8 @@ export interface BacktestOpts {
   assumedSpreadBps: number;
   /** Skip the hindsight oracle. Used for the short 1 minute horizon pass. */
   skipOracle?: boolean;
+  /** Default is the hold-the-trend book. `legacy` is the pre-HTF payoff rules for section 8. */
+  rules?: "htf" | "legacy";
 }
 
 type Desired = (state: MarketState) => "long" | "flat";
@@ -197,6 +199,13 @@ const ASSUMPTIONS = [
   "There is no L2 book in these candles, so imbalance, queue fill rate, and sub-second slippage stay unscored.",
   "A stop fills at the stop price even when the bar opens through it. A take-profit does not fill on a bar that only touches the level.",
   "Breakout uses completed 4 hour bars, a post-only entry that can miss, a 3 ATR trailing stop, and a 14 day cap. Stops fill at the stop or the bar open, whichever is worse.",
+];
+
+const LEGACY_ASSUMPTIONS = [
+  "Five minute Coinbase candles. Pre-HTF payoff rules for the section 8 old-versus-new compare.",
+  "Trend is the 1 minute 8/21 EMA cross. A new long requires emaCross above.",
+  "Toxic flow flattens an open long. Take-profit crosses as taker when the high reaches the target, including a bar that only touches it.",
+  "The backtest cannot replay Jev, so entry vetoes stay the deterministic labels.",
 ];
 
 function feeRate(bps: number): number {
@@ -335,10 +344,10 @@ function stateAt(
   };
 }
 
-function gateFor(state: MarketState, opts: BacktestOpts, feeBuffer: number, trend: TrendAnswer): GateResult {
+function gateInput(state: MarketState, opts: BacktestOpts, feeBuffer: number, trend: TrendAnswer) {
   const vector = classifyDeterministic(state).vector;
   const depthUsd = opts.depthParticipation > 0 ? opts.notionalUsd / opts.depthParticipation : 0;
-  return evaluateGate({
+  return {
     position: state.position,
     vector,
     horizonVolBps: state.volBps,
@@ -361,7 +370,26 @@ function gateFor(state: MarketState, opts: BacktestOpts, feeBuffer: number, tren
     h4ReturnBps: state.returnsBps.h4,
     stopLossBps: opts.stopLossBps,
     takeProfitBps: opts.takeProfitBps,
-  });
+  };
+}
+
+function gateFor(state: MarketState, opts: BacktestOpts, feeBuffer: number, trend: TrendAnswer): GateResult {
+  if (opts.rules === "legacy") return gateForLegacy(state, opts, feeBuffer);
+  return evaluateGate(gateInput(state, opts, feeBuffer, trend));
+}
+
+/** Pre-HTF gate: 1 minute EMA cross as trend, and toxic flow flattens an open long. */
+function gateForLegacy(state: MarketState, opts: BacktestOpts, feeBuffer: number): GateResult {
+  const input = gateInput(state, opts, feeBuffer, { up: false, known: true });
+  if (input.position === "long") {
+    const sized = evaluateGate({ ...input, position: "flat", htfTrendKnown: true, htfTrendUp: true });
+    const base = { expectedYieldBps: sized.expectedYieldBps, hurdleBps: sized.hurdleBps, sizeUsd: 0, approved: false };
+    if (input.halted) return { ...base, target: "flat", reason: "halt" };
+    if (input.vector.toxic_flow_risk === "high") return { ...base, target: "flat", reason: "toxic flow" };
+    if (input.vector.market_regime === "contraction") return { ...base, target: "flat", reason: "regime" };
+    return { ...base, target: "long", reason: null };
+  }
+  return evaluateGate({ ...input, htfTrendKnown: true, htfTrendUp: input.emaCross === "above" });
 }
 
 function closePos(
@@ -548,17 +576,18 @@ export function runBacktest(candles: Candle[], opts: BacktestOpts, desired?: Des
       const stopPx = pos.entry * (1 - opts.stopLossBps / 10_000);
       const takePx = pos.entry * (1 + opts.takeProfitBps / 10_000);
       const hitStop = bar.low <= stopPx;
-      const hitTake = bar.high > takePx;
+      const hitTake = opts.rules === "legacy" ? bar.high >= takePx : bar.high > takePx;
       if (hitStop) settle(pos, stopPx, bar.ts, "taker");
-      else if (hitTake) settle(pos, takePx, bar.ts, "maker");
+      else if (hitTake) settle(pos, takePx, bar.ts, opts.rules === "legacy" ? "taker" : "maker");
       else if (bar.ts >= pos.expiresAt) settle(pos, bar.close, bar.ts, "maker");
     }
     if (inWindow && shadow) {
       const stopPx = shadow.entry * (1 - opts.stopLossBps / 10_000);
       const takePx = shadow.entry * (1 + opts.takeProfitBps / 10_000);
       if (bar.low <= stopPx) shadowSettle(shadow, stopPx, "taker");
-      else if (bar.high > takePx) shadowSettle(shadow, takePx, "maker");
-      else if (bar.ts >= shadow.expiresAt) shadowSettle(shadow, bar.close, "maker");
+      else if (opts.rules === "legacy" ? bar.high >= takePx : bar.high > takePx) {
+        shadowSettle(shadow, takePx, opts.rules === "legacy" ? "taker" : "maker");
+      } else if (bar.ts >= shadow.expiresAt) shadowSettle(shadow, bar.close, "maker");
     }
 
     closes.push(bar.close);
@@ -672,7 +701,7 @@ export function runBacktest(candles: Candle[], opts: BacktestOpts, desired?: Des
     stopLossBps: opts.stopLossBps,
     takeProfitBps: opts.takeProfitBps,
     assumedSpreadBps: opts.assumedSpreadBps,
-    assumptions: ASSUMPTIONS,
+    assumptions: opts.rules === "legacy" ? LEGACY_ASSUMPTIONS : ASSUMPTIONS,
     strategy: summarize(opts.bankrollUsd, fees, wins, trades, buys, sells, equity),
     oracle: oracle,
     holdUsd,
@@ -1036,5 +1065,64 @@ function resultOpts(pair: string, months: 1 | 3 | 6, windowStartTs: number): Bac
     depthParticipation: config.depthParticipation,
     minSizeUsd: config.minSizeUsd,
     assumedSpreadBps: 2,
+  };
+}
+
+export interface OldVsNewPair {
+  pair: string;
+  oldNetUsd: number;
+  newNetUsd: number;
+  oldTrades: number;
+  newTrades: number;
+}
+
+export interface OldVsNewCompare {
+  months: 1;
+  makerFeeBps: number;
+  takerFeeBps: number;
+  fromTs: number;
+  toTs: number;
+  pairs: OldVsNewPair[];
+  oldTotalNetUsd: number;
+  newTotalNetUsd: number;
+  oldTotalTrades: number;
+  newTotalTrades: number;
+  newLosesLess: boolean;
+}
+
+/** Same 30 day 5 minute tape, old payoff rules versus current HTF rules. Fees stay 50/90. */
+export async function compareThirtyDayOldVsNew(): Promise<OldVsNewCompare> {
+  const names = config.pairs.filter((pair) => findBook(pair)?.enabled);
+  const now = Date.now();
+  const windowStartTs = now - WINDOW_DAYS[1] * DAY_MS;
+  const fetchFrom = windowStartTs - 10 * DAY_MS;
+  const pairs: OldVsNewPair[] = [];
+  for (const pair of names) {
+    const candles = await fetchCandles(pair, fetchFrom, now, 300);
+    const base = resultOpts(pair, 1, windowStartTs);
+    const oldR = runBacktest(candles, { ...base, rules: "legacy", skipOracle: true });
+    const newR = runBacktest(candles, { ...base, rules: "htf", skipOracle: true });
+    pairs.push({
+      pair,
+      oldNetUsd: oldR.score.netUsd,
+      newNetUsd: newR.score.netUsd,
+      oldTrades: oldR.score.trades,
+      newTrades: newR.score.trades,
+    });
+  }
+  const oldTotalNetUsd = pairs.reduce((s, p) => s + p.oldNetUsd, 0);
+  const newTotalNetUsd = pairs.reduce((s, p) => s + p.newNetUsd, 0);
+  return {
+    months: 1,
+    makerFeeBps: config.makerFeeBps,
+    takerFeeBps: config.takerFeeBps,
+    fromTs: windowStartTs,
+    toTs: now,
+    pairs,
+    oldTotalNetUsd,
+    newTotalNetUsd,
+    oldTotalTrades: pairs.reduce((s, p) => s + p.oldTrades, 0),
+    newTotalTrades: pairs.reduce((s, p) => s + p.newTrades, 0),
+    newLosesLess: newTotalNetUsd > oldTotalNetUsd,
   };
 }
