@@ -215,4 +215,31 @@ The oracle's $282 is hindsight on every wiggle and is not the target. Holding th
 
 Locked defaults stay `CB_BREAKOUT_BARS=20`, `CB_TRAIL_ATR=3`, `CB_TREND_EMA_BARS=50`, `CB_BREAKOUT_MAX_HOLD_SEC=1209600`. August official is $30.07 short of $300; that is one of the two allowed misses. The 6-month tape (2026-04 through 2026-09) is informational only and does not block.
 
-Live §3 vetoes are on (`cb/vetoes.ts`). Historical backtest and breakout still use deterministic labels. Sections 5 and 7 are not in this slice.
+### Section 8 post-deploy (progress)
+
+Run after `35b6c7f` on 2026-09-26. Official tests: `bun test cb/gate.test.ts cb/vetoes.test.ts cb/trend.test.ts cb/paper.test.ts cb/backtest.test.ts cb/engine.test.ts` (46 pass). `docker compose up -d --build cb` then `GET /health` returned `{ "status": "ok", "runId": "3eed8636-e13f-4bd4-bdf4-ee4f5f1ec501" }`.
+
+The 24 hour live window is still in progress. This rebuild started a new paper run. In the first minutes there were 7 decisions across the six pairs (1 or 2 each), 9 maker entry fills, and no sell. So:
+
+| Check | Status |
+|---|---|
+| Toxic veto 5% to 30% on every pair | In progress. Too few decisions. Observed toxic veto rate is 0 so far (rule source, ring not warm). |
+| No close reason `toxic flow` | Holds so far. No long has closed. |
+| Median hold of any long over 1 hour | In progress. No closed long. |
+| At least 80% of take-profit fills are maker | In progress. Zero take-profit fills. |
+
+30 day fixed-target backtest, all six enabled pairs, 5 minute Exchange candles, 50 bps maker / 90 bps taker, book stops and clips. Old rules: 1 minute EMA cross as trend, toxic flow flattens a long, take-profit is taker when `high >= takePx`. New rules: 4 hour trend, no toxic flatten, take-profit is maker when `high > takePx`. Window start 1787848831319 to 1790440831319.
+
+| Pair | Old net | New net | Old trades | New trades |
+|---|---:|---:|---:|---:|
+| UNI-USD | -31.79 | 7.08 | 54 | 46 |
+| NEAR-USD | -8.21 | -159.68 | 49 | 45 |
+| BCH-USD | -236.04 | -34.54 | 47 | 28 |
+| SUI-USD | -185.30 | -80.88 | 59 | 40 |
+| AVAX-USD | -43.96 | -110.17 | 41 | 40 |
+| ARB-USD | -15.47 | -107.72 | 48 | 41 |
+| Total | -520.77 | -485.92 | 298 | 240 |
+
+New loses less than old (`-485.92` vs `-520.77`). Section 8 check 3 passes. NEAR, AVAX, and ARB are worse under the new rules; UNI, BCH, and SUI carry the total. Replay with `bun run cb/htf-s8-compare.ts`.
+
+Breakout phase 2 was not started.
