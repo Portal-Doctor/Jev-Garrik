@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: htf-trend
     content: Add a 4 hour trend state seeded from Coinbase hourly candles at boot, use it for the entry trend check and a post-only trend exit, and stop gating on the 1 minute EMA cross
-    status: pending
+    status: completed
   - id: maker-tp
     content: Rest a post-only take-profit ask as soon as an entry fills. Stops still cross on the 1 second tick
     status: completed

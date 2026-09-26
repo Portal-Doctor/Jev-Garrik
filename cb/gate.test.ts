@@ -28,6 +28,8 @@ function input(over: Partial<GateInput> = {}): GateInput {
     halted: false,
     feedBlocked: false,
     emaCross: "above",
+    htfTrendUp: true,
+    htfTrendKnown: true,
     h4ReturnBps: 0,
     stopLossBps: 295,
     takeProfitBps: 1180,
@@ -35,16 +37,48 @@ function input(over: Partial<GateInput> = {}): GateInput {
   };
 }
 
-test("flat with the average stack not up refuses trend even at high confidence", () => {
+test("flat with 1 minute EMA below but 4 hour trend up and vetoes clear is approved", () => {
   const r = evaluateGate(
     input({
-      emaCross: "flat",
+      emaCross: "below",
+      htfTrendUp: true,
+      htfTrendKnown: true,
       vector: { ...input().vector, confidence: 0.9, market_regime: "expansion" },
     }),
   );
+  expect(r.approved).toBe(true);
+  expect(r.reason).toBeNull();
+});
+
+test("flat with 4 hour trend down is refused trend, whatever emaCross says", () => {
+  const r = evaluateGate(input({ emaCross: "above", htfTrendUp: false, htfTrendKnown: true }));
   expect(r.approved).toBe(false);
   expect(r.reason).toBe("trend");
-  expect(r.expectedYieldBps).toBeGreaterThan(0);
+});
+
+test("flat with a failed trend fetch is refused trend unknown", () => {
+  const r = evaluateGate(input({ htfTrendKnown: false, htfTrendUp: false, emaCross: "above" }));
+  expect(r.approved).toBe(false);
+  expect(r.reason).toBe("trend unknown");
+});
+
+test("long with toxic high, expansion, and trend up stays long", () => {
+  const r = evaluateGate(
+    input({
+      position: "long",
+      htfTrendUp: true,
+      htfTrendKnown: true,
+      vector: { ...input().vector, toxic_flow_risk: "high", toxicPHigh: 1, market_regime: "expansion" },
+    }),
+  );
+  expect(r.target).toBe("long");
+  expect(r.reason).toBeNull();
+});
+
+test("long flattens with trend down when the 4 hour trend turns down", () => {
+  const r = evaluateGate(input({ position: "long", htfTrendUp: false, htfTrendKnown: true }));
+  expect(r.target).toBe("flat");
+  expect(r.reason).toBe("trend down");
 });
 
 test("flat with the average stack up and toxic flow refuses toxic flow", () => {
