@@ -20,9 +20,8 @@ export interface TrendAnswer {
   ema: number | null;
 }
 
-export function trendFromHourlies(hourlies: Candle[], emaBars: number, now = Date.now()): TrendAnswer {
-  const completed = hourlies.filter((c) => c.close > 0 && c.ts + HOUR_SEC * 1000 <= now);
-  const buckets = aggregate(completed, FOUR_HOUR_SEC);
+/** Completed 4 hour buckets only. A running bucket must already have been dropped. */
+export function trendFromFourHour(buckets: Candle[], emaBars: number): TrendAnswer {
   if (buckets.length < 7) return { known: false, up: false, lastClose: null, ema: null };
   let ema: number | null = null;
   for (const bar of buckets) ema = emaNext(ema, bar.close, emaBars);
@@ -31,6 +30,11 @@ export function trendFromHourlies(hourlies: Candle[], emaBars: number, now = Dat
   if (!(ago.close > 0) || ema == null) return { known: false, up: false, lastClose: last.close, ema };
   const ret24 = (last.close - ago.close) / ago.close;
   return { known: true, up: last.close > ema && ret24 > 0, lastClose: last.close, ema };
+}
+
+export function trendFromHourlies(hourlies: Candle[], emaBars: number, now = Date.now()): TrendAnswer {
+  const completed = hourlies.filter((c) => c.close > 0 && c.ts + HOUR_SEC * 1000 <= now);
+  return trendFromFourHour(aggregate(completed, FOUR_HOUR_SEC), emaBars);
 }
 
 export async function fetchHourlies(pair: string, now = Date.now(), fetchImpl: typeof fetch = fetch): Promise<Candle[]> {
