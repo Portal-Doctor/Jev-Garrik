@@ -62,6 +62,20 @@ test("a signal exit pays the maker fee, a stop pays the taker fee", () => {
   expect(stopped.score.makerFeesUsd).toBeCloseTo(5);
 });
 
+test("legacy rules fill a take-profit touch as taker", () => {
+  const entryClose = 100;
+  const maker = 50 / 10_000;
+  const takePx = entryClose * (1 + maker) * (1 + 250 / 10_000);
+  const touch = runBacktest(
+    [hour(0, entryClose), hour(1, entryClose, takePx, entryClose)],
+    { ...opts, rules: "legacy" },
+    (state) => (state.ts === 0 ? "long" : state.position),
+  );
+  expect(touch.strategy.sells).toHaveLength(1);
+  expect(touch.score.takerFeesUsd).toBeGreaterThan(0);
+  expect(touch.score.makerFeesUsd).toBeCloseTo(5);
+});
+
 test("a bar whose high equals the take-profit does not fill it, and a bar that trades through fills as maker", () => {
   const entryClose = 100;
   const maker = 50 / 10_000;
