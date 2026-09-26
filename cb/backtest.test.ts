@@ -62,6 +62,29 @@ test("a signal exit pays the maker fee, a stop pays the taker fee", () => {
   expect(stopped.score.makerFeesUsd).toBeCloseTo(5);
 });
 
+test("a bar whose high equals the take-profit does not fill it, and a bar that trades through fills as maker", () => {
+  const entryClose = 100;
+  const maker = 50 / 10_000;
+  const takePx = entryClose * (1 + maker) * (1 + 250 / 10_000);
+  const touch = runBacktest(
+    [hour(0, entryClose), hour(1, entryClose, takePx, entryClose), hour(2, entryClose)],
+    opts,
+    (state) => (state.ts === 0 ? "long" : state.position),
+  );
+  expect(touch.strategy.sells).toHaveLength(0);
+  expect(touch.score.trades).toBe(0);
+
+  const through = runBacktest(
+    [hour(0, entryClose), hour(1, entryClose, takePx + 0.01, entryClose)],
+    opts,
+    (state) => (state.ts === 0 ? "long" : state.position),
+  );
+  expect(through.strategy.sells).toHaveLength(1);
+  expect(through.strategy.sells[0]!.price).toBeCloseTo(takePx, 8);
+  expect(through.score.makerFeesUsd).toBeGreaterThan(through.score.takerFeesUsd);
+  expect(through.score.takerFeesUsd).toBe(0);
+});
+
 test("a forced long stops out and the scorecard is attached", () => {
   const candles = [hour(0, 100), hour(1, 96, 100, 96)];
   const result = runBacktest(candles, opts, (state) => (state.ts === 0 ? "long" : "flat"));

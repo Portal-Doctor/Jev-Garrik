@@ -27,6 +27,7 @@ import { runBreakout, type BreakoutSummary } from "./breakout";
 import { classifyDeterministic } from "./model";
 import type { GateResult } from "./gate";
 import type { MarketState } from "./state";
+import { trendFromFourHour, type TrendAnswer } from "./trend";
 
 export interface Candle {
   /** Bucket start, epoch ms. */
@@ -188,11 +189,13 @@ const ASSUMPTIONS = [
   "Imbalance and taker flow are neutral because candles have no book.",
   "Spread is assumed, and each entry uses the configured notional.",
   "The oracle is the best long or flat path on these prices with the same fees.",
-  "Entries are post-only and pay the maker fee. Stop and take-profit still cross and pay the taker fee. A contraction veto and the 24 hour clock rest post-only, then cross if they do not fill.",
-  "A new long requires the fast average above the slow average. Toxic flow, stressed liquidity, contraction, a chase, and a payoff under 2 to 1 refuse the entry.",
+  "Entries are post-only and pay the maker fee. A stop still crosses and pays the taker fee. A contraction veto, a trend down, and the 24 hour clock rest post-only, then cross if they do not fill.",
+  "Take-profit rests as a post-only ask and fills only when the high trades through it. Trend is the 4 hour close above its 50 bar EMA with a positive 24 hour return.",
+  "The backtest cannot replay Jev, so entry vetoes stay the deterministic labels. Live vetoes use Jev's probability once the ring is warm.",
+  "A new long requires that 4 hour trend. Toxic flow, stressed liquidity, contraction, a chase, and a payoff under 2 to 1 refuse the entry. A long flattens on trend down, not on toxic flow.",
   "100 ms, 1 s, and 5 s hit rates are not in this tape. Hit rate is scored at 1 hour and 4 hours.",
   "There is no L2 book in these candles, so imbalance, queue fill rate, and sub-second slippage stay unscored.",
-  "A stop or take-profit fills at the stop price even when the bar opens through it.",
+  "A stop fills at the stop price even when the bar opens through it. A take-profit does not fill on a bar that only touches the level.",
   "Breakout uses completed 4 hour bars, a post-only entry that can miss, a 3 ATR trailing stop, and a 14 day cap. Stops fill at the stop or the bar open, whichever is worse.",
 ];
 
@@ -332,7 +335,7 @@ function stateAt(
   };
 }
 
-function gateFor(state: MarketState, opts: BacktestOpts, feeBuffer: number): GateResult {
+function gateFor(state: MarketState, opts: BacktestOpts, feeBuffer: number, trend: TrendAnswer): GateResult {
   const vector = classifyDeterministic(state).vector;
   const depthUsd = opts.depthParticipation > 0 ? opts.notionalUsd / opts.depthParticipation : 0;
   return evaluateGate({
@@ -353,8 +356,8 @@ function gateFor(state: MarketState, opts: BacktestOpts, feeBuffer: number): Gat
     halted: false,
     feedBlocked: false,
     emaCross: state.emaCross,
-    htfTrendUp: state.emaCross === "above",
-    htfTrendKnown: true,
+    htfTrendUp: trend.up,
+    htfTrendKnown: trend.known,
     h4ReturnBps: state.returnsBps.h4,
     stopLossBps: opts.stopLossBps,
     takeProfitBps: opts.takeProfitBps,
@@ -492,7 +495,28 @@ export function runBacktest(candles: Candle[], opts: BacktestOpts, desired?: Des
     shadowEntries += 1;
   };
 
-  const want = desired ?? ((state: MarketState) => gateFor(state, opts, opts.feeBuffer).target);
+  const fourHourMs = 14_400_000;
+  const fourHourByKey = new Map<number, Candle>();
+  for (const c of ordered) {
+    const key = Math.floor(c.ts / fourHourMs) * fourHourMs;
+    const cur = fourHourByKey.get(key);
+    if (!cur) {
+      fourHourByKey.set(key, { ts: key, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume });
+      continue;
+    }
+    cur.high = Math.max(cur.high, c.high);
+    cur.low = Math.min(cur.low, c.low);
+    cur.close = c.close;
+    cur.volume += c.volume;
+  }
+  const fourHourKeys = [...fourHourByKey.keys()].sort((a, b) => a - b);
+  const trendAt = (ts: number): TrendAnswer => {
+    const cutoff = Math.floor(ts / fourHourMs) * fourHourMs;
+    const buckets = fourHourKeys.filter((k) => k < cutoff).map((k) => fourHourByKey.get(k)!);
+    return trendFromFourHour(buckets, config.trendEmaBars);
+  };
+
+  const want = desired ?? ((state: MarketState) => gateFor(state, opts, opts.feeBuffer, trendAt(state.ts)).target);
 
   const settle = (current: OpenPos, px: number, ts: number, liquidity: "maker" | "taker") => {
     settleLow(px, liquidity);
@@ -524,14 +548,16 @@ export function runBacktest(candles: Candle[], opts: BacktestOpts, desired?: Des
       const stopPx = pos.entry * (1 - opts.stopLossBps / 10_000);
       const takePx = pos.entry * (1 + opts.takeProfitBps / 10_000);
       const hitStop = bar.low <= stopPx;
-      const hitTake = bar.high >= takePx;
-      if (hitStop || hitTake) settle(pos, hitStop ? stopPx : takePx, bar.ts, "taker");
+      const hitTake = bar.high > takePx;
+      if (hitStop) settle(pos, stopPx, bar.ts, "taker");
+      else if (hitTake) settle(pos, takePx, bar.ts, "maker");
       else if (bar.ts >= pos.expiresAt) settle(pos, bar.close, bar.ts, "maker");
     }
     if (inWindow && shadow) {
       const stopPx = shadow.entry * (1 - opts.stopLossBps / 10_000);
       const takePx = shadow.entry * (1 + opts.takeProfitBps / 10_000);
-      if (bar.low <= stopPx || bar.high >= takePx) shadowSettle(shadow, bar.low <= stopPx ? stopPx : takePx, "taker");
+      if (bar.low <= stopPx) shadowSettle(shadow, stopPx, "taker");
+      else if (bar.high > takePx) shadowSettle(shadow, takePx, "maker");
       else if (bar.ts >= shadow.expiresAt) shadowSettle(shadow, bar.close, "maker");
     }
 
@@ -574,9 +600,10 @@ export function runBacktest(candles: Candle[], opts: BacktestOpts, desired?: Des
     const breakout = i >= 20 && isLong && bar.close > priorHigh && next != null;
     const fake = breakout && next!.close < priorHigh;
 
-    const strict = gateFor(state, opts, opts.feeBuffer);
+    const trend = trendAt(bar.ts);
+    const strict = gateFor(state, opts, opts.feeBuffer, trend);
     const costState = shadow ? { ...state, position: "long" as const } : state;
-    const cost = gateFor(costState, opts, 1);
+    const cost = gateFor(costState, opts, 1, trend);
     if (state.position === "flat" && (strict.approved || strict.reason === "yield")) {
       yieldSamples.push({ expectedBps: strict.expectedYieldBps, hurdleBps: strict.hurdleBps });
     }
