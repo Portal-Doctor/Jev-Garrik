@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { PairDiagnostics, PairReport, Report } from "@/lib/paperTypes";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import type { HoldTrendWindow, PairDiagnostics, PairReport, Report } from "@/lib/paperTypes";
 import { fmtUsd } from "@/lib/format";
 import styles from "./report.module.css";
 
@@ -219,6 +219,7 @@ export default function ReportPage() {
           </section>
 
           <HorizonComparison pairs={report!.pairs} />
+          <HoldTrendTable pairs={report!.pairs} />
           <DiagnosticsTable pairs={report!.pairs} />
 
           <section className={styles.block}>
@@ -300,6 +301,103 @@ function HorizonComparison({ pairs }: { pairs: PairReport[] }) {
                 </td>
               ))}
             </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function sourceLabel(s: { jev: number; rule: number }): string {
+  if (s.jev === 0 && s.rule === 0) return "-";
+  if (s.jev > 0 && s.rule === 0) return "jev";
+  if (s.rule > 0 && s.jev === 0) return "rule";
+  return `jev ${s.jev} / rule ${s.rule}`;
+}
+
+function fmtRate(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "-";
+  return `${(n * 100).toFixed(1)}%`;
+}
+
+function fmtBps(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "-";
+  return n.toFixed(1);
+}
+
+function HoldTrendRow({ pair, label, w }: { pair: string; label: string; w: HoldTrendWindow }) {
+  return (
+    <tr>
+      <td className={styles.pair}>{pair}</td>
+      <td>{label}</td>
+      <td className={styles.num}>{w.decisions === 0 ? "-" : fmtRate(w.toxicVetoRate)}</td>
+      <td>{sourceLabel(w.toxicSource)}</td>
+      <td className={styles.num}>{w.decisions === 0 ? "-" : fmtRate(w.stressVetoRate)}</td>
+      <td>{sourceLabel(w.stressSource)}</td>
+      <td className={styles.num}>{fmtHold(w.hold.medianMs)}</td>
+      <td className={styles.num}>{fmtHold(w.hold.maxMs)}</td>
+      <td className={styles.num}>{w.hold.closedUnder15m}</td>
+      <td className={styles.num}>{w.sizedVsClip == null ? "-" : w.sizedVsClip.toFixed(2)}</td>
+      <td className={styles.num}>{w.exits.stop}</td>
+      <td className={styles.num}>{w.exits.takeProfitMaker}</td>
+      <td className={styles.num}>{w.exits.takeProfitTaker}</td>
+      <td className={styles.num}>{w.exits.trendDown}</td>
+      <td className={styles.num}>{w.exits.contraction}</td>
+      <td className={styles.num}>{w.exits.horizon}</td>
+      <td className={styles.num}>{w.exits.halt}</td>
+      <td className={styles.num}>{`${fmtBps(w.forwardH1.vetoedBps)} / ${fmtBps(w.forwardH1.clearBps)}`}</td>
+      <td className={styles.num}>{`${fmtBps(w.forwardH4.vetoedBps)} / ${fmtBps(w.forwardH4.clearBps)}`}</td>
+    </tr>
+  );
+}
+
+function HoldTrendTable({ pairs }: { pairs: PairReport[] }) {
+  const rows = pairs.filter((p) => p.holdTrend != null);
+  if (rows.length === 0) {
+    return (
+      <section className={styles.block}>
+        <h2>Hold the trend</h2>
+        <p className={styles.note}>No veto or hold mix yet. Numbers appear after live decisions and fills land.</p>
+      </section>
+    );
+  }
+  return (
+    <section className={styles.block}>
+      <h2>Hold the trend</h2>
+      <p className={styles.note}>
+        Per pair, current run and last 24 hours. Forward returns are 1 hour and 4 hour, vetoed versus clear. Sized is median
+        approved size over clip. Fees stay 50/90.
+      </p>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th>Pair</th>
+            <th>Window</th>
+            <th className={styles.num}>Toxic</th>
+            <th>Toxic src</th>
+            <th className={styles.num}>Stress</th>
+            <th>Stress src</th>
+            <th className={styles.num}>Hold p50</th>
+            <th className={styles.num}>Hold max</th>
+            <th className={styles.num}>Under 15m</th>
+            <th className={styles.num}>Sized</th>
+            <th className={styles.num}>Stop</th>
+            <th className={styles.num}>TP maker</th>
+            <th className={styles.num}>TP taker</th>
+            <th className={styles.num}>Trend down</th>
+            <th className={styles.num}>Contraction</th>
+            <th className={styles.num}>Horizon</th>
+            <th className={styles.num}>Halt</th>
+            <th className={styles.num}>1h veto / clear</th>
+            <th className={styles.num}>4h veto / clear</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => (
+            <Fragment key={p.pair}>
+              <HoldTrendRow pair={p.pair} label="run" w={p.holdTrend!.run} />
+              <HoldTrendRow pair={p.pair} label="24h" w={p.holdTrend!.last24h} />
+            </Fragment>
           ))}
         </tbody>
       </table>

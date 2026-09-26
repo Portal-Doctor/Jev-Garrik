@@ -30,6 +30,39 @@ export interface CalibrationBucket {
   n: number;
 }
 
+export interface HoldTrendForward {
+  vetoedBps: number | null;
+  clearBps: number | null;
+  vetoedN: number;
+  clearN: number;
+}
+
+export interface HoldTrendWindow {
+  decisions: number;
+  toxicVetoRate: number | null;
+  toxicSource: { jev: number; rule: number };
+  stressVetoRate: number | null;
+  stressSource: { jev: number; rule: number };
+  forwardH1: HoldTrendForward;
+  forwardH4: HoldTrendForward;
+  hold: { medianMs: number | null; maxMs: number | null; closedUnder15m: number };
+  exits: {
+    stop: number;
+    takeProfitMaker: number;
+    takeProfitTaker: number;
+    trendDown: number;
+    contraction: number;
+    horizon: number;
+    halt: number;
+  };
+  sizedVsClip: number | null;
+}
+
+export interface HoldTrendMix {
+  run: HoldTrendWindow;
+  last24h: HoldTrendWindow;
+}
+
 export interface PairReport {
   pair: string;
   horizons: HorizonMetrics[];
@@ -38,6 +71,7 @@ export interface PairReport {
   takerFillShare: number;
   maxDrawdownPct: number;
   makerFeeSensitivity: Array<{ makerBps: number; netUsd: number }>;
+  holdTrend: HoldTrendMix;
   gate: {
     tradedHorizonSec: number;
     resolved200: boolean;
@@ -275,6 +309,158 @@ export function buildPairDiagnostics(input: {
   };
 }
 
+function mean(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return values.reduce((s, n) => s + n, 0) / values.length;
+}
+
+function median(sorted: number[]): number | null {
+  if (sorted.length === 0) return null;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+function emptyHoldWindow(): HoldTrendWindow {
+  return {
+    decisions: 0,
+    toxicVetoRate: null,
+    toxicSource: { jev: 0, rule: 0 },
+    stressVetoRate: null,
+    stressSource: { jev: 0, rule: 0 },
+    forwardH1: { vetoedBps: null, clearBps: null, vetoedN: 0, clearN: 0 },
+    forwardH4: { vetoedBps: null, clearBps: null, vetoedN: 0, clearN: 0 },
+    hold: { medianMs: null, maxMs: null, closedUnder15m: 0 },
+    exits: { stop: 0, takeProfitMaker: 0, takeProfitTaker: 0, trendDown: 0, contraction: 0, horizon: 0, halt: 0 },
+    sizedVsClip: null,
+  };
+}
+
+function exitReasonBucket(reason: string | null): "trendDown" | "contraction" | "horizon" | "halt" | null {
+  if (reason === "trend down") return "trendDown";
+  if (reason === "regime") return "contraction";
+  if (reason === "halt") return "halt";
+  if (reason === "horizon") return "horizon";
+  return null;
+}
+
+export function buildHoldTrendWindow(input: {
+  decisions: Array<{ id: string; run_id: string; ts: number; state: unknown }>;
+  fills: Array<{ run_id: string; purpose: string | null; decision_id: string | null; liquidity: string; side: string; traded_at: number }>;
+  outcomes: Array<{ decision_id: string; horizon_sec: number; move_bps: number }>;
+  notionalUsd: number;
+  fromTs?: number;
+  runId?: string;
+}): HoldTrendWindow {
+  const out = emptyHoldWindow();
+  const decisions = input.decisions.filter((d) => {
+    if (input.runId && d.run_id !== input.runId) return false;
+    if (input.fromTs != null && Number(d.ts) < input.fromTs) return false;
+    return true;
+  });
+  out.decisions = decisions.length;
+  const byId = new Map(decisions.map((d) => [d.id, d]));
+  let toxicKnown = 0;
+  let toxicFired = 0;
+  let stressKnown = 0;
+  let stressFired = 0;
+  const sized: number[] = [];
+  const h1Vetoed: number[] = [];
+  const h1Clear: number[] = [];
+  const h4Vetoed: number[] = [];
+  const h4Clear: number[] = [];
+  const moves = new Map<string, { h1?: number; h4?: number }>();
+  for (const o of input.outcomes) {
+    const row = moves.get(o.decision_id) ?? {};
+    if (Number(o.horizon_sec) === 3600) row.h1 = Number(o.move_bps);
+    if (Number(o.horizon_sec) === 14400) row.h4 = Number(o.move_bps);
+    moves.set(o.decision_id, row);
+  }
+  for (const d of decisions) {
+    const gate = gateFromState(d.state);
+    const toxic = gate.toxicVeto ?? (gate.reason === "toxic flow" ? true : gate.reason != null ? false : null);
+    const stress = gate.stressVeto ?? (gate.reason === "liquidity stress" ? true : gate.reason != null ? false : null);
+    if (toxic != null) {
+      toxicKnown += 1;
+      if (toxic) {
+        toxicFired += 1;
+        if (gate.toxicSource === "jev") out.toxicSource.jev += 1;
+        else if (gate.toxicSource === "rule") out.toxicSource.rule += 1;
+      }
+    }
+    if (stress != null) {
+      stressKnown += 1;
+      if (stress) {
+        stressFired += 1;
+        if (gate.stressSource === "jev") out.stressSource.jev += 1;
+        else if (gate.stressSource === "rule") out.stressSource.rule += 1;
+      }
+    }
+    if (gate.approved && gate.sizeUsd != null && input.notionalUsd > 0) sized.push(gate.sizeUsd / input.notionalUsd);
+    const vetoed = toxic === true || stress === true;
+    const fwd = moves.get(d.id);
+    if (fwd?.h1 != null) (vetoed ? h1Vetoed : h1Clear).push(fwd.h1);
+    if (fwd?.h4 != null) (vetoed ? h4Vetoed : h4Clear).push(fwd.h4);
+  }
+  out.toxicVetoRate = toxicKnown > 0 ? toxicFired / toxicKnown : null;
+  out.stressVetoRate = stressKnown > 0 ? stressFired / stressKnown : null;
+  out.forwardH1 = { vetoedBps: mean(h1Vetoed), clearBps: mean(h1Clear), vetoedN: h1Vetoed.length, clearN: h1Clear.length };
+  out.forwardH4 = { vetoedBps: mean(h4Vetoed), clearBps: mean(h4Clear), vetoedN: h4Vetoed.length, clearN: h4Clear.length };
+  sized.sort((a, b) => a - b);
+  out.sizedVsClip = median(sized);
+
+  const fills = input.fills.filter((f) => {
+    if (input.runId && f.run_id !== input.runId) return false;
+    if (input.fromTs != null && Number(f.traded_at) < input.fromTs) return false;
+    return true;
+  });
+  const holds: number[] = [];
+  let openAt: number | null = null;
+  for (const f of fills) {
+    if (f.purpose === "entry" && f.side === "buy") {
+      if (openAt == null) openAt = Number(f.traded_at);
+    }
+    if (f.purpose === "stop") out.exits.stop += 1;
+    if (f.purpose === "take_profit") {
+      if (f.liquidity === "maker") out.exits.takeProfitMaker += 1;
+      else out.exits.takeProfitTaker += 1;
+    }
+    if (f.purpose === "exit") {
+      if (!f.decision_id) out.exits.horizon += 1;
+      else {
+        const dec = byId.get(f.decision_id);
+        const bucket = exitReasonBucket(dec ? gateFromState(dec.state).reason : null);
+        if (bucket) out.exits[bucket] += 1;
+        else out.exits.horizon += 1;
+      }
+    }
+    if (f.side === "sell" && openAt != null && (f.purpose === "exit" || f.purpose === "stop" || f.purpose === "take_profit")) {
+      const hold = Number(f.traded_at) - openAt;
+      holds.push(hold);
+      if (hold < 15 * 60_000) out.hold.closedUnder15m += 1;
+      openAt = null;
+    }
+  }
+  holds.sort((a, b) => a - b);
+  out.hold.medianMs = median(holds);
+  out.hold.maxMs = holds.length ? holds[holds.length - 1]! : null;
+  return out;
+}
+
+export function buildHoldTrendMix(input: {
+  decisions: Array<{ id: string; run_id: string; ts: number; state: unknown }>;
+  fills: Array<{ run_id: string; purpose: string | null; decision_id: string | null; liquidity: string; side: string; traded_at: number }>;
+  outcomes: Array<{ decision_id: string; horizon_sec: number; move_bps: number }>;
+  notionalUsd: number;
+  runId?: string;
+  now?: number;
+}): HoldTrendMix {
+  const now = input.now ?? Date.now();
+  return {
+    run: buildHoldTrendWindow({ ...input, runId: input.runId }),
+    last24h: buildHoldTrendWindow({ ...input, fromTs: now - 86_400_000 }),
+  };
+}
+
 /** Wilson score interval for a binomial proportion. */
 export function wilson(successes: number, n: number, z = Z): { p: number; lower: number; upper: number } {
   if (n === 0) return { p: 0, lower: 0, upper: 0 };
@@ -437,7 +623,11 @@ export async function buildReport(store: Store, opts: { incidentsPerDay?: number
     };
     gate.passes = gate.resolved200 && gate.accuracyLowerAbove52 && gate.netPnlPositive && gate.drawdownUnder15 && gate.incidentsUnder1PerDay;
 
-    const [decisionRows, purposeFills] = await Promise.all([store.decisionsForPair(pair), store.fillsWithPurpose(pair)]);
+    const [decisionRows, purposeFills, holdOutcomes] = await Promise.all([
+      store.decisionsForPair(pair),
+      store.fillsWithPurpose(pair),
+      store.holdTrendOutcomes(pair),
+    ]);
     const share = takerFillShare(fills);
     const diagnostics = buildPairDiagnostics({
       decisions: decisionRows,
@@ -449,6 +639,13 @@ export async function buildReport(store: Store, opts: { incidentsPerDay?: number
       takerFillShare: share,
       maxDrawdownPct: dd,
     });
+    const holdTrend = buildHoldTrendMix({
+      decisions: decisionRows,
+      fills: purposeFills,
+      outcomes: holdOutcomes,
+      notionalUsd: bookNotional,
+      runId: opts.runId,
+    });
 
     pairReports.push({
       pair,
@@ -458,6 +655,7 @@ export async function buildReport(store: Store, opts: { incidentsPerDay?: number
       takerFillShare: share,
       maxDrawdownPct: dd,
       diagnostics,
+      holdTrend,
       makerFeeSensitivity: makerFeeSensitivity(fills, [50, 25, 10, 0], inference),
       gate,
     });
@@ -519,7 +717,12 @@ if (import.meta.main) {
       `  pnl net $${p.pnl.netUsd.toFixed(2)} (gross $${p.pnl.grossUsd.toFixed(2)}, fees $${p.pnl.feesUsd.toFixed(2)}, unrealized $${p.pnl.unrealizedUsd.toFixed(2)}, inference $${p.pnl.inferenceUsd.toFixed(4)}) | capture ${p.pnl.capture == null ? "n/a" : (p.pnl.capture * 100).toFixed(1) + "%"} | taker fills ${(p.takerFillShare * 100).toFixed(0)}% | maxDD ${p.maxDrawdownPct.toFixed(1)}%`,
     );
     console.log(`  gate ${p.gate.passes ? "PASS" : "FAIL"}: n>=200 ${p.gate.resolved200} | lower>52% ${p.gate.accuracyLowerAbove52} | net>0 ${p.gate.netPnlPositive} | dd<15% ${p.gate.drawdownUnder15} | incidents<1/day ${p.gate.incidentsUnder1PerDay}`);
-    console.log(`  score ${p.diagnostics.score}${p.diagnostics.demote ? " demote" : ""} | quiet ${p.diagnostics.refused.quiet} | stops ${p.diagnostics.fills.stop} | take profit ${p.diagnostics.fills.takeProfit}\n`);
+    console.log(`  score ${p.diagnostics.score}${p.diagnostics.demote ? " demote" : ""} | quiet ${p.diagnostics.refused.quiet} | stops ${p.diagnostics.fills.stop} | take profit ${p.diagnostics.fills.takeProfit}`);
+    const ht = p.holdTrend.run;
+    const pctOrDash = (n: number | null) => (n == null ? "-" : `${(n * 100).toFixed(1)}%`);
+    console.log(
+      `  hold-trend run: toxic ${pctOrDash(ht.toxicVetoRate)} stress ${pctOrDash(ht.stressVetoRate)} hold p50 ${ht.hold.medianMs == null ? "-" : `${Math.round(ht.hold.medianMs / 60_000)}m`} under 15m ${ht.hold.closedUnder15m} sized ${ht.sizedVsClip == null ? "-" : ht.sizedVsClip.toFixed(2)} | exits stop ${ht.exits.stop} tp maker ${ht.exits.takeProfitMaker} tp taker ${ht.exits.takeProfitTaker} trend ${ht.exits.trendDown} contraction ${ht.exits.contraction} horizon ${ht.exits.horizon} halt ${ht.exits.halt}\n`,
+    );
   }
   await store.close();
 }

@@ -19,7 +19,7 @@ todos:
     status: pending
   - id: measure
     content: Add veto rate, hold time, take-profit maker share, and sized-versus-clip ratio to /report, then run the 24 hour and 30 day checks in section 8
-    status: pending
+    status: completed
 isProject: false
 ---
 

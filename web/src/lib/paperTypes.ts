@@ -148,6 +148,39 @@ export interface HorizonMetrics {
   edgeBps: number;
 }
 
+export interface HoldTrendForward {
+  vetoedBps: number | null;
+  clearBps: number | null;
+  vetoedN: number;
+  clearN: number;
+}
+
+export interface HoldTrendWindow {
+  decisions: number;
+  toxicVetoRate: number | null;
+  toxicSource: { jev: number; rule: number };
+  stressVetoRate: number | null;
+  stressSource: { jev: number; rule: number };
+  forwardH1: HoldTrendForward;
+  forwardH4: HoldTrendForward;
+  hold: { medianMs: number | null; maxMs: number | null; closedUnder15m: number };
+  exits: {
+    stop: number;
+    takeProfitMaker: number;
+    takeProfitTaker: number;
+    trendDown: number;
+    contraction: number;
+    horizon: number;
+    halt: number;
+  };
+  sizedVsClip: number | null;
+}
+
+export interface HoldTrendMix {
+  run: HoldTrendWindow;
+  last24h: HoldTrendWindow;
+}
+
 export interface PairReport {
   pair: string;
   horizons: HorizonMetrics[];
@@ -155,6 +188,7 @@ export interface PairReport {
   takerFillShare: number;
   maxDrawdownPct: number;
   makerFeeSensitivity: Array<{ makerBps: number; netUsd: number }>;
+  holdTrend?: HoldTrendMix;
   gate: {
     tradedHorizonSec: number;
     resolved200: boolean;

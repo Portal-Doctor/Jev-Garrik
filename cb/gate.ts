@@ -150,16 +150,47 @@ export function evaluateGate(input: GateInput): GateResult {
   return { ...base, target: "long", approved: true, reason: null, sizeUsd: sized };
 }
 
+export interface GateStateView {
+  approved: boolean | null;
+  reason: string | null;
+  hurdleBps: number | null;
+  sizeUsd: number | null;
+  toxicVeto: boolean | null;
+  toxicSource: "jev" | "rule" | null;
+  stressVeto: boolean | null;
+  stressSource: "jev" | "rule" | null;
+}
+
+const emptyGate: GateStateView = {
+  approved: null,
+  reason: null,
+  hurdleBps: null,
+  sizeUsd: null,
+  toxicVeto: null,
+  toxicSource: null,
+  stressVeto: null,
+  stressSource: null,
+};
+
+function sourceOf(value: unknown): "jev" | "rule" | null {
+  return value === "jev" || value === "rule" ? value : null;
+}
+
 /** Pull the gate off a stored decision so the API does not make the UI parse `state`. */
-export function gateFromState(state: unknown): { approved: boolean | null; reason: string | null; hurdleBps: number | null } {
+export function gateFromState(state: unknown): GateStateView {
   const raw = typeof state === "string" ? parseState(state) : state;
-  if (!raw || typeof raw !== "object") return { approved: null, reason: null, hurdleBps: null };
-  const gate = (raw as { gate?: { approved?: unknown; reason?: unknown; hurdleBps?: unknown } }).gate;
-  if (!gate || typeof gate !== "object") return { approved: null, reason: null, hurdleBps: null };
+  if (!raw || typeof raw !== "object") return emptyGate;
+  const gate = (raw as { gate?: Record<string, unknown> }).gate;
+  if (!gate || typeof gate !== "object") return emptyGate;
   return {
     approved: typeof gate.approved === "boolean" ? gate.approved : null,
     reason: typeof gate.reason === "string" ? gate.reason : null,
     hurdleBps: typeof gate.hurdleBps === "number" ? gate.hurdleBps : null,
+    sizeUsd: typeof gate.sizeUsd === "number" ? gate.sizeUsd : null,
+    toxicVeto: typeof gate.toxicVeto === "boolean" ? gate.toxicVeto : null,
+    toxicSource: sourceOf(gate.toxicSource),
+    stressVeto: typeof gate.stressVeto === "boolean" ? gate.stressVeto : null,
+    stressSource: sourceOf(gate.stressSource),
   };
 }
 

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { wilson, brier, calibration, edgeBps, maxDrawdownPct, makerFeeSensitivity, pnlFromFills, takerFillShare, fmtHorizonCell, liveReportPairs, buildPairDiagnostics, weeklyPairScore, edgeRatioFromMoves, campaignPairs } from "./report";
+import { wilson, brier, calibration, edgeBps, maxDrawdownPct, makerFeeSensitivity, pnlFromFills, takerFillShare, fmtHorizonCell, liveReportPairs, buildPairDiagnostics, weeklyPairScore, edgeRatioFromMoves, campaignPairs, buildHoldTrendWindow } from "./report";
 import type { FillRow } from "./db/store";
 
 test("wilson interval brackets the point estimate and tightens with n", () => {
@@ -192,4 +192,56 @@ test("diagnostics keep quiet separate from yield and score a green book", () => 
   expect(d.adverseNextHour).toBe(1);
   expect(d.score).toBeGreaterThan(0);
   expect(d.demote).toBe(false);
+});
+
+test("hold-trend window reports veto rates, forward gap, hold, exits, and sized ratio", () => {
+  const w = buildHoldTrendWindow({
+    notionalUsd: 600,
+    decisions: [
+      {
+        id: "v",
+        run_id: "r1",
+        ts: 1,
+        state: { gate: { approved: false, reason: "toxic flow", toxicVeto: true, toxicSource: "rule", stressVeto: false, stressSource: "rule", sizeUsd: 0 } },
+      },
+      {
+        id: "c",
+        run_id: "r1",
+        ts: 2,
+        state: { gate: { approved: true, reason: null, toxicVeto: false, toxicSource: "rule", stressVeto: false, stressSource: "rule", sizeUsd: 300 } },
+      },
+      {
+        id: "x",
+        run_id: "r1",
+        ts: 3,
+        state: { gate: { approved: false, reason: "regime", toxicVeto: false, toxicSource: "jev", stressVeto: false, stressSource: "jev" } },
+      },
+    ],
+    fills: [
+      { run_id: "r1", purpose: "entry", decision_id: "c", liquidity: "maker", side: "buy", traded_at: 10_000 },
+      { run_id: "r1", purpose: "take_profit", decision_id: null, liquidity: "maker", side: "sell", traded_at: 20 * 60_000 },
+      { run_id: "r1", purpose: "entry", decision_id: "c", liquidity: "maker", side: "buy", traded_at: 30 * 60_000 },
+      { run_id: "r1", purpose: "stop", decision_id: null, liquidity: "taker", side: "sell", traded_at: 32 * 60_000 },
+      { run_id: "r1", purpose: "exit", decision_id: "x", liquidity: "taker", side: "sell", traded_at: 40 * 60_000 },
+    ],
+    outcomes: [
+      { decision_id: "v", horizon_sec: 3600, move_bps: -80 },
+      { decision_id: "c", horizon_sec: 3600, move_bps: 20 },
+      { decision_id: "v", horizon_sec: 14400, move_bps: -10 },
+      { decision_id: "c", horizon_sec: 14400, move_bps: 40 },
+    ],
+  });
+  expect(w.decisions).toBe(3);
+  expect(w.toxicVetoRate).toBeCloseTo(1 / 3, 8);
+  expect(w.toxicSource.rule).toBe(1);
+  expect(w.stressVetoRate).toBe(0);
+  expect(w.forwardH1.vetoedBps).toBe(-80);
+  expect(w.forwardH1.clearBps).toBe(20);
+  expect(w.sizedVsClip).toBeCloseTo(0.5, 8);
+  expect(w.exits.takeProfitMaker).toBe(1);
+  expect(w.exits.stop).toBe(1);
+  expect(w.exits.contraction).toBe(1);
+  expect(w.hold.closedUnder15m).toBe(1);
+  expect(w.hold.medianMs).toBeGreaterThan(0);
+  expect(w.hold.maxMs).toBeGreaterThan(w.hold.medianMs ?? 0);
 });
