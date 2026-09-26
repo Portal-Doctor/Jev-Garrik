@@ -69,6 +69,8 @@ export const config = {
   trailAtr: num("CB_TRAIL_ATR", 3),
   /** Breakout hold cap. Locked at 14 days (1_209_600s) after the 3-month gate. */
   breakoutMaxHoldSec: num("CB_BREAKOUT_MAX_HOLD_SEC", 1_209_600),
+  /** Resting take-profit crosses as taker if mid stays at or above the target this long. */
+  tpCrossSec: num("CB_TP_CROSS_SEC", 30),
 
   // Model (shared with the demo).
   model: (env("MODEL", "mock") as "mock" | "jev"),

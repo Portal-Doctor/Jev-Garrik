@@ -92,6 +92,8 @@ export interface PaperOpts {
   maxSlippageBps?: number;
   /** When this returns false, resting entries are canceled and new entries are refused. */
   feedHealthy?: (pair: string) => boolean;
+  /** Resting take-profit crosses as taker if mid stays at or above the target this long. */
+  tpCrossSec?: number;
 }
 
 export interface FillEvent {
@@ -120,6 +122,8 @@ export class PaperBroker implements Broker {
   /** Buy notional reserved before the order row exists, so two pairs cannot both clear the cap. */
   private reservedUsd = new Map<string, number>();
   private stepping = new Map<string, boolean>();
+  /** Mid first seen at or above the resting take-profit. Cleared when mid falls back. */
+  private tpAboveSince = new Map<string, number | null>();
   /** Per-instance token so synthetic external ids stay unique even if a runId is ever reused. */
   private readonly instance = crypto.randomUUID().slice(0, 8);
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -139,6 +143,7 @@ export class PaperBroker implements Broker {
       this.open.set(p, null);
       this.horizonExpiresAt.set(p, null);
       this.fillCounts.set(p, { maker: 0, taker: 0 });
+      this.tpAboveSince.set(p, null);
     }
   }
 
@@ -186,6 +191,12 @@ export class PaperBroker implements Broker {
         refMid: null,
       });
     }
+    const now = Date.now();
+    for (const pair of this.pairs) {
+      if (this.positionOf(pair) !== "long") continue;
+      if (this.open.get(pair)) continue;
+      await this.restTakeProfit(pair, now);
+    }
   }
 
   stop(): void {
@@ -232,6 +243,10 @@ export class PaperBroker implements Broker {
   }
 
   onIntent(intent: OrderIntent): void {
+    if (intent.purpose === "exit") {
+      void this.replaceWithExit(intent);
+      return;
+    }
     if (this.open.get(intent.pair)) return; // one order in flight per pair
     if (intent.purpose === "entry") {
       if (killSwitch.blocked()) return;
@@ -239,6 +254,18 @@ export class PaperBroker implements Broker {
       if (this.opts.feedHealthy && !this.opts.feedHealthy(intent.pair)) return;
     }
     void this.place(intent.pair, intent.side, intent.purpose, intent.decisionId, intent.sizeUsd, intent.mid);
+  }
+
+  /** Signal flatten (contraction, trend down, 24h clock) takes the slot from a resting take-profit. */
+  private async replaceWithExit(intent: OrderIntent): Promise<void> {
+    const resting = this.open.get(intent.pair);
+    if (resting && resting.purpose !== "take_profit") return;
+    if (resting) {
+      await this.store.updateOrder(resting.id, { status: "canceled" }, Date.now());
+      this.open.set(intent.pair, null);
+      this.tpAboveSince.set(intent.pair, null);
+    }
+    await this.place(intent.pair, intent.side, "exit", intent.decisionId, intent.sizeUsd, intent.mid);
   }
 
   // --- order lifecycle -------------------------------------------------------
@@ -331,8 +358,15 @@ export class PaperBroker implements Broker {
       await this.processOrder(pair, now);
       await this.enforceGuards(pair, now);
       const expiresAt = this.horizonExpiresAt.get(pair);
-      if (this.positionOf(pair) === "long" && !this.open.get(pair) && expiresAt != null && now >= expiresAt) {
+      if (this.positionOf(pair) === "long" && expiresAt != null && now >= expiresAt) {
+        const resting = this.open.get(pair);
+        if (resting && resting.purpose !== "take_profit") return;
         this.horizonExpiresAt.set(pair, null);
+        if (resting) {
+          await this.store.updateOrder(resting.id, { status: "canceled" }, now);
+          this.open.set(pair, null);
+          this.tpAboveSince.set(pair, null);
+        }
         await this.place(pair, "sell", "exit", null);
       }
     } finally {
@@ -349,9 +383,9 @@ export class PaperBroker implements Broker {
   }
 
   /**
-   * Stop and take-profit on the 1 second tick. A later long classification cannot hold through
-   * a breach: the guard cancels the resting order and flattens as a taker immediately.
-   * A flat pair has no entry price, so neither guard can trip.
+   * Stop on the 1 second tick. Take-profit rests as a maker ask and is not crossed here.
+   * A later long classification cannot hold through a stop: the guard cancels the resting
+   * order and flattens as a taker immediately. A flat pair has no entry price, so the stop cannot trip.
    */
   private async enforceGuards(pair: string, now: number): Promise<void> {
     const risk = this.risk(pair);
@@ -362,9 +396,9 @@ export class PaperBroker implements Broker {
     const entry = this.acct.get(pair)?.entryPrice();
     const mid = this.feed.book(pair)?.mid();
     if (entry == null || mid == null) return;
-    const trip = guardTrip(entry, mid, stop, take);
-    if (!trip) return;
-    await this.takerFlatten(pair, trip, now);
+    if (guardTrip(entry, mid, stop, take) !== "stop") return;
+    this.tpAboveSince.set(pair, null);
+    await this.takerFlatten(pair, "stop", now);
   }
 
   private async takerFlatten(pair: string, purpose: "stop" | "take_profit", now: number): Promise<void> {
@@ -412,10 +446,29 @@ export class PaperBroker implements Broker {
     const book = this.feed.book(pair);
     if (!order || !book) return;
 
-    // A guard that was inserted and not filled (restart) crosses immediately.
-    if (order.purpose === "stop" || order.purpose === "take_profit") {
+    // A stop that was inserted and not filled (restart) crosses immediately.
+    // A restored take-profit stays resting.
+    if (order.purpose === "stop") {
       const cross = book.walk(order.side, order.remaining) ?? (order.side === "sell" ? book.bestBid() : book.bestAsk()) ?? order.price;
       await this.fill(pair, order, order.remaining, cross, "taker", now, true);
+      return;
+    }
+
+    if (order.purpose === "take_profit") {
+      const prints = this.feed.drainPrints(pair);
+      if (now >= order.eligibleAt) {
+        for (const print of prints) {
+          if (print.ts < order.eligibleAt) continue;
+          if (order.remaining <= 1e-12) break;
+          if (!crosses(order.side, order.price, print)) continue;
+          const size = makerFillSize(order.remaining, print.size, this.opts.fillHaircut);
+          if (size > 0) await this.fill(pair, order, size, order.price, "maker", now);
+        }
+      }
+      const current = this.open.get(pair);
+      if (current && current.id === order.id && current.remaining > 1e-12) {
+        await this.maybeCrossTakeProfit(pair, current, now);
+      }
       return;
     }
 
@@ -469,7 +522,8 @@ export class PaperBroker implements Broker {
     order.remaining -= size;
     const maxSlip = this.opts.maxSlippageBps ?? 10;
     const ref = order.refMid;
-    const slipped = ref != null && ref > 0 && (Math.abs(price - ref) / ref) * 10_000 > maxSlip;
+    const slipped =
+      order.purpose === "entry" && ref != null && ref > 0 && (Math.abs(price - ref) / ref) * 10_000 > maxSlip;
     if (slipped) this.entryBlocked.set(pair, true);
     const done = order.remaining <= 1e-12 || slipped;
     const status = slipped && order.remaining > 1e-12 ? "canceled" : done ? (converted ? "converted_taker" : "filled") : "partial";
@@ -497,11 +551,64 @@ export class PaperBroker implements Broker {
 
     if (order.purpose === "entry" && this.positionOf(pair) === "long") {
       this.horizonExpiresAt.set(pair, now + this.opts.horizonSec * 1000);
+      if (done) await this.restTakeProfit(pair, now);
     } else if (this.positionOf(pair) === "flat") {
       this.horizonExpiresAt.set(pair, null);
+      this.tpAboveSince.set(pair, null);
     }
 
     this.onFill({ pair, side: order.side, purpose: order.purpose, price, sizeBase: size, feeUsd: fee, liquidity, ts: now });
+  }
+
+  /** Post-only sell at the fee-inclusive take-profit. The slot is this ask while long. */
+  private async restTakeProfit(pair: string, now: number): Promise<void> {
+    if (this.open.get(pair)) return;
+    if (this.positionOf(pair) !== "long") return;
+    const acct = this.acct.get(pair);
+    const target = this.guardPrice(pair, "take_profit");
+    if (!acct || target == null || !(target > 0) || acct.positionBase <= 0) return;
+    const sizeBase = acct.positionBase;
+    const id = await this.store.insertOrder({
+      run_id: this.runId,
+      decision_id: null,
+      pair,
+      side: "sell",
+      purpose: "take_profit",
+      price: target,
+      size_base: sizeBase,
+      status: "open",
+      venue_order_id: null,
+      created_at: now,
+      updated_at: now,
+    });
+    this.open.set(pair, {
+      id,
+      side: "sell",
+      purpose: "take_profit",
+      price: target,
+      remaining: sizeBase,
+      createdAt: now,
+      eligibleAt: now + ELIGIBLE_DELAY_MS,
+      decisionId: null,
+      refMid: this.feed.book(pair)?.mid() ?? target,
+    });
+  }
+
+  /** Gap through the resting ask: mid at or above the target for CB_TP_CROSS_SEC, then taker the rest. */
+  private async maybeCrossTakeProfit(pair: string, order: OpenOrder, now: number): Promise<void> {
+    const book = this.feed.book(pair);
+    const mid = book?.mid();
+    if (mid == null || mid < order.price) {
+      this.tpAboveSince.set(pair, null);
+      return;
+    }
+    const since = this.tpAboveSince.get(pair) ?? now;
+    this.tpAboveSince.set(pair, since);
+    const waitMs = (this.opts.tpCrossSec ?? 30) * 1000;
+    if (now - since < waitMs) return;
+    const price = book.walk("sell", order.remaining) ?? book.bestBid() ?? order.price;
+    if (!(price > 0)) return;
+    await this.fill(pair, order, order.remaining, price, "taker", now, true);
   }
 
   // --- state + snapshots -----------------------------------------------------

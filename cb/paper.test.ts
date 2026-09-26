@@ -192,7 +192,9 @@ async function enterLong(pairName: string, feed: FakeFeed): Promise<PaperBroker>
   feed.push({ ts: t, price: px - 0.05, size: 80, takerSide: "sell" });
   await (broker as any).processOrder(pairName, t);
   expect(broker.state(pairName).position).toBe("long");
-  expect(broker.state(pairName).openOrder).toBeNull();
+  const resting = broker.state(pairName).openOrder;
+  expect(resting?.purpose).toBe("take_profit");
+  expect(resting?.price).toBeCloseTo(broker.state(pairName).takeProfitPrice!, 8);
   return broker;
 }
 
@@ -216,23 +218,86 @@ test("a long flattens on the 1s tick when mid breaches the stop, even if the las
   expect(rows[0]!.liquidity).toBe("taker");
 });
 
-test("a long flattens on the 1s tick when mid clears the take-profit, even if the last call was still long", async () => {
+test("a taker buy print through the resting take-profit fills at the maker fee", async () => {
   const tpPair = "PAPER-TP-USD";
   const feed = new FakeFeed();
   const broker = await enterLong(tpPair, feed);
-  const entry = broker.state(tpPair).entryPrice!;
-  const mid = entry * (1 + 260 / 10_000);
+  const target = broker.state(tpPair).openOrder!.price;
+  const t = Date.now() + 5_000;
+  feed.push({ ts: t, price: target + 0.01, size: 80, takerSide: "buy" });
+  await (broker as any).processOrder(tpPair, t);
+  expect(broker.state(tpPair).position).toBe("flat");
+  const rows = await store.sql<{ purpose: string; liquidity: string; fee_usd: number; notional_usd: number }[]>`
+    SELECT o.purpose, f.liquidity, f.fee_usd, f.notional_usd FROM orders o
+    JOIN fills f ON f.order_id = o.id
+    WHERE o.run_id = ${runId} AND o.pair = ${tpPair} AND o.purpose = 'take_profit'
+  `;
+  expect(rows.length).toBe(1);
+  expect(rows[0]!.liquidity).toBe("maker");
+  expect(Number(rows[0]!.fee_usd)).toBeCloseTo((Number(rows[0]!.notional_usd) * 50) / 10_000, 8);
+});
+
+test("a mid above the take-profit for 30 seconds without a fill crosses as taker", async () => {
+  const tpPair = "PAPER-TP-CROSS-USD";
+  const feed = new FakeFeed();
+  const broker = await enterLong(tpPair, feed);
+  const target = broker.state(tpPair).openOrder!.price;
+  const mid = target + 0.05;
   retouch(feed, mid - 0.02, mid + 0.02);
-  broker.observe(tpPair, "buy", 0);
-  await (broker as any).tickPair(tpPair, Date.now());
+  const t0 = Date.now() + 2_000;
+  await (broker as any).tickPair(tpPair, t0);
+  expect(broker.state(tpPair).position).toBe("long");
+  await (broker as any).tickPair(tpPair, t0 + 29_000);
+  expect(broker.state(tpPair).position).toBe("long");
+  await (broker as any).tickPair(tpPair, t0 + 30_000);
   expect(broker.state(tpPair).position).toBe("flat");
   const rows = await store.sql<{ purpose: string; liquidity: string }[]>`
     SELECT o.purpose, f.liquidity FROM orders o
     JOIN fills f ON f.order_id = o.id
     WHERE o.run_id = ${runId} AND o.pair = ${tpPair} AND o.purpose = 'take_profit'
   `;
-  expect(rows.length).toBe(1);
-  expect(rows[0]!.liquidity).toBe("taker");
+  expect(rows.some((r) => r.liquidity === "taker")).toBe(true);
+});
+
+test("a stop trip cancels the resting take-profit and crosses", async () => {
+  const stopTpPair = "PAPER-STOP-TP-USD";
+  const feed = new FakeFeed();
+  const broker = await enterLong(stopTpPair, feed);
+  const tpId = (broker as any).open.get(stopTpPair)?.id as string;
+  expect(tpId).toBeTruthy();
+  const entry = broker.state(stopTpPair).entryPrice!;
+  const mid = entry * (1 - 160 / 10_000);
+  retouch(feed, mid - 0.02, mid + 0.02);
+  await (broker as any).tickPair(stopTpPair, Date.now());
+  expect(broker.state(stopTpPair).position).toBe("flat");
+  const tp = await store.sql<{ status: string }[]>`SELECT status FROM orders WHERE id = ${tpId}`;
+  expect(tp[0]!.status).toBe("canceled");
+  const stops = await store.sql<{ purpose: string; liquidity: string }[]>`
+    SELECT o.purpose, f.liquidity FROM orders o
+    JOIN fills f ON f.order_id = o.id
+    WHERE o.run_id = ${runId} AND o.pair = ${stopTpPair} AND o.purpose = 'stop'
+  `;
+  expect(stops.length).toBe(1);
+  expect(stops[0]!.liquidity).toBe("taker");
+});
+
+test("a restart with an open long and a resting take-profit keeps the take-profit resting", async () => {
+  const restoreTp = "PAPER-RESTORE-TP-USD";
+  const feed = new FakeFeed();
+  const first = await enterLong(restoreTp, feed);
+  const target = first.state(restoreTp).openOrder!.price;
+  const remaining = first.state(restoreTp).openOrder!.remaining;
+  first.stop();
+
+  const again = new PaperBroker([restoreTp], feed, store, `test-${crypto.randomUUID()}`, guardOpts);
+  await again.start();
+  const t = Date.now() + 2_000;
+  await (again as any).processOrder(restoreTp, t);
+  expect(again.state(restoreTp).position).toBe("long");
+  expect(again.state(restoreTp).openOrder?.purpose).toBe("take_profit");
+  expect(again.state(restoreTp).openOrder?.price).toBeCloseTo(target, 8);
+  expect(again.state(restoreTp).openOrder?.remaining).toBeCloseTo(remaining, 6);
+  again.stop();
 });
 
 test("a flat pair never trips a stop or a take-profit", async () => {

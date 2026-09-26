@@ -87,6 +87,7 @@ const broker = new PaperBroker(
     maxGrossUsd: config.maxGrossUsd,
     minSizeUsd: config.minSizeUsd,
     maxSlippageBps: config.maxSlippageBps,
+    tpCrossSec: config.tpCrossSec,
     feedHealthy: (pair) => feed.feedHealthy(pair),
   },
   (f) => {
