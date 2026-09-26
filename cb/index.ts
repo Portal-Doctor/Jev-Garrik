@@ -17,6 +17,7 @@ import { Engine } from "./engine";
 import { PaperBroker } from "./paper";
 import { Resolver } from "./resolver";
 import { startServer, type RunMeta } from "./server";
+import { TrendBook } from "./trend";
 
 /**
  * Bootstrap: config, store, feed, paper broker, engine, resolver, server. Wires the live SSE
@@ -98,6 +99,9 @@ const broker = new PaperBroker(
 );
 await broker.start(config.coinbaseRestUrl);
 
+const trend = new TrendBook(pairs);
+await trend.start();
+
 const engine = new Engine(
   pairs,
   feed,
@@ -140,6 +144,7 @@ const engine = new Engine(
     });
     if (intent) broadcast("order", intent);
   },
+  trend,
 );
 await engine.seedVetoes();
 engine.start();
@@ -231,6 +236,7 @@ const shutdown = async () => {
     resolver.stop();
     broker.stop();
     feed.stop();
+    trend.stop();
     await store.stopRun(runId, Date.now());
     await store.close();
   } finally {

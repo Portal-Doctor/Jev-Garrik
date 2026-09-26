@@ -42,8 +42,12 @@ export interface GateInput {
   remainingGrossUsd: number;
   halted: boolean;
   feedBlocked: boolean;
-  /** Fast average versus slow average. A new long requires `above`. */
+  /** Fast versus slow 1 minute average. Recorded for Jev. The entry check uses htfTrendUp. */
   emaCross: "above" | "below" | "flat";
+  /** Last completed 4 hour close above its 50 bar EMA with a positive 24 hour return. */
+  htfTrendUp: boolean;
+  /** False when the hourly candle fetch has not produced a 4 hour trend yet. */
+  htfTrendKnown: boolean;
   /** Close-to-close return over the last 4 hours, in bps. */
   h4ReturnBps: number;
   stopLossBps: number;
@@ -130,6 +134,7 @@ export function evaluateGate(input: GateInput): GateResult {
   if (input.position === "long") {
     if (input.halted) return { ...base, target: "flat", reason: "halt", sizeUsd: 0 };
     if (input.vector.market_regime === "contraction") return { ...base, target: "flat", reason: "regime", sizeUsd: 0 };
+    if (input.htfTrendKnown && !input.htfTrendUp) return { ...base, target: "flat", reason: "trend down", sizeUsd: 0 };
     return { ...base, target: "long", reason: null, sizeUsd: 0 };
   }
 
@@ -137,7 +142,8 @@ export function evaluateGate(input: GateInput): GateResult {
 
   if (input.halted) return refuse("halt");
   if (input.feedBlocked) return refuse("feed");
-  if (input.emaCross !== "above") return refuse("trend");
+  if (!input.htfTrendKnown) return refuse("trend unknown");
+  if (!input.htfTrendUp) return refuse("trend");
   if (input.vector.toxic_flow_risk === "high") return refuse("toxic flow");
   if (input.vector.liquidity_stress === "stressed") return refuse("liquidity stress");
   if (input.vector.market_regime === "contraction") return refuse("regime");

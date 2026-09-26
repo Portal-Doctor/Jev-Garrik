@@ -7,6 +7,7 @@ import { findBook } from "./books";
 import { evaluateGate, type DecisionVector, type GateResult } from "./gate";
 import { killSwitch } from "./kill";
 import { PairVetoes, sampleFromState, VETO_RING_MS, type VetoDecision } from "./vetoes";
+import type { TrendLike } from "./trend";
 
 /** A target-position change the broker should act on. */
 export interface OrderIntent {
@@ -110,6 +111,7 @@ export class Engine {
     private readonly opts: EngineOpts,
     private readonly broker: Broker,
     private readonly onDecision: (id: string, decision: GatedDecision, state: MarketState, intent?: OrderIntent) => void = () => {},
+    private readonly trend: TrendLike = { known: () => false, trendUp: () => false },
   ) {
     for (const pair of pairs) this.vetoes.set(pair, new PairVetoes());
   }
@@ -206,6 +208,8 @@ export class Engine {
         halted: halt != null,
         feedBlocked: !this.feed.feedHealthy(pair),
         emaCross: state.emaCross,
+        htfTrendUp: this.trend.trendUp(pair),
+        htfTrendKnown: this.trend.known(pair),
         h4ReturnBps: state.returnsBps.h4,
         stopLossBps: risk?.stopLossBps ?? 0,
         takeProfitBps: risk?.takeProfitBps ?? 0,

@@ -353,6 +353,8 @@ function gateFor(state: MarketState, opts: BacktestOpts, feeBuffer: number): Gat
     halted: false,
     feedBlocked: false,
     emaCross: state.emaCross,
+    htfTrendUp: state.emaCross === "above",
+    htfTrendKnown: true,
     h4ReturnBps: state.returnsBps.h4,
     stopLossBps: opts.stopLossBps,
     takeProfitBps: opts.takeProfitBps,
