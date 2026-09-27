@@ -243,3 +243,25 @@ The 24 hour live window is still in progress. This rebuild started a new paper r
 New loses less than old (`-485.92` vs `-520.77`). Section 8 check 3 passes. NEAR, AVAX, and ARB are worse under the new rules; UNI, BCH, and SUI carry the total. Replay with `bun run cb/htf-s8-compare.ts`.
 
 Breakout phase 2 was not started.
+
+### Section 8 24h live (final)
+
+Clean paper run `45a0c26d-b7b6-440a-85ec-daf818df1e31`, started 2026-09-26 20:04:43 UTC. Scored `holdTrend.run` only. The process stayed up 24.01 hours (`GET /health` `status=ok`, same `runId`). Decisions did not. Last persisted decision is 2026-09-27 04:08:52 UTC (`ts` 1790482132475). After that, `decide` failed with "Free tier users do not have access to this model." No later decision rows. About 16 hours of the 5 minute cadence is missing. 576 decisions total (95 to 97 per pair). Do not use `last24h` or run `3eed8636`.
+
+| Pair | Decisions | Toxic veto | Band | Hold median h | TP maker | TP taker | Stop | Trend down |
+|---|---:|---:|---|---:|---:|---:|---:|---:|
+| UNI-USD | 96 | 4.2% | out | 14.33 | 0 | 0 | 1 | 3 |
+| NEAR-USD | 96 | 0% | out | - | 0 | 0 | 0 | 0 |
+| BCH-USD | 95 | 7.4% | in | - | 0 | 0 | 0 | 1 |
+| SUI-USD | 97 | 0% | out | 4.42 | 0 | 0 | 1 | 5 |
+| AVAX-USD | 96 | 0% | out | - | 0 | 0 | 1 | 0 |
+| ARB-USD | 96 | 7.3% | in | - | 0 | 0 | 0 | 3 |
+
+| Check | Result |
+|---|---|
+| Toxic veto 5% to 30% on every pair | FAIL. Only BCH and ARB are in band. UNI 4.2%. NEAR, SUI, AVAX 0%. All vetoes were `rule` (ring never reached 200 samples). |
+| No close reason `toxic flow` | PASS. 0 decisions and 0 filled exits with that reason. Signal exits are `trend down`. |
+| Median hold of any long over 1 hour | PASS on the two pairs with a hold sample (UNI 14.33h, SUI 4.42h). NEAR, BCH, AVAX, and ARB have no hold median. |
+| At least 80% of take-profit fills are maker | FAIL. Zero take-profit fills. |
+
+Live section 8 fails. The 30 day old-versus-new compare from the progress write-up still stands. No retune. Breakout phase 2 was not started.
