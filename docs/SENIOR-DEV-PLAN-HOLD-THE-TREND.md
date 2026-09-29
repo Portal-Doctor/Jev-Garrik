@@ -108,6 +108,8 @@ New file [cb/vetoes.ts](cb/vetoes.ts), one instance per pair in the engine:
 
 After 7 days, compare the forward 1 hour and 4 hour returns of decisions where the toxic veto fired against those where it did not, per pair. If vetoed decisions are not worse, delete the toxic veto rather than tune it. Put that comparison on `/report` (section 7) so the decision is visible.
 
+**Answered. The toxic veto is deleted.** The comparison ran on run `d5bc7712` and read vetoed not worse on five of six pairs, actively costly on four. Tables and the call are in [docs/SENIOR-DEV-PLAN-PROFITABILITY.md](docs/SENIOR-DEV-PLAN-PROFITABILITY.md) Result section 2. `evaluateGate` no longer refuses an entry on `toxic_flow_risk`. Do not re-add it without a new forward-return table that says vetoed worse. `toxicPHigh`, `toxicVeto`, and `toxicSource` are still recorded on every decision as an observation so the comparison keeps scoring. The stress veto, the ring, the 200 sample warm-up, and the percentile are unchanged.
+
 ## 4. A 4 hour trend state
 
 The live feed only has history since the last restart, so a 50 bar 4 hour EMA cannot come from the feed.
@@ -190,7 +192,7 @@ Then `docker compose up -d --build cb` with no `--profile kuru`, and confirm `GE
 
 Checks after deploy:
 
-1. Within 24 hours of live decisions: toxic veto rate between 5% and 30% on every pair, no long closed with reason `toxic flow`, and the median hold of any long over 1 hour.
+1. Within 24 hours of live decisions: ~~toxic veto rate between 5% and 30% on every pair~~ (cancelled, the toxic veto is deleted; see section 3), no long closed with reason `toxic flow`, and the median hold of any long over 1 hour.
 2. At least 80% of take-profit fills are maker.
 3. 30 day backtest on all six pairs, old rules against new rules, same fees. Record both totals in this file under a heading "Result". The new rules must lose less than the old. If they do not, stop and report which change made it worse before moving on to the breakout plan's phase 2.
 

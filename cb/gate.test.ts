@@ -81,10 +81,26 @@ test("long flattens with trend down when the 4 hour trend turns down", () => {
   expect(r.reason).toBe("trend down");
 });
 
-test("flat with the average stack up and toxic flow refuses toxic flow", () => {
-  const r = evaluateGate(input({ vector: { ...input().vector, toxic_flow_risk: "high" } }));
+test("the deleted toxic veto no longer refuses an entry", () => {
+  const r = evaluateGate(input({ vector: { ...input().vector, toxic_flow_risk: "high", toxicPHigh: 1 } }));
+  expect(r.approved).toBe(true);
+  expect(r.target).toBe("long");
+  expect(r.reason).toBeNull();
+  expect(r.sizeUsd).toBe(600);
+});
+
+test("stressed liquidity still refuses an entry after the toxic veto is deleted", () => {
+  const r = evaluateGate(
+    input({ vector: { ...input().vector, toxic_flow_risk: "high", liquidity_stress: "stressed" } }),
+  );
   expect(r.approved).toBe(false);
-  expect(r.reason).toBe("toxic flow");
+  expect(r.reason).toBe("liquidity stress");
+});
+
+test("contraction still refuses an entry that toxic flow alone would have let through", () => {
+  const r = evaluateGate(input({ vector: { ...input().vector, toxic_flow_risk: "high", market_regime: "contraction" } }));
+  expect(r.approved).toBe(false);
+  expect(r.reason).toBe("regime");
 });
 
 test("flat with the average stack up refuses a chase past the stop", () => {
