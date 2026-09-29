@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
-import type { HoldTrendWindow, PairDiagnostics, PairReport, Report } from "@/lib/paperTypes";
+import type { HoldTrendForward, HoldTrendWindow, PairDiagnostics, PairReport, Report } from "@/lib/paperTypes";
 import { fmtUsd } from "@/lib/format";
 import styles from "./report.module.css";
 
@@ -220,6 +220,7 @@ export default function ReportPage() {
 
           <HorizonComparison pairs={report!.pairs} />
           <HoldTrendTable pairs={report!.pairs} />
+          <ForwardReturnTable pairs={report!.pairs} />
           <DiagnosticsTable pairs={report!.pairs} />
 
           <section className={styles.block}>
@@ -351,6 +352,68 @@ function HoldTrendRow({ pair, label, w }: { pair: string; label: string; w: Hold
   );
 }
 
+function fmtForward(f: HoldTrendForward, side: "vetoed" | "clear"): string {
+  const n = side === "vetoed" ? f.vetoedN : f.clearN;
+  const bps = side === "vetoed" ? f.vetoedBps : f.clearBps;
+  return n === 0 ? "-" : `${n} / ${fmtBps(bps)}`;
+}
+
+function ForwardReturnRow({ pair, label, w }: { pair: string; label: string; w: HoldTrendWindow }) {
+  return (
+    <tr>
+      <td className={styles.pair}>{pair}</td>
+      <td>{label}</td>
+      <td className={styles.num}>{fmtForward(w.forwardH1, "vetoed")}</td>
+      <td className={styles.num}>{fmtForward(w.forwardH1, "clear")}</td>
+      <td className={styles.num}>{fmtForward(w.forwardH4, "vetoed")}</td>
+      <td className={styles.num}>{fmtForward(w.forwardH4, "clear")}</td>
+      <td>{w.toxicCall}</td>
+      <td className={styles.num}>{fmtForward(w.stressForwardH1, "vetoed")}</td>
+      <td className={styles.num}>{fmtForward(w.stressForwardH4, "vetoed")}</td>
+    </tr>
+  );
+}
+
+function ForwardReturnTable({ pairs }: { pairs: PairReport[] }) {
+  const rows = pairs.filter((p) => p.holdTrend != null);
+  if (rows.length === 0) return null;
+  return (
+    <section className={styles.block}>
+      <h2>Toxic veto forward returns</h2>
+      <p className={styles.note}>
+        Hold the trend section 3. Per pair, n and mean forward move in bps after a toxic veto against a toxic-clear
+        decision, for the current run, the last 24 hours, and the last 7 days. The call is vetoed worse only when the
+        vetoed mean is below the clear mean at every horizon with both sides. Vetoed not worse means delete the toxic
+        veto rather than tune it. Stress columns are the vetoed side of the same table, shown for reference.
+      </p>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th>Pair</th>
+            <th>Window</th>
+            <th className={styles.num}>1h vetoed n / bps</th>
+            <th className={styles.num}>1h clear n / bps</th>
+            <th className={styles.num}>4h vetoed n / bps</th>
+            <th className={styles.num}>4h clear n / bps</th>
+            <th>Call</th>
+            <th className={styles.num}>Stress 1h vetoed</th>
+            <th className={styles.num}>Stress 4h vetoed</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => (
+            <Fragment key={p.pair}>
+              <ForwardReturnRow pair={p.pair} label="run" w={p.holdTrend!.run} />
+              <ForwardReturnRow pair={p.pair} label="24h" w={p.holdTrend!.last24h} />
+              <ForwardReturnRow pair={p.pair} label="7d" w={p.holdTrend!.last7d} />
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 function HoldTrendTable({ pairs }: { pairs: PairReport[] }) {
   const rows = pairs.filter((p) => p.holdTrend != null);
   if (rows.length === 0) {
@@ -365,8 +428,8 @@ function HoldTrendTable({ pairs }: { pairs: PairReport[] }) {
     <section className={styles.block}>
       <h2>Hold the trend</h2>
       <p className={styles.note}>
-        Per pair, current run and last 24 hours. Forward returns are 1 hour and 4 hour, vetoed versus clear. Sized is median
-        approved size over clip. Fees stay 50/90.
+        Per pair, current run, last 24 hours, and last 7 days. Forward returns are 1 hour and 4 hour, toxic vetoed
+        versus toxic clear. Sized is median approved size over clip. Fees stay 50/90.
       </p>
       <table className={styles.table}>
         <thead>
@@ -397,6 +460,7 @@ function HoldTrendTable({ pairs }: { pairs: PairReport[] }) {
             <Fragment key={p.pair}>
               <HoldTrendRow pair={p.pair} label="run" w={p.holdTrend!.run} />
               <HoldTrendRow pair={p.pair} label="24h" w={p.holdTrend!.last24h} />
+              <HoldTrendRow pair={p.pair} label="7d" w={p.holdTrend!.last7d} />
             </Fragment>
           ))}
         </tbody>

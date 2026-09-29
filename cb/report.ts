@@ -37,14 +37,34 @@ export interface HoldTrendForward {
   clearN: number;
 }
 
+/**
+ * The one-line call hold-the-trend section 3 asks for. The burden of proof sits on the veto:
+ * it is only `vetoed worse` when the mean forward move after a toxic veto is below the mean
+ * after a clear decision at every horizon that has both sides. Anything else, including a
+ * sample too small to tell, is `vetoed not worse`, which section 3 answers by deleting the veto.
+ */
+export type VetoCall = "vetoed worse" | "vetoed not worse" | "no sample";
+
+export function toxicVetoCall(h1: HoldTrendForward, h4: HoldTrendForward): VetoCall {
+  const scored = [h1, h4].filter((f) => f.vetoedN > 0 && f.clearN > 0 && f.vetoedBps != null && f.clearBps != null);
+  if (scored.length === 0) return "no sample";
+  return scored.every((f) => f.vetoedBps! < f.clearBps!) ? "vetoed worse" : "vetoed not worse";
+}
+
 export interface HoldTrendWindow {
   decisions: number;
   toxicVetoRate: number | null;
   toxicSource: { jev: number; rule: number };
   stressVetoRate: number | null;
   stressSource: { jev: number; rule: number };
+  /** Toxic-vetoed versus toxic-clear forward returns. The section 3 test. */
   forwardH1: HoldTrendForward;
   forwardH4: HoldTrendForward;
+  /** The section 3 verdict for this window, read off the two rows above. */
+  toxicCall: VetoCall;
+  /** The same table for the stress veto, shown beside toxic because it is free. */
+  stressForwardH1: HoldTrendForward;
+  stressForwardH4: HoldTrendForward;
   hold: { medianMs: number | null; maxMs: number | null; closedUnder15m: number };
   exits: {
     stop: number;
@@ -61,6 +81,8 @@ export interface HoldTrendWindow {
 export interface HoldTrendMix {
   run: HoldTrendWindow;
   last24h: HoldTrendWindow;
+  /** Section 3 asks for a 7 day block. Before the tape is that long it is the whole tape. */
+  last7d: HoldTrendWindow;
 }
 
 export interface PairReport {
@@ -329,6 +351,9 @@ function emptyHoldWindow(): HoldTrendWindow {
     stressSource: { jev: 0, rule: 0 },
     forwardH1: { vetoedBps: null, clearBps: null, vetoedN: 0, clearN: 0 },
     forwardH4: { vetoedBps: null, clearBps: null, vetoedN: 0, clearN: 0 },
+    toxicCall: "no sample",
+    stressForwardH1: { vetoedBps: null, clearBps: null, vetoedN: 0, clearN: 0 },
+    stressForwardH4: { vetoedBps: null, clearBps: null, vetoedN: 0, clearN: 0 },
     hold: { medianMs: null, maxMs: null, closedUnder15m: 0 },
     exits: { stop: 0, takeProfitMaker: 0, takeProfitTaker: 0, trendDown: 0, contraction: 0, horizon: 0, halt: 0 },
     sizedVsClip: null,
@@ -368,6 +393,10 @@ export function buildHoldTrendWindow(input: {
   const h1Clear: number[] = [];
   const h4Vetoed: number[] = [];
   const h4Clear: number[] = [];
+  const h1StressVetoed: number[] = [];
+  const h1StressClear: number[] = [];
+  const h4StressVetoed: number[] = [];
+  const h4StressClear: number[] = [];
   const moves = new Map<string, { h1?: number; h4?: number }>();
   for (const o of input.outcomes) {
     const row = moves.get(o.decision_id) ?? {};
@@ -396,15 +425,34 @@ export function buildHoldTrendWindow(input: {
       }
     }
     if (gate.approved && gate.sizeUsd != null && input.notionalUsd > 0) sized.push(gate.sizeUsd / input.notionalUsd);
-    const vetoed = toxic === true || stress === true;
     const fwd = moves.get(d.id);
-    if (fwd?.h1 != null) (vetoed ? h1Vetoed : h1Clear).push(fwd.h1);
-    if (fwd?.h4 != null) (vetoed ? h4Vetoed : h4Clear).push(fwd.h4);
+    // Section 3 isolates the toxic veto, so a stress veto does not make a decision toxic-vetoed.
+    if (toxic != null) {
+      if (fwd?.h1 != null) (toxic ? h1Vetoed : h1Clear).push(fwd.h1);
+      if (fwd?.h4 != null) (toxic ? h4Vetoed : h4Clear).push(fwd.h4);
+    }
+    if (stress != null) {
+      if (fwd?.h1 != null) (stress ? h1StressVetoed : h1StressClear).push(fwd.h1);
+      if (fwd?.h4 != null) (stress ? h4StressVetoed : h4StressClear).push(fwd.h4);
+    }
   }
   out.toxicVetoRate = toxicKnown > 0 ? toxicFired / toxicKnown : null;
   out.stressVetoRate = stressKnown > 0 ? stressFired / stressKnown : null;
   out.forwardH1 = { vetoedBps: mean(h1Vetoed), clearBps: mean(h1Clear), vetoedN: h1Vetoed.length, clearN: h1Clear.length };
   out.forwardH4 = { vetoedBps: mean(h4Vetoed), clearBps: mean(h4Clear), vetoedN: h4Vetoed.length, clearN: h4Clear.length };
+  out.toxicCall = toxicVetoCall(out.forwardH1, out.forwardH4);
+  out.stressForwardH1 = {
+    vetoedBps: mean(h1StressVetoed),
+    clearBps: mean(h1StressClear),
+    vetoedN: h1StressVetoed.length,
+    clearN: h1StressClear.length,
+  };
+  out.stressForwardH4 = {
+    vetoedBps: mean(h4StressVetoed),
+    clearBps: mean(h4StressClear),
+    vetoedN: h4StressVetoed.length,
+    clearN: h4StressClear.length,
+  };
   sized.sort((a, b) => a - b);
   out.sizedVsClip = median(sized);
 
@@ -458,6 +506,7 @@ export function buildHoldTrendMix(input: {
   return {
     run: buildHoldTrendWindow({ ...input, runId: input.runId }),
     last24h: buildHoldTrendWindow({ ...input, fromTs: now - 86_400_000 }),
+    last7d: buildHoldTrendWindow({ ...input, fromTs: now - 7 * 86_400_000 }),
   };
 }
 
@@ -721,8 +770,14 @@ if (import.meta.main) {
     const ht = p.holdTrend.run;
     const pctOrDash = (n: number | null) => (n == null ? "-" : `${(n * 100).toFixed(1)}%`);
     console.log(
-      `  hold-trend run: toxic ${pctOrDash(ht.toxicVetoRate)} stress ${pctOrDash(ht.stressVetoRate)} hold p50 ${ht.hold.medianMs == null ? "-" : `${Math.round(ht.hold.medianMs / 60_000)}m`} under 15m ${ht.hold.closedUnder15m} sized ${ht.sizedVsClip == null ? "-" : ht.sizedVsClip.toFixed(2)} | exits stop ${ht.exits.stop} tp maker ${ht.exits.takeProfitMaker} tp taker ${ht.exits.takeProfitTaker} trend ${ht.exits.trendDown} contraction ${ht.exits.contraction} horizon ${ht.exits.horizon} halt ${ht.exits.halt}\n`,
+      `  hold-trend run: toxic ${pctOrDash(ht.toxicVetoRate)} stress ${pctOrDash(ht.stressVetoRate)} hold p50 ${ht.hold.medianMs == null ? "-" : `${Math.round(ht.hold.medianMs / 60_000)}m`} under 15m ${ht.hold.closedUnder15m} sized ${ht.sizedVsClip == null ? "-" : ht.sizedVsClip.toFixed(2)} | exits stop ${ht.exits.stop} tp maker ${ht.exits.takeProfitMaker} tp taker ${ht.exits.takeProfitTaker} trend ${ht.exits.trendDown} contraction ${ht.exits.contraction} horizon ${ht.exits.horizon} halt ${ht.exits.halt}`,
     );
+    const fwd = (f: (typeof ht)["forwardH1"]) =>
+      `${f.vetoedN}/${f.vetoedBps == null ? "-" : f.vetoedBps.toFixed(1)} vs ${f.clearN}/${f.clearBps == null ? "-" : f.clearBps.toFixed(1)}`;
+    for (const [label, w] of [["run", p.holdTrend.run], ["24h", p.holdTrend.last24h], ["7d", p.holdTrend.last7d]] as const) {
+      console.log(`  toxic forward ${label}: 1h ${fwd(w.forwardH1)} | 4h ${fwd(w.forwardH4)} | ${w.toxicCall}`);
+    }
+    console.log("");
   }
   await store.close();
 }
