@@ -4,7 +4,7 @@ overview: "Fees, the unused toxic veto forward-return test, and a NEAR clip cut 
 todos:
   - id: fee-tier
     content: Replay locked breakout and HTF fixed-target on the 6-month tape at the real Coinbase Advanced Trade US spot tiers. Table net per pair and per month, 30-day volume required, and whether this book's turnover can reach each tier. Live 50/90 stays the default
-    status: pending
+    status: completed
   - id: veto-forward
     content: Compare 1h and 4h forward returns of toxic-vetoed versus clear decisions per pair on /report. If vetoed is not worse, delete the toxic veto rather than tune it. That may moot the PR 9 band work
     status: pending
@@ -111,4 +111,126 @@ Fees in the running engine, stops, payoff 2 to 1, gross cap, kill switch, decide
 
 ## Result
 
-Empty until the three items land. Put the fee-tier tables, the veto forward-return call (keep or delete), and the NEAR-halved adoption table here.
+### 1. Fee tier
+
+Run `bun run cb/fee-tier-replay.ts`. Six month 5 minute Coinbase Exchange tape, window 2026-04-02T11:37:28Z to 2026-09-29T11:37:28Z, all six pairs, current clips. Both books replayed from scratch at each tier, so entries move with the fee level rather than being repriced after the fact. `CB_MAKER_FEE_BPS` and `CB_TAKER_FEE_BPS` are untouched at 50/90.
+
+April and September are partial calendar months on this window. Read those two columns as partial.
+
+#### The schedule, and one thing Brian has to confirm
+
+Coinbase moved the full US Advanced ladder behind a logged-in session during 2026, so only part of the US column is publicly readable. Two published sources are used and kept separate in [cb/feetiers.ts](cb/feetiers.ts). Nothing is merged or invented.
+
+| Tier | 30 day volume | Maker bps | Taker bps | Source |
+|---|---:|---:|---:|---|
+| US entry | $0 | 50 | 90 | Coinbase Advanced US repricing, September 16, 2026 |
+| US first discounted step | $10,000 | 25 | 40 | Coinbase Advanced US repricing, September 16, 2026 |
+| Intro 1 | $0 | 60 | 120 | coinbase.com/advanced-vip |
+| Intro 2 | $10,000 | 40 | 80 | coinbase.com/advanced-vip |
+| Advanced 1 | $25,000 | 25 | 50 | coinbase.com/advanced-vip |
+| Advanced 2 | $75,000 | 12.5 | 25 | coinbase.com/advanced-vip |
+| Advanced 3 | $250,000 | 7.5 | 15 | coinbase.com/advanced-vip |
+| VIP 1 | $500,000 | 6 | 12.5 | coinbase.com/advanced-vip |
+| VIP 2 | $1,000,000 | 5 | 10 | coinbase.com/advanced-vip |
+
+The two sources disagree above the entry row. `coinbase.com/advanced-vip` is Coinbase's own page and is the only place the volume cutoffs above $10,000 are published, but its rate column is the non-US ladder: its entry row is 60/120, not the US 50/90. The September 16 US repricing publishes the US entry row (50/90) and the first discounted step ($10,000 at 25/40), and nothing above that. Every row above $10,000 in the tables below is therefore priced off the advanced-vip column.
+
+**Brian: read the authoritative US column off your logged-in Coinbase Advanced fee page and paste it here.** That is a two minute job for you and not reachable from this machine. Rows above $10,000 should then be re-run against the real US rates. The two rows that matter most for a decision, the entry row and the $10,000 row, are already the published US numbers.
+
+VIP 3 and above need $5M or more of 30 day volume. This book turns over at most $239K in its busiest 30 days, so those rows are dropped.
+
+#### This book's turnover
+
+Sum of entry plus exit notional over the tape, at the current clips.
+
+| Book | Tape filled notional | Scaled to 30 days | Busiest real 30 days | Reaches $10,000 | Reaches $25,000 | Reaches $75,000 | Reaches $250,000 |
+|---|---:|---:|---:|---|---|---|---|
+| Locked breakout | $109,601 | $18,267 | $25,612 | yes | yes | no | no |
+| HTF fixed-target | $873,187 | $145,531 | $238,685 | yes | yes | yes | no |
+
+Breakout trades rarely and holds for days, so it clears the $10,000 and $25,000 cutoffs but not $75,000. The HTF fixed-target book churns a 24 hour clock across six pairs and turns over roughly $239K in its busiest 30 days, so it clears $75,000 on its own volume. Neither book reaches $250,000.
+
+#### Locked breakout: net USD per pair
+
+Donchian 20 / trail 3 ATR / EMA 50 / hold 14d, veto on.
+
+| Tier | 30d volume needed | Maker bps | Taker bps | Reachable | UNI-USD | NEAR-USD | BCH-USD | SUI-USD | AVAX-USD | ARB-USD | Total |
+|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| US entry | $0 | 50 | 90 | yes | 379.11 | 508.87 | 107.82 | -101.88 | -23.94 | 159.87 | 1029.85 |
+| US first discounted step | $10,000 | 25 | 40 | yes | 455.92 | 714.33 | 156.89 | -49.30 | 29.73 | 192.82 | 1500.39 |
+| Intro 1 | $0 | 60 | 120 | yes | 335.67 | 463.40 | 61.19 | -244.44 | -48.66 | 141.30 | 708.46 |
+| Intro 2 | $10,000 | 40 | 80 | yes | 397.31 | 611.37 | 119.31 | -90.05 | -14.29 | 167.40 | 1191.05 |
+| Advanced 1 | $25,000 | 25 | 50 | yes | 443.38 | 702.74 | 148.68 | -58.51 | 22.46 | 187.50 | 1446.24 |
+| Advanced 2 | $75,000 | 12.5 | 25 | no | 481.74 | 740.87 | 173.12 | -20.56 | 42.83 | 203.95 | 1621.95 |
+| Advanced 3 | $250,000 | 7.5 | 15 | no | 497.01 | 756.12 | 182.89 | -10.47 | 50.96 | 210.53 | 1687.04 |
+| VIP 1 | $500,000 | 6 | 12.5 | no | 501.04 | 760.11 | 185.40 | -7.88 | 53.04 | 212.24 | 1703.95 |
+| VIP 2 | $1,000,000 | 5 | 10 | no | 504.73 | 763.74 | 187.77 | -5.43 | 54.62 | 213.82 | 1719.25 |
+
+#### Locked breakout: net USD per calendar month, six pairs combined
+
+| Tier | 2026-04 | 2026-05 | 2026-06 | 2026-07 | 2026-08 | 2026-09 | Total |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| US entry | -205.39 | 159.70 | -95.96 | -124.04 | 269.93 | 1025.60 | 1029.85 |
+| US first discounted step | -145.65 | 292.74 | -54.29 | -71.69 | 318.77 | 1160.51 | 1500.39 |
+| Intro 1 | -267.96 | 111.11 | -120.19 | -153.65 | 159.70 | 979.46 | 708.46 |
+| Intro 2 | -191.10 | 254.67 | -87.04 | -111.68 | 281.90 | 1044.29 | 1191.05 |
+| Advanced 1 | -155.27 | 284.70 | -61.89 | -80.28 | 311.20 | 1147.77 | 1446.24 |
+| Advanced 2 | -125.53 | 309.70 | -41.15 | -54.14 | 335.60 | 1197.48 | 1621.95 |
+| Advanced 3 | -113.71 | 319.69 | -32.87 | -43.69 | 345.35 | 1212.27 | 1687.04 |
+| VIP 1 | -110.56 | 322.29 | -30.77 | -40.99 | 347.90 | 1216.09 | 1703.95 |
+| VIP 2 | -107.70 | 324.28 | -28.74 | -38.47 | 350.22 | 1219.66 | 1719.25 |
+
+#### HTF fixed-target: net USD per pair
+
+4 hour trend, maker take-profit when `high > takePx`, no toxic flatten.
+
+| Tier | 30d volume needed | Maker bps | Taker bps | Reachable | UNI-USD | NEAR-USD | BCH-USD | SUI-USD | AVAX-USD | ARB-USD | Total |
+|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| US entry | $0 | 50 | 90 | yes | -584.41 | -690.16 | -440.79 | -644.59 | -1012.34 | -376.54 | -3748.84 |
+| US first discounted step | $10,000 | 25 | 40 | yes | 34.73 | -20.81 | -142.19 | -186.77 | -534.40 | -167.48 | -1016.90 |
+| Intro 1 | $0 | 60 | 120 | yes | -910.55 | -951.18 | 0.00 | 0.00 | 0.00 | -491.18 | -2352.91 |
+| Intro 2 | $10,000 | 40 | 80 | yes | -375.19 | -459.93 | -328.31 | -489.28 | -835.33 | -302.45 | -2790.47 |
+| Advanced 1 | $25,000 | 25 | 50 | yes | 10.80 | -48.14 | -153.92 | -209.52 | -557.91 | -176.73 | -1135.42 |
+| Advanced 2 | $75,000 | 12.5 | 25 | yes | 274.71 | 225.61 | 7.82 | -45.08 | -343.65 | -71.88 | 47.54 |
+| Advanced 3 | $250,000 | 7.5 | 15 | no | 374.58 | 316.88 | 58.04 | 21.50 | -268.45 | -31.88 | 470.67 |
+| VIP 1 | $500,000 | 6 | 12.5 | no | 407.00 | 350.56 | 74.17 | 38.75 | -243.13 | -21.69 | 605.66 |
+| VIP 2 | $1,000,000 | 5 | 10 | no | 425.03 | 372.90 | 84.68 | 51.35 | -225.92 | -8.75 | 699.29 |
+
+The three zeros on the Intro 1 row are not missing data. At 60 maker plus 120 taker, the after-fee winner on BCH, SUI, and AVAX falls under twice the after-fee loser, so the payoff 2 to 1 check refuses every entry on those pairs and the book never trades them. That check is working as designed.
+
+#### HTF fixed-target: net USD per calendar month, six pairs combined
+
+| Tier | 2026-04 | 2026-05 | 2026-06 | 2026-07 | 2026-08 | 2026-09 | Total |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| US entry | -891.68 | -330.03 | -652.43 | -753.06 | -622.10 | -499.53 | -3748.84 |
+| US first discounted step | -517.16 | 23.42 | -313.63 | -303.99 | -145.80 | 240.24 | -1016.90 |
+| Intro 1 | -449.37 | -147.92 | -423.41 | -439.02 | -322.94 | -570.25 | -2352.91 |
+| Intro 2 | -745.97 | -195.42 | -542.03 | -579.23 | -455.08 | -272.73 | -2790.47 |
+| Advanced 1 | -529.37 | 9.88 | -330.08 | -316.57 | -166.69 | 197.40 | -1135.42 |
+| Advanced 2 | -365.67 | 163.66 | -208.43 | -118.82 | 31.22 | 545.57 | 47.54 |
+| Advanced 3 | -289.78 | 210.94 | -165.13 | -45.86 | 103.03 | 657.47 | 470.67 |
+| VIP 1 | -271.97 | 232.20 | -151.19 | -23.63 | 126.33 | 693.92 | 605.66 |
+| VIP 2 | -259.23 | 243.03 | -133.82 | -6.66 | 140.75 | 715.21 | 699.29 |
+
+#### The $300/mo gate on the last three months
+
+Jul, Aug, Sep. September is a partial month.
+
+| Book | Tier | Jul | Aug | Sep | Months at or above $300 | Gate |
+|---|---|---:|---:|---:|---:|---|
+| Breakout | US entry 50/90 | -124.04 | 269.93 | 1025.60 | 1 of 3 | FAIL |
+| Breakout | $10,000 step 25/40 | -71.69 | 318.77 | 1160.51 | 2 of 3 | FAIL |
+| Breakout | Advanced 1 25/50 | -80.28 | 311.20 | 1147.77 | 2 of 3 | FAIL |
+| HTF fixed-target | US entry 50/90 | -753.06 | -622.10 | -499.53 | 0 of 3 | FAIL |
+| HTF fixed-target | Advanced 2 12.5/25 | -118.82 | 31.22 | 545.57 | 1 of 3 | FAIL |
+
+No book and no reachable tier passes the $300/mo gate on this window. Two miss months per year is the allowance, and every row above misses at least once in three months.
+
+#### What the fee lever is actually worth
+
+- Breakout at the live 50/90 entry tier already makes money over six months: +$1,029.85. Moving to the published $10,000 US step adds +$470.54 over the same tape, a 46% improvement, and the breakout book generates enough turnover to reach that cutoff on its own ($25,612 in its busiest 30 days against a $10,000 cutoff).
+- The HTF fixed-target book, which is what the live engine runs today, loses $3,748.84 over six months at 50/90. The $10,000 step cuts that to -$1,016.90 and the $75,000 tier is the first reachable row where it stops losing money (+$47.54). Its own turnover clears $75,000, so that tier is not hypothetical.
+- Fees are the largest single lever on the fixed-target book: the gap between the entry tier and the first discounted step is $2,731.94 over six months, which is larger than anything the strategy work has moved.
+- Neither book reaches $250,000 of 30 day volume, so Advanced 3 and every VIP row stay out of reach at the current clips.
+
+Live fee defaults stay 50/90. Moving them is Brian's call.
