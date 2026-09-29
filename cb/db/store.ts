@@ -475,6 +475,8 @@ export class Store {
   /**
    * Last 7 days of decision state for a pair. `state` is JSON text inside JSONB,
    * so unwrap with `(state #>> '{}')::jsonb` before reading vector probabilities.
+   *
+   * No `run_id` filter on purpose: a restart gets a new run id and the ring has to survive it.
    */
   async vetoRingForPair(pair: string, sinceTs: number): Promise<Array<{ ts: number; state: unknown }>> {
     return this.sql`
@@ -483,6 +485,31 @@ export class Store {
       WHERE d.pair = ${pair} AND d.ts >= ${sinceTs}
       ORDER BY d.ts ASC
     `;
+  }
+
+  /** Mirror of the ring sample on a decision. Survives `resetVenue`, unlike the decision row. */
+  async insertVetoSample(s: { pair: string; ts: number; toxicPHigh: number; stressPStressed: number }): Promise<void> {
+    await this.sql`
+      INSERT INTO veto_samples (pair, ts, toxic_p_high, stress_p_stressed)
+      VALUES (${s.pair}, ${s.ts}, ${s.toxicPHigh}, ${s.stressPStressed})
+      ON CONFLICT (pair, ts) DO NOTHING
+    `;
+  }
+
+  /** Persisted ring samples for a pair, oldest first. Read beside `vetoRingForPair` at boot. */
+  async vetoSamplesForPair(pair: string, sinceTs: number): Promise<Array<{ ts: number; toxicPHigh: number; stressPStressed: number }>> {
+    const rows = await this.sql<Array<{ ts: number; toxic_p_high: number; stress_p_stressed: number }>>`
+      SELECT ts, toxic_p_high, stress_p_stressed
+      FROM veto_samples
+      WHERE pair = ${pair} AND ts >= ${sinceTs}
+      ORDER BY ts ASC
+    `;
+    return rows.map((r) => ({ ts: Number(r.ts), toxicPHigh: Number(r.toxic_p_high), stressPStressed: Number(r.stress_p_stressed) }));
+  }
+
+  /** Drop ring samples older than the 7 day window so the table cannot grow without bound. */
+  async pruneVetoSamples(beforeTs: number): Promise<void> {
+    await this.sql`DELETE FROM veto_samples WHERE ts < ${beforeTs}`;
   }
 
   /** Decisions for one pair, oldest first, including the gate stored on `state`. */
@@ -510,6 +537,16 @@ export class Store {
       LEFT JOIN orders o ON o.id = f.order_id
       WHERE f.pair = ${pair}
       ORDER BY f.traded_at ASC
+    `;
+  }
+
+  /** Take-profit orders for a pair, oldest first. Scores the section 8 resting-ask check. */
+  async takeProfitOrdersForPair(pair: string): Promise<Array<{ run_id: string; created_at: number; price: number; status: string }>> {
+    return this.sql`
+      SELECT run_id, created_at, price, status
+      FROM orders
+      WHERE pair = ${pair} AND purpose = ${"take_profit"}
+      ORDER BY created_at ASC
     `;
   }
 
@@ -548,14 +585,19 @@ export class Store {
   /**
    * Wipe every paper-trading record: runs, decisions, outcomes, orders, fills, snapshots. Used by
    * the admin "clear paper trades" control to start a fresh campaign. Deliberately leaves `bars`
-   * alone: it is a market-data cache (OHLC from the public feed), not trading state, and refilling
-   * it from scratch would just cost the resolver a warm-up period for no benefit.
+   * and `veto_samples` alone: both are calibration inputs rather than trading state, and refilling
+   * them from scratch would just cost a warm-up period for no benefit.
    */
   async resetAll(): Promise<void> {
     await this.sql`TRUNCATE TABLE fills, orders, outcomes, decisions, snapshots, runs`;
   }
 
-  /** Wipe one venue's trading state. Leaves the other venue and `bars` alone. */
+  /**
+   * Wipe one venue's trading state. Leaves the other venue alone, and leaves `bars` and
+   * `veto_samples` alone. Both are calibration inputs rather than trading state: wiping the
+   * ring would cold-start the veto percentile for 200 decisions, which is roughly 17 hours at
+   * the 5 minute cadence, and that is what made the section 8 band unscoreable.
+   */
   async resetVenue(venue: "paper"): Promise<void> {
     await this.sql`DELETE FROM fills WHERE run_id IN (SELECT id FROM runs WHERE venue = ${venue}) OR venue = ${venue}`;
     await this.sql`DELETE FROM orders WHERE run_id IN (SELECT id FROM runs WHERE venue = ${venue})`;

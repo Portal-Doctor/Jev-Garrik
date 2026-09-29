@@ -30,6 +30,13 @@ export interface CalibrationBucket {
   n: number;
 }
 
+/** Where each fired veto came from. `ruleDegenerate` is a warm but uncalibratable ring. */
+export interface VetoSourceCounts {
+  jev: number;
+  rule: number;
+  ruleDegenerate: number;
+}
+
 export interface HoldTrendForward {
   vetoedBps: number | null;
   clearBps: number | null;
@@ -45,6 +52,70 @@ export interface HoldTrendForward {
  */
 export type VetoCall = "vetoed worse" | "vetoed not worse" | "no sample";
 
+/** A check that can honestly report "not enough data" instead of failing. */
+export type CheckVerdict = "pass" | "fail" | "no sample";
+
+/** Longest gap between a completing entry fill and its resting take-profit ask. One 1 second tick. */
+export const TP_TICK_MS = 1_000;
+/** Take-profit fills needed before the maker share means anything. */
+export const TP_FILL_SAMPLE_MIN = 5;
+/** Share of take-profit fills that must be maker once the sample exists. */
+export const TP_MAKER_SHARE_MIN = 0.8;
+
+/** Section 8 check 2, 24 hour half: every filled long carries a resting post-only ask. */
+export interface RestingAskCheck {
+  filledLongs: number;
+  withAskWithinOneTick: number;
+  maxLagMs: number | null;
+  verdict: CheckVerdict;
+}
+
+/** Section 8 check 2, 7 day half: at least 80% of take-profit fills are maker, given 5 fills. */
+export interface TakeProfitMakerCheck {
+  fills: number;
+  makerFills: number;
+  makerShare: number | null;
+  verdict: CheckVerdict;
+}
+
+/**
+ * A long counts as covered when a take-profit ask was created within one tick of the fill that
+ * completed its entry. No filled longs is no sample, not a pass: there is nothing to check.
+ */
+export function scoreRestingAsk(
+  completingFills: Array<{ pair: string; at: number }>,
+  askCreatedAt: Array<{ pair: string; at: number }>,
+): RestingAskCheck {
+  const byPair = new Map<string, number[]>();
+  for (const a of askCreatedAt) byPair.set(a.pair, [...(byPair.get(a.pair) ?? []), a.at]);
+  let covered = 0;
+  let maxLagMs: number | null = null;
+  for (const fill of completingFills) {
+    const lags = (byPair.get(fill.pair) ?? [])
+      .map((at) => at - fill.at)
+      .filter((lag) => lag >= 0 && lag <= TP_TICK_MS);
+    if (lags.length === 0) continue;
+    covered += 1;
+    const lag = Math.min(...lags);
+    maxLagMs = maxLagMs == null ? lag : Math.max(maxLagMs, lag);
+  }
+  return {
+    filledLongs: completingFills.length,
+    withAskWithinOneTick: covered,
+    maxLagMs,
+    verdict: completingFills.length === 0 ? "no sample" : covered === completingFills.length ? "pass" : "fail",
+  };
+}
+
+/** Under `TP_FILL_SAMPLE_MIN` fills there is no denominator, so the answer is no sample, not fail. */
+export function scoreTakeProfitMakerShare(fills: Array<{ liquidity: string }>): TakeProfitMakerCheck {
+  const makerFills = fills.filter((f) => f.liquidity === "maker").length;
+  const makerShare = fills.length > 0 ? makerFills / fills.length : null;
+  const verdict: CheckVerdict =
+    fills.length < TP_FILL_SAMPLE_MIN ? "no sample" : makerShare! >= TP_MAKER_SHARE_MIN ? "pass" : "fail";
+  return { fills: fills.length, makerFills, makerShare, verdict };
+}
+
 export function toxicVetoCall(h1: HoldTrendForward, h4: HoldTrendForward): VetoCall {
   const scored = [h1, h4].filter((f) => f.vetoedN > 0 && f.clearN > 0 && f.vetoedBps != null && f.clearBps != null);
   if (scored.length === 0) return "no sample";
@@ -54,9 +125,9 @@ export function toxicVetoCall(h1: HoldTrendForward, h4: HoldTrendForward): VetoC
 export interface HoldTrendWindow {
   decisions: number;
   toxicVetoRate: number | null;
-  toxicSource: { jev: number; rule: number };
+  toxicSource: VetoSourceCounts;
   stressVetoRate: number | null;
-  stressSource: { jev: number; rule: number };
+  stressSource: VetoSourceCounts;
   /** Toxic-vetoed versus toxic-clear forward returns. The section 3 test. */
   forwardH1: HoldTrendForward;
   forwardH4: HoldTrendForward;
@@ -65,6 +136,9 @@ export interface HoldTrendWindow {
   /** The same table for the stress veto, shown beside toxic because it is free. */
   stressForwardH1: HoldTrendForward;
   stressForwardH4: HoldTrendForward;
+  /** Section 8 check 2, scored on this window. */
+  restingAsk: RestingAskCheck;
+  takeProfitMaker: TakeProfitMakerCheck;
   hold: { medianMs: number | null; maxMs: number | null; closedUnder15m: number };
   exits: {
     stop: number;
@@ -346,14 +420,16 @@ function emptyHoldWindow(): HoldTrendWindow {
   return {
     decisions: 0,
     toxicVetoRate: null,
-    toxicSource: { jev: 0, rule: 0 },
+    toxicSource: { jev: 0, rule: 0, ruleDegenerate: 0 },
     stressVetoRate: null,
-    stressSource: { jev: 0, rule: 0 },
+    stressSource: { jev: 0, rule: 0, ruleDegenerate: 0 },
     forwardH1: { vetoedBps: null, clearBps: null, vetoedN: 0, clearN: 0 },
     forwardH4: { vetoedBps: null, clearBps: null, vetoedN: 0, clearN: 0 },
     toxicCall: "no sample",
     stressForwardH1: { vetoedBps: null, clearBps: null, vetoedN: 0, clearN: 0 },
     stressForwardH4: { vetoedBps: null, clearBps: null, vetoedN: 0, clearN: 0 },
+    restingAsk: { filledLongs: 0, withAskWithinOneTick: 0, maxLagMs: null, verdict: "no sample" },
+    takeProfitMaker: { fills: 0, makerFills: 0, makerShare: null, verdict: "no sample" },
     hold: { medianMs: null, maxMs: null, closedUnder15m: 0 },
     exits: { stop: 0, takeProfitMaker: 0, takeProfitTaker: 0, trendDown: 0, contraction: 0, horizon: 0, halt: 0 },
     sizedVsClip: null,
@@ -370,8 +446,10 @@ function exitReasonBucket(reason: string | null): "trendDown" | "contraction" | 
 
 export function buildHoldTrendWindow(input: {
   decisions: Array<{ id: string; run_id: string; ts: number; state: unknown }>;
-  fills: Array<{ run_id: string; purpose: string | null; decision_id: string | null; liquidity: string; side: string; traded_at: number }>;
+  fills: Array<{ run_id: string; purpose: string | null; decision_id: string | null; order_id?: string | null; liquidity: string; side: string; traded_at: number }>;
   outcomes: Array<{ decision_id: string; horizon_sec: number; move_bps: number }>;
+  /** Take-profit orders for this pair, for the section 8 resting-ask check. */
+  takeProfitOrders?: Array<{ run_id: string; created_at: number }>;
   notionalUsd: number;
   fromTs?: number;
   runId?: string;
@@ -414,6 +492,7 @@ export function buildHoldTrendWindow(input: {
         toxicFired += 1;
         if (gate.toxicSource === "jev") out.toxicSource.jev += 1;
         else if (gate.toxicSource === "rule") out.toxicSource.rule += 1;
+        else if (gate.toxicSource === "rule_degenerate") out.toxicSource.ruleDegenerate += 1;
       }
     }
     if (stress != null) {
@@ -422,6 +501,7 @@ export function buildHoldTrendWindow(input: {
         stressFired += 1;
         if (gate.stressSource === "jev") out.stressSource.jev += 1;
         else if (gate.stressSource === "rule") out.stressSource.rule += 1;
+        else if (gate.stressSource === "rule_degenerate") out.stressSource.ruleDegenerate += 1;
       }
     }
     if (gate.approved && gate.sizeUsd != null && input.notionalUsd > 0) sized.push(gate.sizeUsd / input.notionalUsd);
@@ -491,13 +571,35 @@ export function buildHoldTrendWindow(input: {
   holds.sort((a, b) => a - b);
   out.hold.medianMs = median(holds);
   out.hold.maxMs = holds.length ? holds[holds.length - 1]! : null;
+
+  // Section 8 check 2. A long's entry can fill in legs, so the completing fill is the last one
+  // on that entry order. Legs without an order id cannot be grouped and are each their own long.
+  const completingByOrder = new Map<string, number>();
+  const ungrouped: Array<{ pair: string; at: number }> = [];
+  for (const f of fills) {
+    if (f.purpose !== "entry" || f.side !== "buy") continue;
+    const at = Number(f.traded_at);
+    if (!f.order_id) ungrouped.push({ pair: "pair", at });
+    else completingByOrder.set(f.order_id, Math.max(completingByOrder.get(f.order_id) ?? 0, at));
+  }
+  const completing = [...[...completingByOrder.values()].map((at) => ({ pair: "pair", at })), ...ungrouped];
+  const asks = (input.takeProfitOrders ?? [])
+    .filter((o) => {
+      if (input.runId && o.run_id !== input.runId) return false;
+      if (input.fromTs != null && Number(o.created_at) < input.fromTs) return false;
+      return true;
+    })
+    .map((o) => ({ pair: "pair", at: Number(o.created_at) }));
+  out.restingAsk = scoreRestingAsk(completing, asks);
+  out.takeProfitMaker = scoreTakeProfitMakerShare(fills.filter((f) => f.purpose === "take_profit"));
   return out;
 }
 
 export function buildHoldTrendMix(input: {
   decisions: Array<{ id: string; run_id: string; ts: number; state: unknown }>;
-  fills: Array<{ run_id: string; purpose: string | null; decision_id: string | null; liquidity: string; side: string; traded_at: number }>;
+  fills: Array<{ run_id: string; purpose: string | null; decision_id: string | null; order_id?: string | null; liquidity: string; side: string; traded_at: number }>;
   outcomes: Array<{ decision_id: string; horizon_sec: number; move_bps: number }>;
+  takeProfitOrders?: Array<{ run_id: string; created_at: number }>;
   notionalUsd: number;
   runId?: string;
   now?: number;
@@ -672,10 +774,11 @@ export async function buildReport(store: Store, opts: { incidentsPerDay?: number
     };
     gate.passes = gate.resolved200 && gate.accuracyLowerAbove52 && gate.netPnlPositive && gate.drawdownUnder15 && gate.incidentsUnder1PerDay;
 
-    const [decisionRows, purposeFills, holdOutcomes] = await Promise.all([
+    const [decisionRows, purposeFills, holdOutcomes, takeProfitOrders] = await Promise.all([
       store.decisionsForPair(pair),
       store.fillsWithPurpose(pair),
       store.holdTrendOutcomes(pair),
+      store.takeProfitOrdersForPair(pair),
     ]);
     const share = takerFillShare(fills);
     const diagnostics = buildPairDiagnostics({
@@ -692,6 +795,7 @@ export async function buildReport(store: Store, opts: { incidentsPerDay?: number
       decisions: decisionRows,
       fills: purposeFills,
       outcomes: holdOutcomes,
+      takeProfitOrders,
       notionalUsd: bookNotional,
       runId: opts.runId,
     });
@@ -777,6 +881,12 @@ if (import.meta.main) {
     for (const [label, w] of [["run", p.holdTrend.run], ["24h", p.holdTrend.last24h], ["7d", p.holdTrend.last7d]] as const) {
       console.log(`  toxic forward ${label}: 1h ${fwd(w.forwardH1)} | 4h ${fwd(w.forwardH4)} | ${w.toxicCall}`);
     }
+    const ask = p.holdTrend.last24h.restingAsk;
+    const tp = p.holdTrend.last7d.takeProfitMaker;
+    console.log(
+      `  check 2: resting ask 24h ${ask.withAskWithinOneTick}/${ask.filledLongs} filled longs within one tick (${ask.verdict}) | tp maker share 7d ${tp.makerFills}/${tp.fills}${tp.makerShare == null ? "" : ` = ${(tp.makerShare * 100).toFixed(0)}%`} (${tp.verdict})`,
+    );
+    console.log(`  veto source run: toxic jev ${ht.toxicSource.jev} rule ${ht.toxicSource.rule} degenerate ${ht.toxicSource.ruleDegenerate} | stress jev ${ht.stressSource.jev} rule ${ht.stressSource.rule} degenerate ${ht.stressSource.ruleDegenerate}`);
     console.log("");
   }
   await store.close();

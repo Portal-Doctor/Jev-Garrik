@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
-import type { HoldTrendForward, HoldTrendWindow, PairDiagnostics, PairReport, Report } from "@/lib/paperTypes";
+import type { HoldTrendForward, HoldTrendWindow, PairDiagnostics, PairReport, Report, VetoSourceCounts } from "@/lib/paperTypes";
 import { fmtUsd } from "@/lib/format";
 import styles from "./report.module.css";
 
@@ -221,6 +221,7 @@ export default function ReportPage() {
           <HorizonComparison pairs={report!.pairs} />
           <HoldTrendTable pairs={report!.pairs} />
           <ForwardReturnTable pairs={report!.pairs} />
+          <CheckTwoTable pairs={report!.pairs} />
           <DiagnosticsTable pairs={report!.pairs} />
 
           <section className={styles.block}>
@@ -309,11 +310,14 @@ function HorizonComparison({ pairs }: { pairs: PairReport[] }) {
   );
 }
 
-function sourceLabel(s: { jev: number; rule: number }): string {
-  if (s.jev === 0 && s.rule === 0) return "-";
-  if (s.jev > 0 && s.rule === 0) return "jev";
-  if (s.rule > 0 && s.jev === 0) return "rule";
-  return `jev ${s.jev} / rule ${s.rule}`;
+function sourceLabel(s: VetoSourceCounts): string {
+  const parts: string[] = [];
+  if (s.jev > 0) parts.push(`jev ${s.jev}`);
+  if (s.rule > 0) parts.push(`rule ${s.rule}`);
+  if (s.ruleDegenerate > 0) parts.push(`degenerate ${s.ruleDegenerate}`);
+  if (parts.length === 0) return "-";
+  if (parts.length === 1) return parts[0]!.replace(/ \d+$/, "");
+  return parts.join(" / ");
 }
 
 function fmtRate(n: number | null | undefined): string {
@@ -463,6 +467,56 @@ function HoldTrendTable({ pairs }: { pairs: PairReport[] }) {
               <HoldTrendRow pair={p.pair} label="7d" w={p.holdTrend!.last7d} />
             </Fragment>
           ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function CheckTwoTable({ pairs }: { pairs: PairReport[] }) {
+  const rows = pairs.filter((p) => p.holdTrend != null);
+  if (rows.length === 0) return null;
+  return (
+    <section className={styles.block}>
+      <h2>Take-profit checks</h2>
+      <p className={styles.note}>
+        Section 8 check 2, in two halves. Over 24 hours, every filled long must carry a resting post-only take-profit
+        ask placed within one 1 second tick of the fill that completed its entry. Over 7 days, at least 80% of
+        take-profit fills must be maker, and that needs at least 5 fills before it means anything. Under 5 fills the
+        answer is no sample, not a fail.
+      </p>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th>Pair</th>
+            <th className={styles.num}>Filled longs 24h</th>
+            <th className={styles.num}>With ask in one tick</th>
+            <th className={styles.num}>Worst lag ms</th>
+            <th>Resting ask</th>
+            <th className={styles.num}>TP fills 7d</th>
+            <th className={styles.num}>Maker fills</th>
+            <th className={styles.num}>Maker share</th>
+            <th>Maker share verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => {
+            const ask = p.holdTrend!.last24h.restingAsk;
+            const tp = p.holdTrend!.last7d.takeProfitMaker;
+            return (
+              <tr key={p.pair}>
+                <td className={styles.pair}>{p.pair}</td>
+                <td className={styles.num}>{ask.filledLongs}</td>
+                <td className={styles.num}>{ask.withAskWithinOneTick}</td>
+                <td className={styles.num}>{ask.maxLagMs == null ? "-" : ask.maxLagMs}</td>
+                <td>{ask.verdict}</td>
+                <td className={styles.num}>{tp.fills}</td>
+                <td className={styles.num}>{tp.makerFills}</td>
+                <td className={styles.num}>{tp.makerShare == null ? "-" : fmtRate(tp.makerShare)}</td>
+                <td>{tp.verdict}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </section>

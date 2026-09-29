@@ -2,9 +2,14 @@
  * Per-pair entry veto calibration (hold-the-trend plan section 3).
  * Until a pair has 200 samples, the deterministic label decides.
  * After that, veto when Jev's probability sits above the rolling 85th percentile.
+ *
+ * A warm ring whose probabilities are tied cannot be calibrated: a percentile over a handful of
+ * repeated values is not a percentile. Such a ring falls back to the deterministic label and says
+ * so with `rule_degenerate`, rather than quietly under-vetoing. The percentile itself is never
+ * moved to make a rate land in a band.
  */
 
-export type VetoSource = "jev" | "rule";
+export type VetoSource = "jev" | "rule" | "rule_degenerate";
 
 export interface VetoSample {
   ts: number;
@@ -22,6 +27,12 @@ export interface VetoDecision {
 export const VETO_RING_MS = 7 * 86_400_000;
 export const VETO_WARM_SAMPLES = 200;
 export const VETO_PERCENTILE = 0.85;
+/** A warm ring with fewer distinct probabilities than this cannot be calibrated. */
+export const VETO_MIN_DISTINCT = 20;
+
+export function distinctCount(values: number[]): number {
+  return new Set(values).size;
+}
 
 export function quantile(values: number[], p: number): number {
   if (values.length === 0) return 0;
@@ -89,23 +100,30 @@ export class PairVetoes {
   }): VetoDecision {
     this.trim(input.ts);
     const warm = this.ring.length >= VETO_WARM_SAMPLES;
-    const toxicVeto = warm ? input.toxicPHigh > quantile(this.ring.map((s) => s.toxicPHigh), VETO_PERCENTILE) : input.ruleToxic;
-    const stressVeto = warm
-      ? input.stressPStressed > quantile(this.ring.map((s) => s.stressPStressed), VETO_PERCENTILE)
-      : input.ruleStress;
+    const toxic = this.judge(this.ring.map((s) => s.toxicPHigh), input.toxicPHigh, input.ruleToxic, warm);
+    const stress = this.judge(this.ring.map((s) => s.stressPStressed), input.stressPStressed, input.ruleStress, warm);
     this.ring.push({
       ts: input.ts,
       toxicPHigh: input.toxicPHigh,
       stressPStressed: input.stressPStressed,
     });
     this.trim(input.ts);
-    const source: VetoSource = warm ? "jev" : "rule";
     return {
-      toxicVeto,
-      toxicSource: source,
-      stressVeto,
-      stressSource: source,
+      toxicVeto: toxic.veto,
+      toxicSource: toxic.source,
+      stressVeto: stress.veto,
+      stressSource: stress.source,
     };
+  }
+
+  /**
+   * Each field is judged on its own ring, so a tied toxic ring does not drag the stress veto
+   * onto the fallback with it.
+   */
+  private judge(ring: number[], current: number, ruleSaysVeto: boolean, warm: boolean): { veto: boolean; source: VetoSource } {
+    if (!warm) return { veto: ruleSaysVeto, source: "rule" };
+    if (distinctCount(ring) < VETO_MIN_DISTINCT) return { veto: ruleSaysVeto, source: "rule_degenerate" };
+    return { veto: current > quantile(ring, VETO_PERCENTILE), source: "jev" };
   }
 
   private trim(now: number): void {

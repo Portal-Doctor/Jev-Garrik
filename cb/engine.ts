@@ -6,7 +6,7 @@ import { depthUsd } from "./features";
 import { findBook } from "./books";
 import { evaluateGate, type DecisionVector, type GateResult } from "./gate";
 import { killSwitch } from "./kill";
-import { PairVetoes, sampleFromState, VETO_RING_MS, type VetoDecision } from "./vetoes";
+import { PairVetoes, sampleFromState, VETO_RING_MS, type VetoDecision, type VetoSample } from "./vetoes";
 import type { TrendLike } from "./trend";
 
 /** A target-position change the broker should act on. */
@@ -116,17 +116,21 @@ export class Engine {
     for (const pair of pairs) this.vetoes.set(pair, new PairVetoes());
   }
 
-  /** Seed 7-day rings from persisted decisions so a restart does not reset calibration. */
+  /**
+   * Seed 7-day rings so neither a restart nor a paper reset resets calibration.
+   *
+   * Two sources, deduped by timestamp: the decision rows (which a reset wipes) and the
+   * `veto_samples` mirror (which it does not). Neither is scoped to a run id.
+   */
   async seedVetoes(): Promise<void> {
     const since = Date.now() - VETO_RING_MS;
+    await this.store.pruneVetoSamples(since);
     for (const pair of this.pairs) {
-      const rows = await this.store.vetoRingForPair(pair, since);
-      const samples = [];
-      for (const row of rows) {
-        const sample = sampleFromState(Number(row.ts), row.state);
-        if (sample) samples.push(sample);
-      }
-      this.vetoes.get(pair)?.seed(samples);
+      const [decisions, samples] = await Promise.all([
+        this.store.vetoRingForPair(pair, since),
+        this.store.vetoSamplesForPair(pair, since),
+      ]);
+      this.vetoes.get(pair)?.seed(mergeSeedSamples(decisions, samples));
     }
   }
 
@@ -189,6 +193,18 @@ export class Engine {
         ruleToxic: rule.toxic_flow_risk === "high",
         ruleStress: rule.liquidity_stress === "stressed",
       });
+      // Mirrored outside `decisions` so a paper reset cannot cold-start the ring. The mirror is a
+      // calibration convenience, so a write failure is logged and the decision still goes through.
+      try {
+        await this.store.insertVetoSample({
+          pair,
+          ts: state.ts,
+          toxicPHigh: decision.vector.toxicPHigh,
+          stressPStressed: decision.vector.stressPStressed,
+        });
+      } catch (e) {
+        console.error(`veto sample ${pair}:`, (e as Error).message);
+      }
       const gatedVector = applyEntryVetoes(decision.vector, veto);
       const gate = evaluateGate({
         position,
@@ -277,6 +293,25 @@ export class Engine {
  * forward-return test, so overwriting `toxic_flow_risk` with the percentile answer would put a
  * number in front of the gate that nothing reads. Jev's own toxic label is left untouched.
  */
+/**
+ * Ring seed from both persisted sources, deduped by timestamp and sorted oldest first.
+ *
+ * Decision rows are the richer source and are wiped by a paper reset. `veto_samples` survives
+ * one. Either alone can warm the ring; together they cover both a restart and a reset.
+ */
+export function mergeSeedSamples(
+  decisions: Array<{ ts: number; state: unknown }>,
+  samples: Array<{ ts: number; toxicPHigh: number; stressPStressed: number }>,
+): VetoSample[] {
+  const byTs = new Map<number, VetoSample>();
+  for (const row of decisions) {
+    const sample = sampleFromState(Number(row.ts), row.state);
+    if (sample) byTs.set(sample.ts, sample);
+  }
+  for (const s of samples) byTs.set(Number(s.ts), { ts: Number(s.ts), toxicPHigh: s.toxicPHigh, stressPStressed: s.stressPStressed });
+  return [...byTs.values()].sort((a, b) => a.ts - b.ts);
+}
+
 export function applyEntryVetoes(vector: DecisionVector, veto: VetoDecision): DecisionVector {
   return {
     ...vector,
