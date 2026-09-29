@@ -6,7 +6,7 @@
 import { emaNext, Welford } from "./features";
 import { maxDrawdown } from "./metrics";
 import { classifyDeterministic } from "./model";
-import type { Candle, EquityPoint, Mark, SideSummary } from "./backtest";
+import type { Candle, ClosedTrade, EquityPoint, Mark, SideSummary } from "./backtest";
 import type { DecisionVector } from "./gate";
 import type { MarketState } from "./state";
 
@@ -41,6 +41,8 @@ export interface BreakoutSummary extends SideSummary {
   maxDrawdown: number | null;
   maxHoldHours: number;
   lowFeeNetUsd: number;
+  /** Closed round trips, oldest first. */
+  tradeLog: ClosedTrade[];
 }
 
 /** Completed buckets only. The last bucket is dropped because it may still be open. */
@@ -122,6 +124,7 @@ function emptySummary(): BreakoutSummary {
     maxDrawdown: null,
     maxHoldHours: 0,
     lowFeeNetUsd: 0,
+    tradeLog: [],
   };
 }
 
@@ -164,6 +167,7 @@ export function runBreakout(candles5m: Candle[], opts: BreakoutOpts): BreakoutSu
   let vetoedEntries = 0;
   let lowFeeNetUsd = 0;
   let maxHoldHours = 0;
+  const tradeLog: ClosedTrade[] = [];
   const winNets: number[] = [];
   const lossNets: number[] = [];
   const buys: Mark[] = [];
@@ -219,6 +223,13 @@ export function runBreakout(candles5m: Candle[], opts: BreakoutOpts): BreakoutSu
       winNets.push(net);
     } else lossNets.push(net);
     trades += 1;
+    tradeLog.push({
+      openedTs,
+      closedTs: ts,
+      netUsd: net,
+      entryNotionalUsd: pos.units * pos.fill,
+      exitNotionalUsd: pos.units * px,
+    });
     maxHoldHours = Math.max(maxHoldHours, (ts - openedTs) / 3_600_000);
     sells.push({ ts, price: px });
     pos = null;
@@ -342,6 +353,7 @@ export function runBreakout(candles5m: Candle[], opts: BreakoutOpts): BreakoutSu
     maxDrawdown: maxDrawdown(equity.map((p) => p.equity)).maxDrawdown,
     maxHoldHours,
     lowFeeNetUsd,
+    tradeLog,
   };
 }
 
