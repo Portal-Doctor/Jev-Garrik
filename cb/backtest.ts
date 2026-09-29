@@ -49,6 +49,17 @@ export interface EquityPoint {
   equity: number;
 }
 
+/** One closed round trip. Enough to bucket net by calendar month and to measure turnover. */
+export interface ClosedTrade {
+  openedTs: number;
+  closedTs: number;
+  netUsd: number;
+  /** Notional bought at entry, before fees. */
+  entryNotionalUsd: number;
+  /** Notional sold at exit, before fees. */
+  exitNotionalUsd: number;
+}
+
 export interface SideSummary {
   returnUsd: number;
   returnPct: number;
@@ -86,6 +97,8 @@ export interface BacktestResult {
   fixedAvgLossUsd: number | null;
   /** Longest closed hold, in hours. */
   fixedMaxHoldHours: number;
+  /** Closed round trips of the fixed-target book, oldest first. */
+  fixedTradeLog: ClosedTrade[];
   /** Donchian breakout with a trailing stop, on the same candles. */
   breakout?: BreakoutSummary;
 }
@@ -446,6 +459,7 @@ export function runBacktest(candles: Candle[], opts: BacktestOpts, desired?: Des
   let makerFeesUsd = 0;
   let takerFeesUsd = 0;
   const tradeNets: number[] = [];
+  const tradeLog: ClosedTrade[] = [];
   const holdHours: number[] = [];
   const buys: Mark[] = [];
   const sells: Mark[] = [];
@@ -559,6 +573,13 @@ export function runBacktest(candles: Candle[], opts: BacktestOpts, desired?: Des
     if (liquidity === "maker") makerFeesUsd += exitFee;
     else takerFeesUsd += exitFee;
     tradeNets.push(net);
+    tradeLog.push({
+      openedTs: current.openedTs,
+      closedTs: ts,
+      netUsd: net,
+      entryNotionalUsd: current.units * current.fill,
+      exitNotionalUsd: current.units * px,
+    });
     holdHours.push(Math.max(0, (ts - current.openedTs) / 3_600_000));
     const closed = closePos(current, px, exitBps, cash);
     cash = closed.cash;
@@ -709,6 +730,7 @@ export function runBacktest(candles: Candle[], opts: BacktestOpts, desired?: Des
     fixedAvgWinUsd: mean(winNets),
     fixedAvgLossUsd: mean(lossNets),
     fixedMaxHoldHours: holdHours.length ? Math.max(...holdHours) : 0,
+    fixedTradeLog: tradeLog,
     diagnostics: buildDiagnostics({
       samples: yieldSamples,
       windowMs: Math.max(1, window[window.length - 1]!.ts - window[0]!.ts),
@@ -909,7 +931,7 @@ function simulateOracle(window: Candle[], planned: OracleTrade[], opts: Backtest
   return summarize(opts.bankrollUsd, fees, wins, planned.length, buys, sells, equity);
 }
 
-async function fetchCandles(pair: string, fromMs: number, toMs: number, barSec: number): Promise<Candle[]> {
+export async function fetchCandles(pair: string, fromMs: number, toMs: number, barSec: number): Promise<Candle[]> {
   const out = new Map<number, Candle>();
   const chunk = 299 * barSec * 1000;
   for (let cursor = fromMs; cursor < toMs; cursor += chunk) {
