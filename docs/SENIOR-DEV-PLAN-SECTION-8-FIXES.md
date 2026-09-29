@@ -74,6 +74,30 @@ Hypothesis "boot seed is scoped to the current `run_id`": **did not hold**. `Sto
 
 Hypothesis "warm `toxicPHigh` is tied near one value, so p85 vetoes well under 15%": **did not hold** on this paid tape. Warm rings had 30 to 41 distinct values. Modal share 6.7% to 9.2%. p85 was 0.90 to 0.92 except BCH at 0.61. Warm Jev veto rates were not crushed by ties.
 
+Per pair, over the warm Jev-sourced decisions inside the 24h window:
+
+| Pair | Warm n | Distinct `toxicPHigh` | Modal value | Modal count | Modal share | p85 | Min | Max |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| UNI-USD | 87 | 34 | 0.86 | 8 | 9.2% | 0.9010 | 0.52 | 0.96 |
+| NEAR-USD | 89 | 30 | 0.83 | 8 | 9.0% | 0.9100 | 0.49 | 0.95 |
+| BCH-USD | 88 | 41 | 0.38 | 6 | 6.8% | 0.6095 | 0.07 | 0.82 |
+| SUI-USD | 89 | 41 | 0.83 | 6 | 6.7% | 0.9000 | 0.55 | 0.97 |
+| AVAX-USD | 90 | 34 | 0.80 | 6 | 6.7% | 0.9100 | 0.51 | 0.95 |
+| ARB-USD | 85 | 34 | 0.91 | 7 | 8.2% | 0.9240 | 0.60 | 0.96 |
+
+And the 200 sample ring itself, as it stood at the moment each pair first went warm (the cross-run read `vetoRingForPair` performs):
+
+| Pair | Ring n | Distinct `toxicPHigh` | Modal value | Modal count | Modal share | p85 |
+|---|---:|---:|---:|---:|---:|---:|
+| UNI-USD | 200 | 43 | 0.69 | 10 | 5.0% | 0.9100 |
+| NEAR-USD | 200 | 41 | 0.85 | 18 | 9.0% | 0.9115 |
+| BCH-USD | 200 | 54 | 0.42 | 9 | 4.5% | 0.6915 |
+| SUI-USD | 200 | 42 | 0.87 | 13 | 6.5% | 0.8915 |
+| AVAX-USD | 200 | 38 | 0.83 | 12 | 6.0% | 0.9200 |
+| ARB-USD | 200 | 38 | 0.72 | 12 | 6.0% | 0.9100 |
+
+BCH is the outlier on both readings. Its probabilities sit far lower than the other five (0.07 to 0.82 against 0.49 to 0.97), which is why its p85 lands at 0.61 rather than 0.90, not because its ring is tied.
+
 ### Take-profit
 
 The target is fee-inclusive entry times `1 + takeProfitBps / 10_000` (UNI 1180 bps, NEAR 1324, BCH 968, SUI 876, AVAX 908, ARB 1560).
@@ -81,6 +105,20 @@ The target is fee-inclusive entry times `1 + takeProfitBps / 10_000` (UNI 1180 b
 UNI and BCH never went long. The other four pairs rest a `take_profit` ask on the completing entry fill at lag 0 ms. Partial fills before the entry is done have no ask yet, which matches `restTakeProfit` in [cb/paper.ts](cb/paper.ts). Ten `take_profit` orders, zero fills.
 
 Max snapshot mid while each ask rested stayed 721 to 1382 bps short of the ask. Holds were 1.07h to 2.17h, then stop or `trend down`. Hypothesis "zero take-profits in 24h is expected at 4 sigma, not a missing resting ask": **held**. The 80% maker-share check has no denominator, so it reports FAIL instead of no sample.
+
+Every filled long on the run, one row each. `Lag` is the gap between the completing entry fill and the `take_profit` order being created. `Short of ask` is how far the best snapshot mid while the ask rested stayed below the ask.
+
+| Pair | Entry filled (UTC) | Fill legs | Avg fill px | Resting ask | Lag | Ask px | Target distance | Rested | Max mid while resting | Short of ask | Closed by |
+|---|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---|
+| NEAR-USD | 2026-09-28 01:54:21 | 1 | 5.32810 | yes | 0 ms | 6.06371 | 1380.6 bps | 2.17h | 5.33970 | 1194.0 bps | stop |
+| SUI-USD | 2026-09-28 02:55:52 | 2 | 1.24990 | yes | 0 ms | 1.36619 | 930.4 bps | 1.09h | 1.25500 | 813.9 bps | stop |
+| ARB-USD | 2026-09-28 03:39:08 | 3 | 0.21708 | yes | 0 ms | 0.25220 | 1617.8 bps | 1.48h | 0.21734 | 1382.4 bps | exit |
+| AVAX-USD | 2026-09-28 03:42:11 | 10 | 10.77471 | yes | 0 ms | 11.80979 | 960.7 bps | 1.43h | 10.80250 | 852.9 bps | exit |
+| SUI-USD | 2026-09-28 04:11:31 | 2 | 1.22850 | yes | 0 ms | 1.34280 | 930.4 bps | 1.04h | 1.24600 | 720.9 bps | stop |
+
+Five filled longs, five with a resting post-only ask, all at lag 0 ms. The ten `take_profit` orders are those five longs' asks split across fill legs (ARB 3, AVAX 4, NEAR 1, SUI 2). Zero filled. UNI and BCH never went long, so they have no row.
+
+The closest any of them came was SUI at 720.9 bps short of a 930.4 bps target. Max favorable excursion from the fill was 21.8 to 142.4 bps against targets of 930 to 1618 bps. The resting ask is not the problem; a 4 sigma target is simply not reached inside a 1 to 2 hour hold.
 
 ## 2. Warm the veto ring at boot
 
@@ -102,6 +140,19 @@ If a pair's ring is warm (`>= 200` samples) and the ring has fewer than 20 disti
 Add a test: 200 identical `toxicPHigh` values, current value equal to that constant, `ruleToxic=false`: no Jev percentile veto, source is `rule_degenerate`.
 
 This paid run would not have tripped that rule (30 to 41 distinct values). The rule is still required so a tied ring cannot silently under-veto.
+
+Checked against every warm decision on the run, not just the moment each pair went warm. The ring held 37 to 58 distinct `toxicPHigh` values at all 1,248 warm decisions and never fell under 20, so `rule_degenerate` would have fired zero times.
+
+| Pair | Warm decisions | Fewest distinct in ring | Most distinct in ring | Would be `rule_degenerate` |
+|---|---:|---:|---:|---:|
+| UNI-USD | 207 | 40 | 46 | 0 |
+| NEAR-USD | 209 | 37 | 42 | 0 |
+| BCH-USD | 208 | 48 | 58 | 0 |
+| SUI-USD | 209 | 42 | 46 | 0 |
+| AVAX-USD | 210 | 37 | 43 | 0 |
+| ARB-USD | 205 | 37 | 40 | 0 |
+
+The tie theory is dead on this tape. The cold-ring theory is the live one: 16.5 to 16.9 hours to warm, so roughly 70% of the scored window ran on the deterministic label at 0.0% to 4.5%, while warm Jev rates were 5.7% to 15.7%. Section 2's seed fix is the fix; this guard is insurance.
 
 ## 4. Amend check 1 (Brian signed off)
 
