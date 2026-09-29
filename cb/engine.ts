@@ -193,13 +193,18 @@ export class Engine {
         ruleToxic: rule.toxic_flow_risk === "high",
         ruleStress: rule.liquidity_stress === "stressed",
       });
-      // Mirrored outside `decisions` so a paper reset cannot cold-start the ring.
-      await this.store.insertVetoSample({
-        pair,
-        ts: state.ts,
-        toxicPHigh: decision.vector.toxicPHigh,
-        stressPStressed: decision.vector.stressPStressed,
-      });
+      // Mirrored outside `decisions` so a paper reset cannot cold-start the ring. The mirror is a
+      // calibration convenience, so a write failure is logged and the decision still goes through.
+      try {
+        await this.store.insertVetoSample({
+          pair,
+          ts: state.ts,
+          toxicPHigh: decision.vector.toxicPHigh,
+          stressPStressed: decision.vector.stressPStressed,
+        });
+      } catch (e) {
+        console.error(`veto sample ${pair}:`, (e as Error).message);
+      }
       const gatedVector = applyEntryVetoes(decision.vector, veto);
       const gate = evaluateGate({
         position,
