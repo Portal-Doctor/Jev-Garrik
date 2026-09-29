@@ -16,7 +16,8 @@ export interface PairBook {
 
 export const PAIR_BOOKS: readonly PairBook[] = [
   { pair: "UNI-USD", sigmaBps: 295, stopLossBps: 295, takeProfitBps: 1180, notionalUsd: 600, maxOpen: 1, enabled: true },
-  { pair: "NEAR-USD", sigmaBps: 331, stopLossBps: 331, takeProfitBps: 1324, notionalUsd: 600, maxOpen: 1, enabled: true },
+  // Clip halved from 600 for breakout adoption rule 3. Stop, take-profit, and sigma untouched.
+  { pair: "NEAR-USD", sigmaBps: 331, stopLossBps: 331, takeProfitBps: 1324, notionalUsd: 300, maxOpen: 1, enabled: true },
   { pair: "BCH-USD", sigmaBps: 242, stopLossBps: 242, takeProfitBps: 968, notionalUsd: 500, maxOpen: 1, enabled: true },
   { pair: "SUI-USD", sigmaBps: 219, stopLossBps: 219, takeProfitBps: 876, notionalUsd: 400, maxOpen: 1, enabled: true },
   { pair: "AVAX-USD", sigmaBps: 227, stopLossBps: 227, takeProfitBps: 908, notionalUsd: 400, maxOpen: 1, enabled: true },
