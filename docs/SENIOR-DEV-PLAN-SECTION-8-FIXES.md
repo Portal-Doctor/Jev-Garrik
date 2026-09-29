@@ -16,7 +16,7 @@ todos:
     status: completed
   - id: rerun-24h
     content: Deploy with docker compose up -d --build cb, confirm GET /health, then run a fresh 24h live window that starts warm
-    status: pending
+    status: in_progress
   - id: rerun-7d
     content: After the 24h window, run 7 days for take-profit maker share and the vetoed versus clear forward-return comparison from HTF section 3
     status: pending
@@ -232,9 +232,36 @@ The profitability work order's section 3 forward-return test ran and read **veto
 
 The section 2 seed fix and the section 3 degenerate guard are **not** cancelled by that deletion. Both serve the stress veto, which uses the same ring, the same 200 sample warm-up, and the same percentile, and which the forward-return test did not judge. Section 3 already asked the guard to cover the stress field.
 
-### Not run yet
+### Section 6 window is running
 
-Section 6's fresh 24 hour window and the 7 day take-profit window need a merge and a `docker compose up -d --build cb`. They are not run here because nothing is merged. Once deployed, the 24 hour window should start warm: the ring no longer cold-starts on a reset, and `veto_samples` begins filling on the first decide after deploy.
+Deployed from `origin/main` `b9f7167` (six-PR stack through #16). `bun test cb` was 200 pass. `web` `bunx tsc --noEmit` passed after clearing a stale local `.next` that still named deleted kuru routes. Merged tip was not broken.
+
+The previous container was still the 2026-09-28 01:53 UTC image, run `d5bc7712`. It was not this tip. Only `cb` and `cb-postgres` were up. No kuru profile.
+
+`veto_samples` was empty because that binary never wrote it. The 7-day `decisions` tape was intact (414 to 419 rows per pair). After `docker compose up -d --build cb` created the table, those rows were copied into `veto_samples` (2504 inserts), then `POST /reset` started the scored window. Reset wiped runs, decisions, orders, fills, and snapshots. It left `veto_samples` and `bars` alone.
+
+Window run `cb05dd41-9af2-4f30-984f-3946c4962c8a`, started 2026-09-29 12:41:19 UTC. `GET /health` returned `status=ok`. Pairs are still UNI-USD, NEAR-USD, BCH-USD, SUI-USD, AVAX-USD, ARB-USD. Do not add pairs to this window. Do not rebuild `cb` until the 24 hours finish.
+
+Ring n at t=0 (after reset, first decide still pending) and the first decide's `toxicSource`:
+
+| Pair | Ring n | First toxicSource | First gate reason |
+|---|---:|---|---|
+| UNI-USD | 418 | jev | trend |
+| NEAR-USD | 420 | jev | trend |
+| BCH-USD | 418 | jev | trend |
+| SUI-USD | 418 | jev | trend |
+| AVAX-USD | 419 | jev | approved long |
+| ARB-USD | 414 | jev | trend |
+
+All six started warm (n >= 200). None started cold. First-cycle split: jev 6, rule 0, rule_degenerate 0.
+
+The toxic entry veto is gone from the live gate path. ARB's first print recorded `toxicVeto=true` as an observation and still refused for `trend`, not `toxic flow`. AVAX filled an approved long on the first cycle.
+
+Amended check 1 band clause stays cancelled. 24h resting-ask and 7-day maker-share scores wait until those windows complete.
+
+### 7 day window not started yet
+
+The 7 day take-profit maker-share window starts after this 24h window, not in parallel.
 
 ### Rule 3
 
