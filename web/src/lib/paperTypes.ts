@@ -155,6 +155,8 @@ export interface HoldTrendForward {
   clearN: number;
 }
 
+export type VetoCall = "vetoed worse" | "vetoed not worse" | "no sample";
+
 export interface HoldTrendWindow {
   decisions: number;
   toxicVetoRate: number | null;
@@ -163,6 +165,9 @@ export interface HoldTrendWindow {
   stressSource: { jev: number; rule: number };
   forwardH1: HoldTrendForward;
   forwardH4: HoldTrendForward;
+  toxicCall: VetoCall;
+  stressForwardH1: HoldTrendForward;
+  stressForwardH4: HoldTrendForward;
   hold: { medianMs: number | null; maxMs: number | null; closedUnder15m: number };
   exits: {
     stop: number;
@@ -179,6 +184,7 @@ export interface HoldTrendWindow {
 export interface HoldTrendMix {
   run: HoldTrendWindow;
   last24h: HoldTrendWindow;
+  last7d: HoldTrendWindow;
 }
 
 export interface PairReport {

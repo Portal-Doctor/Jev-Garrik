@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: veto-forward
     content: Compare 1h and 4h forward returns of toxic-vetoed versus clear decisions per pair on /report. If vetoed is not worse, delete the toxic veto rather than tune it. That may moot the PR 9 band work
-    status: pending
+    status: completed
   - id: near-clip
     content: Re-run the 6-month six-pair breakout adoption table with the NEAR clip halved. Re-score all five rules. Do not move the 15% drawdown limit. If rule 3 still fails, report and stop
     status: pending
@@ -234,3 +234,71 @@ No book and no reachable tier passes the $300/mo gate on this window. Two miss m
 - Neither book reaches $250,000 of 30 day volume, so Advanced 3 and every VIP row stay out of reach at the current clips.
 
 Live fee defaults stay 50/90. Moving them is Brian's call.
+
+### 2. Section 3 veto forward-return test
+
+`/report` and the paper report page now show, per pair and per window (current run, last 24 hours, last 7 days), n and mean forward 1 hour and 4 hour move in bps for toxic-vetoed against toxic-clear decisions, plus a one-line call. The stress veto gets the same columns beside it, since the table was already being built.
+
+Two things changed in how this is scored. Both were needed to answer the section 3 question rather than a different one.
+
+- A decision is now `vetoed` for this table only when the **toxic** veto fired. It used to mean toxic or stress, which mixes two vetoes into one comparison and cannot answer "delete the toxic veto".
+- The call is `vetoed worse` only when the vetoed mean is below the clear mean at **every** horizon that has both sides. Anything else is `vetoed not worse`. The burden of proof sits on the veto, which is what "delete rather than tune" means.
+
+#### The tape
+
+Run `d5bc7712-18e1-44da-a21c-f7a10ac9839c`, 2026-09-28 01:40:34 UTC to 2026-09-29 11:48:12 UTC. That is **34.1 hours, not 7 days**. The 7 day block and the run block are therefore the same numbers on this tape. Read the sample sizes before reading the call.
+
+| Pair | Decisions | `toxicSource=jev` | `toxicSource=rule` | Toxic veto fired | Of those, Jev-sourced |
+|---|---:|---:|---:|---:|---:|
+| UNI-USD | 406 | 206 | 200 | 20 | 18 |
+| NEAR-USD | 408 | 208 | 200 | 16 | 15 |
+| BCH-USD | 407 | 207 | 200 | 19 | 11 |
+| SUI-USD | 408 | 208 | 200 | 28 | 24 |
+| AVAX-USD | 409 | 209 | 200 | 12 | 12 |
+| ARB-USD | 404 | 204 | 200 | 25 | 16 |
+
+#### Forward returns, 7 day block
+
+n and mean forward move in bps. Positive means price rose after the decision. A veto refuses a long, so a **positive** move after a veto is the veto refusing an entry that would have worked.
+
+| Pair | 1h vetoed n/bps | 1h clear n/bps | 4h vetoed n/bps | 4h clear n/bps | Call |
+|---|---:|---:|---:|---:|---|
+| UNI-USD | 19 / -16.5 | 374 / -12.8 | 16 / +25.3 | 341 / -49.4 | vetoed not worse |
+| NEAR-USD | 16 / +17.1 | 380 / -29.9 | 16 / +17.2 | 344 / -127.7 | vetoed not worse |
+| BCH-USD | 18 / +13.7 | 377 / -13.9 | 13 / +71.2 | 346 / -30.5 | vetoed not worse |
+| SUI-USD | 26 / +24.6 | 370 / -24.4 | 23 / -5.0 | 337 / -92.3 | vetoed not worse |
+| AVAX-USD | 12 / +49.2 | 385 / +20.5 | 11 / +255.3 | 350 / +89.6 | vetoed not worse |
+| ARB-USD | 25 / -27.4 | 366 / -15.1 | 24 / -70.7 | 331 / -59.9 | vetoed worse |
+
+#### Forward returns, last 24 hours
+
+| Pair | 1h vetoed n/bps | 1h clear n/bps | 4h vetoed n/bps | 4h clear n/bps | Call |
+|---|---:|---:|---:|---:|---|
+| UNI-USD | 19 / -16.5 | 253 / +6.6 | 16 / +25.3 | 220 / +29.7 | vetoed worse |
+| NEAR-USD | 15 / +26.6 | 259 / -30.4 | 15 / +41.5 | 223 / -138.3 | vetoed not worse |
+| BCH-USD | 13 / -6.6 | 260 / +1.1 | 8 / -0.9 | 229 / +2.3 | vetoed worse |
+| SUI-USD | 22 / +12.5 | 252 / -6.6 | 19 / +6.9 | 219 / -24.6 | vetoed not worse |
+| AVAX-USD | 12 / +49.2 | 263 / +42.3 | 11 / +255.3 | 228 / +198.3 | vetoed not worse |
+| ARB-USD | 20 / -50.6 | 250 / +8.7 | 19 / -85.9 | 215 / +18.6 | vetoed worse |
+
+#### The call: delete the toxic veto
+
+Five of six pairs read **vetoed not worse** on the full tape. ARB is the only pair where the toxic veto looks like it is doing its job, and it is not close to a majority.
+
+On four pairs the veto is not merely neutral, it is actively costly. It refused entries that then went up while clear decisions went down: NEAR at 4 hours is +17.2 bps vetoed against -127.7 bps clear, BCH is +71.2 against -30.5, SUI is -5.0 against -92.3, AVAX is +255.3 against +89.6. The toxic veto is preferentially blocking the good side of the tape.
+
+Applying the section 3 rule literally: **delete the toxic veto.** Do not raise the percentile, do not widen the ring, do not retune to hit a 5 to 30% band.
+
+Honest caveats, stated rather than used to dodge the rule:
+
+- The tape is 34 hours, not the 7 days section 3 asks for. Section 3 sends the too-small-to-tell case to the same answer, delete, so waiting cannot flip four of these pairs to "keep" without a large reversal.
+- Per-pair vetoed n is 11 to 28. These means are noisy. The direction is consistent across pairs, which is what carries the call, not any single pair's number.
+- Half the window ran on the deterministic label because the ring needs 200 samples. 92 of the 120 toxic vetoes on the tape are Jev-sourced, so the comparison is not dominated by the rule fallback.
+
+#### What this cancels
+
+Per the work order, deleting the toxic veto moots the PR 9 band work. The 5 to 30% toxic band has nothing left to score, so **HTF section 8 check 1's band clause is cancelled, not completed.** Check 1's other two clauses (no long closed with reason `toxic flow`, median hold of any long over 1 hour) stand and are unaffected.
+
+The warm seed tape and the `rule_degenerate` guard are **not** cancelled. Both serve the stress veto, which uses the same ring, the same 200 sample warm-up, and the same percentile, and which this test did not judge. Section 8's own wording already asks `rule_degenerate` to cover "the matching stress field if the stress ring is degenerate". Brian: say so if you want those dropped too.
+
+The deletion itself is a separate PR so it can be approved or rejected on its own. This PR is the measurement and the call.
