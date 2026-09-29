@@ -1,5 +1,5 @@
 import { experimental_evaluate } from "ai";
-import { typeSafeAi } from "@ai-sdk/typesafe-ai";
+import { createTypeSafeAi, typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { config } from "./config";
 import type { DecisionVector, LiquidityStress, Regime, ToxicFlow } from "./gate";
 import type { MarketState } from "./state";
@@ -132,21 +132,23 @@ function fromAnswers(answers: {
 
 /**
  * Real Jev via the AI SDK. Two transports:
- * - Vercel AI Gateway (AI_GATEWAY_API_KEY set): pass the string model id `typesafe-ai/jev`; the SDK
- *   resolves it through the Gateway. No TypeSafe waitlist/key needed.
- * - Direct TypeSafe provider (otherwise): `typeSafeAi.evaluationModel(...)` with TYPESAFE_AI_API_KEY.
+ * - Direct TypeSafe (`TYPESAFE_AI_API_KEY`): `createTypeSafeAi({ apiKey }).evaluationModel(...)`.
+ * - Vercel AI Gateway, only when that key is absent and `AI_GATEWAY_API_KEY` is set: the string
+ *   model id `typesafe-ai/jev`.
  */
 export class JevModel implements Model {
   readonly name: string;
   private readonly model: ReturnType<typeof typeSafeAi.evaluationModel> | string;
 
   constructor() {
-    if (config.aiGatewayApiKey) {
+    if (config.typesafeApiKey) {
+      this.name = config.jevModelId;
+      this.model = createTypeSafeAi({ apiKey: config.typesafeApiKey }).evaluationModel(config.jevModelId);
+    } else if (config.aiGatewayApiKey) {
       this.name = config.jevGatewayModelId;
       this.model = config.jevGatewayModelId;
     } else {
-      this.name = config.jevModelId;
-      this.model = typeSafeAi.evaluationModel(config.jevModelId);
+      throw new Error("Jev requires TYPESAFE_AI_API_KEY");
     }
   }
 

@@ -76,9 +76,9 @@ export const config = {
   model: (env("MODEL", "mock") as "mock" | "jev"),
   jevModelId: env("JEV_MODEL_ID", "jev-latest")!,
   jevUsdPerMTok: 0.042,
-  // Vercel AI Gateway: when AI_GATEWAY_API_KEY is set, the Jev model routes through the Gateway using
-  // the string model id below (no direct TypeSafe key / waitlist needed). Otherwise it uses the direct
-  // TypeSafe provider with TYPESAFE_AI_API_KEY.
+  // Direct TypeSafe key (console.typesafe.ai). When set, Jev calls api.typesafe.ai with this key.
+  // AI_GATEWAY_API_KEY is only used when this key is absent.
+  typesafeApiKey: env("TYPESAFE_AI_API_KEY"),
   aiGatewayApiKey: env("AI_GATEWAY_API_KEY"),
   jevGatewayModelId: env("JEV_GATEWAY_MODEL_ID", "typesafe-ai/jev")!,
 

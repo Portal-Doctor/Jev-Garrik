@@ -37,8 +37,10 @@ await store.init();
 
 const runId = crypto.randomUUID();
 const startedAt = Date.now();
-// Label reflects the actual Jev transport: the Gateway model id when routing through Vercel.
-const modelLabel = config.model === "jev" ? (config.aiGatewayApiKey ? config.jevGatewayModelId : config.jevModelId) : "mock";
+// Label reflects the actual Jev transport. The TypeSafe key wins over the Vercel gateway.
+const modelLabel = config.model === "jev"
+  ? (config.typesafeApiKey ? config.jevModelId : config.aiGatewayApiKey ? config.jevGatewayModelId : config.jevModelId)
+  : "mock";
 await store.insertRun({
   id: runId,
   mode: "paper",
