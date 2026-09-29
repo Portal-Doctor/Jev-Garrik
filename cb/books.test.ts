@@ -41,8 +41,30 @@ test("a take-profit at two sigma fails the after-fee payoff at 50 and 90", () =>
 
 test("notionals sum to less than the 3000 gross cap", () => {
   const sum = PAIR_BOOKS.reduce((s, b) => s + b.notionalUsd, 0);
-  expect(sum).toBe(2800);
+  expect(sum).toBe(2500);
   expect(sum).toBeLessThan(3000);
+});
+
+test("the NEAR clip is halved to 300 and its stop, take-profit, and sigma are untouched", () => {
+  expect(bookFor("NEAR-USD")).toMatchObject({
+    notionalUsd: 300,
+    stopLossBps: 331,
+    takeProfitBps: 1324,
+    sigmaBps: 331,
+  });
+  expect(() => assertPairBooks(SIX, fees)).not.toThrow();
+});
+
+test("only NEAR moved: every other clip is unchanged", () => {
+  const clips = Object.fromEntries(PAIR_BOOKS.map((b) => [b.pair, b.notionalUsd]));
+  expect(clips).toEqual({
+    "UNI-USD": 600,
+    "NEAR-USD": 300,
+    "BCH-USD": 500,
+    "SUI-USD": 400,
+    "AVAX-USD": 400,
+    "ARB-USD": 300,
+  });
 });
 
 test("boot accepts the six books and rejects an unknown pair or a stop under the hurdle", () => {

@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: near-clip
     content: Re-run the 6-month six-pair breakout adoption table with the NEAR clip halved. Re-score all five rules. Do not move the 15% drawdown limit. If rule 3 still fails, report and stop
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -302,3 +302,50 @@ Per the work order, deleting the toxic veto moots the PR 9 band work. The 5 to 3
 The warm seed tape and the `rule_degenerate` guard are **not** cancelled. Both serve the stress veto, which uses the same ring, the same 200 sample warm-up, and the same percentile, and which this test did not judge. Section 8's own wording already asks `rule_degenerate` to cover "the matching stress field if the stress ring is degenerate". Brian: say so if you want those dropped too.
 
 The deletion itself is a separate PR so it can be approved or rejected on its own. This PR is the measurement and the call.
+
+### 3. NEAR clip sizing
+
+NEAR's clip in [cb/books.ts](cb/books.ts) is halved from `notionalUsd: 600` to `notionalUsd: 300`. Stop 331 bps, take-profit 1324 bps, and sigma 331 bps are untouched. No other pair's clip moved. The six clips now sum to $2,500 against the $3,000 gross cap.
+
+Run `bun run cb/adoption-run.ts`. Six month 5 minute tape, window 2026-04-02T12:01:09Z to 2026-09-29T12:01:09Z, live 50/90, knobs locked at 20 / 3 / 50 / 14d. Each pair's bankroll is $2,000. Fixed-target net is closed trades. Trailing net is mark-to-market equity, so it includes an open position where one is still on.
+
+| Pair | Fixed trades | Fixed win | Fixed net | Fixed DD | Trail trades | Trail win | Trail net | Trail DD | Missed | Signals | Miss rate | Vetoed |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| UNI-USD | 164 | 26.22% | -$584.41 | 29.58% | 20 | 30.00% | $379.11 | 8.15% | 1 | 21 | 4.76% | 0 |
+| NEAR-USD | 166 | 28.31% | -$345.08 | 22.85% | 20 | 25.00% | $254.43 | 8.22% | 2 | 22 | 9.09% | 0 |
+| BCH-USD | 111 | 26.13% | -$440.79 | 24.31% | 16 | 18.75% | $107.82 | 7.55% | 3 | 19 | 15.79% | 0 |
+| SUI-USD | 170 | 20.59% | -$644.59 | 34.46% | 23 | 13.04% | -$101.88 | 8.85% | 4 | 27 | 14.81% | 0 |
+| AVAX-USD | 191 | 14.66% | -$1,012.34 | 50.79% | 19 | 15.79% | -$23.20 | 7.34% | 3 | 23 | 13.04% | 0 |
+| ARB-USD | 127 | 22.05% | -$376.54 | 20.83% | 17 | 41.18% | $159.87 | 5.32% | 2 | 19 | 10.53% | 0 |
+| Six books | 929 | | -$3,403.76 | | 115 | | $776.15 | | 15 | 131 | 11.45% | 0 |
+
+#### All five adoption rules
+
+1. **Pass.** Combined breakout net is $776.15.
+2. **Pass.** Breakout beats the fixed target on 6 of 6 pairs.
+3. **Pass.** Worst pair drawdown is SUI at 8.85%. NEAR is 8.22%, down from 15.05% at the $600 clip. The 15% limit was not moved.
+4. **Pass.** Missed 15 of 131 signals (11.45%), and no pair is at or above half.
+5. **Pass.** 115 closed breakout trades.
+
+All five pass. Rule 3 no longer fails, so the work order's stop condition is not triggered. Phase 2 still needs its own plan and is not started here.
+
+#### What halving NEAR cost and bought
+
+NEAR's breakout net drops from $449.66 at the $600 clip to $254.43 at $300, so combined breakout net falls from $1,028.25 to $776.15. That is the price of rule 3.
+
+The other five pairs' drawdowns also read slightly differently from the 2026-09-24 table (UNI 8.24% to 8.15%, BCH 8.30% to 7.55%, SUI 9.55% to 8.85%, AVAX 7.72% to 7.34%, ARB 5.36% to 5.32%). Their clips did not change. That is the tape window moving five days, not a parameter change.
+
+The toxic veto deletion in Result section 2 does not move these numbers. The fixed-target nets for UNI, BCH, SUI, AVAX, and ARB are identical to the cent against the pre-deletion fee-tier replay at 50/90 (-$584.41, -$440.79, -$644.59, -$1,012.34, -$376.54). NEAR is the only pair that moved, and that is the clip. The deterministic classifier never returned toxic high on an entry the gate would otherwise have approved on this tape, which the zero in the Vetoed column shows from the other direction.
+
+#### The $300/mo gate
+
+Net USD per UTC calendar month, six pairs combined, closed trades only. April and September are partial months.
+
+| Book | 2026-04 | 2026-05 | 2026-06 | 2026-07 | 2026-08 | 2026-09 |
+|---|---:|---:|---:|---:|---:|---:|
+| Breakout | -$192.75 | $36.53 | -$55.12 | -$105.18 | $250.26 | $841.68 |
+| Fixed target | -$813.69 | -$375.68 | -$502.16 | -$725.81 | -$529.95 | -$456.47 |
+
+On the last three months the breakout book clears $300 in 1 of 3 (September only) and the fixed-target book clears it in 0 of 3. **Both fail the gate.** Two miss months per year is the allowance and breakout misses two in a single quarter.
+
+Passing all five adoption rules is not the same as passing the revenue gate. Adoption says the trailing stop is the better of the two books. The gate says neither book earns $300 a month yet.
