@@ -207,7 +207,7 @@ const ASSUMPTIONS = [
   "Entries are post-only and pay the maker fee. A stop still crosses and pays the taker fee. A contraction veto, a trend down, and the 24 hour clock rest post-only, then cross if they do not fill.",
   "Take-profit rests as a post-only ask and fills only when the high trades through it. Trend is the 4 hour close above its 50 bar EMA with a positive 24 hour return.",
   "The backtest cannot replay Jev, so entry vetoes stay the deterministic labels. Live vetoes use Jev's probability once the ring is warm.",
-  "A new long requires that 4 hour trend. Toxic flow, stressed liquidity, contraction, a chase, and a payoff under 2 to 1 refuse the entry. A long flattens on trend down, not on toxic flow.",
+  "A new long requires that 4 hour trend. Stressed liquidity, contraction, a chase, and a payoff under 2 to 1 refuse the entry. The toxic veto was deleted after the section 3 forward-return test. A long flattens on trend down.",
   "100 ms, 1 s, and 5 s hit rates are not in this tape. Hit rate is scored at 1 hour and 4 hours.",
   "There is no L2 book in these candles, so imbalance, queue fill rate, and sub-second slippage stay unscored.",
   "A stop fills at the stop price even when the bar opens through it. A take-profit does not fill on a bar that only touches the level.",

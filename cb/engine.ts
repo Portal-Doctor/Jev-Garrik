@@ -232,6 +232,9 @@ export class Engine {
           vector: decision.vector,
           gate: {
             ...gate,
+            // The toxic veto is deleted, so this pair of fields is an observation, not an action:
+            // whether the toxic percentile would have fired, kept so the section 3 forward-return
+            // table on /report keeps scoring after the deletion.
             toxicVeto: veto.toxicVeto,
             toxicSource: veto.toxicSource,
             stressVeto: veto.stressVeto,
@@ -269,10 +272,14 @@ export class Engine {
   }
 }
 
-function applyEntryVetoes(vector: DecisionVector, veto: VetoDecision): DecisionVector {
+/**
+ * Only the stress veto reaches the gate. The toxic veto was deleted after the section 3
+ * forward-return test, so overwriting `toxic_flow_risk` with the percentile answer would put a
+ * number in front of the gate that nothing reads. Jev's own toxic label is left untouched.
+ */
+export function applyEntryVetoes(vector: DecisionVector, veto: VetoDecision): DecisionVector {
   return {
     ...vector,
-    toxic_flow_risk: veto.toxicVeto ? "high" : "low",
     liquidity_stress: veto.stressVeto ? "stressed" : "normal",
   };
 }

@@ -144,7 +144,11 @@ export function evaluateGate(input: GateInput): GateResult {
   if (input.feedBlocked) return refuse("feed");
   if (!input.htfTrendKnown) return refuse("trend unknown");
   if (!input.htfTrendUp) return refuse("trend");
-  if (input.vector.toxic_flow_risk === "high") return refuse("toxic flow");
+  // No toxic flow refusal. Hold-the-trend section 3 measured the 1 hour and 4 hour forward move
+  // after a toxic veto against a clear decision, per pair, and found the veto not worse on five
+  // of six pairs and actively costly on four. Section 3 answers that by deleting the veto rather
+  // than tuning the percentile. `toxicPHigh` and the percentile observation are still recorded on
+  // every decision so the comparison stays live on /report.
   if (input.vector.liquidity_stress === "stressed") return refuse("liquidity stress");
   if (input.vector.market_regime === "contraction") return refuse("regime");
   if (input.h4ReturnBps > input.stopLossBps) return refuse("chase");
