@@ -156,18 +156,41 @@ export interface HoldTrendForward {
 }
 
 export type VetoCall = "vetoed worse" | "vetoed not worse" | "no sample";
+export type CheckVerdict = "pass" | "fail" | "no sample";
+
+export interface VetoSourceCounts {
+  jev: number;
+  rule: number;
+  ruleDegenerate: number;
+}
+
+export interface RestingAskCheck {
+  filledLongs: number;
+  withAskWithinOneTick: number;
+  maxLagMs: number | null;
+  verdict: CheckVerdict;
+}
+
+export interface TakeProfitMakerCheck {
+  fills: number;
+  makerFills: number;
+  makerShare: number | null;
+  verdict: CheckVerdict;
+}
 
 export interface HoldTrendWindow {
   decisions: number;
   toxicVetoRate: number | null;
-  toxicSource: { jev: number; rule: number };
+  toxicSource: VetoSourceCounts;
   stressVetoRate: number | null;
-  stressSource: { jev: number; rule: number };
+  stressSource: VetoSourceCounts;
   forwardH1: HoldTrendForward;
   forwardH4: HoldTrendForward;
   toxicCall: VetoCall;
   stressForwardH1: HoldTrendForward;
   stressForwardH4: HoldTrendForward;
+  restingAsk: RestingAskCheck;
+  takeProfitMaker: TakeProfitMakerCheck;
   hold: { medianMs: number | null; maxMs: number | null; closedUnder15m: number };
   exits: {
     stop: number;

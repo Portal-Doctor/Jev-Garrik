@@ -106,6 +106,19 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_pair_ts ON snapshots(pair, ts);
 
 ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS gas_usd DOUBLE PRECISION NOT NULL DEFAULT 0;
 
+-- Veto ring calibration samples. One row per decision, written beside the decision row.
+-- This exists so a paper reset cannot cold-start the ring: `POST /reset` wipes runs, decisions,
+-- orders, fills, and snapshots, but calibration is not trading state, so it survives here for the
+-- same reason `bars` does. `seedVetoes` reads decisions and this table together.
+CREATE TABLE IF NOT EXISTS veto_samples (
+  pair TEXT NOT NULL,
+  ts BIGINT NOT NULL,               -- decision ts (epoch ms)
+  toxic_p_high DOUBLE PRECISION NOT NULL,
+  stress_p_stressed DOUBLE PRECISION NOT NULL,
+  PRIMARY KEY (pair, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_veto_samples_pair_ts ON veto_samples(pair, ts);
+
 -- Minute bars so the resolver and charts survive restarts.
 CREATE TABLE IF NOT EXISTS bars (
   pair TEXT NOT NULL,

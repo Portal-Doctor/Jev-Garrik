@@ -4,16 +4,16 @@ overview: "The paid 24h window on run d5bc7712 failed the 5 to 30% toxic band an
 todos:
   - id: seed-ring
     content: Seed each pair's 7-day veto ring from decisions across runs, keep that tape through a paper reset, and test that a restart and a reset leave the ring warm
-    status: pending
+    status: completed
   - id: degenerate-rule
     content: If a warm ring has fewer than 20 distinct toxicPHigh values, veto from the deterministic label and record toxicSource=rule_degenerate. Add a test. Do not retune the percentile
-    status: pending
+    status: completed
   - id: amend-check-1
     content: Score the 5 to 30% toxic band only on warm Jev-sourced decisions, at least 100 per pair. Keep the rest of HTF section 8 check 1
-    status: pending
+    status: cancelled
   - id: amend-check-2
     content: In 24h, require a resting post-only take-profit on every filled long within one tick. Score 80% maker share over 7 days with at least 5 take-profit fills, else no sample
-    status: pending
+    status: completed
   - id: rerun-24h
     content: Deploy with docker compose up -d --build cb, confirm GET /health, then run a fresh 24h live window that starts warm
     status: pending
@@ -151,4 +151,40 @@ Two options, no choice in this pass:
 
 ## Result
 
-Not started. Code, deploy, and the new 24h / 7-day windows land in a later PR after Brian approves this work order.
+### Code landed
+
+Sections 2, 3, and 5 are implemented with unit tests. Section 4 is cancelled, see below. Sections 6's re-run windows are not run yet: they need Brian to merge and redeploy.
+
+**Section 2, warm the ring.** `vetoRingForPair` still reads the last 7 days of `decisions` for the pair with no `run_id` filter, unchanged. The gap was `POST /reset`, which deletes every paper decision and so cold-started the ring even though the query was cross-run. A new `veto_samples` table mirrors `(pair, ts, toxic_p_high, stress_p_stressed)` on every decide. `resetVenue` and `resetAll` leave it alone, for the same reason they already leave `bars` alone: calibration is not trading state. `seedVetoes` merges both sources by timestamp, so a restart warms from decisions, a reset warms from the mirror, and either alone is enough. Samples older than 7 days are pruned at boot so the table cannot grow without bound.
+
+**Section 3, degenerate probabilities.** A warm ring with fewer than 20 distinct values falls back to the deterministic label and records `rule_degenerate`. Toxic and stress are judged on their own rings, so a tied toxic ring does not drag the stress veto onto the fallback with it. `VETO_PERCENTILE` is still 0.85 and `VETO_WARM_SAMPLES` is still 200. Neither was touched.
+
+**Section 5, check 2.** Both halves are now scored measurements on `/report` and on the paper report page rather than prose. The 24 hour half counts filled longs that carry a resting post-only ask created within one 1 second tick of the fill that completed their entry, grouping partial entry legs by order so a three-leg entry is one long. The 7 day half reports maker share over take-profit fills and returns **no sample** under 5 fills instead of FAIL.
+
+### Diagnostics re-run on 2026-09-29
+
+Read-only SQL against run `d5bc7712-18e1-44da-a21c-f7a10ac9839c`. Nothing reset, restarted, or mutated. The run row and all its decisions are intact. Every number in section 1 reproduces exactly. The per-pair and per-long tables behind section 1's ranges were added in a separate doc PR.
+
+Which hypothesis actually caused the failure:
+
+| Theory | Verdict | Evidence |
+|---|---|---|
+| Tied probabilities crush the warm veto rate | **Dead** | The ring held 37 to 58 distinct values at all 1,248 warm decisions and never fell under 20. `rule_degenerate` would have fired zero times. |
+| Boot seed scoped to `run_id` | **Dead** | `vetoRingForPair` has no `run_id` predicate. |
+| Cold ring | **Confirmed** | 16.5 to 16.9 hours to warm, so roughly 70% of the scored window ran on the deterministic label at 0.0% to 4.5% while warm Jev rates were 5.7% to 15.7%. |
+
+The seed fix is the fix. The degenerate guard is insurance against a ring this tape did not produce.
+
+### Section 4 is cancelled, not completed
+
+The profitability work order's section 3 forward-return test ran and read **vetoed not worse on five of six pairs**. Applying that rule deletes the toxic veto, which leaves the 5 to 30% toxic band with nothing to score. Check 1's band clause is therefore cancelled rather than amended. Its other two clauses (no long closed with reason `toxic flow`, median hold of any long over 1 hour) stand unchanged. Tables and the call are in [docs/SENIOR-DEV-PLAN-PROFITABILITY.md](docs/SENIOR-DEV-PLAN-PROFITABILITY.md) Result section 2.
+
+The section 2 seed fix and the section 3 degenerate guard are **not** cancelled by that deletion. Both serve the stress veto, which uses the same ring, the same 200 sample warm-up, and the same percentile, and which the forward-return test did not judge. Section 3 already asked the guard to cover the stress field.
+
+### Not run yet
+
+Section 6's fresh 24 hour window and the 7 day take-profit window need a merge and a `docker compose up -d --build cb`. They are not run here because nothing is merged. Once deployed, the 24 hour window should start warm: the ring no longer cold-starts on a reset, and `veto_samples` begins filling on the first decide after deploy.
+
+### Rule 3
+
+Section 8's two options are now resolved by evidence rather than by amendment. Option (b) is unnecessary: halving the NEAR clip from $600 to $300 takes NEAR's breakout drawdown from 15.05% to 8.22%, and all five adoption rules pass with the 15% limit untouched. The table is in the profitability work order's Result section 3. Phase 2 still needs its own plan.

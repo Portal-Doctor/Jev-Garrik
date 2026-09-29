@@ -1,4 +1,5 @@
 import { payoffLegs } from "./books";
+import type { VetoSource } from "./vetoes";
 
 /**
  * Deterministic entry hurdle and hard stop / take-profit guards.
@@ -166,9 +167,9 @@ export interface GateStateView {
   hurdleBps: number | null;
   sizeUsd: number | null;
   toxicVeto: boolean | null;
-  toxicSource: "jev" | "rule" | null;
+  toxicSource: VetoSource | null;
   stressVeto: boolean | null;
-  stressSource: "jev" | "rule" | null;
+  stressSource: VetoSource | null;
 }
 
 const emptyGate: GateStateView = {
@@ -182,8 +183,8 @@ const emptyGate: GateStateView = {
   stressSource: null,
 };
 
-function sourceOf(value: unknown): "jev" | "rule" | null {
-  return value === "jev" || value === "rule" ? value : null;
+function sourceOf(value: unknown): VetoSource | null {
+  return value === "jev" || value === "rule" || value === "rule_degenerate" ? value : null;
 }
 
 /** Pull the gate off a stored decision so the API does not make the UI parse `state`. */
