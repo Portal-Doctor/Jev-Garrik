@@ -265,3 +265,25 @@ Clean paper run `45a0c26d-b7b6-440a-85ec-daf818df1e31`, started 2026-09-26 20:04
 | At least 80% of take-profit fills are maker | FAIL. Zero take-profit fills. |
 
 Live section 8 fails. The 30 day old-versus-new compare from the progress write-up still stands. No retune. Breakout phase 2 was not started.
+
+### Section 8 paid-Jev 24h live (final)
+
+Paid TypeSafe paper run `d5bc7712-18e1-44da-a21c-f7a10ac9839c`, started 2026-09-28 01:53:19 UTC. Scored `holdTrend.run` only. Process stayed up 24.02 hours (`GET /health` `status=ok`, same `runId`). Decide stayed on `jev-latest` (direct TypeSafe, not the Vercel gateway). First decision 2026-09-28 01:53:19 UTC, last 2026-09-29 01:54:04 UTC. 1713 decisions (283 to 287 per pair). That is a full 5 minute cadence. Do not use `last24h`, run `45a0c26d`, or run `3eed8636`.
+
+| Pair | Decisions | Toxic veto | Band | Hold median h | TP maker | TP taker | Stop | Trend down |
+|---|---:|---:|---|---:|---:|---:|---:|---:|
+| UNI-USD | 285 | 4.2% | out | - | 0 | 0 | 0 | 0 |
+| NEAR-USD | 287 | 3.8% | out | 2.17 | 0 | 0 | 1 | 0 |
+| BCH-USD | 285 | 4.6% | out | - | 0 | 0 | 0 | 0 |
+| SUI-USD | 286 | 6.3% | in | 1.07 | 0 | 0 | 3 | 0 |
+| AVAX-USD | 287 | 2.8% | out | 1.43 | 0 | 0 | 1 | 2 |
+| ARB-USD | 283 | 7.8% | in | 1.48 | 0 | 0 | 1 | 3 |
+
+| Check | Result |
+|---|---|
+| Toxic veto 5% to 30% on every pair | FAIL. Only SUI and ARB are in band. UNI 4.2%, NEAR 3.8%, BCH 4.6%, AVAX 2.8%. Most late vetoes were `jev` once the ring warmed. |
+| No close reason `toxic flow` | PASS. 0 decisions and 0 filled exits with that reason. Signal exits are `trend down`. |
+| Median hold of any long over 1 hour | PASS on the four pairs with a hold sample (NEAR 2.17h, SUI 1.07h, AVAX 1.43h, ARB 1.48h). UNI and BCH have no hold median. |
+| At least 80% of take-profit fills are maker | FAIL. Zero take-profit fills (18 maker entries, 5 exits, 6 taker stops). |
+
+Paid live section 8 fails. The 30 day old-versus-new compare still stands. No retune. Breakout phase 2 was not started.
