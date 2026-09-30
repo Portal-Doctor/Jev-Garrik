@@ -51,14 +51,21 @@ CVD, book imbalance, and momentum, which are retail-flow signals), and Coinbase 
 | Pair | 4h sigma | Stop / take-profit | Notional | Role |
 |------|-----------|--------------------|----------|------|
 | UNI-USD | 295 bps | 295 / 1180 | $600 | Liquid tape. Trades when the average stack is up. |
-| NEAR-USD | 331 bps | 331 / 1324 | $600 | Same class, slightly larger move. |
+| NEAR-USD | 331 bps | 331 / 1324 | $300 | Same class, slightly larger move. Clip halved for adoption rule 3. |
 | BCH-USD | 242 bps | 242 / 968 | $500 | Large tape, quieter than UNI. |
-| SUI-USD | 219 bps | 219 / 876 | $400 | Tightest after-fee payoff. Still above 2 to 1 at 50 and 90. |
+| SUI-USD | 219 bps | 219 / 876 | $400 | Tightest of the original six. Still above 2 to 1 at 40/80 and 50/90. |
 | AVAX-USD | 227 bps | 227 / 908 | $400 | Same class as SUI. |
-| ARB-USD | 390 bps | 390 / 1560 | $300 | Largest liquid 4h move. Smallest clip. |
+| ARB-USD | 390 bps | 390 / 1560 | $300 | Largest liquid 4h move. Smallest original clip. |
+| VVV-USD | 312 bps | 312 / 1248 | $400 | High-vol screen. Clears 2 to 1 at 40/80. |
+| ZEC-USD | 273 bps | 273 / 1092 | $600 | High-vol screen. Largest new clip. |
+| PUMP-USD | 246 bps | 246 / 984 | $300 | High-vol screen. |
+| XLM-USD | 189 bps | 189 / 756 | $400 | High-vol screen. Clears the 40/80 hurdle; fails 2 to 1 at 50/90. |
+| TAO-USD | 177 bps | 177 / 708 | $400 | Parked. 4-sigma take-profit fails 2 to 1 at 40/80. Do not retune. |
+| ADA-USD | 157 bps | 157 / 628 | $500 | Parked. Same boot failure as TAO. |
 
 Stop is 1.0 sigma and take-profit is 4.0 sigma (`cb/books.ts`). The table is the risk book.
 `CB_PAIRS` selects which enabled rows run. A name missing from the table refuses boot.
+TAO and ADA stay in the table with `enabled: false`. Enabled clips sum to $4,200; `CB_MAX_GROSS_USD` stays $3,000.
 
 Excluded: SOL-USD, ETH-USD, and BTC-USD (typical 4h sigma sits under the fee hurdle), XRP-USD
 (needs a near-certain call), and thin meme tapes where a post-only clip is the book.
@@ -70,8 +77,8 @@ instance per pair against a shared feed process.
 
 - Trade cadence stays one model call per pair every `CB_DECIDE_SEC` (default 300 s). Features
   update on each Coinbase tick. Jev's classify time is the only sub-second work. There is no
-  per-block loop. The live book is UNI, NEAR, BCH, SUI, AVAX, and ARB. Calls are staggered by
-  `decideSec / n` (50 s at six pairs). The 25 s decide deadline stays under that stagger.
+  per-block loop. The live book is UNI, NEAR, BCH, SUI, AVAX, ARB, VVV, ZEC, PUMP, and XLM. Calls are staggered by
+  `decideSec / n` (30 s at ten pairs). The 25 s decide deadline stays under that stagger.
 - The call is one classification with four choices: `market_regime` (expansion, balance,
   contraction), `direction_bias` (`long` or `flat`; spot cannot short), `toxic_flow_risk`
   (`low` or `high`), and `liquidity_stress` (`normal` or `stressed`). Confidence is the `long`
@@ -134,8 +141,8 @@ Execution, paper now:
 - A signal or horizon exit rests post-only first. If it is still open at the timeout it may cross,
   so inventory does not stick. That cross is the taker cost the gate already required the entry to beat.
 - Stop and take-profit skip the maker rest and cross immediately.
-- Fees: applied per fill from config (`CB_MAKER_FEE_BPS` default 50, `CB_TAKER_FEE_BPS` default
-  90). Fee tier is config, not hardcoded. The report shows P&L under the configured tier and under
+- Fees: applied per fill from config (`CB_MAKER_FEE_BPS` default 40, `CB_TAKER_FEE_BPS` default
+  80). Fee tier is config, not hardcoded. The report shows P&L under the configured tier and under
   0 bps maker as an upper bound. Both legs record their liquidity flag. `takerFillShare` stays on
   `/report`.
 
@@ -478,14 +485,14 @@ Additions to `.env.example` (root) and `web/.env.example`:
 
 ```
 # cb (Coinbase paper trading)
-CB_PAIRS=UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD
+CB_PAIRS=UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD,VVV-USD,ZEC-USD,PUMP-USD,XLM-USD
 CB_DECIDE_SEC=300
 CB_HORIZON_SEC=86400
 CB_NOTIONAL_USD=1000
 CB_BANKROLL_USD=12000
 CB_MAX_GROSS_USD=3000
-CB_MAKER_FEE_BPS=50
-CB_TAKER_FEE_BPS=90
+CB_MAKER_FEE_BPS=40
+CB_TAKER_FEE_BPS=80
 CB_FILL_HAIRCUT=0.5
 CB_ENTRY_TIMEOUT_SEC=120
 CB_REPRICE_TICKS=2

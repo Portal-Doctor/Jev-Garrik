@@ -433,7 +433,7 @@ function HoldTrendTable({ pairs }: { pairs: PairReport[] }) {
       <h2>Hold the trend</h2>
       <p className={styles.note}>
         Per pair, current run, last 24 hours, and last 7 days. Forward returns are 1 hour and 4 hour, toxic vetoed
-        versus toxic clear. Sized is median approved size over clip. Fees stay 50/90.
+        versus toxic clear. Sized is median approved size over clip. Paper fees are 40/80.
       </p>
       <table className={styles.table}>
         <thead>

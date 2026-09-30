@@ -99,12 +99,12 @@ Engine knobs (defaults in `cb/config.ts`). Change a value, then `docker compose 
 |---|---|---|
 | `MODEL` | `mock` | `mock` heuristic or `jev` (real model). |
 | `AI_GATEWAY_API_KEY` | — | Present ⇒ Jev routes via Vercel AI Gateway as `typesafe-ai/jev`. |
-| `CB_PAIRS` | `SOL-USD` | Pairs to trade/measure. Live book is SOL only. |
+| `CB_PAIRS` | ten USD spots | Original six plus VVV, ZEC, PUMP, XLM. TAO and ADA stay disabled. |
 | `CB_DECIDE_SEC` | `300` | Seconds between decisions per pair. |
 | `CB_HORIZON_SEC` | `14400` | Traded horizon (4h). Scored also at 1h/24h. |
 | `CB_NOTIONAL_USD` | `1000` | Notional per position. |
 | `CB_BANKROLL_USD` | `10000` | Starting bankroll for equity. |
-| `CB_MAKER_FEE_BPS` / `CB_TAKER_FEE_BPS` | `50` / `90` | Fee assumptions. |
+| `CB_MAKER_FEE_BPS` / `CB_TAKER_FEE_BPS` | `40` / `80` | Fee assumptions. Between US Intro 50/90 and Advanced 1 35/75. |
 | `CB_FILL_HAIRCUT` | `0.5` | Optimism haircut on paper fills. |
 | `CB_ENTRY_TIMEOUT_SEC` / `CB_REPRICE_TICKS` | `120` / `2` | Post-only entry. Unfilled entries cancel. |
 | `CB_BUY_THRESHOLD` / `CB_SELL_THRESHOLD` | `0.6` / `0.4` | Confidence to enter, and to flatten. |
