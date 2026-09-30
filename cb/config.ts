@@ -14,7 +14,7 @@ export const config = {
   databaseUrl: env("DATABASE_URL", "postgres://cb:cb@localhost:5432/cb")!,
 
   // Strategy (spec section 2). Pairs are config, not code. Risk per pair lives in cb/books.ts.
-  pairs: list("CB_PAIRS", "UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD"),
+  pairs: list("CB_PAIRS", "UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD,VVV-USD,ZEC-USD,PUMP-USD,XLM-USD"),
   decideSec: num("CB_DECIDE_SEC", 300),
   /** Position timer. A long flattens at this age if stop, take-profit, toxic flow, and contraction have not. */
   horizonSec: num("CB_HORIZON_SEC", 86_400),
@@ -25,8 +25,9 @@ export const config = {
   maxGrossUsd: num("CB_MAX_GROSS_USD", 3_000),
 
   // Fees and paper fill honesty knobs (spec sections 2.3, 6). Config, not hardcoded.
-  makerFeeBps: num("CB_MAKER_FEE_BPS", 50),
-  takerFeeBps: num("CB_TAKER_FEE_BPS", 90),
+  // 40/80 is Brian's judged paper default: between US Intro 50/90 and Advanced 1 35/75.
+  makerFeeBps: num("CB_MAKER_FEE_BPS", 40),
+  takerFeeBps: num("CB_TAKER_FEE_BPS", 80),
   fillHaircut: num("CB_FILL_HAIRCUT", 0.5),
   entryTimeoutSec: num("CB_ENTRY_TIMEOUT_SEC", 120),
   repriceTicks: num("CB_REPRICE_TICKS", 2),

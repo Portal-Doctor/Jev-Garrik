@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { ADVANCED_VIP_LADDER, US_ANNOUNCED_TIERS, tierReached, tiersInReach } from "./feetiers";
 
-test("the US entry tier is the live 50/90 default and needs no volume", () => {
+test("the published US Intro row is 50/90 and needs no volume", () => {
   const entry = US_ANNOUNCED_TIERS[0]!;
   expect(entry.makerBps).toBe(50);
   expect(entry.takerBps).toBe(90);

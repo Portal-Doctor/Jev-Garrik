@@ -8,8 +8,8 @@
  * - Locked breakout: Donchian 20 / trail 3 ATR / EMA 50 / hold 14d, veto on.
  * - Official HTF fixed-target: 4 hour trend, maker take-profit, no toxic flatten.
  *
- * Fees are arguments here. `CB_MAKER_FEE_BPS` and `CB_TAKER_FEE_BPS` stay 50/90 in compose and
- * `.env`; moving the live default is Brian's call after he reads these tables.
+ * Fees are arguments here. Paper defaults are now the judged 40/80 row. This helper still
+ * prices each published Coinbase tier independently.
  */
 
 import { backtestRisk, runBacktest, type ClosedTrade } from "./backtest";
