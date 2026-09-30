@@ -1,0 +1,26 @@
+{
+  "now": 1790686495118,
+  "windowStartTs": 1775134495118,
+  "arb30dUsd": 285912439,
+  "uni30dUsd": 657082857,
+  "kept": [
+    { "pair": "USELESS-USD", "volBps": 397.9, "notional30dUsd": 387307215, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "VVV-USD", "volBps": 312.0, "notional30dUsd": 376373072, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "ZEC-USD", "volBps": 273.2, "notional30dUsd": 4772140110, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "QNT-USD", "volBps": 246.9, "notional30dUsd": 469351326, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "PUMP-USD", "volBps": 245.6, "notional30dUsd": 318128948, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "ONDO-USD", "volBps": 211.1, "notional30dUsd": 352851110, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "XLM-USD", "volBps": 189.3, "notional30dUsd": 461305175, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "TAO-USD", "volBps": 176.8, "notional30dUsd": 393881642, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "HYPE-USD", "volBps": 175.0, "notional30dUsd": 1190903477, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "ADA-USD", "volBps": 156.9, "notional30dUsd": 556623509, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "HBAR-USD", "volBps": 140.7, "notional30dUsd": 381080757, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "LINK-USD", "volBps": 127.1, "notional30dUsd": 769680217, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "XRP-USD", "volBps": 121.5, "notional30dUsd": 4933518959, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "DOGE-USD", "volBps": 121.2, "notional30dUsd": 689414395, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "SOL-USD", "volBps": 117.3, "notional30dUsd": 3293367975, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "LTC-USD", "volBps": 108.4, "notional30dUsd": 375687641, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "ETH-USD", "volBps": 107.0, "notional30dUsd": 7834194486, "bars4h": 1080, "keep": true, "reason": "kept" },
+    { "pair": "BTC-USD", "volBps": 80.5, "notional30dUsd": 14750221900, "bars4h": 1080, "keep": true, "reason": "kept" }
+  ]
+}
