@@ -311,6 +311,55 @@ Started 2026-10-01 11:09:30.210 UTC. 131 decisions over 1.8054 hours, then silen
 
 No. Elapsed on the scored live run is **1.5563 hours**, not 24. The 7 day maker-share half has no sample. GitHub already shows PR 20 merged. This pass did not merge it, did not change live pairs, and did not change live fees. Wait for a continuous 24 hour decide tape on one run id before treating section 6 as done.
 
+### Section 6 score 2026-10-02 post-reboot (incomplete)
+
+Read-only. No `/reset`, no rebuild, no pair or fee change, no merge of PR 20 into the live stack. Live `.env` is still `CB_PAIRS=UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD` and `CB_MAKER_FEE_BPS=50` / `CB_TAKER_FEE_BPS=90`. Decision `feeBps` prints the same 50/90.
+
+**Host power (not changed).** `powercfg /a` lists Standby (S0 Low Power Idle) as unavailable: "The system firmware does not support this standby state." S1, S2, and S3 are also unavailable. Hibernate is not enabled. Balanced `STANDBYIDLE` AC=0 DC=0 and `HIBERNATEIDLE` AC=0 DC=0 (never sleep, never hibernate). S0 Modern Standby is gone.
+
+**Stack.** Docker Engine 29.8.1. After the host reboot, `cb-app` and `cb-postgres` were already up. No `docker compose up -d`. No kuru profile. `GET /health` `status=ok`. UI `:3000` was empty; `bun run ui:start` then served `/paper` 200. Model `jev-latest`.
+
+`cb-postgres` `RestartCount=0`, started 2026-10-02 20:21:42.504 UTC, healthy. `cb-app` `RestartCount=3` (same inspect field as the pre-reboot score; container created 3 days ago), `StartedAt` 2026-10-02 20:21:46.740 UTC. Boot logs show three `PostgresError: the database system is starting up` before the live process stuck.
+
+**A reboot minted new run ids.** `9bf0fa81` continued after the 1.5563 hour snapshot to **3.1942 hours** / 231 decisions (last 2026-10-02 13:52:37.299 UTC), then died. `80013751-7db5-4a6a-876d-887cfce4930a` started 2026-10-02 13:53:34.153 UTC, 225 decisions over **3.1109 hours**, 0 fills. First-cycle `toxicSource` all `jev`. AVAX leftover from `9bf0fa81` (6.55859833) stayed open through that fragment.
+
+Host reboot then minted `a6788e16-f7da-4ddf-9174-19d68e14ad14` at 2026-10-02 20:06:41.417 UTC (13 decisions, 0.1667 hours). That process stop-flattened the leftover AVAX at 20:06:42.615 UTC, purpose `stop`, taker, reason is not `toxic flow`. It then filled a new AVAX long at 20:15:04.289 to 20:15:19.319 UTC (17 maker legs, completing size 32.00421535509792, cost basis $340.7704151160543). Post-only `take_profit` rested at lag **0 ms**, ask 11.614481551392956, still `open`. Ask equals fee-inclusive cost-basis entry times (1 + 908 / 10_000).
+
+**Scored run is the live id** `5b892748-cc42-4365-a5f1-3cfc617a940a`, started 2026-10-02 20:21:47.425 UTC. Score snapshot 2026-10-02 20:37:50.977 UTC. `GET /health` `uptimeMs=963552` = **0.2677 hours**. 20 decisions. First-to-last decide tape **0.2639 hours**. This is not a finished 24 hour window.
+
+`d2c71811` wall time to this snapshot is **33.47 hours**. Summed decide tape across `d2c71811` + `9bf0fa81` + `80013751` + `a6788e16` + live `5b892748` is **8.54 hours**. Do not treat 33 hours of calendar time as 33 hours of decide tape. On this live id, tape length matches the 5 minute cadence (19 then 20 decisions over ~16 minutes).
+
+#### Live run `5b892748` per pair
+
+| Pair | Decisions | Toxic src jev/rule/degen | Ring n at t=0 | Distinct toxicPHigh | Warm | First reason | Hold median h | Open age h | TP maker | TP taker | Stop | Trend down | Resting ask |
+|---|---:|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---|
+| UNI-USD | 4 | 4/0/0 | 881 | 54 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+| NEAR-USD | 4 | 4/0/0 | 883 | 48 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+| BCH-USD | 3 | 3/0/0 | 881 | 72 | yes | liquidity stress | - | - | 0 | 0 | 0 | 0 | no sample |
+| SUI-USD | 3 | 3/0/0 | 876 | 50 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| AVAX-USD | 3 | 3/0/0 | 878 | 48 | yes | hold (already long) | - | 0.375 | 0 | 0 | 0 | 0 | no sample on this run |
+| ARB-USD | 3 | 3/0/0 | 872 | 49 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+
+All six first `toxicSource=jev` and first `stressSource=jev`. Run totals: toxic jev 20, rule 0, `rule_degenerate` 0. Stress same. Seed fix held: rings were warm at boot (872 to 883 samples, 48 to 72 distinct `toxicPHigh`). None started cold. First-cycle split: jev 6, rule 0, rule_degenerate 0.
+
+This run has **0 orders and 0 fills**. SUI printed approved long on every cycle (`sizeUsd=400`) and did not persist an entry. BCH later printed approved in the log and also has no order. AVAX printed `hold` with `sizeUsd=0` because the book is already long from `a6788e16`.
+
+The open AVAX 32.00421535509793 at snapshot entry 10.647672856062483 is that leftover fill, not an entry on `5b892748`. Official closed-hold median uses entry-to-exit on this run only: no sample. Open age of the inherited long at the snapshot is **0.375 hours**. The resting ask from `a6788e16` is still open (lag 0 ms on that fill). Check 2 on the live runId has no filled long, so no sample.
+
+No decision on this run has reason `toxic flow`. No flatten fill on this run exists, so none is a toxic-flow flatten. The 20:06 AVAX stop is on `a6788e16`, purpose `stop`, not `toxic flow`.
+
+| Check | Result |
+|---|---|
+| Toxic veto 5% to 30% band | Cancelled. Toxic entry veto is deleted. Observation rates on this short tape: BCH 33.3% (1/3), UNI 0% (0/4), NEAR 0% (0/4), SUI 0% (0/3), AVAX 0% (0/3), ARB 0% (0/3). |
+| No close reason `toxic flow` | PASS. 0 decisions with that reason. 0 flatten fills with that reason on the live run. |
+| Median hold of any long over 1 hour | Closed p50: no sample (0 closed longs on this run). Open age: inherited AVAX 0.375 h, under 1 hour. |
+| Check 2, 24h: resting post-only take-profit within one 1 second tick | no sample on every pair for this runId (0 filled longs). The inherited AVAX ask from `a6788e16` is still open at lag 0 ms. |
+| Check 2, 7d: 80% maker take-profit fills, n>=5 | no sample on every pair. 0 take-profit fills in 7 days. Not FAIL. |
+
+#### Does this unblock applying PR 20 to the live engine?
+
+No. Elapsed on the scored live run is **0.2677 hours**, not 24. The 7 day maker-share half has no sample. GitHub already shows PR 20 merged. This pass did not merge it, did not change live pairs, and did not change live fees. Wait for a continuous 24 hour decide tape on one run id before treating section 6 as done. S0 is gone and AC/DC sleep/hibernate are 0, so the tape can survive if power and Docker stay up.
+
 ### 7 day window not started yet
 
 The 7 day take-profit maker-share window starts after a finished 24h window, not in parallel.
