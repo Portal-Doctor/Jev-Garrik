@@ -360,6 +360,59 @@ No decision on this run has reason `toxic flow`. No flatten fill on this run exi
 
 No. Elapsed on the scored live run is **0.2677 hours**, not 24. The 7 day maker-share half has no sample. GitHub already shows PR 20 merged. This pass did not merge it, did not change live pairs, and did not change live fees. Wait for a continuous 24 hour decide tape on one run id before treating section 6 as done. S0 is gone and AC/DC sleep/hibernate are 0, so the tape can survive if power and Docker stay up.
 
+### Section 6 score 2026-10-03 mid-window (incomplete)
+
+Read-only. No `/reset`, no rebuild, no pair or fee change, no merge of PR 20 into the live stack. Live container env is still `CB_PAIRS=UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD` and `CB_MAKER_FEE_BPS=50` / `CB_TAKER_FEE_BPS=90`. Run config on the row matches 50/90.
+
+**Host power (not changed).** `powercfg /a` still lists S0 Low Power Idle, S1, S2, S3 unavailable, hibernate not enabled. Balanced `STANDBYIDLE` AC=0 DC=0 and `HIBERNATEIDLE` AC=0 DC=0.
+
+**Stack.** `cb-app` and `cb-postgres` already up. No `docker compose up -d`. No kuru profile. `GET /health` `status=ok`, `runId=570e5fd9-95cd-4dba-9247-179663134b94`. Model `jev-latest`.
+
+`cb-postgres` `RestartCount=0`, started 2026-10-02 20:52:24.553 UTC, healthy. `cb-app` `RestartCount=2`, `Created` 2026-09-29 12:39:58.738 UTC, `StartedAt` 2026-10-02 20:52:26.897 UTC.
+
+**Expected id is live.** `570e5fd9` started 2026-10-02 20:52:27.328 UTC. Score snapshot 2026-10-03 12:26:50.560 UTC. `GET /health` `uptimeMs=56062858` = **15.5730 hours**. First decide 2026-10-02 20:52:28.146 UTC, last 2026-10-03 12:26:34.773 UTC. Decide tape **15.5685 hours**. Calendar since run start **15.5731 hours**. Tape, calendar, and process uptime match. 1122 decisions, 187 per pair. Max inter-decide gap 5.00 minutes. This is not a finished 24 hour window.
+
+The 20:51 dirty reboot minted this id. Prior fragment `5b892748` last decided 2026-10-02 20:47:38.255 UTC (32 decisions, 0.4308 hours of tape), then died. No later run id exists. Score this tape, not `5b892748`.
+
+**Host events since 2026-10-02 20:48 UTC.** One System `Kernel-Power` 41 at 2026-10-02 20:51:07.015 UTC (dirty reboot). No System `BugCheck` 1001. Application WER 1001 `BlueScreen` P1=`50` (0x50) points at minidump `100226-23062-01.dmp`, first queued 2026-10-02 20:51:44 UTC, same Report Id re-queued later. That is the crash that minted `570e5fd9`, not a second crash during this window. No Kernel-Power 41 after 20:51:07.
+
+#### Live run `570e5fd9` per pair
+
+| Pair | Decisions | Toxic src jev/rule/degen | Ring n at t=0 | Distinct toxicPHigh | Warm | First reason | Hold median h | Open age h | TP maker | TP taker | Stop | Trend down | Resting ask |
+|---|---:|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---|
+| UNI-USD | 187 | 187/0/0 | 887 | 54 | yes | trend | - | 7.310 | 0 | 0 | 0 | 0 | 1/1 pass, lag 0 ms |
+| NEAR-USD | 187 | 187/0/0 | 889 | 48 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+| BCH-USD | 187 | 187/0/0 | 886 | 72 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| SUI-USD | 187 | 187/0/0 | 881 | 50 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| AVAX-USD | 187 | 187/0/0 | 883 | 48 | yes | trend down | - | - | 0 | 0 | 0 | 5 | no sample |
+| ARB-USD | 187 | 187/0/0 | 877 | 49 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+
+All six first `toxicSource=jev` and first `stressSource=jev`. Run totals: toxic source jev 1122, rule 0, `rule_degenerate` 0. Seed fix held: rings were warm at boot (877 to 889 samples, 48 to 72 distinct `toxicPHigh`). None started cold. First-cycle split: jev 6, rule 0, rule_degenerate 0. Ring now 1064 to 1076 samples, 49 to 73 distinct.
+
+BCH printed approved long 64 times and persisted 0 orders. SUI printed approved twice and did not fill.
+
+AVAX first cycle was `trend down` on the leftover long from `a6788e16` (filled 2026-10-02 20:15:04 to 20:15:19 UTC). This run flattened it 2026-10-02 21:06:19 to 21:07:48 UTC, purpose `exit`, four maker legs plus one taker, reason `trend down`, not `toxic flow`. Official closed-hold median uses entry-to-exit on this run only: no sample (0 entries on AVAX). `/report` counts those five sells as `trendDown` exits.
+
+Filled longs on this run, fee-inclusive target = cost basis / size times (1 + book take-profit bps / 10_000). Check 2's signed-off tick is the 1 second time tick in `scoreRestingAsk`.
+
+| Pair | Entry filled (UTC) | Fill legs | Cost-basis entry | Resting ask | Lag | Book target bps | Closed by |
+|---|---|---:|---:|---:|---:|---:|---|
+| UNI-USD | 2026-10-03 05:08:13.869 | 1 | 9.182886 | 10.266466547999999 | 0 ms | 1180 | still open |
+
+UNI ask equals that target. Ask is post-only `take_profit`, status `open`. Open age at the snapshot is **7.310 hours**.
+
+| Check | Result |
+|---|---|
+| Toxic veto 5% to 30% band | Cancelled. Toxic entry veto is deleted. Observation rates on this tape: UNI 7.5% (14/187), SUI 8.6% (16/187), NEAR 6.4% (12/187), AVAX 4.3% (8/187), ARB 3.7% (7/187), BCH 3.2% (6/187). |
+| No close reason `toxic flow` | PASS. 0 decisions with that reason. Flatten fills on this run are AVAX `trend down` only. |
+| Median hold of any long over 1 hour | Closed p50: no sample (0 closed longs entered on this run). Open age: UNI 7.310 h, already over 1 hour. |
+| Check 2, 24h: resting post-only take-profit within one 1 second tick | PASS on UNI (1/1, lag 0 ms). no sample on NEAR, BCH, SUI, AVAX, ARB. |
+| Check 2, 7d: 80% maker take-profit fills, n>=5 | no sample on every pair. 0 take-profit fills in 7 days and 0 ever. Not FAIL. |
+
+#### Does this unblock applying PR 20 to the live engine?
+
+No. Elapsed on the scored live run is **15.5730 hours**, not 24. The 7 day maker-share half has no sample. GitHub already shows PR 20 merged. This pass did not merge it, did not change live pairs, and did not change live fees. Wait for a continuous 24 hour decide tape on one run id before treating section 6 as done. 24h clock on this id lands near **20:52 UTC 3 Oct** if it holds.
+
 ### 7 day window not started yet
 
 The 7 day take-profit maker-share window starts after a finished 24h window, not in parallel.
