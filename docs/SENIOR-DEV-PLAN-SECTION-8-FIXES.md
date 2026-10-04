@@ -257,11 +257,282 @@ All six started warm (n >= 200). None started cold. First-cycle split: jev 6, ru
 
 The toxic entry veto is gone from the live gate path. ARB's first print recorded `toxicVeto=true` as an observation and still refused for `trend`, not `toxic flow`. AVAX filled an approved long on the first cycle.
 
-Amended check 1 band clause stays cancelled. 24h resting-ask and 7-day maker-share scores wait until those windows complete.
+Amended check 1 band clause stays cancelled. Incomplete scores from 2026-10-02 and the 2026-10-03 mid-window sit below. The finished 24 hour score on `570e5fd9` and the 28.73h continuation score on the same id sit below.
+
+### Section 6 score 2026-10-02 (incomplete)
+
+Read-only. No `/reset`, no rebuild, no pair or fee change, no merge of PR 20 into the live stack. Live `.env` is still the original six pairs at 50/90.
+
+**Stack.** Docker Engine 29.8.1. `cb-app` and `cb-postgres` up. `GET /health` `status=ok`. Pairs UNI-USD, NEAR-USD, BCH-USD, SUI-USD, AVAX-USD, ARB-USD. Model `jev-latest`.
+
+**A restart minted a new run id.** Expected window `d2c71811-b657-4ba7-af24-9a2b95206a6b` started 2026-10-01 11:09:30.210 UTC, matching the id Brian named. Its decide tape stopped after **1.8054 hours** (131 decisions, last 2026-10-01 12:57:50.774 UTC). `cb-app` then shows `RestartCount=3`. Live process started 2026-10-02 10:40:56.939 UTC.
+
+**Scored run is the live id** `9bf0fa81-47db-48ed-8bb1-f8564b6a5b60`, started 2026-10-02 10:40:57.478 UTC. Score snapshot 2026-10-02 12:14:20.252 UTC. `GET /health` `uptimeMs=5602782` = **1.5563 hours**. 113 decisions. This is not a finished 24 hour window.
+
+`d2c71811` wall time to this snapshot would have been 25.05 hours if the process had stayed on that id. It did not. Do not treat 25 hours of calendar time as 25 hours of decide tape.
+
+#### Live run `9bf0fa81` per pair
+
+| Pair | Decisions | Toxic src jev/rule/degen | Ring n at t=0 | Warm | First reason | Hold median h | Open age h | TP maker | TP taker | Stop | Trend down | Resting ask |
+|---|---:|---|---:|---|---|---:|---:|---:|---:|---:|---:|---|
+| UNI-USD | 19 | 19/0/0 | 801 | yes | regime | - | 1.374 | 0 | 0 | 0 | 0 | 1/1 pass, lag 0 ms |
+| NEAR-USD | 19 | 19/0/0 | 804 | yes | trend | - | - | 0 | 0 | 1 | 0 | no sample |
+| BCH-USD | 19 | 19/0/0 | 802 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| SUI-USD | 19 | 19/0/0 | 799 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| AVAX-USD | 19 | 19/0/0 | 801 | yes | approved long | - | 1.490 | 0 | 0 | 0 | 0 | 1/1 pass, lag 0 ms |
+| ARB-USD | 18 | 18/0/0 | 795 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+
+All six first `toxicSource=jev` and first `stressSource=jev`. Run totals: toxic jev 113, rule 0, `rule_degenerate` 0. Stress same. Seed fix held: rings were warm at boot (795 to 804 samples, 47 to 72 distinct `toxicPHigh` now). BCH and SUI printed approved long and did not fill (entries canceled).
+
+NEAR's one stop is not a live filled long. Restart flattened 2.5145 NEAR left over from `d2c71811` at 2026-10-02 10:40:58.665 UTC, purpose `stop`, taker. Reason is not `toxic flow`.
+
+Filled longs on this run, fee-inclusive target = cost basis / size times (1 + book take-profit bps / 10_000). Check 2's signed-off tick is the 1 second time tick in `scoreRestingAsk`.
+
+| Pair | Entry filled (UTC) | Fill legs | Cost-basis entry | Resting ask | Lag | Book target bps | Closed by |
+|---|---|---:|---:|---:|---:|---:|---|
+| AVAX-USD | 2026-10-02 10:44:55.124 | 1 | 11.245995 | 12.26708226 | 0 ms | 908 | still open |
+| UNI-USD | 2026-10-02 10:51:53.734 | 3 | 9.092575 | 10.16580307 | 0 ms | 1180 | still open |
+
+AVAX ask equals that target. UNI ask is the engine `guardPrice` at the completing fill (0.30 bps above the post-hoc cost-basis VWAP). Both asks are post-only `take_profit`.
+
+| Check | Result |
+|---|---|
+| Toxic veto 5% to 30% band | Cancelled. Toxic entry veto is deleted. Observation rates on this short tape: ARB 5.6%, NEAR 21.1%, SUI 26.3%, UNI 31.6%, AVAX 31.6%, BCH 36.8%. |
+| No close reason `toxic flow` | PASS. 0 decisions with that reason. 0 flatten fills with that reason. |
+| Median hold of any long over 1 hour | No closed-long sample on this run. Official hold median uses closed entry-to-exit only, same as prior Result tables. Two longs are still open: AVAX 1.490 h, UNI 1.374 h at the snapshot. If open age counts, both are already over 1 hour. Ask Brian which reading he wants on an unfinished window. |
+| Check 2, 24h: resting post-only take-profit within one 1 second tick | PASS on the two filled longs (UNI, AVAX). no sample on NEAR, BCH, SUI, ARB. |
+| Check 2, 7d: 80% maker take-profit fills, n>=5 | no sample on every pair. 0 take-profit fills in 7 days. Not FAIL. |
+
+#### Expected run `d2c71811` (dead tape, not the live score)
+
+Started 2026-10-01 11:09:30.210 UTC. 131 decisions over 1.8054 hours, then silence. First-cycle sources all `jev`, rings 774 to 782. One NEAR long filled 2026-10-01 11:11:17.683 UTC (2 legs), take-profit rested at lag 0 ms, ask 5.84646331. That position was still open when the decide loop died and was stop-flattened on the later restart. No toxic-flow close. Closed hold median: none (the 57.24 NEAR stop at 11:10:04.583 UTC was a leftover from `5a27eb06`, not an entry on `d2c71811`).
+
+#### Does this unblock applying PR 20 to the live engine?
+
+No. Elapsed on the scored live run is **1.5563 hours**, not 24. The 7 day maker-share half has no sample. GitHub already shows PR 20 merged. This pass did not merge it, did not change live pairs, and did not change live fees. Wait for a continuous 24 hour decide tape on one run id before treating section 6 as done.
+
+### Section 6 score 2026-10-02 post-reboot (incomplete)
+
+Read-only. No `/reset`, no rebuild, no pair or fee change, no merge of PR 20 into the live stack. Live `.env` is still `CB_PAIRS=UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD` and `CB_MAKER_FEE_BPS=50` / `CB_TAKER_FEE_BPS=90`. Decision `feeBps` prints the same 50/90.
+
+**Host power (not changed).** `powercfg /a` lists Standby (S0 Low Power Idle) as unavailable: "The system firmware does not support this standby state." S1, S2, and S3 are also unavailable. Hibernate is not enabled. Balanced `STANDBYIDLE` AC=0 DC=0 and `HIBERNATEIDLE` AC=0 DC=0 (never sleep, never hibernate). S0 Modern Standby is gone.
+
+**Stack.** Docker Engine 29.8.1. After the host reboot, `cb-app` and `cb-postgres` were already up. No `docker compose up -d`. No kuru profile. `GET /health` `status=ok`. UI `:3000` was empty; `bun run ui:start` then served `/paper` 200. Model `jev-latest`.
+
+`cb-postgres` `RestartCount=0`, started 2026-10-02 20:21:42.504 UTC, healthy. `cb-app` `RestartCount=3` (same inspect field as the pre-reboot score; container created 3 days ago), `StartedAt` 2026-10-02 20:21:46.740 UTC. Boot logs show three `PostgresError: the database system is starting up` before the live process stuck.
+
+**A reboot minted new run ids.** `9bf0fa81` continued after the 1.5563 hour snapshot to **3.1942 hours** / 231 decisions (last 2026-10-02 13:52:37.299 UTC), then died. `80013751-7db5-4a6a-876d-887cfce4930a` started 2026-10-02 13:53:34.153 UTC, 225 decisions over **3.1109 hours**, 0 fills. First-cycle `toxicSource` all `jev`. AVAX leftover from `9bf0fa81` (6.55859833) stayed open through that fragment.
+
+Host reboot then minted `a6788e16-f7da-4ddf-9174-19d68e14ad14` at 2026-10-02 20:06:41.417 UTC (13 decisions, 0.1667 hours). That process stop-flattened the leftover AVAX at 20:06:42.615 UTC, purpose `stop`, taker, reason is not `toxic flow`. It then filled a new AVAX long at 20:15:04.289 to 20:15:19.319 UTC (17 maker legs, completing size 32.00421535509792, cost basis $340.7704151160543). Post-only `take_profit` rested at lag **0 ms**, ask 11.614481551392956, still `open`. Ask equals fee-inclusive cost-basis entry times (1 + 908 / 10_000).
+
+**Scored run is the live id** `5b892748-cc42-4365-a5f1-3cfc617a940a`, started 2026-10-02 20:21:47.425 UTC. Score snapshot 2026-10-02 20:37:50.977 UTC. `GET /health` `uptimeMs=963552` = **0.2677 hours**. 20 decisions. First-to-last decide tape **0.2639 hours**. This is not a finished 24 hour window.
+
+`d2c71811` wall time to this snapshot is **33.47 hours**. Summed decide tape across `d2c71811` + `9bf0fa81` + `80013751` + `a6788e16` + live `5b892748` is **8.54 hours**. Do not treat 33 hours of calendar time as 33 hours of decide tape. On this live id, tape length matches the 5 minute cadence (19 then 20 decisions over ~16 minutes).
+
+#### Live run `5b892748` per pair
+
+| Pair | Decisions | Toxic src jev/rule/degen | Ring n at t=0 | Distinct toxicPHigh | Warm | First reason | Hold median h | Open age h | TP maker | TP taker | Stop | Trend down | Resting ask |
+|---|---:|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---|
+| UNI-USD | 4 | 4/0/0 | 881 | 54 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+| NEAR-USD | 4 | 4/0/0 | 883 | 48 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+| BCH-USD | 3 | 3/0/0 | 881 | 72 | yes | liquidity stress | - | - | 0 | 0 | 0 | 0 | no sample |
+| SUI-USD | 3 | 3/0/0 | 876 | 50 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| AVAX-USD | 3 | 3/0/0 | 878 | 48 | yes | hold (already long) | - | 0.375 | 0 | 0 | 0 | 0 | no sample on this run |
+| ARB-USD | 3 | 3/0/0 | 872 | 49 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+
+All six first `toxicSource=jev` and first `stressSource=jev`. Run totals: toxic jev 20, rule 0, `rule_degenerate` 0. Stress same. Seed fix held: rings were warm at boot (872 to 883 samples, 48 to 72 distinct `toxicPHigh`). None started cold. First-cycle split: jev 6, rule 0, rule_degenerate 0.
+
+This run has **0 orders and 0 fills**. SUI printed approved long on every cycle (`sizeUsd=400`) and did not persist an entry. BCH later printed approved in the log and also has no order. AVAX printed `hold` with `sizeUsd=0` because the book is already long from `a6788e16`.
+
+The open AVAX 32.00421535509793 at snapshot entry 10.647672856062483 is that leftover fill, not an entry on `5b892748`. Official closed-hold median uses entry-to-exit on this run only: no sample. Open age of the inherited long at the snapshot is **0.375 hours**. The resting ask from `a6788e16` is still open (lag 0 ms on that fill). Check 2 on the live runId has no filled long, so no sample.
+
+No decision on this run has reason `toxic flow`. No flatten fill on this run exists, so none is a toxic-flow flatten. The 20:06 AVAX stop is on `a6788e16`, purpose `stop`, not `toxic flow`.
+
+| Check | Result |
+|---|---|
+| Toxic veto 5% to 30% band | Cancelled. Toxic entry veto is deleted. Observation rates on this short tape: BCH 33.3% (1/3), UNI 0% (0/4), NEAR 0% (0/4), SUI 0% (0/3), AVAX 0% (0/3), ARB 0% (0/3). |
+| No close reason `toxic flow` | PASS. 0 decisions with that reason. 0 flatten fills with that reason on the live run. |
+| Median hold of any long over 1 hour | Closed p50: no sample (0 closed longs on this run). Open age: inherited AVAX 0.375 h, under 1 hour. |
+| Check 2, 24h: resting post-only take-profit within one 1 second tick | no sample on every pair for this runId (0 filled longs). The inherited AVAX ask from `a6788e16` is still open at lag 0 ms. |
+| Check 2, 7d: 80% maker take-profit fills, n>=5 | no sample on every pair. 0 take-profit fills in 7 days. Not FAIL. |
+
+#### Does this unblock applying PR 20 to the live engine?
+
+No. Elapsed on the scored live run is **0.2677 hours**, not 24. The 7 day maker-share half has no sample. GitHub already shows PR 20 merged. This pass did not merge it, did not change live pairs, and did not change live fees. Wait for a continuous 24 hour decide tape on one run id before treating section 6 as done. S0 is gone and AC/DC sleep/hibernate are 0, so the tape can survive if power and Docker stay up.
+
+### Section 6 score 2026-10-03 mid-window (incomplete)
+
+Read-only. No `/reset`, no rebuild, no pair or fee change, no merge of PR 20 into the live stack. Live container env is still `CB_PAIRS=UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD` and `CB_MAKER_FEE_BPS=50` / `CB_TAKER_FEE_BPS=90`. Run config on the row matches 50/90.
+
+**Host power (not changed).** `powercfg /a` still lists S0 Low Power Idle, S1, S2, S3 unavailable, hibernate not enabled. Balanced `STANDBYIDLE` AC=0 DC=0 and `HIBERNATEIDLE` AC=0 DC=0.
+
+**Stack.** `cb-app` and `cb-postgres` already up. No `docker compose up -d`. No kuru profile. `GET /health` `status=ok`, `runId=570e5fd9-95cd-4dba-9247-179663134b94`. Model `jev-latest`.
+
+`cb-postgres` `RestartCount=0`, started 2026-10-02 20:52:24.553 UTC, healthy. `cb-app` `RestartCount=2`, `Created` 2026-09-29 12:39:58.738 UTC, `StartedAt` 2026-10-02 20:52:26.897 UTC.
+
+**Expected id is live.** `570e5fd9` started 2026-10-02 20:52:27.328 UTC. Score snapshot 2026-10-03 12:26:50.560 UTC. `GET /health` `uptimeMs=56062858` = **15.5730 hours**. First decide 2026-10-02 20:52:28.146 UTC, last 2026-10-03 12:26:34.773 UTC. Decide tape **15.5685 hours**. Calendar since run start **15.5731 hours**. Tape, calendar, and process uptime match. 1122 decisions, 187 per pair. Max inter-decide gap 5.00 minutes. This is not a finished 24 hour window.
+
+The 20:51 dirty reboot minted this id. Prior fragment `5b892748` last decided 2026-10-02 20:47:38.255 UTC (32 decisions, 0.4308 hours of tape), then died. No later run id exists. Score this tape, not `5b892748`.
+
+**Host events since 2026-10-02 20:48 UTC.** One System `Kernel-Power` 41 at 2026-10-02 20:51:07.015 UTC (dirty reboot). No System `BugCheck` 1001. Application WER 1001 `BlueScreen` P1=`50` (0x50) points at minidump `100226-23062-01.dmp`, first queued 2026-10-02 20:51:44 UTC, same Report Id re-queued later. That is the crash that minted `570e5fd9`, not a second crash during this window. No Kernel-Power 41 after 20:51:07.
+
+#### Live run `570e5fd9` per pair
+
+| Pair | Decisions | Toxic src jev/rule/degen | Ring n at t=0 | Distinct toxicPHigh | Warm | First reason | Hold median h | Open age h | TP maker | TP taker | Stop | Trend down | Resting ask |
+|---|---:|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---|
+| UNI-USD | 187 | 187/0/0 | 887 | 54 | yes | trend | - | 7.310 | 0 | 0 | 0 | 0 | 1/1 pass, lag 0 ms |
+| NEAR-USD | 187 | 187/0/0 | 889 | 48 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+| BCH-USD | 187 | 187/0/0 | 886 | 72 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| SUI-USD | 187 | 187/0/0 | 881 | 50 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| AVAX-USD | 187 | 187/0/0 | 883 | 48 | yes | trend down | - | - | 0 | 0 | 0 | 5 | no sample |
+| ARB-USD | 187 | 187/0/0 | 877 | 49 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+
+All six first `toxicSource=jev` and first `stressSource=jev`. Run totals: toxic source jev 1122, rule 0, `rule_degenerate` 0. Seed fix held: rings were warm at boot (877 to 889 samples, 48 to 72 distinct `toxicPHigh`). None started cold. First-cycle split: jev 6, rule 0, rule_degenerate 0. Ring now 1064 to 1076 samples, 49 to 73 distinct.
+
+BCH printed approved long 64 times and persisted 0 orders. SUI printed approved twice and did not fill.
+
+AVAX first cycle was `trend down` on the leftover long from `a6788e16` (filled 2026-10-02 20:15:04 to 20:15:19 UTC). This run flattened it 2026-10-02 21:06:19 to 21:07:48 UTC, purpose `exit`, four maker legs plus one taker, reason `trend down`, not `toxic flow`. Official closed-hold median uses entry-to-exit on this run only: no sample (0 entries on AVAX). `/report` counts those five sells as `trendDown` exits.
+
+Filled longs on this run, fee-inclusive target = cost basis / size times (1 + book take-profit bps / 10_000). Check 2's signed-off tick is the 1 second time tick in `scoreRestingAsk`.
+
+| Pair | Entry filled (UTC) | Fill legs | Cost-basis entry | Resting ask | Lag | Book target bps | Closed by |
+|---|---|---:|---:|---:|---:|---:|---|
+| UNI-USD | 2026-10-03 05:08:13.869 | 1 | 9.182886 | 10.266466547999999 | 0 ms | 1180 | still open |
+
+UNI ask equals that target. Ask is post-only `take_profit`, status `open`. Open age at the snapshot is **7.310 hours**.
+
+| Check | Result |
+|---|---|
+| Toxic veto 5% to 30% band | Cancelled. Toxic entry veto is deleted. Observation rates on this tape: UNI 7.5% (14/187), SUI 8.6% (16/187), NEAR 6.4% (12/187), AVAX 4.3% (8/187), ARB 3.7% (7/187), BCH 3.2% (6/187). |
+| No close reason `toxic flow` | PASS. 0 decisions with that reason. Flatten fills on this run are AVAX `trend down` only. |
+| Median hold of any long over 1 hour | Closed p50: no sample (0 closed longs entered on this run). Open age: UNI 7.310 h, already over 1 hour. |
+| Check 2, 24h: resting post-only take-profit within one 1 second tick | PASS on UNI (1/1, lag 0 ms). no sample on NEAR, BCH, SUI, AVAX, ARB. |
+| Check 2, 7d: 80% maker take-profit fills, n>=5 | no sample on every pair. 0 take-profit fills in 7 days and 0 ever. Not FAIL. |
+
+#### Does this unblock applying PR 20 to the live engine?
+
+No. Elapsed on the scored live run is **15.5730 hours**, not 24. The 7 day maker-share half has no sample. GitHub already shows PR 20 merged. This pass did not merge it, did not change live pairs, and did not change live fees. Wait for a continuous 24 hour decide tape on one run id before treating section 6 as done. 24h clock on this id lands near **20:52 UTC 3 Oct** if it holds.
+
+### Section 6 score 2026-10-03 24h (finished)
+
+Read-only. No `/reset`, no rebuild, no pair or fee change, no apply of PR 20 to the live stack. Live container env is still `CB_PAIRS=UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD` and `CB_MAKER_FEE_BPS=50` / `CB_TAKER_FEE_BPS=90`. Run config on the row matches 50/90. Power settings were not changed.
+
+**Host power (not changed).** `powercfg /a` still lists S0 Low Power Idle, S1, S2, S3 unavailable, hibernate not enabled. Balanced `STANDBYIDLE` AC=0 DC=0 and `HIBERNATEIDLE` AC=0 DC=0.
+
+**Stack.** `cb-app` and `cb-postgres` already up. No `docker compose up -d`. No kuru profile. `GET /health` `status=ok`, `runId=570e5fd9-95cd-4dba-9247-179663134b94`. Model `jev-latest`.
+
+`cb-postgres` `RestartCount=0`, started 2026-10-02 20:52:24.553 UTC, healthy. `cb-app` `RestartCount=2`, `Created` 2026-09-29 12:39:58.738 UTC, `StartedAt` 2026-10-02 20:52:26.897 UTC. Same inspect fields as the 15.57h mid-window score. No mid-window container restart minted a new id.
+
+**Expected id is still live.** `570e5fd9` started 2026-10-02 20:52:27.328 UTC. Score snapshot 2026-10-03 20:58:34.036 UTC. `GET /health` `uptimeMs=86766708` = **24.1019 hours**. First decide 2026-10-02 20:52:28.146 UTC, last 2026-10-03 20:58:12.887 UTC. Decide tape **24.0958 hours**. Calendar since run start **24.1019 hours**. Tape, calendar, and process uptime match. 1736 decisions (UNI 290, NEAR 290, BCH 289, SUI 289, AVAX 289, ARB 289). Max inter-decide gap 5.00 minutes.
+
+This is a **clean 24h tape**: same runId the whole window, tape approximately equal to calendar, no mid-window restart that minted a new id.
+
+No later run id exists. Prior fragment `5b892748` still ends at 2026-10-02 20:47:38.255 UTC. The 20:51 dirty reboot minted this id and it held.
+
+**Host events since 2026-10-02 20:51 UTC.** One System `Kernel-Power` 41 at 2026-10-02 20:51:07.015 UTC (dirty reboot that minted this id). None after that. No System `BugCheck` 1001. Application WER 1001 `BlueScreen` P1=`50` (0x50) still points at minidump `100226-23062-01.dmp`. That dump is the 20:51 crash. The same report was re-queued later (including 2026-10-03 20:22:26 UTC). No new 0x50.
+
+#### Live run `570e5fd9` per pair
+
+| Pair | Decisions | Toxic src jev/rule/degen | Ring n at t=0 | Distinct toxicPHigh | Warm | First reason | Hold median h | Open age h | TP maker | TP taker | Stop | Trend down | Resting ask |
+|---|---:|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---|
+| UNI-USD | 290 | 290/0/0 | 887 | 54 | yes | trend | 12.020 | - | 0 | 0 | 0 | 1 | 1/1 pass, lag 0 ms |
+| NEAR-USD | 290 | 290/0/0 | 889 | 48 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+| BCH-USD | 289 | 289/0/0 | 886 | 72 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| SUI-USD | 289 | 289/0/0 | 881 | 50 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| AVAX-USD | 289 | 289/0/0 | 883 | 48 | yes | hold (already long) | 4.000 | - | 0 | 0 | 0 | 9 | 1/1 pass, lag 0 ms |
+| ARB-USD | 289 | 289/0/0 | 877 | 49 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+
+All six first `toxicSource=jev` and first `stressSource=jev`. Run totals: toxic source jev 1736, rule 0, `rule_degenerate` 0. Seed fix held: rings were warm at boot (877 to 889 samples, 48 to 72 distinct `toxicPHigh`). None started cold. First-cycle split: jev 6, rule 0, rule_degenerate 0.
+
+BCH printed approved 111 times and persisted 0 orders. SUI printed approved 81 times and did not fill.
+
+AVAX first stored row is reason null, target long, size 0 (leftover from `a6788e16`). First named reason is `trend down` at 2026-10-02 21:05:48.076 UTC. This run flattened that leftover 2026-10-02 21:06:19 to 21:07:48 UTC, purpose `exit`, four maker legs plus one taker, reason `trend down`, not `toxic flow`. That leftover is not an official closed long on this run.
+
+Official closed-hold median uses entry-to-exit on this run only, first closing sell, same as `/report` `holdTrend.run`. Two closed longs: UNI 12.019572 h, AVAX 3.999952 h. Closed p50 **8.010 h**. Both over 1 hour. Book is flat at the snapshot (all `position_base=0`). Open age: no sample.
+
+Filled longs on this run, fee-inclusive target = cost basis / size times (1 + book take-profit bps / 10_000). Check 2's signed-off tick is the 1 second time tick in `scoreRestingAsk`.
+
+| Pair | Entry filled (UTC) | Fill legs | Cost-basis entry | Resting ask | Lag | Book target bps | Closed by |
+|---|---|---:|---:|---:|---:|---:|---|
+| UNI-USD | 2026-10-03 05:08:13.869 | 1 | 9.182886 | 10.266466547999999 | 0 ms | 1180 | trend down 2026-10-03 17:09:24.329, taker |
+| AVAX-USD | 2026-10-03 13:05:47.264 | 3 | 11.114295 | 12.123472986 | 0 ms | 908 | trend down 2026-10-03 17:05:47.090 first sell, four maker legs |
+
+Both asks equal that target. Both are post-only `take_profit`, later `canceled` when the trend-down exit filled. AVAX last exit leg 2026-10-03 17:07:42.214 UTC.
+
+| Check | Result |
+|---|---|
+| Toxic veto 5% to 30% band | Cancelled. Toxic entry veto is deleted. Observation rates on this tape: SUI 10.0% (29/289), NEAR 9.7% (28/290), UNI 8.6% (25/290), ARB 5.5% (16/289), AVAX 4.8% (14/289), BCH 4.5% (13/289). |
+| No close reason `toxic flow` | PASS. 0 decisions with that reason. Flatten fills on this run are AVAX and UNI `trend down` only. |
+| Median hold of any long over 1 hour | Closed p50 8.010 h (UNI 12.020 h, AVAX 4.000 h). PASS. Open age: no sample, book flat. |
+| Check 2, 24h: resting post-only take-profit within one 1 second tick | PASS on UNI and AVAX (1/1 each, lag 0 ms). no sample on NEAR, BCH, SUI, ARB. |
+| Check 2, 7d: 80% maker take-profit fills, n>=5 | no sample on every pair. 0 take-profit fills in 7 days and 0 ever. Not FAIL. |
+
+#### Does this unblock applying PR 20 to the live engine?
+
+No. The 24h tape is clean and the scored 24h clauses pass, but Brian has not approved applying #20. The 7 day maker-share half still has no sample. GitHub already shows PR 20 merged. This pass did not apply it to the live container, did not change live pairs, and did not change live fees or power.
+
+### Section 6 score 2026-10-04 28.73h (continuation)
+
+Read-only. No `/reset`, no rebuild, no pair or fee change, no apply of PR 20 to the live stack. Live container env is still `CB_PAIRS=UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD` and `CB_MAKER_FEE_BPS=50` / `CB_TAKER_FEE_BPS=90`. Run config and decision `feeBps` still print 50/90. Power settings were not changed.
+
+**Host power (not changed).** `powercfg /a` still lists S0 Low Power Idle, S1, S2, S3 unavailable, hibernate not enabled. Balanced `STANDBYIDLE` AC=0 DC=0 and `HIBERNATEIDLE` AC=0 DC=0.
+
+**Stack.** Docker Engine 29.8.1. `cb-app` and `cb-postgres` already up. No `docker compose up -d`. No kuru profile. `GET /health` `status=ok`, `runId=570e5fd9-95cd-4dba-9247-179663134b94`. Model `jev-latest`.
+
+`cb-postgres` `RestartCount=0`, started 2026-10-02 20:52:24.553 UTC, healthy. `cb-app` `RestartCount=2`, `Created` 2026-09-29 12:39:58.738 UTC, `StartedAt` 2026-10-02 20:52:26.897 UTC. Same inspect fields as the finished 24h score. No mid-window container restart minted a new id.
+
+**Expected id is still live.** `570e5fd9` started 2026-10-02 20:52:27.328 UTC. Score snapshot 2026-10-04 01:35:59.466 UTC. `GET /health` `uptimeMs=103412138` = **28.7256 hours**. First decide 2026-10-02 20:52:28.146 UTC, last 2026-10-04 01:35:41.867 UTC. Decide tape **28.7205 hours**. Calendar since run start **28.7256 hours**. Tape, calendar, and process uptime match. 2069 decisions (UNI 345, NEAR 345, BCH 345, SUI 345, AVAX 345, ARB 344). Max inter-decide gap 5.00 minutes.
+
+No later run id exists. This is the same clean tape as the 24.10h Result, plus 4.62 hours. Do not treat calendar time as a new window; decide-tape equals calendar on this id.
+
+**Versus the 24.10h snapshot.** Closed-hold p50 is unchanged at **8.010 h** (UNI 12.020 h, AVAX 4.000 h). Those two fills are still the only closed longs. A third AVAX entry filled after the 24h snapshot and is still open. Resting-ask coverage is now 3/3 instead of 2/2. Maker share is still no sample.
+
+**Host events since 2026-10-02 20:51 UTC.** One System `Kernel-Power` 41 at 2026-10-02 20:51:07.015 UTC (dirty reboot that minted this id). None after that. No System `BugCheck` 1001. Application WER 1001 `BlueScreen` P1=`50` (0x50) still points at minidump `100226-23062-01.dmp`. That dump is the 20:51 crash. The same report was re-queued later (including 2026-10-04 00:29:12 and 2026-10-04 01:30:31 UTC). No new 0x50.
+
+#### Live run `570e5fd9` per pair
+
+| Pair | Decisions | Toxic src jev/rule/degen | Ring n at t=0 | Distinct toxicPHigh | Warm | First reason | Hold median h | Open age h | TP maker | TP taker | Stop | Trend down | Resting ask |
+|---|---:|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---|
+| UNI-USD | 345 | 345/0/0 | 887 | 54 | yes | trend | 12.020 | - | 0 | 0 | 0 | 1 | 1/1 pass, lag 0 ms |
+| NEAR-USD | 345 | 345/0/0 | 889 | 48 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+| BCH-USD | 345 | 345/0/0 | 886 | 72 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| SUI-USD | 345 | 345/0/0 | 881 | 50 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| AVAX-USD | 345 | 345/0/0 | 883 | 48 | yes | hold (already long) | 4.000 | 4.487 | 0 | 0 | 0 | 9 | 2/2 pass, lag 0 ms |
+| ARB-USD | 344 | 344/0/0 | 877 | 49 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+
+All six first `toxicSource=jev` and first `stressSource=jev`. Run totals: toxic source jev 2069, rule 0, `rule_degenerate` 0. Seed fix held: rings were warm at boot (877 to 889 samples, 48 to 72 distinct `toxicPHigh`). None started cold. First-cycle split: jev 6, rule 0, rule_degenerate 0.
+
+BCH printed approved 162 times and persisted 0 orders. SUI printed approved 127 times and did not fill.
+
+AVAX first stored row is reason null, target long, size 0 (leftover from `a6788e16`). First named reason is `trend down` at 2026-10-02 21:05:48.076 UTC. This run flattened that leftover 2026-10-02 21:06:19 to 21:07:48 UTC, purpose `exit`, four maker legs plus one taker, reason `trend down`, not `toxic flow`. That leftover is not an official closed long on this run.
+
+Official closed-hold median uses entry-to-exit on this run only, first closing sell, same as `/report` `holdTrend.run`. Two closed longs: UNI 12.019572 h, AVAX 3.999952 h. Closed p50 **8.010 h**. Both over 1 hour. One AVAX long is open at the snapshot. Open age **4.487 h**.
+
+Filled longs on this run, fee-inclusive target = cost basis / size times (1 + book take-profit bps / 10_000). Check 2's signed-off tick is the 1 second time tick in `scoreRestingAsk`.
+
+| Pair | Entry filled (UTC) | Fill legs | Cost-basis entry | Resting ask | Lag | Book target bps | Closed by |
+|---|---|---:|---:|---:|---:|---:|---|
+| UNI-USD | 2026-10-03 05:08:13.869 | 1 | 9.182886 | 10.266466547999999 | 0 ms | 1180 | trend down 2026-10-03 17:09:24.329, taker |
+| AVAX-USD | 2026-10-03 13:05:47.264 | 3 | 11.114295 | 12.123472986 | 0 ms | 908 | trend down 2026-10-03 17:05:47.090 first sell, four maker legs |
+| AVAX-USD | 2026-10-03 21:06:45.936 | 2 | 11.134395 | 12.145398066 | 0 ms | 908 | still open |
+
+All three asks equal that target. UNI and the first AVAX ask are post-only `take_profit`, later `canceled` when the trend-down exit filled. The second AVAX ask is post-only `take_profit`, status `open`. Position at snapshot: AVAX 36.10434154707103, others flat.
+
+| Check | Result |
+|---|---|
+| Toxic veto 5% to 30% band | Cancelled. Toxic entry veto is deleted. Observation rates on this tape: NEAR 9.6% (33/345), SUI 9.6% (33/345), UNI 7.5% (26/345), ARB 6.4% (22/344), BCH 6.1% (21/345), AVAX 4.6% (16/345). |
+| No close reason `toxic flow` | PASS. 0 decisions with that reason. Flatten fills on this run are AVAX and UNI `trend down` only. |
+| Median hold of any long over 1 hour | Closed p50 8.010 h (UNI 12.020 h, AVAX 4.000 h). PASS. Open age: AVAX 4.487 h, already over 1 hour. |
+| Check 2, 24h: resting post-only take-profit within one 1 second tick | PASS on UNI (1/1) and AVAX (2/2), lag 0 ms. no sample on NEAR, BCH, SUI, ARB. |
+| Check 2, 7d: 80% maker take-profit fills, n>=5 | no sample on every pair. 0 take-profit fills in 7 days and 0 ever. Not FAIL. |
+
+#### Does this unblock applying PR 20 to the live engine?
+
+No. The tape is still clean past 24h and the scored clauses still pass, but Brian has not approved applying #20. The 7 day maker-share half still has no sample. GitHub already shows PR 20 merged. This pass did not apply it to the live container, did not change live pairs, and did not change live fees or power.
 
 ### 7 day window not started yet
 
-The 7 day take-profit maker-share window starts after this 24h window, not in parallel.
+The 24h window on `570e5fd9` is a finished clean tape and the same id is still deciding at 28.73h. The 7 day take-profit maker-share half still has n=0. This pass did not reset or start a separate 7d campaign. Maker share stays no sample until five take-profit fills exist.
 
 ### Rule 3
 
