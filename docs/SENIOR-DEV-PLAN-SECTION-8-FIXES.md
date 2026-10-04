@@ -257,7 +257,7 @@ All six started warm (n >= 200). None started cold. First-cycle split: jev 6, ru
 
 The toxic entry veto is gone from the live gate path. ARB's first print recorded `toxicVeto=true` as an observation and still refused for `trend`, not `toxic flow`. AVAX filled an approved long on the first cycle.
 
-Amended check 1 band clause stays cancelled. Incomplete scores from 2026-10-02 and the 2026-10-03 mid-window sit below. The finished 24 hour score on `570e5fd9` is the last Result block.
+Amended check 1 band clause stays cancelled. Incomplete scores from 2026-10-02 and the 2026-10-03 mid-window sit below. The finished 24 hour score on `570e5fd9` and the 28.73h continuation score on the same id sit below.
 
 ### Section 6 score 2026-10-02 (incomplete)
 
@@ -471,9 +471,68 @@ Both asks equal that target. Both are post-only `take_profit`, later `canceled` 
 
 No. The 24h tape is clean and the scored 24h clauses pass, but Brian has not approved applying #20. The 7 day maker-share half still has no sample. GitHub already shows PR 20 merged. This pass did not apply it to the live container, did not change live pairs, and did not change live fees or power.
 
+### Section 6 score 2026-10-04 28.73h (continuation)
+
+Read-only. No `/reset`, no rebuild, no pair or fee change, no apply of PR 20 to the live stack. Live container env is still `CB_PAIRS=UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD` and `CB_MAKER_FEE_BPS=50` / `CB_TAKER_FEE_BPS=90`. Run config and decision `feeBps` still print 50/90. Power settings were not changed.
+
+**Host power (not changed).** `powercfg /a` still lists S0 Low Power Idle, S1, S2, S3 unavailable, hibernate not enabled. Balanced `STANDBYIDLE` AC=0 DC=0 and `HIBERNATEIDLE` AC=0 DC=0.
+
+**Stack.** Docker Engine 29.8.1. `cb-app` and `cb-postgres` already up. No `docker compose up -d`. No kuru profile. `GET /health` `status=ok`, `runId=570e5fd9-95cd-4dba-9247-179663134b94`. Model `jev-latest`.
+
+`cb-postgres` `RestartCount=0`, started 2026-10-02 20:52:24.553 UTC, healthy. `cb-app` `RestartCount=2`, `Created` 2026-09-29 12:39:58.738 UTC, `StartedAt` 2026-10-02 20:52:26.897 UTC. Same inspect fields as the finished 24h score. No mid-window container restart minted a new id.
+
+**Expected id is still live.** `570e5fd9` started 2026-10-02 20:52:27.328 UTC. Score snapshot 2026-10-04 01:35:59.466 UTC. `GET /health` `uptimeMs=103412138` = **28.7256 hours**. First decide 2026-10-02 20:52:28.146 UTC, last 2026-10-04 01:35:41.867 UTC. Decide tape **28.7205 hours**. Calendar since run start **28.7256 hours**. Tape, calendar, and process uptime match. 2069 decisions (UNI 345, NEAR 345, BCH 345, SUI 345, AVAX 345, ARB 344). Max inter-decide gap 5.00 minutes.
+
+No later run id exists. This is the same clean tape as the 24.10h Result, plus 4.62 hours. Do not treat calendar time as a new window; decide-tape equals calendar on this id.
+
+**Versus the 24.10h snapshot.** Closed-hold p50 is unchanged at **8.010 h** (UNI 12.020 h, AVAX 4.000 h). Those two fills are still the only closed longs. A third AVAX entry filled after the 24h snapshot and is still open. Resting-ask coverage is now 3/3 instead of 2/2. Maker share is still no sample.
+
+**Host events since 2026-10-02 20:51 UTC.** One System `Kernel-Power` 41 at 2026-10-02 20:51:07.015 UTC (dirty reboot that minted this id). None after that. No System `BugCheck` 1001. Application WER 1001 `BlueScreen` P1=`50` (0x50) still points at minidump `100226-23062-01.dmp`. That dump is the 20:51 crash. The same report was re-queued later (including 2026-10-04 00:29:12 and 2026-10-04 01:30:31 UTC). No new 0x50.
+
+#### Live run `570e5fd9` per pair
+
+| Pair | Decisions | Toxic src jev/rule/degen | Ring n at t=0 | Distinct toxicPHigh | Warm | First reason | Hold median h | Open age h | TP maker | TP taker | Stop | Trend down | Resting ask |
+|---|---:|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---|
+| UNI-USD | 345 | 345/0/0 | 887 | 54 | yes | trend | 12.020 | - | 0 | 0 | 0 | 1 | 1/1 pass, lag 0 ms |
+| NEAR-USD | 345 | 345/0/0 | 889 | 48 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+| BCH-USD | 345 | 345/0/0 | 886 | 72 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| SUI-USD | 345 | 345/0/0 | 881 | 50 | yes | approved long | - | - | 0 | 0 | 0 | 0 | no sample |
+| AVAX-USD | 345 | 345/0/0 | 883 | 48 | yes | hold (already long) | 4.000 | 4.487 | 0 | 0 | 0 | 9 | 2/2 pass, lag 0 ms |
+| ARB-USD | 344 | 344/0/0 | 877 | 49 | yes | trend | - | - | 0 | 0 | 0 | 0 | no sample |
+
+All six first `toxicSource=jev` and first `stressSource=jev`. Run totals: toxic source jev 2069, rule 0, `rule_degenerate` 0. Seed fix held: rings were warm at boot (877 to 889 samples, 48 to 72 distinct `toxicPHigh`). None started cold. First-cycle split: jev 6, rule 0, rule_degenerate 0.
+
+BCH printed approved 162 times and persisted 0 orders. SUI printed approved 127 times and did not fill.
+
+AVAX first stored row is reason null, target long, size 0 (leftover from `a6788e16`). First named reason is `trend down` at 2026-10-02 21:05:48.076 UTC. This run flattened that leftover 2026-10-02 21:06:19 to 21:07:48 UTC, purpose `exit`, four maker legs plus one taker, reason `trend down`, not `toxic flow`. That leftover is not an official closed long on this run.
+
+Official closed-hold median uses entry-to-exit on this run only, first closing sell, same as `/report` `holdTrend.run`. Two closed longs: UNI 12.019572 h, AVAX 3.999952 h. Closed p50 **8.010 h**. Both over 1 hour. One AVAX long is open at the snapshot. Open age **4.487 h**.
+
+Filled longs on this run, fee-inclusive target = cost basis / size times (1 + book take-profit bps / 10_000). Check 2's signed-off tick is the 1 second time tick in `scoreRestingAsk`.
+
+| Pair | Entry filled (UTC) | Fill legs | Cost-basis entry | Resting ask | Lag | Book target bps | Closed by |
+|---|---|---:|---:|---:|---:|---:|---|
+| UNI-USD | 2026-10-03 05:08:13.869 | 1 | 9.182886 | 10.266466547999999 | 0 ms | 1180 | trend down 2026-10-03 17:09:24.329, taker |
+| AVAX-USD | 2026-10-03 13:05:47.264 | 3 | 11.114295 | 12.123472986 | 0 ms | 908 | trend down 2026-10-03 17:05:47.090 first sell, four maker legs |
+| AVAX-USD | 2026-10-03 21:06:45.936 | 2 | 11.134395 | 12.145398066 | 0 ms | 908 | still open |
+
+All three asks equal that target. UNI and the first AVAX ask are post-only `take_profit`, later `canceled` when the trend-down exit filled. The second AVAX ask is post-only `take_profit`, status `open`. Position at snapshot: AVAX 36.10434154707103, others flat.
+
+| Check | Result |
+|---|---|
+| Toxic veto 5% to 30% band | Cancelled. Toxic entry veto is deleted. Observation rates on this tape: NEAR 9.6% (33/345), SUI 9.6% (33/345), UNI 7.5% (26/345), ARB 6.4% (22/344), BCH 6.1% (21/345), AVAX 4.6% (16/345). |
+| No close reason `toxic flow` | PASS. 0 decisions with that reason. Flatten fills on this run are AVAX and UNI `trend down` only. |
+| Median hold of any long over 1 hour | Closed p50 8.010 h (UNI 12.020 h, AVAX 4.000 h). PASS. Open age: AVAX 4.487 h, already over 1 hour. |
+| Check 2, 24h: resting post-only take-profit within one 1 second tick | PASS on UNI (1/1) and AVAX (2/2), lag 0 ms. no sample on NEAR, BCH, SUI, ARB. |
+| Check 2, 7d: 80% maker take-profit fills, n>=5 | no sample on every pair. 0 take-profit fills in 7 days and 0 ever. Not FAIL. |
+
+#### Does this unblock applying PR 20 to the live engine?
+
+No. The tape is still clean past 24h and the scored clauses still pass, but Brian has not approved applying #20. The 7 day maker-share half still has no sample. GitHub already shows PR 20 merged. This pass did not apply it to the live container, did not change live pairs, and did not change live fees or power.
+
 ### 7 day window not started yet
 
-The 24h window on `570e5fd9` is now a finished clean tape. The 7 day take-profit maker-share half still has n=0. This pass did not reset or start a separate 7d campaign. Maker share stays no sample until five take-profit fills exist.
+The 24h window on `570e5fd9` is a finished clean tape and the same id is still deciding at 28.73h. The 7 day take-profit maker-share half still has n=0. This pass did not reset or start a separate 7d campaign. Maker share stays no sample until five take-profit fills exist.
 
 ### Rule 3
 
