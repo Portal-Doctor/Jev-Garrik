@@ -4,16 +4,16 @@ overview: "Replace per-pair clip accounting with one $12,000 pool that can fund 
 todos:
   - id: pool-core
     content: Add ranking, flatten-to-fund, concurrent/gross caps, and the 15% pool DD trip as pure functions with unit tests
-    status: pending
+    status: completed
   - id: backtest
     content: Replay Jul/Aug/Sep 2026 at 40/80 for split-clip HTF, split-clip breakout, and pooled rotation. Record monthly nets, trades, fees, portfolio DD, and harness scores. Do not tune knobs to force $300/mo
-    status: pending
+    status: completed
   - id: live-wire
     content: Wire CB_BOOK=pooled into the paper broker and engine so docker compose up -d --build cb (no kuru) runs the pool. Host .env must match. Do not enable TAO or ADA. Do not /reset
-    status: pending
+    status: completed
   - id: pre-ship
     content: Run the existing pre-ship checklist (bun test cb, web tsc, compose health, GET /health, t=0 rings). Report pass or fail from real output
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -162,4 +162,30 @@ Then the repo pre-ship checklist, not a new script: `bun test cb`, `cd web && bu
 
 ## Result
 
-Empty until the replay and the pre-ship checklist land.
+Run `bun run cb/pool-run.ts` on 2026-10-05. Fees 40/80. Knobs 20 / 3 / 50 / 14d. Window 2026-07-01T00:00:00Z to 2026-10-01T00:00:00Z, ten live names, TAO and ADA off. Closed-trade monthly nets. Portfolio DD is peak to trough of the summed mark path as a fraction of the $12,000 pool. Harness scores are [cb/tradescore.ts](cb/tradescore.ts) on gate-month closes. Parameters were not changed after the tape.
+
+| Book | Trades | Fees | Net | Jul | Aug | Sep | Portfolio DD | Gate | n | Accuracy | Wilson 95% | Brier | Edge bps |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---|---:|---:|
+| (a) Split-clip HTF | 1002 | $3961.62 | -$1856.30 | -$815.18 | -$288.43 | -$752.68 | 16.48% | fail (0/3) | 1002 | 27.15% | 24.48% to 29.98% | 0.7285 | -48.6 |
+| (b) Split-clip breakout | 116 | $599.54 | $1143.25 | -$209.72 | $512.33 | $840.64 | 5.08% | pass (2/3) | 116 | 24.14% | 17.26% to 32.67% | 0.7586 | 218.7 |
+| (c) Pooled rotation breakout | 103 | $521.77 | -$100.12 | -$306.40 | -$89.29 | $295.56 | 4.17% | fail (0/3) | 103 | 17.48% | 11.35% to 25.94% | 0.8252 | -13.9 |
+
+Pooled book extras: 23 flatten-to-fund rotations, 9 missed post-only entries, 0 vetoed, DD trip did not fire.
+
+The $300/mo gate (two miss months/year) still passes only for split-clip breakout. Pooled September is $295.56, under the target. No knob was moved to push it over.
+
+### Pre-ship checklist
+
+The repo has no `preship` script. The checklist used on prior ships ([docs/SENIOR-DEV-PLAN-SECTION-8-FIXES.md](SENIOR-DEV-PLAN-SECTION-8-FIXES.md), [docs/SENIOR-DEV-PLAN-HOLD-THE-TREND.md](SENIOR-DEV-PLAN-HOLD-THE-TREND.md)) is: `bun test cb`, `web` `bunx tsc --noEmit`, `docker compose up -d --build cb` with no kuru, `GET /health`, t=0 ring n and first `toxicSource`.
+
+| Check | Result |
+|---|---|
+| `bun test cb` | **pass**. 230 pass, 0 fail. |
+| `cd web; bunx tsc --noEmit` | **pass**. |
+| `docker compose up -d --build cb` (no kuru) | **pass**. Only `cb-app` and `cb-postgres`. Log line `book=pooled`. |
+| `GET /health` | **pass**. `{ "status": "ok", "runId": "cf358bc0-5091-4174-9629-da690f966119" }`. |
+| t=0 rings (no `/reset`) | **pass**. Original six first `toxicSource=jev`, ring n 1133 to 1146. VVV/ZEC/PUMP/XLM first `toxicSource=rule`, ring n 147 to 148 (still under 200). |
+
+This rebuild **replaced** the previous HTF process (`7115ade3`). Three leftover HTF longs (UNI, ARB, NEAR) stopped as taker on boot under the pooled trail/stop. Inventory was not `/reset`. TAO and ADA stayed off.
+
+Overall pre-ship: **pass**. The Jul/Aug/Sep $300 gate for book (c) is a separate fail and was not tuned.

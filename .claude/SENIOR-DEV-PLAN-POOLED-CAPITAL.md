@@ -4,16 +4,16 @@ overview: "Replace per-pair clip accounting with one $12,000 pool that can fund 
 todos:
   - id: pool-core
     content: Add ranking, flatten-to-fund, concurrent/gross caps, and the 15% pool DD trip as pure functions with unit tests
-    status: pending
+    status: completed
   - id: backtest
     content: Replay Jul/Aug/Sep 2026 at 40/80 for split-clip HTF, split-clip breakout, and pooled rotation. Record monthly nets, trades, fees, portfolio DD, and harness scores. Do not tune knobs to force $300/mo
-    status: pending
+    status: completed
   - id: live-wire
     content: Wire CB_BOOK=pooled into the paper broker and engine so docker compose up -d --build cb (no kuru) runs the pool. Host .env must match. Do not enable TAO or ADA. Do not /reset
-    status: pending
+    status: completed
   - id: pre-ship
     content: Run the existing pre-ship checklist (bun test cb, web tsc, compose health, GET /health, t=0 rings). Report pass or fail from real output
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -162,4 +162,12 @@ Then the repo pre-ship checklist, not a new script: `bun test cb`, `cd web && bu
 
 ## Result
 
-Empty until the replay and the pre-ship checklist land.
+Mirror of [docs/SENIOR-DEV-PLAN-POOLED-CAPITAL.md](../docs/SENIOR-DEV-PLAN-POOLED-CAPITAL.md) Result. Run `bun run cb/pool-run.ts` on 2026-10-05 at 40/80, knobs 20 / 3 / 50 / 14d.
+
+| Book | Trades | Fees | Net | Jul | Aug | Sep | Portfolio DD | Gate |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| (a) Split-clip HTF | 1002 | $3961.62 | -$1856.30 | -$815.18 | -$288.43 | -$752.68 | 16.48% | fail |
+| (b) Split-clip breakout | 116 | $599.54 | $1143.25 | -$209.72 | $512.33 | $840.64 | 5.08% | pass |
+| (c) Pooled rotation breakout | 103 | $521.77 | -$100.12 | -$306.40 | -$89.29 | $295.56 | 4.17% | fail |
+
+Pooled extras: 23 rotations, 9 misses, 0 vetoed, no DD trip. No knob was moved. Pre-ship output is recorded in the docs copy after compose.
