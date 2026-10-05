@@ -23,6 +23,11 @@ export const config = {
   bankrollUsd: num("CB_BANKROLL_USD", 12_000),
   /** Cap on the mark of every open long plus resting entry. */
   maxGrossUsd: num("CB_MAX_GROSS_USD", 3_000),
+  /** htf = per-pair clips and the 24h fixed target. pooled = one ledger and breakout rotation. */
+  book: (env("CB_BOOK", "pooled") === "htf" ? "htf" : "pooled") as "htf" | "pooled",
+  maxConcurrent: num("CB_MAX_CONCURRENT", 3),
+  /** Fraction of the $12k pool. Trip when mark equity is at or under pool * (1 - this). */
+  poolDd: num("CB_POOL_DD", 0.15),
 
   // Fees and paper fill honesty knobs (spec sections 2.3, 6). Config, not hardcoded.
   // 40/80 is Brian's judged paper default: between US Intro 50/90 and Advanced 1 35/75.

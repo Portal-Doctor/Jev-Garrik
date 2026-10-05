@@ -1,4 +1,4 @@
-# Always-on local stack: Postgres + Coinbase paper (cb). Ten Coinbase pairs at 40/80.
+# Always-on local stack: Postgres + Coinbase paper (cb). Ten Coinbase pairs, one $12k pool, 40/80.
 # cb uses restart: unless-stopped, so it returns after a crash or reboot
 # (as long as Docker Desktop is set to start on login).
 #   docker compose up -d --build              build + start db and cb
