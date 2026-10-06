@@ -94,7 +94,7 @@ test("a close above the 20 bar high but under the 50 bar EMA does not enter", ()
   expect(result.missedEntries).toBe(0);
 });
 
-test("toxic, stressed, and contraction each refuse a valid breakout", () => {
+test("Jev labels are telemetry by default and do not refuse a valid breakout", () => {
   const bars = [
     ...Array.from({ length: 60 }, (_, i) => bucket(i, 100)).flat(),
     ...bucket(60, 130),
@@ -106,10 +106,22 @@ test("toxic, stressed, and contraction each refuse a valid breakout", () => {
     { ...clearVector, market_regime: "contraction" as const },
   ]) {
     const result = runBreakout(bars, opts({ classify: () => ({ vector }) }));
-    expect(result.vetoedEntries).toBe(1);
-    expect(result.buys).toHaveLength(0);
+    expect(result.vetoedEntries).toBe(0);
+    expect(result.buys).toHaveLength(1);
     expect(result.missedEntries).toBe(0);
   }
+});
+
+test("the retired label veto remains available only as an explicit comparison replay", () => {
+  const bars = [
+    ...Array.from({ length: 60 }, (_, i) => bucket(i, 100)).flat(),
+    ...bucket(60, 130),
+    ...bucket(61, 129, 129, 128),
+  ];
+  const vector = { ...clearVector, liquidity_stress: "stressed" as const };
+  const result = runBreakout(bars, opts({ classify: () => ({ vector }), labelVeto: true }));
+  expect(result.vetoedEntries).toBe(1);
+  expect(result.buys).toHaveLength(0);
 });
 
 test("a post-only entry misses when the next bar stays above the limit", () => {
@@ -145,6 +157,7 @@ test("a gap through the stop fills at the bar open", () => {
   expect(result.buys).toHaveLength(1);
   expect(result.sells).toHaveLength(1);
   expect(result.sells[0]!.price).toBe(100);
+  expect(result.exitReasons).toEqual({ stop: 1, maxHold: 0 });
 });
 
 test("entry pays the maker fee and the stop pays the taker fee, and 10/10 replays those fills", () => {
@@ -169,6 +182,7 @@ test("entry pays the maker fee and the stop pays the taker fee, and 10/10 replay
   const maxHold = runBreakout(held, opts({ stopLossBps: 5_000, maxHoldSec: 300, makerFeeBps: 50, takerFeeBps: 90 }));
   expect(maxHold.buys).toHaveLength(1);
   expect(maxHold.sells).toHaveLength(1);
+  expect(maxHold.exitReasons).toEqual({ stop: 0, maxHold: 1 });
   const holdUnits = 1_000 / 130;
   const holdExit = holdUnits * maxHold.sells[0]!.price * 0.009;
   expect(maxHold.feesUsd).toBeCloseTo(1_000 * 0.005 + holdExit, 4);

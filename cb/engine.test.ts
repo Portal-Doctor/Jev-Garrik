@@ -51,8 +51,6 @@ test("split breakout enters a known candidate and holds a long through a missing
     position: "flat" as const,
     halted: false,
     feedBlocked: false,
-    stress: false,
-    contraction: false,
     known: true,
     candidate: true,
     clipUsd: 600,
@@ -65,4 +63,23 @@ test("split breakout enters a known candidate and holds a long through a missing
     target: "long",
     approved: false,
   });
+});
+
+test("split breakout treats Jev stress and regime labels as telemetry", () => {
+  const flat = {
+    position: "flat" as const,
+    halted: false,
+    feedBlocked: false,
+    known: true,
+    candidate: true,
+    clipUsd: 400,
+    remainingGrossUsd: 3000,
+    minSizeUsd: 25,
+  };
+  const stressed = applyEntryVetoes(
+    { ...vector, market_regime: "contraction", liquidity_stress: "stressed" },
+    veto(false, true),
+  );
+  expect(stressed).toMatchObject({ market_regime: "contraction", liquidity_stress: "stressed" });
+  expect(evaluateSplitBreakout(flat)).toMatchObject({ approved: true, target: "long", sizeUsd: 400 });
 });

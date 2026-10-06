@@ -189,6 +189,8 @@ export interface HoldTrendWindow {
   toxicCall: VetoCall;
   stressForwardH1: HoldTrendForward;
   stressForwardH4: HoldTrendForward;
+  labelForwardH1: Record<string, { n: number; meanBps: number | null }>;
+  labelForwardH4: Record<string, { n: number; meanBps: number | null }>;
   restingAsk: RestingAskCheck;
   takeProfitMaker: TakeProfitMakerCheck;
   hold: { medianMs: number | null; maxMs: number | null; closedUnder15m: number };

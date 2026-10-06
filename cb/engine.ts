@@ -185,7 +185,6 @@ export class Engine {
   private evaluateSplitBreakout(
     pair: string,
     position: "long" | "flat",
-    vector: DecisionVector,
     halted: boolean,
     feedBlocked: boolean,
     remainingGrossUsd: number,
@@ -195,8 +194,6 @@ export class Engine {
       position,
       halted,
       feedBlocked,
-      stress: vector.liquidity_stress === "stressed",
-      contraction: vector.market_regime === "contraction",
       known: snap?.known === true,
       candidate: snap?.candidate === true,
       clipUsd: findBook(pair)?.notionalUsd ?? this.opts.notionalUsd,
@@ -309,7 +306,7 @@ export class Engine {
         this.opts.book === "pooled" && this.pool
           ? this.evaluatePooled(pair, position, gatedVector, halt != null, !this.feed.feedHealthy(pair), remainingGrossUsd)
           : this.opts.book === "breakout"
-            ? this.evaluateSplitBreakout(pair, position, gatedVector, halt != null, !this.feed.feedHealthy(pair), remainingGrossUsd)
+            ? this.evaluateSplitBreakout(pair, position, halt != null, !this.feed.feedHealthy(pair), remainingGrossUsd)
           : evaluateGate({
               position,
               vector: gatedVector,
@@ -431,13 +428,14 @@ export function mergeSeedSamples(
   return [...byTs.values()].sort((a, b) => a.ts - b.ts);
 }
 
-/** Per-pair locked breakout 20/3/50. No flatten-to-fund. Trail and the 14 day cap are the broker. */
+/**
+ * Per-pair locked breakout 20/3/50. Jev labels are telemetry only: the completed-bar breakout
+ * owns entry, while the broker's trail and 14 day cap own exit.
+ */
 export function evaluateSplitBreakout(input: {
   position: "long" | "flat";
   halted: boolean;
   feedBlocked: boolean;
-  stress: boolean;
-  contraction: boolean;
   known: boolean;
   candidate: boolean;
   clipUsd: number;
@@ -451,8 +449,6 @@ export function evaluateSplitBreakout(input: {
   }
   if (input.halted) return { ...base, target: "flat", reason: "halt" };
   if (input.feedBlocked) return { ...base, target: "flat", reason: "feed" };
-  if (input.stress) return { ...base, target: "flat", reason: "liquidity stress" };
-  if (input.contraction) return { ...base, target: "flat", reason: "regime" };
   if (!input.known) return { ...base, target: "flat", reason: "breakout unknown" };
   if (!input.candidate) return { ...base, target: "flat", reason: "breakout" };
   if (Number.isFinite(input.remainingGrossUsd) && input.remainingGrossUsd < input.minSizeUsd) {
