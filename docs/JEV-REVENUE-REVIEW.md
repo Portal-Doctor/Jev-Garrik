@@ -1,6 +1,6 @@
 # Jev revenue review
 
-Date: 2026-10-06  
+Date: 2026-10-06
 Scope: split breakout 20/3/50, Coinbase paper run `5f55b8ab`, and the locked
 2026-07-01 through 2026-10-01 five-minute replay.
 
