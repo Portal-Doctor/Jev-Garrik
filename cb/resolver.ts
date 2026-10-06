@@ -30,6 +30,15 @@ export class Resolver {
 
   /** Resolve everything currently due. Returns the number of outcomes written. */
   async tick(now = Date.now()): Promise<number> {
+    try {
+      return await this.resolveDue(now);
+    } catch (e) {
+      console.error("resolver:", (e as Error).message);
+      return 0;
+    }
+  }
+
+  private async resolveDue(now: number): Promise<number> {
     const due = await this.store.decisionsDueForResolve(now, this.horizonsSec, this.filter);
     let n = 0;
     for (const d of due) {

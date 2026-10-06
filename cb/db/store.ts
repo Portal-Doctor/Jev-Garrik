@@ -1,4 +1,5 @@
 import { SQL } from "bun";
+import { createPaperSql, resilientSql, withSqlRetry } from "./reconnect";
 
 /**
  * Postgres-only store for the paper-trading harness (Bun.sql).
@@ -115,22 +116,62 @@ const uuid = () => crypto.randomUUID();
 
 export class Store {
   readonly sql: SQL;
+  private client: SQL;
+  private readonly url: string;
+  private stopped = false;
+  private reconnecting: Promise<void> | null = null;
 
   constructor(url: string) {
-    this.sql = new SQL(url);
+    this.url = url;
+    this.client = this.newClient();
+    this.sql = resilientSql(() => this.client, () => this.reconnect());
+  }
+
+  private newClient(): SQL {
+    return createPaperSql(this.url, (err) => {
+      if (this.stopped || !err) return;
+      console.error(`postgres closed: ${err.message}`);
+    });
+  }
+
+  /** Replace the Bun.SQL client after Postgres closes the socket or the pool is dead. */
+  async reconnect(): Promise<void> {
+    if (this.stopped) return;
+    if (this.reconnecting) return this.reconnecting;
+    this.reconnecting = (async () => {
+      const previous = this.client;
+      try {
+        await previous.close({ timeout: 1 }).catch(() => undefined);
+      } catch {
+        /* already gone */
+      }
+      this.client = this.newClient();
+      try {
+        await this.client.connect();
+      } catch (err) {
+        // Next query retries with backoff while Postgres is still coming up.
+        console.error(`postgres reconnect: ${(err as Error).message}`);
+      }
+    })().finally(() => {
+      this.reconnecting = null;
+    });
+    return this.reconnecting;
   }
 
   // --- connection + schema ---------------------------------------------------
 
   /** Connect and apply the schema (CREATE TABLE IF NOT EXISTS). Safe to call on every boot. */
   async init(): Promise<void> {
-    await this.sql.connect();
-    const ddl = await Bun.file(new URL("./schema.sql", import.meta.url)).text();
-    await this.sql.unsafe(ddl).simple();
+    await withSqlRetry(async () => {
+      await this.client.connect();
+      const ddl = await Bun.file(new URL("./schema.sql", import.meta.url)).text();
+      await this.client.unsafe(ddl).simple();
+    }, () => this.reconnect());
   }
 
   async close(): Promise<void> {
-    await this.sql.close();
+    this.stopped = true;
+    await this.client.close().catch(() => undefined);
   }
 
   // --- writes ----------------------------------------------------------------
