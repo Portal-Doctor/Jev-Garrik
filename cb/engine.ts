@@ -8,6 +8,8 @@ import { evaluateGate, type DecisionVector, type GateResult } from "./gate";
 import { killSwitch } from "./kill";
 import { PairVetoes, sampleFromState, VETO_RING_MS, type VetoDecision, type VetoSample } from "./vetoes";
 import type { TrendLike } from "./trend";
+import { MAX_CONCURRENT, planRotation, POOL_DD, POOL_USD } from "./pool";
+import type { PoolBook } from "./poolbook";
 
 /** A target-position change the broker should act on. */
 export interface OrderIntent {
@@ -27,6 +29,12 @@ export interface Broker {
   positionOf(pair: string): "long" | "flat";
   /** Mark of open longs plus resting entries, in USD. */
   openGrossUsd(): number;
+  /** Fee-inclusive entry, or null when flat. */
+  entryPriceOf?(pair: string): number | null;
+  /** Mark equity of the whole book. */
+  markEquityUsd?(): number;
+  /** Uncommitted cash across the book. */
+  cashUsd?(): number;
   /** Called on every decision (traded or not), so the broker can refresh the horizon clock and accrue inference cost. */
   observe(pair: string, action: Action, inferenceUsd: number): void;
   onIntent(intent: OrderIntent): void;
@@ -38,6 +46,15 @@ export class FlatBroker implements Broker {
     return "flat";
   }
   openGrossUsd(): number {
+    return 0;
+  }
+  entryPriceOf(): number | null {
+    return null;
+  }
+  markEquityUsd(): number {
+    return 0;
+  }
+  cashUsd(): number {
     return 0;
   }
   observe(): void {}
@@ -58,6 +75,10 @@ export interface EngineOpts {
   minSizeUsd: number;
   /** Book-level cap. Omit to leave size uncapped. */
   maxGrossUsd?: number;
+  book?: "htf" | "pooled" | "breakout";
+  maxConcurrent?: number;
+  poolDd?: number;
+  bankrollUsd?: number;
 }
 
 export interface GatedDecision extends Decision {
@@ -101,6 +122,7 @@ export class Engine {
   private nextAt = new Map<string, number>();
   readonly latest = new Map<string, { decision: GatedDecision; state: MarketState; id: string }>();
   private readonly vetoes = new Map<string, PairVetoes>();
+  private lastPlan: { flatten: string[]; enter: string[] } = { flatten: [], enter: [] };
 
   constructor(
     private readonly pairs: string[],
@@ -112,6 +134,7 @@ export class Engine {
     private readonly broker: Broker,
     private readonly onDecision: (id: string, decision: GatedDecision, state: MarketState, intent?: OrderIntent) => void = () => {},
     private readonly trend: TrendLike = { known: () => false, trendUp: () => false },
+    private readonly pool: PoolBook | null = null,
   ) {
     for (const pair of pairs) this.vetoes.set(pair, new PairVetoes());
   }
@@ -157,6 +180,79 @@ export class Engine {
   private fire(pair: string): void {
     this.nextAt.set(pair, Date.now() + this.opts.decideSec * 1000);
     void this.decide(pair);
+  }
+
+  private evaluateSplitBreakout(
+    pair: string,
+    position: "long" | "flat",
+    halted: boolean,
+    feedBlocked: boolean,
+    remainingGrossUsd: number,
+  ): GateResult {
+    const snap = this.pool?.snap(pair);
+    return evaluateSplitBreakout({
+      position,
+      halted,
+      feedBlocked,
+      known: snap?.known === true,
+      candidate: snap?.candidate === true,
+      clipUsd: findBook(pair)?.notionalUsd ?? this.opts.notionalUsd,
+      remainingGrossUsd,
+      minSizeUsd: this.opts.minSizeUsd,
+    });
+  }
+
+  private evaluatePooled(
+    pair: string,
+    position: "long" | "flat",
+    vector: DecisionVector,
+    halted: boolean,
+    feedBlocked: boolean,
+    remainingGrossUsd: number,
+  ): GateResult {
+    const clip = findBook(pair)?.notionalUsd ?? this.opts.notionalUsd;
+    const base = { expectedYieldBps: 0, hurdleBps: 0, sizeUsd: 0, approved: false as boolean };
+    if (halted) return { ...base, target: "flat", reason: "halt" };
+    if (position === "long" && vector.market_regime === "contraction") {
+      return { ...base, target: "flat", reason: "regime" };
+    }
+    const names = this.pairs.map((p) => {
+      const snap = this.pool!.snap(p);
+      const open = this.broker.positionOf(p) === "long";
+      return {
+        pair: p,
+        rank: snap.rank,
+        clipUsd: findBook(p)?.notionalUsd ?? this.opts.notionalUsd,
+        open,
+        candidate: !open && snap.known && snap.candidate,
+      };
+    });
+    const plan = planRotation({
+      equityUsd: this.broker.markEquityUsd?.() ?? POOL_USD,
+      cashUsd: this.broker.cashUsd?.() ?? Math.max(0, (this.opts.bankrollUsd ?? POOL_USD) - this.broker.openGrossUsd()),
+      grossUsd: this.broker.openGrossUsd(),
+      maxGrossUsd: this.opts.maxGrossUsd ?? 3_000,
+      maxConcurrent: this.opts.maxConcurrent ?? MAX_CONCURRENT,
+      makerFeeBps: this.opts.makerFeeBps,
+      minSizeUsd: this.opts.minSizeUsd,
+      names,
+      halted,
+      poolUsd: this.opts.bankrollUsd ?? POOL_USD,
+      poolDd: this.opts.poolDd ?? POOL_DD,
+    });
+    this.lastPlan = plan;
+    if (plan.halt && position === "long") return { ...base, target: "flat", reason: "pool dd" };
+    if (position === "long" && plan.flatten.includes(pair)) {
+      return { ...base, target: "flat", reason: Number.isFinite(names.find((n) => n.pair === pair)?.rank) ? "rotate" : "trail" };
+    }
+    if (position === "long") return { ...base, target: "long", reason: null };
+    if (feedBlocked) return { ...base, target: "flat", reason: "feed" };
+    if (vector.liquidity_stress === "stressed") return { ...base, target: "flat", reason: "liquidity stress" };
+    if (vector.market_regime === "contraction") return { ...base, target: "flat", reason: "regime" };
+    if (plan.halt) return { ...base, target: "flat", reason: "pool dd" };
+    if (Number.isFinite(remainingGrossUsd) && remainingGrossUsd < this.opts.minSizeUsd) return { ...base, target: "flat", reason: "gross cap" };
+    if (!plan.enter.includes(pair)) return { ...base, target: "flat", reason: "rank" };
+    return { ...base, target: "long", approved: true, reason: null, sizeUsd: clip };
   }
 
   /** Wall-clock ms of the next scheduled decision for a pair, or null before `start()`. */
@@ -206,30 +302,35 @@ export class Engine {
         console.error(`veto sample ${pair}:`, (e as Error).message);
       }
       const gatedVector = applyEntryVetoes(decision.vector, veto);
-      const gate = evaluateGate({
-        position,
-        vector: gatedVector,
-        horizonVolBps: state.volBps,
-        spreadBps: state.spreadBps,
-        makerFeeBps: this.opts.makerFeeBps,
-        takerFeeBps: this.opts.takerFeeBps,
-        feeBuffer: this.opts.feeBuffer,
-        buyThreshold: this.opts.buyThreshold,
-        sellThreshold: this.opts.sellThreshold,
-        depthUsd: book ? depthUsd(book, "buy", 3) : 0,
-        notionalUsd: risk?.notionalUsd ?? this.opts.notionalUsd,
-        participation: this.opts.depthParticipation,
-        minSizeUsd: this.opts.minSizeUsd,
-        remainingGrossUsd,
-        halted: halt != null,
-        feedBlocked: !this.feed.feedHealthy(pair),
-        emaCross: state.emaCross,
-        htfTrendUp: this.trend.trendUp(pair),
-        htfTrendKnown: this.trend.known(pair),
-        h4ReturnBps: state.returnsBps.h4,
-        stopLossBps: risk?.stopLossBps ?? 0,
-        takeProfitBps: risk?.takeProfitBps ?? 0,
-      });
+      const gate =
+        this.opts.book === "pooled" && this.pool
+          ? this.evaluatePooled(pair, position, gatedVector, halt != null, !this.feed.feedHealthy(pair), remainingGrossUsd)
+          : this.opts.book === "breakout"
+            ? this.evaluateSplitBreakout(pair, position, halt != null, !this.feed.feedHealthy(pair), remainingGrossUsd)
+          : evaluateGate({
+              position,
+              vector: gatedVector,
+              horizonVolBps: state.volBps,
+              spreadBps: state.spreadBps,
+              makerFeeBps: this.opts.makerFeeBps,
+              takerFeeBps: this.opts.takerFeeBps,
+              feeBuffer: this.opts.feeBuffer,
+              buyThreshold: this.opts.buyThreshold,
+              sellThreshold: this.opts.sellThreshold,
+              depthUsd: book ? depthUsd(book, "buy", 3) : 0,
+              notionalUsd: risk?.notionalUsd ?? this.opts.notionalUsd,
+              participation: this.opts.depthParticipation,
+              minSizeUsd: this.opts.minSizeUsd,
+              remainingGrossUsd,
+              halted: halt != null,
+              feedBlocked: !this.feed.feedHealthy(pair),
+              emaCross: state.emaCross,
+              htfTrendUp: this.trend.trendUp(pair),
+              htfTrendKnown: this.trend.known(pair),
+              h4ReturnBps: state.returnsBps.h4,
+              stopLossBps: risk?.stopLossBps ?? 0,
+              takeProfitBps: risk?.takeProfitBps ?? 0,
+            });
       const action = gate.approved ? "buy" : decision.action;
       const gated: GatedDecision = { ...decision, action, gate };
       const target = gate.target;
@@ -279,6 +380,21 @@ export class Engine {
         this.broker.onIntent(intent);
         if (halt) console.log(`kill ${pair}: ${halt}`);
       }
+      if (this.opts.book === "pooled") {
+        for (const other of this.lastPlan.flatten) {
+          if (other === pair) continue;
+          if (this.broker.positionOf(other) !== "long") continue;
+          this.broker.onIntent({
+            pair: other,
+            target: "flat",
+            side: "sell",
+            purpose: "exit",
+            decisionId: id,
+            mid: this.feed.book(other)?.mid() ?? state.mid,
+            ts: state.ts,
+          });
+        }
+      }
       this.onDecision(id, gated, state, intent);
     } catch (e) {
       console.error(`decide ${pair}:`, (e as Error).message);
@@ -310,6 +426,36 @@ export function mergeSeedSamples(
   }
   for (const s of samples) byTs.set(Number(s.ts), { ts: Number(s.ts), toxicPHigh: s.toxicPHigh, stressPStressed: s.stressPStressed });
   return [...byTs.values()].sort((a, b) => a.ts - b.ts);
+}
+
+/**
+ * Per-pair locked breakout 20/3/50. Jev labels are telemetry only: the completed-bar breakout
+ * owns entry, while the broker's trail and 14 day cap own exit.
+ */
+export function evaluateSplitBreakout(input: {
+  position: "long" | "flat";
+  halted: boolean;
+  feedBlocked: boolean;
+  known: boolean;
+  candidate: boolean;
+  clipUsd: number;
+  remainingGrossUsd: number;
+  minSizeUsd: number;
+}): GateResult {
+  const base = { expectedYieldBps: 0, hurdleBps: 0, sizeUsd: 0, approved: false as boolean };
+  if (input.position === "long") {
+    if (input.halted) return { ...base, target: "flat", reason: "halt" };
+    return { ...base, target: "long", reason: null };
+  }
+  if (input.halted) return { ...base, target: "flat", reason: "halt" };
+  if (input.feedBlocked) return { ...base, target: "flat", reason: "feed" };
+  if (!input.known) return { ...base, target: "flat", reason: "breakout unknown" };
+  if (!input.candidate) return { ...base, target: "flat", reason: "breakout" };
+  if (Number.isFinite(input.remainingGrossUsd) && input.remainingGrossUsd < input.minSizeUsd) {
+    return { ...base, target: "flat", reason: "gross cap" };
+  }
+  if (!(input.clipUsd >= input.minSizeUsd)) return { ...base, target: "flat", reason: "dust" };
+  return { ...base, target: "long", approved: true, reason: null, sizeUsd: input.clipUsd };
 }
 
 export function applyEntryVetoes(vector: DecisionVector, veto: VetoDecision): DecisionVector {

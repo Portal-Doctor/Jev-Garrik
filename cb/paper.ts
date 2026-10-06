@@ -94,6 +94,10 @@ export interface PaperOpts {
   feedHealthy?: (pair: string) => boolean;
   /** Resting take-profit crosses as taker if mid stays at or above the target this long. */
   tpCrossSec?: number;
+  /** One cash ledger and no resting take-profit. */
+  pooled?: boolean;
+  /** Live trail under the highest completed 4-hour close. */
+  trailPrice?: (pair: string) => number | null;
 }
 
 export interface FillEvent {
@@ -128,6 +132,8 @@ export class PaperBroker implements Broker {
   private readonly instance = crypto.randomUUID().slice(0, 8);
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private snapTimer: ReturnType<typeof setInterval> | null = null;
+  /** Shared cash when `opts.pooled`. Null keeps the per-pair bankroll split. */
+  private poolCash: number | null = null;
 
   constructor(
     private readonly pairs: string[],
@@ -137,7 +143,8 @@ export class PaperBroker implements Broker {
     private readonly opts: PaperOpts,
     private readonly onFill: (f: FillEvent) => void = () => {},
   ) {
-    const perPairBankroll = opts.bankrollUsd / (pairs.length || 1);
+    this.poolCash = opts.pooled ? opts.bankrollUsd : null;
+    const perPairBankroll = opts.pooled ? 0 : opts.bankrollUsd / (pairs.length || 1);
     for (const p of pairs) {
       this.acct.set(p, new Accounting(perPairBankroll));
       this.open.set(p, null);
@@ -197,6 +204,15 @@ export class PaperBroker implements Broker {
       if (this.open.get(pair)) continue;
       await this.restTakeProfit(pair, now);
     }
+    if (this.poolCash != null) {
+      let delta = 0;
+      for (const pair of this.pairs) {
+        const acct = this.acct.get(pair);
+        if (!acct) continue;
+        delta += acct.realizedUsd - acct.inferenceUsd - acct.costBasisUsd;
+      }
+      this.poolCash = this.opts.bankrollUsd + delta;
+    }
   }
 
   stop(): void {
@@ -211,6 +227,30 @@ export class PaperBroker implements Broker {
   }
 
   /** Mark of every open long, plus resting and reserved entry notionals. */
+  entryPriceOf(pair: string): number | null {
+    return this.acct.get(pair)?.entryPrice() ?? null;
+  }
+
+  cashUsd(): number {
+    if (this.poolCash != null) return this.poolCash;
+    let sum = 0;
+    for (const pair of this.pairs) sum += this.acct.get(pair)?.cashUsd() ?? 0;
+    return sum;
+  }
+
+  markEquityUsd(): number {
+    if (this.poolCash != null) {
+      let marks = 0;
+      for (const pair of this.pairs) {
+        const acct = this.acct.get(pair);
+        const mid = this.feed.book(pair)?.mid();
+        if (acct && acct.positionBase > 0 && mid != null && mid > 0) marks += acct.positionBase * mid;
+      }
+      return this.poolCash + marks;
+    }
+    return this.allState().reduce((s, p) => s + p.equityUsd, 0);
+  }
+
   openGrossUsd(): number {
     let sum = 0;
     for (const pair of this.pairs) {
@@ -244,6 +284,10 @@ export class PaperBroker implements Broker {
 
   onIntent(intent: OrderIntent): void {
     if (intent.purpose === "exit") {
+      if (this.opts.pooled) {
+        void this.takerFlatten(intent.pair, "exit", Date.now());
+        return;
+      }
       void this.replaceWithExit(intent);
       return;
     }
@@ -307,9 +351,10 @@ export class PaperBroker implements Broker {
     // A buy needs cash for its notional plus the maker fee. Entries do not convert to taker.
     if (side === "buy") {
       const requiredCashUsd = usd * (1 + this.opts.makerFeeBps / 10_000);
-      if (acct.cashUsd() < requiredCashUsd) {
+      const cash = this.poolCash != null ? this.poolCash : acct.cashUsd();
+      if (cash < requiredCashUsd) {
         if (reserved) this.reservedUsd.delete(pair);
-        console.warn(`${pair}: skipping ${purpose} buy, insufficient cash ($${acct.cashUsd().toFixed(2)} < $${requiredCashUsd.toFixed(2)} needed)`);
+        console.warn(`${pair}: skipping ${purpose} buy, insufficient cash ($${cash.toFixed(2)} < $${requiredCashUsd.toFixed(2)} needed)`);
         return;
       }
     }
@@ -396,12 +441,21 @@ export class PaperBroker implements Broker {
     const entry = this.acct.get(pair)?.entryPrice();
     const mid = this.feed.book(pair)?.mid();
     if (entry == null || mid == null) return;
+    if (this.opts.pooled || this.opts.trailPrice) {
+      const initial = entry * (1 - stop / 10_000);
+      const trail = this.opts.trailPrice?.(pair);
+      const level = trail != null && trail > 0 ? Math.max(initial, trail) : initial;
+      if (!(mid <= level)) return;
+      this.tpAboveSince.set(pair, null);
+      await this.takerFlatten(pair, "stop", now);
+      return;
+    }
     if (guardTrip(entry, mid, stop, take) !== "stop") return;
     this.tpAboveSince.set(pair, null);
     await this.takerFlatten(pair, "stop", now);
   }
 
-  private async takerFlatten(pair: string, purpose: "stop" | "take_profit", now: number): Promise<void> {
+  private async takerFlatten(pair: string, purpose: "stop" | "take_profit" | "exit", now: number): Promise<void> {
     const resting = this.open.get(pair);
     if (resting) {
       await this.store.updateOrder(resting.id, { status: "canceled" }, now);
@@ -516,6 +570,9 @@ export class PaperBroker implements Broker {
     const fee = feeUsd(notional, liquidity === "maker" ? this.opts.makerFeeBps : this.opts.takerFeeBps);
     const realizedBefore = acct.realizedUsd;
     acct.apply({ side: order.side, sizeBase: size, notionalUsd: notional, feeUsd: fee });
+    if (this.poolCash != null) {
+      this.poolCash += order.side === "buy" ? -(notional + fee) : notional - fee;
+    }
     killSwitch.recordUsd(acct.realizedUsd - realizedBefore);
     const counts = this.fillCounts.get(pair)!;
     counts[liquidity]++;
@@ -562,6 +619,7 @@ export class PaperBroker implements Broker {
 
   /** Post-only sell at the fee-inclusive take-profit. The slot is this ask while long. */
   private async restTakeProfit(pair: string, now: number): Promise<void> {
+    if (this.opts.pooled || this.opts.trailPrice) return;
     if (this.open.get(pair)) return;
     if (this.positionOf(pair) !== "long") return;
     const acct = this.acct.get(pair);
@@ -629,8 +687,8 @@ export class PaperBroker implements Broker {
       feesUsd: acct.feesUsd,
       inferenceUsd: acct.inferenceUsd,
       equityUsd: mid != null ? acct.equity(mid) : acct.equity(acct.entryPrice() ?? 0),
-      cashUsd: acct.cashUsd(),
-      bankrollUsd: acct.bankrollUsd,
+      cashUsd: this.poolCash != null ? this.poolCash : acct.cashUsd(),
+      bankrollUsd: this.opts.pooled ? this.opts.bankrollUsd : acct.bankrollUsd,
       openOrder: order ? { side: order.side, purpose: order.purpose, price: order.price, remaining: order.remaining, ageMs: Date.now() - order.createdAt } : null,
       stopPrice: this.guardPrice(pair, "stop"),
       takeProfitPrice: this.guardPrice(pair, "take_profit"),

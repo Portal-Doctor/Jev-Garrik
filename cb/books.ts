@@ -24,15 +24,18 @@ export const PAIR_BOOKS: readonly PairBook[] = [
   { pair: "ARB-USD", sigmaBps: 390, stopLossBps: 390, takeProfitBps: 1560, notionalUsd: 300, maxOpen: 1, enabled: true },
   // 6-month 4h realized vol, stop 1 sigma, take-profit 4 sigma, clips from the high-vol screen.
   { pair: "VVV-USD", sigmaBps: 312, stopLossBps: 312, takeProfitBps: 1248, notionalUsd: 400, maxOpen: 1, enabled: true },
-  { pair: "ZEC-USD", sigmaBps: 273, stopLossBps: 273, takeProfitBps: 1092, notionalUsd: 600, maxOpen: 1, enabled: true },
-  { pair: "PUMP-USD", sigmaBps: 246, stopLossBps: 246, takeProfitBps: 984, notionalUsd: 300, maxOpen: 1, enabled: true },
-  { pair: "XLM-USD", sigmaBps: 189, stopLossBps: 189, takeProfitBps: 756, notionalUsd: 400, maxOpen: 1, enabled: true },
+  // $500 is the smallest $100 clip step that keeps exact-book rule 3 below 15% at both 40/80 and 50/90.
+  { pair: "ZEC-USD", sigmaBps: 273, stopLossBps: 273, takeProfitBps: 1092, notionalUsd: 500, maxOpen: 1, enabled: true },
+  // Negative gross alpha on the locked Jul/Aug/Sep replay at 40/80 and no fee-adjusted edge at 50/90.
+  { pair: "PUMP-USD", sigmaBps: 246, stopLossBps: 246, takeProfitBps: 984, notionalUsd: 300, maxOpen: 1, enabled: false },
+  // Fails the 2-to-1 payoff boot at the account's actual Intro 50/90 tier and was net negative in replay.
+  { pair: "XLM-USD", sigmaBps: 189, stopLossBps: 189, takeProfitBps: 756, notionalUsd: 400, maxOpen: 1, enabled: false },
   // Rule 3 passed at $2000, but 4-sigma take-profit fails the 2-to-1 after-fee boot at 40/80. Do not retune.
   { pair: "TAO-USD", sigmaBps: 177, stopLossBps: 177, takeProfitBps: 708, notionalUsd: 400, maxOpen: 1, enabled: false },
   { pair: "ADA-USD", sigmaBps: 157, stopLossBps: 157, takeProfitBps: 628, notionalUsd: 500, maxOpen: 1, enabled: false },
 ];
 
-/** Enabled names Brian approved after the high-vol backtest, minus TAO and ADA which cannot boot at 40/80. */
+/** Evidence-backed split-breakout book. Disabled rows remain available for audit replays. */
 export const LIVE_PAIRS = [
   "UNI-USD",
   "NEAR-USD",
@@ -42,8 +45,6 @@ export const LIVE_PAIRS = [
   "ARB-USD",
   "VVV-USD",
   "ZEC-USD",
-  "PUMP-USD",
-  "XLM-USD",
 ] as const;
 
 const BY_PAIR = new Map(PAIR_BOOKS.map((b) => [b.pair, b]));

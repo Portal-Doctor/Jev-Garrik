@@ -77,8 +77,9 @@ instance per pair against a shared feed process.
 
 - Trade cadence stays one model call per pair every `CB_DECIDE_SEC` (default 300 s). Features
   update on each Coinbase tick. Jev's classify time is the only sub-second work. There is no
-  per-block loop. The live book is UNI, NEAR, BCH, SUI, AVAX, ARB, VVV, ZEC, PUMP, and XLM. Calls are staggered by
-  `decideSec / n` (30 s at ten pairs). The 25 s decide deadline stays under that stagger.
+  per-block loop. The evidence-backed book is UNI, NEAR, BCH, SUI, AVAX, ARB, VVV, and ZEC.
+  Calls are staggered by `decideSec / n` (37.5 s at eight pairs). The 25 s decide deadline stays
+  under that stagger.
 - The call is one classification with four choices: `market_regime` (expansion, balance,
   contraction), `direction_bias` (`long` or `flat`; spot cannot short), `toxic_flow_risk`
   (`low` or `high`), and `liquidity_stress` (`normal` or `stressed`). Confidence is the `long`
@@ -485,7 +486,7 @@ Additions to `.env.example` (root) and `web/.env.example`:
 
 ```
 # cb (Coinbase paper trading)
-CB_PAIRS=UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD,VVV-USD,ZEC-USD,PUMP-USD,XLM-USD
+CB_PAIRS=UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD,VVV-USD,ZEC-USD
 CB_DECIDE_SEC=300
 CB_HORIZON_SEC=86400
 CB_NOTIONAL_USD=1000

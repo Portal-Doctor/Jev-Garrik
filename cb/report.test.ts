@@ -245,3 +245,49 @@ test("hold-trend window reports veto rates, forward gap, hold, exits, and sized 
   expect(w.hold.medianMs).toBeGreaterThan(0);
   expect(w.hold.maxMs).toBeGreaterThan(w.hold.medianMs ?? 0);
 });
+
+test("report retains raw Jev label forward returns after execution stops vetoing", () => {
+  const w = buildHoldTrendWindow({
+    notionalUsd: 400,
+    decisions: [
+      {
+        id: "long",
+        run_id: "r1",
+        ts: 1,
+        state: {
+          vector: {
+            market_regime: "expansion",
+            direction_bias: "long",
+            liquidity_stress: "stressed",
+            toxic_flow_risk: "high",
+          },
+          gate: { approved: true, reason: null, stressVeto: true, stressSource: "jev" },
+        },
+      },
+      {
+        id: "flat",
+        run_id: "r1",
+        ts: 2,
+        state: {
+          vector: {
+            market_regime: "balance",
+            direction_bias: "flat",
+            liquidity_stress: "normal",
+            toxic_flow_risk: "low",
+          },
+          gate: { approved: false, reason: "breakout", stressVeto: false, stressSource: "jev" },
+        },
+      },
+    ],
+    fills: [],
+    outcomes: [
+      { decision_id: "long", horizon_sec: 3600, move_bps: -20 },
+      { decision_id: "long", horizon_sec: 14400, move_bps: -40 },
+      { decision_id: "flat", horizon_sec: 3600, move_bps: 10 },
+      { decision_id: "flat", horizon_sec: 14400, move_bps: 30 },
+    ],
+  });
+  expect(w.labelForwardH1["direction_bias=long"]).toEqual({ n: 1, meanBps: -20 });
+  expect(w.labelForwardH4["direction_bias=flat"]).toEqual({ n: 1, meanBps: 30 });
+  expect(w.labelForwardH4["liquidity_stress=stressed"]).toEqual({ n: 1, meanBps: -40 });
+});

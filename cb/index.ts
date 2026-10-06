@@ -3,12 +3,12 @@ import { config, MEASURED_HORIZONS_SEC } from "./config";
 import { assertTakeProfitClearsFees, gateFromState } from "./gate";
 
 assertTakeProfitClearsFees(config.takeProfitBps, config.makerFeeBps, config.takerFeeBps);
-assertPairBooks(config.pairs, {
+const pairs = activePairs(config.pairs);
+assertPairBooks(pairs, {
   makerFeeBps: config.makerFeeBps,
   takerFeeBps: config.takerFeeBps,
   feeBuffer: config.feeBuffer,
 });
-const pairs = activePairs(config.pairs);
 if (pairs.length === 0) throw new Error("CB_PAIRS has no enabled book");
 import { Store } from "./db/store";
 import { Feed } from "./feed";
@@ -18,6 +18,7 @@ import { PaperBroker } from "./paper";
 import { Resolver } from "./resolver";
 import { startServer, type RunMeta } from "./server";
 import { TrendBook } from "./trend";
+import { PoolBook } from "./poolbook";
 
 /**
  * Bootstrap: config, store, feed, paper broker, engine, resolver, server. Wires the live SSE
@@ -68,6 +69,9 @@ let broadcast: (type: string, data: unknown) => void = () => {};
 let doReset: () => Promise<void> = async () => {};
 
 const model = createModel();
+const breakoutLive = config.book === "breakout" || config.book === "pooled";
+const pool = breakoutLive ? new PoolBook(pairs) : null;
+
 const broker = new PaperBroker(
   pairs,
   feed,
@@ -80,7 +84,7 @@ const broker = new PaperBroker(
     fillHaircut: config.fillHaircut,
     entryTimeoutSec: config.entryTimeoutSec,
     repriceTicks: config.repriceTicks,
-    horizonSec: config.horizonSec,
+    horizonSec: breakoutLive ? config.breakoutMaxHoldSec : config.horizonSec,
     bankrollUsd: config.bankrollUsd,
     neverCrossEntry: config.neverCrossEntry,
     stopLossBps: config.stopLossBps,
@@ -90,17 +94,30 @@ const broker = new PaperBroker(
     maxSlippageBps: config.maxSlippageBps,
     tpCrossSec: config.tpCrossSec,
     feedHealthy: (pair) => feed.feedHealthy(pair),
+    pooled: config.book === "pooled",
+    trailPrice: pool ? (pair) => pool.trailPrice(pair) : undefined,
   },
   (f) => {
+    if (pool) {
+      if (f.side === "buy") pool.noteFill(f.pair, f.price);
+      else pool.noteFlat(f.pair);
+    }
     console.log(`FILL ${f.pair} ${f.side.toUpperCase()} ${f.purpose} ${f.sizeBase.toFixed(4)} @ ${f.price} ${f.liquidity} fee $${f.feeUsd.toFixed(4)}`);
     broadcast("fill", f);
     broadcast("equity", broker.allState());
   },
 );
 await broker.start(config.coinbaseRestUrl);
+if (pool) {
+  for (const pair of pairs) {
+    const px = broker.entryPriceOf(pair);
+    if (px != null) pool.noteFill(pair, px);
+  }
+}
 
 const trend = new TrendBook(pairs);
 await trend.start();
+if (pool) await pool.start();
 
 const engine = new Engine(
   pairs,
@@ -121,6 +138,10 @@ const engine = new Engine(
     depthParticipation: config.depthParticipation,
     minSizeUsd: config.minSizeUsd,
     maxGrossUsd: config.maxGrossUsd,
+    book: config.book,
+    maxConcurrent: config.maxConcurrent,
+    poolDd: config.poolDd,
+    bankrollUsd: config.bankrollUsd,
   },
   broker,
   (id, decision, state, intent) => {
@@ -145,6 +166,7 @@ const engine = new Engine(
     if (intent) broadcast("order", intent);
   },
   trend,
+  pool,
 );
 await engine.seedVetoes();
 engine.start();
@@ -237,6 +259,7 @@ const shutdown = async () => {
     broker.stop();
     feed.stop();
     trend.stop();
+    pool?.stop();
     await store.stopRun(runId, Date.now());
     await store.close();
   } finally {
@@ -254,5 +277,5 @@ doReset = async () => {
 };
 
 console.log(
-  `cb paper trader | run ${runId} | model=${meta.model} | pairs=${pairs.join(",")} | db=${config.databaseUrl.replace(/:[^:@/]*@/, ":****@")} | http://localhost:${server.port}`,
+  `cb paper trader | run ${runId} | book=${config.book} | model=${meta.model} | pairs=${pairs.join(",")} | db=${config.databaseUrl.replace(/:[^:@/]*@/, ":****@")} | http://localhost:${server.port}`,
 );

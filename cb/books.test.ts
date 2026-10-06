@@ -14,10 +14,10 @@ import {
 const fees50 = { makerFeeBps: 50, takerFeeBps: 90, feeBuffer: 1.5 };
 const fees40 = { makerFeeBps: 40, takerFeeBps: 80, feeBuffer: 1.5 };
 const SIX = ["UNI-USD", "NEAR-USD", "BCH-USD", "SUI-USD", "AVAX-USD", "ARB-USD"];
-const NEW_LIVE = ["VVV-USD", "ZEC-USD", "PUMP-USD", "XLM-USD"];
-const PARKED = ["TAO-USD", "ADA-USD"];
+const NEW_LIVE = ["VVV-USD", "ZEC-USD"];
+const PARKED = ["PUMP-USD", "XLM-USD", "TAO-USD", "ADA-USD"];
 
-test("the live set is the original six plus the four names that boot at 40/80", () => {
+test("the evidence-backed live set excludes negative or fee-ineligible names", () => {
   expect([...LIVE_PAIRS]).toEqual([...SIX, ...NEW_LIVE]);
   expect(PAIR_BOOKS.filter((b) => b.enabled).map((b) => b.pair)).toEqual([...LIVE_PAIRS]);
   expect(PAIR_BOOKS.some((b) => b.pair === "SOL-USD")).toBe(false);
@@ -31,7 +31,7 @@ test("stop is one sigma and take-profit is four sigma", () => {
   }
   expect(bookFor("ARB-USD")).toMatchObject({ stopLossBps: 390, takeProfitBps: 1560, notionalUsd: 300 });
   expect(bookFor("VVV-USD")).toMatchObject({ stopLossBps: 312, takeProfitBps: 1248, notionalUsd: 400 });
-  expect(bookFor("ZEC-USD")).toMatchObject({ stopLossBps: 273, takeProfitBps: 1092, notionalUsd: 600 });
+  expect(bookFor("ZEC-USD")).toMatchObject({ stopLossBps: 273, takeProfitBps: 1092, notionalUsd: 500 });
   expect(bookFor("PUMP-USD")).toMatchObject({ stopLossBps: 246, takeProfitBps: 984, notionalUsd: 300 });
   expect(bookFor("XLM-USD")).toMatchObject({ stopLossBps: 189, takeProfitBps: 756, notionalUsd: 400 });
 });
@@ -45,8 +45,8 @@ test("enabled books clear the 2-to-1 payoff at 40/80", () => {
   expect(() => assertPairBooks([...LIVE_PAIRS], fees40)).not.toThrow();
 });
 
-test("the original six still clear the 2-to-1 payoff at 50/90", () => {
-  for (const pair of SIX) {
+test("the evidence-backed live book clears the 2-to-1 payoff at honest 50/90", () => {
+  for (const pair of LIVE_PAIRS) {
     const book = bookFor(pair);
     const legs = payoffLegs(book.takeProfitBps, book.stopLossBps, 50, 90);
     expect(legs.winnerBps).toBeGreaterThanOrEqual(2 * legs.loserBps);
@@ -54,7 +54,7 @@ test("the original six still clear the 2-to-1 payoff at 50/90", () => {
   const sui = payoffLegs(876, 219, 50, 90);
   expect(sui.winnerBps).toBe(736);
   expect(sui.loserBps).toBe(359);
-  expect(() => assertPairBooks(SIX, fees50)).not.toThrow();
+  expect(() => assertPairBooks([...LIVE_PAIRS], fees50)).not.toThrow();
 });
 
 test("TAO and ADA fail the 2-to-1 boot at 40/80 so they stay out of CB_PAIRS", () => {
@@ -73,7 +73,7 @@ test("a take-profit at two sigma fails the after-fee payoff at 50 and 90", () =>
 
 test("enabled clips exceed the 3000 gross cap and the cap is not raised", () => {
   const sum = PAIR_BOOKS.filter((b) => b.enabled).reduce((s, b) => s + b.notionalUsd, 0);
-  expect(sum).toBe(4200);
+  expect(sum).toBe(3400);
   expect(sum).toBeGreaterThan(3000);
 });
 
@@ -97,7 +97,15 @@ test("original six clips are unchanged", () => {
   });
 });
 
-test("boot accepts the live ten and rejects an unknown pair or a stop under the hurdle", () => {
+test("risk config keeps VVV, trims ZEC, and excludes PUMP and XLM", () => {
+  expect(bookFor("VVV-USD")).toMatchObject({ notionalUsd: 400, enabled: true });
+  expect(bookFor("ZEC-USD")).toMatchObject({ notionalUsd: 500, enabled: true });
+  expect(bookFor("PUMP-USD").enabled).toBe(false);
+  expect(bookFor("XLM-USD").enabled).toBe(false);
+  expect(activePairs(["VVV-USD", "ZEC-USD", "PUMP-USD", "XLM-USD"])).toEqual(["VVV-USD", "ZEC-USD"]);
+});
+
+test("boot accepts the evidence-backed live book and rejects an unknown pair or a stop under the hurdle", () => {
   expect(() => assertPairBooks([...LIVE_PAIRS], fees40)).not.toThrow();
   expect(() => assertPairBooks(["SOL-USD"], fees40)).toThrow(/no book/);
   expect(() => bookFor("SOL-USD")).toThrow(/no book/);
@@ -117,8 +125,8 @@ test("a disabled book stays in the table and drops out of the live set", () => {
   expect(activePairs(["SOL-USD", "UNI-USD"])).toEqual(["UNI-USD"]);
 });
 
-test("ten-pair stagger stays wider than a hung classify", () => {
+test("enabled-pair stagger stays wider than a hung classify", () => {
   const staggerMs = (300 * 1000) / LIVE_PAIRS.length;
-  expect(staggerMs).toBe(30_000);
+  expect(staggerMs).toBe(37_500);
   expect(DECIDE_DEADLINE_MS).toBeLessThan(staggerMs);
 });

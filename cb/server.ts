@@ -73,7 +73,17 @@ export function startServer(ctx: ServerCtx) {
 
       // Lightweight liveness probe the UI polls; no DB access so it stays cheap.
       if (pathname === "/health")
-        return json({ status: "ok", runId: meta.runId, ts: Date.now(), uptimeMs: Date.now() - meta.startedAt });
+        return json({
+          status: "ok",
+          runId: meta.runId,
+          book: config.book,
+          pairs: meta.pairs,
+          makerFeeBps: config.makerFeeBps,
+          takerFeeBps: config.takerFeeBps,
+          startedAt: meta.startedAt,
+          ts: Date.now(),
+          uptimeMs: Date.now() - meta.startedAt,
+        });
 
       if (pathname === "/") return json({ ...meta, snapshot: await ctx.snapshot() });
 

@@ -31,6 +31,8 @@ export interface BreakoutOpts {
   bucketSec?: number;
   /** Test hook. Production uses the deterministic classifier. */
   classify?: (state: MarketState) => { vector: DecisionVector };
+  /** Comparison hook for the retired label veto. Default false: labels are telemetry only. */
+  labelVeto?: boolean;
 }
 
 export interface BreakoutSummary extends SideSummary {
@@ -41,6 +43,7 @@ export interface BreakoutSummary extends SideSummary {
   maxDrawdown: number | null;
   maxHoldHours: number;
   lowFeeNetUsd: number;
+  exitReasons: { stop: number; maxHold: number };
   /** Closed round trips, oldest first. */
   tradeLog: ClosedTrade[];
 }
@@ -124,6 +127,7 @@ function emptySummary(): BreakoutSummary {
     maxDrawdown: null,
     maxHoldHours: 0,
     lowFeeNetUsd: 0,
+    exitReasons: { stop: 0, maxHold: 0 },
     tradeLog: [],
   };
 }
@@ -167,6 +171,7 @@ export function runBreakout(candles5m: Candle[], opts: BreakoutOpts): BreakoutSu
   let vetoedEntries = 0;
   let lowFeeNetUsd = 0;
   let maxHoldHours = 0;
+  const exitReasons = { stop: 0, maxHold: 0 };
   const tradeLog: ClosedTrade[] = [];
   const winNets: number[] = [];
   const lossNets: number[] = [];
@@ -206,7 +211,7 @@ export function runBreakout(candles5m: Candle[], opts: BreakoutOpts): BreakoutSu
     };
   };
 
-  const settle = (px: number, ts: number, openedTs: number, liquidity: "taker") => {
+  const settle = (px: number, ts: number, openedTs: number, liquidity: "taker", reason: "stop" | "maxHold") => {
     if (!pos) return;
     void liquidity;
     const exitFee = pos.units * px * feeRate(opts.takerFeeBps);
@@ -223,6 +228,7 @@ export function runBreakout(candles5m: Candle[], opts: BreakoutOpts): BreakoutSu
       winNets.push(net);
     } else lossNets.push(net);
     trades += 1;
+    exitReasons[reason] += 1;
     tradeLog.push({
       openedTs,
       closedTs: ts,
@@ -261,7 +267,7 @@ export function runBreakout(candles5m: Candle[], opts: BreakoutOpts): BreakoutSu
     const ready = priorHigh != null && emaSamples >= opts.trendEmaBars && atrWarm && atr != null && ema != null;
     if (tradable && !pos && !pending && ready && bar4h.close > priorHigh && bar4h.close > ema) {
       const vector = classify(stateAt(last5, "flat")).vector;
-      if (vetoed(vector)) vetoedEntries += 1;
+      if (opts.labelVeto && vetoed(vector)) vetoedEntries += 1;
       else pending = { price: bar4h.close };
     }
 
@@ -298,8 +304,8 @@ export function runBreakout(candles5m: Candle[], opts: BreakoutOpts): BreakoutSu
 
     if (pos) {
       const stop = Math.max(pos.initialStop, pos.trail);
-      if (bar.low <= stop) settle(Math.min(stop, bar.open), bar.ts, pos.openedTs, "taker");
-      else if (bar.ts >= pos.expiresAt) settle(bar.close, bar.ts, pos.openedTs, "taker");
+      if (bar.low <= stop) settle(Math.min(stop, bar.open), bar.ts, pos.openedTs, "taker", "stop");
+      else if (bar.ts >= pos.expiresAt) settle(bar.close, bar.ts, pos.openedTs, "taker", "maxHold");
     }
 
     if (pending && !pos) {
@@ -353,6 +359,7 @@ export function runBreakout(candles5m: Candle[], opts: BreakoutOpts): BreakoutSu
     maxDrawdown: maxDrawdown(equity.map((p) => p.equity)).maxDrawdown,
     maxHoldHours,
     lowFeeNetUsd,
+    exitReasons,
     tradeLog,
   };
 }

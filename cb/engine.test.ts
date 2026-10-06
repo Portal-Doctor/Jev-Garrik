@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { applyEntryVetoes, withDeadline } from "./engine";
+import { applyEntryVetoes, evaluateSplitBreakout, withDeadline } from "./engine";
 import type { DecisionVector } from "./gate";
 import type { VetoDecision } from "./vetoes";
 
@@ -44,4 +44,42 @@ test("withDeadline resolves when the work finishes in time", async () => {
 test("withDeadline rejects a hung promise so a pair can fire again", async () => {
   const hung = new Promise<number>(() => {});
   await expect(withDeadline(hung, 20, "decide AVAX-USD")).rejects.toThrow("decide AVAX-USD timed out after 20ms");
+});
+
+test("split breakout enters a known candidate and holds a long through a missing signal", () => {
+  const flat = {
+    position: "flat" as const,
+    halted: false,
+    feedBlocked: false,
+    known: true,
+    candidate: true,
+    clipUsd: 600,
+    remainingGrossUsd: 3000,
+    minSizeUsd: 25,
+  };
+  expect(evaluateSplitBreakout(flat)).toMatchObject({ approved: true, target: "long", sizeUsd: 600 });
+  expect(evaluateSplitBreakout({ ...flat, candidate: false }).reason).toBe("breakout");
+  expect(evaluateSplitBreakout({ ...flat, position: "long", candidate: false })).toMatchObject({
+    target: "long",
+    approved: false,
+  });
+});
+
+test("split breakout treats Jev stress and regime labels as telemetry", () => {
+  const flat = {
+    position: "flat" as const,
+    halted: false,
+    feedBlocked: false,
+    known: true,
+    candidate: true,
+    clipUsd: 400,
+    remainingGrossUsd: 3000,
+    minSizeUsd: 25,
+  };
+  const stressed = applyEntryVetoes(
+    { ...vector, market_regime: "contraction", liquidity_stress: "stressed" },
+    veto(false, true),
+  );
+  expect(stressed).toMatchObject({ market_regime: "contraction", liquidity_stress: "stressed" });
+  expect(evaluateSplitBreakout(flat)).toMatchObject({ approved: true, target: "long", sizeUsd: 400 });
 });

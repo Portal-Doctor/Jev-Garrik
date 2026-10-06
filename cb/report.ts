@@ -136,6 +136,9 @@ export interface HoldTrendWindow {
   /** The same table for the stress veto, shown beside toxic because it is free. */
   stressForwardH1: HoldTrendForward;
   stressForwardH4: HoldTrendForward;
+  /** Raw Jev labels remain telemetry and are scored without becoming execution gates. */
+  labelForwardH1: Record<string, { n: number; meanBps: number | null }>;
+  labelForwardH4: Record<string, { n: number; meanBps: number | null }>;
   /** Section 8 check 2, scored on this window. */
   restingAsk: RestingAskCheck;
   takeProfitMaker: TakeProfitMakerCheck;
@@ -428,6 +431,8 @@ function emptyHoldWindow(): HoldTrendWindow {
     toxicCall: "no sample",
     stressForwardH1: { vetoedBps: null, clearBps: null, vetoedN: 0, clearN: 0 },
     stressForwardH4: { vetoedBps: null, clearBps: null, vetoedN: 0, clearN: 0 },
+    labelForwardH1: {},
+    labelForwardH4: {},
     restingAsk: { filledLongs: 0, withAskWithinOneTick: 0, maxLagMs: null, verdict: "no sample" },
     takeProfitMaker: { fills: 0, makerFills: 0, makerShare: null, verdict: "no sample" },
     hold: { medianMs: null, maxMs: null, closedUnder15m: 0 },
@@ -442,6 +447,24 @@ function exitReasonBucket(reason: string | null): "trendDown" | "contraction" | 
   if (reason === "halt") return "halt";
   if (reason === "horizon") return "horizon";
   return null;
+}
+
+function labelKeysFromState(state: unknown): string[] {
+  let root = state;
+  if (typeof root === "string") {
+    try {
+      root = JSON.parse(root);
+    } catch {
+      return [];
+    }
+  }
+  if (!root || typeof root !== "object") return [];
+  const vector = (root as { vector?: unknown }).vector;
+  if (!vector || typeof vector !== "object") return [];
+  const row = vector as Record<string, unknown>;
+  return ["market_regime", "direction_bias", "liquidity_stress", "toxic_flow_risk"]
+    .filter((key) => typeof row[key] === "string")
+    .map((key) => `${key}=${row[key]}`);
 }
 
 export function buildHoldTrendWindow(input: {
@@ -475,6 +498,8 @@ export function buildHoldTrendWindow(input: {
   const h1StressClear: number[] = [];
   const h4StressVetoed: number[] = [];
   const h4StressClear: number[] = [];
+  const h1Labels = new Map<string, number[]>();
+  const h4Labels = new Map<string, number[]>();
   const moves = new Map<string, { h1?: number; h4?: number }>();
   for (const o of input.outcomes) {
     const row = moves.get(o.decision_id) ?? {};
@@ -506,6 +531,11 @@ export function buildHoldTrendWindow(input: {
     }
     if (gate.approved && gate.sizeUsd != null && input.notionalUsd > 0) sized.push(gate.sizeUsd / input.notionalUsd);
     const fwd = moves.get(d.id);
+    const labels = labelKeysFromState(d.state);
+    for (const label of labels) {
+      if (fwd?.h1 != null) h1Labels.set(label, [...(h1Labels.get(label) ?? []), fwd.h1]);
+      if (fwd?.h4 != null) h4Labels.set(label, [...(h4Labels.get(label) ?? []), fwd.h4]);
+    }
     // Section 3 isolates the toxic veto, so a stress veto does not make a decision toxic-vetoed.
     if (toxic != null) {
       if (fwd?.h1 != null) (toxic ? h1Vetoed : h1Clear).push(fwd.h1);
@@ -533,6 +563,8 @@ export function buildHoldTrendWindow(input: {
     vetoedN: h4StressVetoed.length,
     clearN: h4StressClear.length,
   };
+  out.labelForwardH1 = Object.fromEntries([...h1Labels].map(([label, values]) => [label, { n: values.length, meanBps: mean(values) }]));
+  out.labelForwardH4 = Object.fromEntries([...h4Labels].map(([label, values]) => [label, { n: values.length, meanBps: mean(values) }]));
   sized.sort((a, b) => a - b);
   out.sizedVsClip = median(sized);
 
