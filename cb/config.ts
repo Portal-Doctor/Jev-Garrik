@@ -6,6 +6,16 @@ const num = (key: string, fallback: number) => {
 const list = (key: string, fallback: string) =>
   (env(key, fallback) ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
+export type BookMode = "breakout" | "pooled" | "htf";
+
+/** Live book. Default is split-clip locked breakout. Pooled stays opt-in after it missed the gate. */
+export function parseBook(raw?: string): BookMode {
+  const v = (raw ?? "breakout").trim().toLowerCase();
+  if (v === "htf") return "htf";
+  if (v === "pooled") return "pooled";
+  return "breakout";
+}
+
 /** Horizons every decision is scored at (seconds). 24h is the traded hold. 30m and 2h are scored only. */
 export const MEASURED_HORIZONS_SEC = [1800, 3600, 7200, 14400, 86400] as const;
 
@@ -23,8 +33,8 @@ export const config = {
   bankrollUsd: num("CB_BANKROLL_USD", 12_000),
   /** Cap on the mark of every open long plus resting entry. */
   maxGrossUsd: num("CB_MAX_GROSS_USD", 3_000),
-  /** htf = per-pair clips and the 24h fixed target. pooled = one ledger and breakout rotation. */
-  book: (env("CB_BOOK", "pooled") === "htf" ? "htf" : "pooled") as "htf" | "pooled",
+  /** breakout = split-clip locked 20/3/50. pooled = one ledger and rotation. htf = 24h fixed target. */
+  book: parseBook(env("CB_BOOK", "breakout")),
   maxConcurrent: num("CB_MAX_CONCURRENT", 3),
   /** Fraction of the $12k pool. Trip when mark equity is at or under pool * (1 - this). */
   poolDd: num("CB_POOL_DD", 0.15),

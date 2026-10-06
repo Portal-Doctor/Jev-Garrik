@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { parseBook } from "./config";
 
 test("the judged paper fee fallback is 40/80, not a Coinbase published row", async () => {
   const src = await Bun.file("cb/config.ts").text();
@@ -11,8 +12,14 @@ test("the judged paper fee fallback is 40/80, not a Coinbase published row", asy
   expect(env).toContain("VVV-USD,ZEC-USD,PUMP-USD,XLM-USD");
   expect(env).not.toMatch(/CB_PAIRS=.*TAO-USD/);
   expect(env).not.toMatch(/CB_PAIRS=.*ADA-USD/);
-  expect(src).toContain('env("CB_BOOK", "pooled")');
-  expect(env).toMatch(/CB_BOOK=pooled\b/);
-  expect(env).toMatch(/CB_MAX_CONCURRENT=3\b/);
-  expect(env).toMatch(/CB_POOL_DD=0.15\b/);
+  expect(src).toContain('env("CB_BOOK", "breakout")');
+  expect(env).toMatch(/CB_BOOK=breakout\b/);
+  expect(env).not.toMatch(/CB_BOOK=pooled\b/);
+});
+
+test("the live default is split-clip breakout, and pooled is opt-in", () => {
+  expect(parseBook(undefined)).toBe("breakout");
+  expect(parseBook("breakout")).toBe("breakout");
+  expect(parseBook("pooled")).toBe("pooled");
+  expect(parseBook("htf")).toBe("htf");
 });

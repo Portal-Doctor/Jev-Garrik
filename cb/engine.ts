@@ -75,7 +75,7 @@ export interface EngineOpts {
   minSizeUsd: number;
   /** Book-level cap. Omit to leave size uncapped. */
   maxGrossUsd?: number;
-  book?: "htf" | "pooled";
+  book?: "htf" | "pooled" | "breakout";
   maxConcurrent?: number;
   poolDd?: number;
   bankrollUsd?: number;
@@ -182,6 +182,29 @@ export class Engine {
     void this.decide(pair);
   }
 
+  private evaluateSplitBreakout(
+    pair: string,
+    position: "long" | "flat",
+    vector: DecisionVector,
+    halted: boolean,
+    feedBlocked: boolean,
+    remainingGrossUsd: number,
+  ): GateResult {
+    const snap = this.pool?.snap(pair);
+    return evaluateSplitBreakout({
+      position,
+      halted,
+      feedBlocked,
+      stress: vector.liquidity_stress === "stressed",
+      contraction: vector.market_regime === "contraction",
+      known: snap?.known === true,
+      candidate: snap?.candidate === true,
+      clipUsd: findBook(pair)?.notionalUsd ?? this.opts.notionalUsd,
+      remainingGrossUsd,
+      minSizeUsd: this.opts.minSizeUsd,
+    });
+  }
+
   private evaluatePooled(
     pair: string,
     position: "long" | "flat",
@@ -285,6 +308,8 @@ export class Engine {
       const gate =
         this.opts.book === "pooled" && this.pool
           ? this.evaluatePooled(pair, position, gatedVector, halt != null, !this.feed.feedHealthy(pair), remainingGrossUsd)
+          : this.opts.book === "breakout"
+            ? this.evaluateSplitBreakout(pair, position, gatedVector, halt != null, !this.feed.feedHealthy(pair), remainingGrossUsd)
           : evaluateGate({
               position,
               vector: gatedVector,
@@ -404,6 +429,37 @@ export function mergeSeedSamples(
   }
   for (const s of samples) byTs.set(Number(s.ts), { ts: Number(s.ts), toxicPHigh: s.toxicPHigh, stressPStressed: s.stressPStressed });
   return [...byTs.values()].sort((a, b) => a.ts - b.ts);
+}
+
+/** Per-pair locked breakout 20/3/50. No flatten-to-fund. Trail and the 14 day cap are the broker. */
+export function evaluateSplitBreakout(input: {
+  position: "long" | "flat";
+  halted: boolean;
+  feedBlocked: boolean;
+  stress: boolean;
+  contraction: boolean;
+  known: boolean;
+  candidate: boolean;
+  clipUsd: number;
+  remainingGrossUsd: number;
+  minSizeUsd: number;
+}): GateResult {
+  const base = { expectedYieldBps: 0, hurdleBps: 0, sizeUsd: 0, approved: false as boolean };
+  if (input.position === "long") {
+    if (input.halted) return { ...base, target: "flat", reason: "halt" };
+    return { ...base, target: "long", reason: null };
+  }
+  if (input.halted) return { ...base, target: "flat", reason: "halt" };
+  if (input.feedBlocked) return { ...base, target: "flat", reason: "feed" };
+  if (input.stress) return { ...base, target: "flat", reason: "liquidity stress" };
+  if (input.contraction) return { ...base, target: "flat", reason: "regime" };
+  if (!input.known) return { ...base, target: "flat", reason: "breakout unknown" };
+  if (!input.candidate) return { ...base, target: "flat", reason: "breakout" };
+  if (Number.isFinite(input.remainingGrossUsd) && input.remainingGrossUsd < input.minSizeUsd) {
+    return { ...base, target: "flat", reason: "gross cap" };
+  }
+  if (!(input.clipUsd >= input.minSizeUsd)) return { ...base, target: "flat", reason: "dust" };
+  return { ...base, target: "long", approved: true, reason: null, sizeUsd: input.clipUsd };
 }
 
 export function applyEntryVetoes(vector: DecisionVector, veto: VetoDecision): DecisionVector {

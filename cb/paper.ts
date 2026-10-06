@@ -441,7 +441,7 @@ export class PaperBroker implements Broker {
     const entry = this.acct.get(pair)?.entryPrice();
     const mid = this.feed.book(pair)?.mid();
     if (entry == null || mid == null) return;
-    if (this.opts.pooled) {
+    if (this.opts.pooled || this.opts.trailPrice) {
       const initial = entry * (1 - stop / 10_000);
       const trail = this.opts.trailPrice?.(pair);
       const level = trail != null && trail > 0 ? Math.max(initial, trail) : initial;
@@ -619,7 +619,7 @@ export class PaperBroker implements Broker {
 
   /** Post-only sell at the fee-inclusive take-profit. The slot is this ask while long. */
   private async restTakeProfit(pair: string, now: number): Promise<void> {
-    if (this.opts.pooled) return;
+    if (this.opts.pooled || this.opts.trailPrice) return;
     if (this.open.get(pair)) return;
     if (this.positionOf(pair) !== "long") return;
     const acct = this.acct.get(pair);

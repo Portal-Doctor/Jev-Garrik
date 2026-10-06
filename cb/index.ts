@@ -69,7 +69,8 @@ let broadcast: (type: string, data: unknown) => void = () => {};
 let doReset: () => Promise<void> = async () => {};
 
 const model = createModel();
-const pool = config.book === "pooled" ? new PoolBook(pairs) : null;
+const breakoutLive = config.book === "breakout" || config.book === "pooled";
+const pool = breakoutLive ? new PoolBook(pairs) : null;
 
 const broker = new PaperBroker(
   pairs,
@@ -83,7 +84,7 @@ const broker = new PaperBroker(
     fillHaircut: config.fillHaircut,
     entryTimeoutSec: config.entryTimeoutSec,
     repriceTicks: config.repriceTicks,
-    horizonSec: config.book === "pooled" ? config.breakoutMaxHoldSec : config.horizonSec,
+    horizonSec: breakoutLive ? config.breakoutMaxHoldSec : config.horizonSec,
     bankrollUsd: config.bankrollUsd,
     neverCrossEntry: config.neverCrossEntry,
     stopLossBps: config.stopLossBps,
