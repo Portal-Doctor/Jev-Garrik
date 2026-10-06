@@ -3,12 +3,12 @@ import { config, MEASURED_HORIZONS_SEC } from "./config";
 import { assertTakeProfitClearsFees, gateFromState } from "./gate";
 
 assertTakeProfitClearsFees(config.takeProfitBps, config.makerFeeBps, config.takerFeeBps);
-assertPairBooks(config.pairs, {
+const pairs = activePairs(config.pairs);
+assertPairBooks(pairs, {
   makerFeeBps: config.makerFeeBps,
   takerFeeBps: config.takerFeeBps,
   feeBuffer: config.feeBuffer,
 });
-const pairs = activePairs(config.pairs);
 if (pairs.length === 0) throw new Error("CB_PAIRS has no enabled book");
 import { Store } from "./db/store";
 import { Feed } from "./feed";

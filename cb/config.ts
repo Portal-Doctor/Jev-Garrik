@@ -24,7 +24,7 @@ export const config = {
   databaseUrl: env("DATABASE_URL", "postgres://cb:cb@localhost:5432/cb")!,
 
   // Strategy (spec section 2). Pairs are config, not code. Risk per pair lives in cb/books.ts.
-  pairs: list("CB_PAIRS", "UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD,VVV-USD,ZEC-USD,PUMP-USD,XLM-USD"),
+  pairs: list("CB_PAIRS", "UNI-USD,NEAR-USD,BCH-USD,SUI-USD,AVAX-USD,ARB-USD,VVV-USD,ZEC-USD"),
   decideSec: num("CB_DECIDE_SEC", 300),
   /** Position timer. A long flattens at this age if stop, take-profit, toxic flow, and contraction have not. */
   horizonSec: num("CB_HORIZON_SEC", 86_400),

@@ -8,8 +8,12 @@ test("the judged paper fee fallback is 40/80, not a Coinbase published row", asy
   const env = await Bun.file(".env.example").text();
   expect(env).toMatch(/CB_MAKER_FEE_BPS=40\b/);
   expect(env).toMatch(/CB_TAKER_FEE_BPS=80\b/);
-  expect(src).toContain("VVV-USD,ZEC-USD,PUMP-USD,XLM-USD");
-  expect(env).toContain("VVV-USD,ZEC-USD,PUMP-USD,XLM-USD");
+  expect(src).toContain("VVV-USD,ZEC-USD");
+  expect(env).toContain("VVV-USD,ZEC-USD");
+  expect(src).not.toMatch(/CB_PAIRS[^"]*PUMP-USD/);
+  expect(env).not.toMatch(/CB_PAIRS=.*PUMP-USD/);
+  expect(src).not.toMatch(/CB_PAIRS[^"]*XLM-USD/);
+  expect(env).not.toMatch(/CB_PAIRS=.*XLM-USD/);
   expect(env).not.toMatch(/CB_PAIRS=.*TAO-USD/);
   expect(env).not.toMatch(/CB_PAIRS=.*ADA-USD/);
   expect(src).toContain('env("CB_BOOK", "breakout")');
