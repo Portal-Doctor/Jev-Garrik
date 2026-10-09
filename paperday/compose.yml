@@ -1,0 +1,44 @@
+# Separate stack from cb-app. Own database. Report and Postgres bind to loopback only.
+#   docker compose -f paperday/compose.yml up -d
+# Does not deploy orders. Refuses to start if COINBASE_API_* is set (see paperday/src/safety.ts).
+
+services:
+  paperday-db:
+    image: postgres:17
+    container_name: paperday-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: paperday
+      POSTGRES_PASSWORD: ${PAPERDAY_DB_PASSWORD:-paperday}
+      POSTGRES_DB: paperday
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - paperday-pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperday -d paperday"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  paperday:
+    build:
+      context: ..
+      dockerfile: paperday/Dockerfile
+    container_name: paperday-app
+    restart: unless-stopped
+    depends_on:
+      paperday-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://paperday:${PAPERDAY_DB_PASSWORD:-paperday}@paperday-db:5432/paperday
+      PAPERDAY_BIND: 127.0.0.1
+      PAPERDAY_JEV_STAGE: "0"
+    ports:
+      - "127.0.0.1:3099:3099"
+    volumes:
+      - ./data:/app/paperday/data
+
+volumes:
+  paperday-pgdata:
