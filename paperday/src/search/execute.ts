@@ -233,7 +233,7 @@ export async function runSearch(paths: SearchPaths, now = new Date()): Promise<S
       oosNetUsd: score.oosNetUsd,
     }));
 
-  const lock = openHoldout(paths.lockPath, now, "search-v1");
+  const lock = openHoldout(paths.lockPath, new Date(), "search-v1");
   const holdBook = loadFullBook(paths.cacheDir);
   const holdPrepared = holdBook.prepared;
   const holdProxy = holdBook.proxy;

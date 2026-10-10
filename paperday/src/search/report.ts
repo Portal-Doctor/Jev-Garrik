@@ -87,6 +87,9 @@ export function renderSearchReport(input: SearchReportInput): string {
   lines.push("");
   if (input.ranked.length === 0) {
     lines.push("No config passed eligibility and the neighbor stability guard. The selected config is null.");
+    if (input.ineligibleTop.length > 0 && input.ineligibleTop.every((score) => score.oosTrades === 0 && score.oosNetUsd === 0)) {
+      lines.push("Every row in this table has 0 closed OOS trades and an OOS net of $0. The order is the id tie-break, not a revenue ranking.");
+    }
     lines.push("");
     lines.push("Highest OOS net among executed configs (not eligible):");
     lines.push("");
@@ -147,6 +150,9 @@ export function renderSearchReport(input: SearchReportInput): string {
   lines.push(`Best jev_off by OOS net: ${input.bestJevOff ? `\`${input.bestJevOff.id}\`` : "none"} (${offEligible ? "eligible" : "not eligible"}).`);
   lines.push(`Best repo_breakout_4h by OOS net: ${input.bestBreakout ? `\`${input.bestBreakout.id}\`` : "none"} (${brkEligible ? "eligible" : "not eligible"}).`);
   lines.push("Best Jev config: not run. No Jev row is filled in.");
+  if (input.bestJevOff && input.bestBreakout && input.bestJevOff.id === input.bestBreakout.id) {
+    lines.push("The jev_off and baseline columns name the same config because the OOS nets tied and the id order placed this row first. That is not a choice between them.");
+  }
   lines.push("");
   lines.push("| | best Jev | best jev_off | best repo_breakout_4h |");
   lines.push("|---|---|---|---|");
