@@ -37,6 +37,7 @@ if (!started.ok) {
 
 const paths = dataPaths(realDataDir());
 const command = process.argv[2] ?? "";
+const SUPERSEDED_1M_ROOT = "67b8963191a52383657fff6bd6bc505327aa540fe4009de6d264e2c4cd2799d8";
 
 if (import.meta.main) {
   main().catch((err) => {
@@ -135,8 +136,6 @@ async function snapshot(): Promise<void> {
   });
   console.log(`snapshot ${products.length} USD products raw ${sha256Bytes(bytes)}`);
 }
-
-const SUPERSEDED_1M_ROOT = "67b8963191a52383657fff6bd6bc505327aa540fe4009de6d264e2c4cd2799d8";
 
 function oneMinuteSuperseded(now: Date): SnapshotLift {
   return {
