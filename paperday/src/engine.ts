@@ -70,6 +70,11 @@ export interface EngineResult {
   dailyHaltBreached: boolean;
   wins: number;
   avgR: number | null;
+  /** Setups that cleared structure and the fee floor. */
+  qualified: number;
+  entryAttempts: number;
+  entryFills: number;
+  entryTimeouts: number;
 }
 
 interface Prepared {
@@ -575,5 +580,9 @@ export async function runEngine(opts: EngineOpts): Promise<EngineResult> {
     dailyHaltBreached: dailyHalt,
     wins,
     avgR: trades > 0 ? rSum / trades : null,
+    qualified: ideas,
+    entryAttempts: fills,
+    entryFills: fills,
+    entryTimeouts: 0,
   };
 }

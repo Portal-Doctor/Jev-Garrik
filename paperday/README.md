@@ -12,6 +12,8 @@ bun test paperday
 
 Home PC stack: `docker compose -f paperday/compose.yml up -d`. Postgres and the report bind to `127.0.0.1`. Startup throws if `COINBASE_API_*` or another order-capable credential is set.
 
+Forward paper for the frozen holdout v2 config is `paperday/FORWARD.md`. The 30-day clock starts only when that command is run on the home PC.
+
 ## Assumptions
 
 - Setups A/B/C were not numerically specified. A is a 5-minute EMA20 pullback above session VWAP. B is a VWAP reclaim. C is a 5-minute Donchian break while the completed 4-hour close is through its prior 20-bar high. All three require the `cb/trend.ts` bias gate (first-value EMA, not the TradingView SMA seed).

@@ -1,5 +1,7 @@
 # Paper-day backtest summary
 
+Holdout v1 is void: consumed, pre-contaminated. It is not evidence for selection.
+
 Data: Coinbase public 1-minute candles, including BTC-USD for the market proxy. Hash `f049b7a1ab8f513a16345e00899fb4348d40af74659bea9d4394374da9a53e6f`.
 Fee tier 50/90. Winner round trip 100 bps (maker target). Loser round trip 140 bps (taker stop or market exit). Haircut 0.5.
 Per-trade floor: (T − 100) ≥ 1.5 × (S + 140). Class p* = (S + 140) / (T + S − 40) ≤ 45%. Walk-forward E ≥ +0.15R or ≥ +25 bps in at least 2 of 3 splits.

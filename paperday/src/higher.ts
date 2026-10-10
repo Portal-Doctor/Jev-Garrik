@@ -1,20 +1,13 @@
 /**
- * Swing book and the repo 4h breakout, replayed through the paper allocator and the fee floor.
+ * Swing book, replayed through the paper allocator and the fee floor.
  * Swing may run in a backtest only when the caller passes swingApproved. Forward paper
- * keeps SWING_APPROVED false. The breakout is re-implemented here and does not consult labels.
- * Its exits are a 3 ATR trail or a 14-day market flat, both taker, so it has no resting
- * maker target and every signal is below_fee_floor. That is not retuned.
+ * keeps SWING_APPROVED false until the launch script is started with Brian's approval.
+ * The 4h breakout lives in breakout-paper.ts.
  */
 
 import {
-  BREAKOUT_ATR_BARS,
-  BREAKOUT_BARS,
-  BREAKOUT_EMA_BARS,
-  BREAKOUT_MAX_HOLD_MS,
-  BREAKOUT_TRAIL_ATR,
   DAILY_LOSS_HALT_USD,
   PAIR_LOSS_HALT_USD,
-  REPO_BREAKOUT_STOP_BPS,
   RESERVE_USD,
   STARTING_BUDGET_USD,
   SWING_MAX_HOLD_MS,
@@ -33,7 +26,7 @@ import { ctDayKey, quarterKey, utcDayKey } from "./clock";
 import { belowFeeFloor, type ClosedSample } from "./expectancy";
 import { stopBpsOf } from "./fees";
 import { fillRestingBuy, newEntryOrder } from "./fill";
-import { confirmedSwingLow, indicatorSeries, nearestSwingHighAbove, trueRange, type IndicatorPoint } from "./indicators";
+import { confirmedSwingLow, indicatorSeries, nearestSwingHighAbove, type IndicatorPoint } from "./indicators";
 import { buildPacket, type PacketInput } from "./jev";
 import { freshBook, PaperSession } from "./pipeline";
 import { openPosition, rMultiple, stepPosition, type Position } from "./position";
@@ -83,6 +76,40 @@ export interface HigherOpts {
   stopAtrMult?: number;
   targetR?: number;
   maxHoldMs?: number;
+  /**
+   * Turn-1 keeps the Chicago activity window. Search v2 passes false for swing and breakout.
+   * Omitted means the window still applies, which is what the 12/11 parity row uses.
+   */
+  activityWindow?: boolean;
+  /** Geometry scan. Records stops and does not admit, fill, or mark a net. */
+  geometryOnly?: boolean;
+  /** Qualified idea, after the fee floor and the sentiment screen, before overrides. */
+  onQualified?: (idea: QualifiedIdea) => void;
+  /**
+   * Paid-review filter. Absent on jev_off. The search supplies this only after a real review.
+   * `order` is identity for veto. Select reorders a bar that has two or more names.
+   */
+  jevAdmit?: JevAdmit;
+}
+
+export interface QualifiedIdea {
+  id: string;
+  pair: string;
+  setup: "A" | "B" | "C";
+  barTs: number;
+  asOf: number;
+  entry: number;
+  stop: number;
+  atr: number;
+  rsi: number | null;
+  vwap: number | null;
+  biasUp: boolean;
+}
+
+export interface JevAdmit {
+  allow(id: string): boolean;
+  order<T extends { id: string }>(rows: readonly T[]): T[];
+  onChoice(count: number): void;
 }
 
 function bump(map: Record<string, number>, key: string): void {
@@ -186,6 +213,10 @@ function blank(opts: HigherOpts, noteReject?: string): EngineResult {
     dailyHaltBreached: false,
     wins: 0,
     avgR: null,
+    qualified: 0,
+    entryAttempts: 0,
+    entryFills: 0,
+    entryTimeouts: 0,
   };
 }
 
@@ -235,7 +266,7 @@ function snapshotOf(p: SwingPair, h1i: number, h4i: number, d1i: number): Decisi
 }
 
 export async function runSwing(opts: HigherOpts): Promise<EngineResult> {
-  if (opts.variant !== "jev_off") throw new Error("not run: needs paid Jev reviews");
+  if (opts.variant !== "jev_off" && !opts.jevAdmit) throw new Error("not run: needs paid Jev reviews");
   if (!swingEntryAllowed(opts.swingApproved)) return blank(opts, "swing_not_approved");
   const pairs = opts.prepared ?? prepareSwingPairs(opts.candles, opts.enabledPairs, opts.toMs);
   const session = new PaperSession({
@@ -243,7 +274,7 @@ export async function runSwing(opts: HigherOpts): Promise<EngineResult> {
     jev: null,
     store: new MemoryStore(null),
     state: blankAllocator(opts.mode, opts.formula),
-    book: freshBook(opts.enabledPairs, "clear"),
+    book: { ...freshBook(opts.enabledPairs, "clear"), enforceActivityWindow: opts.activityWindow !== false },
     enabledPairs: opts.enabledPairs,
     atrByPair: {},
     jevOff: true,
@@ -263,6 +294,10 @@ export async function runSwing(opts: HigherOpts): Promise<EngineResult> {
   let rSum = 0;
   let pairHalt = false;
   let dailyHalt = false;
+  let qualified = 0;
+  let entryAttempts = 0;
+  let entryFills = 0;
+  let entryTimeouts = 0;
   const quarters = new Map<string, number>();
   const rejects: Record<string, number> = {};
   const exits: Record<string, number> = {};
@@ -332,6 +367,44 @@ export async function runSwing(opts: HigherOpts): Promise<EngineResult> {
   events.sort((a, b) => pairs[a.i]!.m15[a.m15i]!.ts - pairs[b.i]!.m15[b.m15i]!.ts || a.i - b.i);
 
   const rule = ruleStrategy(opts.strategy);
+  if (opts.geometryOnly) {
+    for (const series of pairs) {
+      for (let h1i = 0; h1i < series.h1.length; h1i++) {
+        const decisionTs = series.h1[h1i]!.ts + H1;
+        if (decisionTs <= opts.fromMs || decisionTs > opts.toMs) continue;
+        const h4i = lastClosed(series.h4, H4, decisionTs);
+        const d1i = lastClosed(series.d1, D1, decisionTs);
+        const snap = snapshotOf(series, h1i, h4i, d1i);
+        if (!snap || snap.atr == null || !(snap.atr > 0) || !snap.biasUp) continue;
+        for (const setup of findSetups(snap, "clear", rule)) {
+          const geom = swingStop(setup.entry, series.h1Swing[h1i] ?? null, snap.atr, opts.stopAtrMult ?? SWING_ATR_MULT);
+          if (!geom) {
+            bump(rejects, "no_structure");
+            continue;
+          }
+          const nextHigh = h4i >= 0 ? nearestSwingHighAbove(series.h4, h4i, setup.entry) : null;
+          const targetPx =
+            opts.targetR == null
+              ? swingTarget(setup.entry, geom.stop, nextHigh)
+              : searchSwingTarget(setup.entry, geom.stop, opts.targetR, nextHigh);
+          const floor = swingFloor(setup.entry, geom.stop, targetPx);
+          (stopsByPair[series.pair] ??= []).push(floor.stopBps);
+          if (!floor.pass || belowFeeFloor(floor.stopBps, floor.targetBps)) bump(rejects, "below_fee_floor");
+          else qualified += 1;
+        }
+      }
+    }
+    return {
+      ...blank(opts),
+      rejects,
+      stopsByPair,
+      qualified,
+      netUsd: 0,
+      trades: 0,
+      feesUsd: 0,
+      maxDrawdownUsd: 0,
+    };
+  }
   for (const ev of events) {
     const series = pairs[ev.i]!;
     const m15i = ev.m15i;
@@ -400,19 +473,16 @@ export async function runSwing(opts: HigherOpts): Promise<EngineResult> {
     if (!snap || snap.atr == null || !(snap.atr > 0)) continue;
     if (!snap.biasUp) continue;
     const proxy = opts.sentimentMode === "market_proxy" && opts.proxy ? proxyAt(opts.proxy, series.pair, decisionTs) : null;
-    if (proxy?.veto) {
-      bump(rejects, "sentiment");
-      continue;
-    }
     session.opts.atrByPair[series.pair] = snap.atr;
-    let setups = findSetups(snap, "clear", rule);
-    if (proxy?.caution) {
-      setups = setups.filter((s) => s.setup === "A");
-      if ((cautionIdeas.get(series.pair) ?? 0) >= 1) {
-        bump(rejects, "sentiment");
-        continue;
-      }
+    const setups = findSetups(snap, "clear", rule);
+    interface Ready {
+      id: string;
+      setup: Candidate;
+      geomStop: number;
+      floor: { stopBps: number; targetBps: number };
+      targetPx: number;
     }
+    const ready: Ready[] = [];
     for (const setup of setups) {
       const geom = swingStop(setup.entry, series.h1Swing[h1i] ?? null, snap.atr, opts.stopAtrMult ?? SWING_ATR_MULT);
       if (!geom) {
@@ -430,6 +500,37 @@ export async function runSwing(opts: HigherOpts): Promise<EngineResult> {
         bump(rejects, "below_fee_floor");
         continue;
       }
+      qualified += 1;
+      if (proxy?.veto || (proxy?.caution && (setup.setup !== "A" || (cautionIdeas.get(series.pair) ?? 0) >= 1))) {
+        bump(rejects, "sentiment");
+        continue;
+      }
+      ready.push({ id: setup.id, setup, geomStop: geom.stop, floor, targetPx });
+    }
+    if (ready.length >= 2) opts.jevAdmit?.onChoice(ready.length);
+    const ordered = opts.jevAdmit ? opts.jevAdmit.order(ready) : ready;
+    for (const item of ordered) {
+      const setup = item.setup;
+      const geom = { stop: item.geomStop };
+      const floor = item.floor;
+      const targetPx = item.targetPx;
+      if (opts.jevAdmit && !opts.jevAdmit.allow(setup.id)) {
+        bump(rejects, "jev");
+        continue;
+      }
+      opts.onQualified?.({
+        id: setup.id,
+        pair: setup.pair,
+        setup: setup.setup,
+        barTs: setup.barTs,
+        asOf: decisionTs,
+        entry: setup.entry,
+        stop: geom.stop,
+        atr: snap.atr,
+        rsi: snap.rsi,
+        vwap: snap.vwap,
+        biasUp: true,
+      });
       const notional = session.proposedNotional(series.pair);
       const unitsPlanned = setup.entry > 0 ? notional / setup.entry : 0;
       const candidate: Candidate = {
@@ -473,6 +574,7 @@ export async function runSwing(opts: HigherOpts): Promise<EngineResult> {
       }
       ideas += 1;
       if (proxy?.caution) cautionIdeas.set(series.pair, (cautionIdeas.get(series.pair) ?? 0) + 1);
+      entryAttempts += 1;
       const order = newEntryOrder(candidate.id, series.pair, candidate.entry, unitsPlanned, decisionTs);
       let filledUnits = 0;
       let filledFee = 0;
@@ -499,9 +601,11 @@ export async function runSwing(opts: HigherOpts): Promise<EngineResult> {
       const unused = notional - used;
       if (unused > 1e-6) dropReserve(series.pair, unused);
       if (!(filledUnits > 0)) {
+        entryTimeouts += 1;
         refreshBusy();
         break;
       }
+      entryFills += 1;
       reservedLeft.set(series.pair, used);
       const opened = openPosition({
         id: candidate.id,
@@ -564,55 +668,11 @@ export async function runSwing(opts: HigherOpts): Promise<EngineResult> {
     dailyHaltBreached: dailyHalt,
     wins,
     avgR: trades > 0 ? rSum / trades : null,
+    qualified,
+    entryAttempts,
+    entryFills,
+    entryTimeouts,
   };
 }
 
-export async function runBreakoutPaper(opts: HigherOpts): Promise<EngineResult> {
-  if (opts.variant !== "jev_off") throw new Error("not run: needs paid Jev reviews");
-  const rejects: Record<string, number> = {};
-  const stopsByPair: Record<string, number[]> = {};
-  for (const pair of opts.enabledPairs) {
-    const m1 = (opts.candles[pair] ?? []).filter((c) => c.close > 0 && c.ts < opts.toMs);
-    const h4 = aggregate(m1, H4, opts.toMs);
-    let ema: number | null = null;
-    let emaSamples = 0;
-    let atr: number | null = null;
-    let atrWarm = false;
-    const atrSeed: number[] = [];
-    let prevClose: number | null = null;
-    const highs: number[] = [];
-    for (let i = 0; i < h4.length; i++) {
-      const bar = h4[i]!;
-      const prior = highs.length >= BREAKOUT_BARS ? Math.max(...highs.slice(-BREAKOUT_BARS)) : null;
-      ema = biasEmaNext(ema, bar.close, BREAKOUT_EMA_BARS);
-      emaSamples += 1;
-      const tr = trueRange(bar.high, bar.low, prevClose);
-      if (!atrWarm) {
-        atrSeed.push(tr);
-        if (atrSeed.length >= BREAKOUT_ATR_BARS) {
-          atr = atrSeed.reduce((s, x) => s + x, 0) / BREAKOUT_ATR_BARS;
-          atrWarm = true;
-        }
-      } else if (atr != null) {
-        atr = (atr * (BREAKOUT_ATR_BARS - 1) + tr) / BREAKOUT_ATR_BARS;
-      }
-      const closeTs = bar.ts + H4;
-      const ready = prior != null && emaSamples >= BREAKOUT_EMA_BARS && atrWarm && atr != null && ema != null;
-      if (ready && closeTs >= opts.fromMs && closeTs < opts.toMs && bar.close > prior && bar.close > ema) {
-        const bookBps = REPO_BREAKOUT_STOP_BPS[pair] ?? 0;
-        const atrBps = bar.close > 0 ? ((BREAKOUT_TRAIL_ATR * atr!) / bar.close) * 10_000 : 0;
-        const live = bookBps > 0 && atrBps > 0 ? Math.min(bookBps, atrBps) : bookBps || atrBps;
-        if (live > 0) (stopsByPair[pair] ??= []).push(live);
-        bump(rejects, "below_fee_floor");
-      }
-      highs.push(bar.high);
-      prevClose = bar.close;
-    }
-    void BREAKOUT_MAX_HOLD_MS;
-  }
-  const result = blank(opts);
-  result.rejects = rejects;
-  result.stopsByPair = stopsByPair;
-  result.strategy = "combined";
-  return result;
-}
+export { runBreakoutPaper } from "./breakout-paper";

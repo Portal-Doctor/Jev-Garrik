@@ -22,8 +22,28 @@ export interface ProxyMark {
   caution: boolean;
 }
 
+export interface ClauseShare {
+  pairDays: number;
+  vetoPairDays: number;
+  zScorePairDays: number;
+  crashPairDays: number;
+  btcPairDays: number;
+}
+
 export interface ProxyBook {
   byPair: Record<string, ProxyMark[]>;
+  /** Pair-days, not bars. A clause counts when it fires on any hour of that UTC day. */
+  clauses: ClauseShare;
+}
+
+export function emptyClauses(): ClauseShare {
+  return { pairDays: 0, vetoPairDays: 0, zScorePairDays: 0, crashPairDays: 0, btcPairDays: 0 };
+}
+
+/** Trader flag. No rule change. About 40% of pair-days. */
+export function btcClauseFlag(clauses: ClauseShare): boolean {
+  if (!(clauses.pairDays > 0)) return false;
+  return clauses.btcPairDays / clauses.pairDays > 0.4;
 }
 
 function utcDay(ms: number): string {
@@ -94,6 +114,7 @@ export function buildMarketProxy(pairCandles: Record<string, Candle[]>, btc: Can
     return i >= 0 && btcVeto[i] === true;
   };
   const byPair: Record<string, ProxyMark[]> = {};
+  const clauses = emptyClauses();
   for (const [pair, raw] of Object.entries(pairCandles)) {
     const m1 = raw.filter((c) => c.ts < toMs && c.close > 0);
     const h1 = aggregate(m1, H1, toMs);
@@ -108,13 +129,28 @@ export function buildMarketProxy(pairCandles: Record<string, Candle[]>, btc: Can
     let day = "";
     let dayVeto = false;
     let dayCaution = false;
+    let dayZ = false;
+    let dayCrash = false;
+    let dayBtc = false;
+    const flushDay = () => {
+      if (!day) return;
+      clauses.pairDays += 1;
+      if (dayVeto) clauses.vetoPairDays += 1;
+      if (dayZ) clauses.zScorePairDays += 1;
+      if (dayCrash) clauses.crashPairDays += 1;
+      if (dayBtc) clauses.btcPairDays += 1;
+    };
     for (let i = 0; i < h1.length; i++) {
       const closeTs = h1[i]!.ts + H1;
       const d = utcDay(closeTs);
       if (d !== day) {
+        flushDay();
         day = d;
         dayVeto = false;
         dayCaution = false;
+        dayZ = false;
+        dayCrash = false;
+        dayBtc = false;
       }
       const bar = h1[i]!;
       const shockAtr = i > 0 ? atr[i - 1] : null;
@@ -142,13 +178,19 @@ export function buildMarketProxy(pairCandles: Record<string, Candle[]>, btc: Can
         }
       }
       const relVol = volAvg != null && bar.volume > 3 * volAvg;
-      if (shock || (z != null && z <= -2) || btcVetoNow(closeTs)) dayVeto = true;
+      const zHit = z != null && z <= -2;
+      const btcHit = btcVetoNow(closeTs);
+      if (zHit) dayZ = true;
+      if (shock) dayCrash = true;
+      if (btcHit) dayBtc = true;
+      if (shock || zHit || btcHit) dayVeto = true;
       if (!dayVeto && z != null && z >= 2.5 && relVol) dayCaution = true;
       marks.push({ ts: closeTs, veto: dayVeto, caution: dayCaution && !dayVeto });
     }
+    flushDay();
     byPair[pair] = marks;
   }
-  return { byPair };
+  return { byPair, clauses };
 }
 
 export function proxyAt(book: ProxyBook, pair: string, ts: number): { veto: boolean; caution: boolean } {

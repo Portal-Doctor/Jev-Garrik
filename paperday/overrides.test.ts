@@ -156,6 +156,15 @@ test("outside_session blocks Chicago hours outside 08:00-15:00", () => {
   expect(failed({}, {}, 1000, early).failed).toContain("outside_session");
 });
 
+test("swing and breakout search rows do not use the Chicago activity window", () => {
+  const early = Date.parse("2026-10-07T12:00:00.000Z");
+  const swing = failed({ enforceActivityWindow: false }, { entryProfile: "swing" }, 1000, early);
+  expect(swing.failed).not.toContain("outside_session");
+  const breakout = failed({}, { entryProfile: "breakout", plannedTargetBps: 1180 }, 1000, early);
+  expect(breakout.failed).not.toContain("outside_session");
+  expect(failed({}, { entryProfile: "intraday" }, 1000, early).failed).toContain("outside_session");
+});
+
 test("macro_blackout blocks the default 09:00 CT slot even inside the entry window", () => {
   const slot = Date.parse("2026-10-07T14:00:00.000Z");
   const result = failed({}, {}, 1000, slot);

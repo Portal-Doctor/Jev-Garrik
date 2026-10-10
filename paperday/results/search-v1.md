@@ -1,5 +1,7 @@
 # Search v1
 
+Holdout v1 is void: consumed, pre-contaminated. It is not evidence for selection.
+
 Grid sha256 `fc6067e78e5c0c5865aaff83abb2b42275b60997e11b299a3d63dda21dca9e31`.
 Configs in the pre-registered file: 372.
 Full cross is 4 strategies x 3 stops x 3 targets x 2 holds x 4 allocators x 5 Jev variants, plus 4 breakout allocators x 5 Jev variants = 1460. Cap 500. jev_off uses the full structural cross (288 swing + 4 breakout). jev_veto V1/V2/V3 and jev_select are registered only at stop 2, target 3R, hold 48h, for every strategy and allocator (64 swing + 16 breakout). Total 372. sentiment_blind is not in the grid.

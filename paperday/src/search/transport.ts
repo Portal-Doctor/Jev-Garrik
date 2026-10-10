@@ -12,6 +12,13 @@ import type { JevPacket } from "../jev";
 import type { CachedReview } from "./jev";
 import { JEV_MODEL_ID, costOf, jevBlockedReason, redactSecrets } from "./jev";
 
+/**
+ * Direct Typesafe API id. The public grid id stays `typesafe-ai/jev`.
+ * `typesafe-ai/jev` is the gateway name; the systemone endpoint knows `jev-latest`
+ * and answers as `jev-1.13.0`.
+ */
+export const JEV_API_MODEL_ID = "jev-latest";
+
 export type JevTransportPlan =
   | { kind: "blocked"; reason: string }
   | { kind: "gateway"; model: typeof JEV_MODEL_ID }
@@ -95,10 +102,11 @@ function choiceOf(
 export async function reviewWithJev(env: Record<string, string | undefined>, packet: JevPacket, hash: string): Promise<CachedReview> {
   const plan = jevTransportPlan(env);
   if (plan.kind === "blocked") throw new Error(plan.reason);
-  const model = plan.kind === "gateway" ? plan.model : typeSafeAi.evaluationModel(plan.model);
+  const model = plan.kind === "gateway" ? plan.model : typeSafeAi.evaluationModel(JEV_API_MODEL_ID);
   let raw: {
     answers?: Record<string, { choice?: string; probabilities?: Record<string, number> } | undefined>;
     usage?: { inputTokens?: number; outputTokens?: number };
+    response?: { modelId?: string };
   };
   try {
     raw = await experimental_evaluate({
@@ -136,6 +144,7 @@ export async function reviewWithJev(env: Record<string, string | undefined>, pac
   return {
     hash,
     model: JEV_MODEL_ID,
+    responseModel: raw.response?.modelId,
     tokens,
     costUsd: costOf(tokens),
     labels: {

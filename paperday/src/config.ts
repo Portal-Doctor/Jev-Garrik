@@ -70,6 +70,7 @@ export type RunStrategy =
   | "swing_C"
   | "swing_combined"
   | "repo_breakout_4h"
+  | "swing_4h"
   | "intraday_research";
 export type SentimentMode = "sentiment_blind" | "market_proxy";
 export type VariantId = "jev_off" | "jev_veto" | "jev_select";

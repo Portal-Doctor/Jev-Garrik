@@ -63,7 +63,7 @@ export interface OverrideCandidate {
   originatedFromSentiment: boolean;
   /** Explicit add to an open long. Always refused. */
   addOn?: boolean;
-  /** Planned target distance. Absent on the 4h breakout, which has no resting maker target. */
+  /** Planned target distance in bps. The 4h breakout passes the book take-profit. */
   plannedTargetBps?: number | null;
   /** Swing replaces the UTC flat rule with the overnight cap. Breakout is not a day-trade card. */
   entryProfile?: "intraday" | "swing" | "breakout";
@@ -97,6 +97,12 @@ export interface OverrideBook {
   macroCalendarPresent: boolean;
   /** Sum of open loss-to-stop on positions that are still open at the next UTC midnight. */
   overnightOpenRiskUsd?: number;
+  /**
+   * Chicago activity window. Intraday keeps it. Swing and breakout search rows set this
+   * false: those windows were an intraday rule and are not part of the swing or breakout book.
+   * Omitted means the window still applies.
+   */
+  enforceActivityWindow?: boolean;
 }
 
 export interface OverrideCheck {
@@ -238,7 +244,7 @@ export function evaluateOverrides(
     },
     {
       rule: "ideas_per_day",
-      pass: profile === "breakout" || book.ideasTodayCt < ideaCap,
+      pass: book.ideasTodayCt < ideaCap,
       detail: `ideas ${book.ideasTodayCt} cap ${ideaCap} weekend ${clock.weekend}`,
     },
     {
@@ -288,12 +294,12 @@ export function evaluateOverrides(
     },
     {
       rule: "outside_session",
-      pass: profile === "breakout" || clock.inEntryWindow,
-      detail: `ct ${clock.ctHour}:${String(clock.ctMinute).padStart(2, "0")} window ${clock.inEntryWindow}`,
+      pass: profile === "breakout" || book.enforceActivityWindow === false || clock.inEntryWindow,
+      detail: `ct ${clock.ctHour}:${String(clock.ctMinute).padStart(2, "0")} window ${clock.inEntryWindow} profile ${profile}`,
     },
     {
       rule: "macro_blackout",
-      pass: profile === "breakout" || !clock.inMacroBlackout,
+      pass: !clock.inMacroBlackout,
       detail: clock.macroCalendarMissing ? "calendar missing; default slots" : "calendar loaded",
     },
     {
@@ -311,7 +317,7 @@ export function evaluateOverrides(
     {
       rule: "overnight_risk",
       pass:
-        profile !== "swing" ||
+        (profile !== "swing" && profile !== "breakout") ||
         (book.overnightOpenRiskUsd ?? 0) + (candidate.lossToStopUsd ?? 0) <= OVERNIGHT_RISK_CAP_USD,
       detail: `open ${book.overnightOpenRiskUsd ?? 0} plus idea ${candidate.lossToStopUsd ?? 0} cap ${OVERNIGHT_RISK_CAP_USD}`,
     },

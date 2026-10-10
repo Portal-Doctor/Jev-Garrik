@@ -63,7 +63,10 @@ export function applyJevDecision(
 
 export interface CachedReview {
   hash: string;
+  /** Public id. The cache rejects anything else. */
   model: string;
+  /** Provider response id, when the transport recorded one. */
+  responseModel?: string;
   tokens: number;
   costUsd: number;
   labels: JevLabels;
@@ -89,6 +92,16 @@ export class JevReviewCache {
 
   constructor(capUsd = JEV_SEARCH_CAP_USD) {
     this.capUsd = capUsd;
+  }
+
+  peek(hash: string): CachedReview | null {
+    return this.entries.get(hash) ?? null;
+  }
+
+  /** A review already paid for and loaded from disk. It does not add spend or a call. */
+  seed(review: CachedReview): void {
+    if (review.model !== JEV_MODEL_ID) throw new Error(`Jev model id ${review.model} is not ${JEV_MODEL_ID}`);
+    if (!this.entries.has(review.hash)) this.entries.set(review.hash, review);
   }
 
   /**

@@ -161,7 +161,7 @@ test("overnight risk cap is $500 and forward swing stays unapproved", () => {
   expect(swingEntryAllowed(true)).toBe(true);
 });
 
-test("repo breakout signals have no maker target and do not trade", async () => {
+test("repo breakout uses the book take-profit and this sparse tape does not fill", async () => {
   const start = Date.parse("2026-04-01T00:00:00.000Z");
   const bars = Array.from({ length: 80 }, (_, i) => {
     const close = 100 + i;
@@ -188,6 +188,7 @@ test("repo breakout signals have no maker target and do not trade", async () => 
     variant: "jev_off",
   });
   expect(result.trades).toBe(0);
-  expect(result.rejects.below_fee_floor ?? 0).toBeGreaterThan(0);
+  expect(result.rejects.below_fee_floor ?? 0).toBe(0);
+  expect(result.qualified).toBeGreaterThan(0);
   expect(result.netUsd).toBe(0);
 });

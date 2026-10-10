@@ -27,15 +27,17 @@ export { MIN_TRADES, requiredGate, targetGate };
 export interface WidthStats {
   n: number;
   min: number | null;
+  p10: number | null;
   p25: number | null;
   p50: number | null;
   p75: number | null;
+  p90: number | null;
   max: number | null;
   mean: number | null;
 }
 
 export function widthStats(values: number[]): WidthStats {
-  if (values.length === 0) return { n: 0, min: null, p25: null, p50: null, p75: null, max: null, mean: null };
+  if (values.length === 0) return { n: 0, min: null, p10: null, p25: null, p50: null, p75: null, p90: null, max: null, mean: null };
   const xs = values.slice().sort((a, b) => a - b);
   const q = (p: number) => {
     const i = (xs.length - 1) * p;
@@ -47,9 +49,11 @@ export function widthStats(values: number[]): WidthStats {
   return {
     n: xs.length,
     min: xs[0]!,
+    p10: q(0.1),
     p25: q(0.25),
     p50: q(0.5),
     p75: q(0.75),
+    p90: q(0.9),
     max: xs[xs.length - 1]!,
     mean: xs.reduce((s, x) => s + x, 0) / xs.length,
   };
