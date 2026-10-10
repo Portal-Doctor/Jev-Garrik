@@ -1,0 +1,17 @@
+{
+  "version": "v2",
+  "holdoutV1": "consumed, pre-contaminated",
+  "gridVersion": "v2",
+  "gridHash": "83dcf3dff0bd47de9832a667edfa2e43a74a74989553bef9c87400e9a6f29ce2",
+  "configHash": null,
+  "answerId": null,
+  "onlyBreakout": false,
+  "jevWinners": [],
+  "frozen": [],
+  "plannedStart": "Starts when Brian runs the forward-paper command on the home PC. The 30-day clock is not running.",
+  "startedAt": null,
+  "windowDays": 30,
+  "jevStage": 0,
+  "swingApprovedConstant": false,
+  "command": "PAPERDAY_SWING_APPROVED=true PAPERDAY_FORWARD_CONFIRM=1 bun run paperday/src/forward-paper.ts"
+}

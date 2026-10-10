@@ -8,3 +8,8 @@ cb_run.err
 
 # database backups created during maintenance (see docs/DEPLOY.md)
 *.dump
+
+# paperday runtime and candle cache (summaries under paperday/results are committed)
+paperday/cache/
+paperday/data/
+paperday/backup/

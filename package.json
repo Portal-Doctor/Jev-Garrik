@@ -27,6 +27,7 @@
     "engines:down": "docker compose stop cb",
     "ui:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ui-start.ps1",
     "ui:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ui-stop.ps1",
-    "test": "bun test cb"
+    "test": "bun test cb",
+    "test:paperday": "bun test paperday"
   }
 }
