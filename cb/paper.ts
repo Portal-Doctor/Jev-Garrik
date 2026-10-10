@@ -158,7 +158,10 @@ export class PaperBroker implements Broker {
     if (restUrl) await this.loadTicks(restUrl);
     await this.restore();
     this.tickTimer = setInterval(() => this.tick(), 1_000);
-    this.snapTimer = setInterval(() => void this.snapshot(), 60_000);
+    this.snapTimer = setInterval(
+      () => void this.snapshot().catch((e) => console.error("snapshot:", (e as Error).message)),
+      60_000,
+    );
   }
 
   /** Replay paper fills and leftover orders so a container restart does not flatten inventory. */

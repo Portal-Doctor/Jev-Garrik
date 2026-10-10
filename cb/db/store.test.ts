@@ -100,3 +100,31 @@ test("decisionsDueForResolve returns due horizons lacking an outcome", async () 
   expect(after.some((d) => d.id === id && Number(d.horizon_sec) === 3600)).toBe(false); // resolved, no longer due
 });
 
+test("queries succeed after the postgres session is terminated", async () => {
+  const isolated = new Store(config.databaseUrl);
+  await isolated.init();
+  try {
+    try {
+      await isolated.sql`SELECT pg_terminate_backend(pg_backend_pid())`;
+    } catch {
+      /* Bun reports Connection closed; the next query must still work. */
+    }
+    const rows = await isolated.sql<{ n: number }[]>`SELECT 1::int AS n`;
+    expect(rows[0]!.n).toBe(1);
+    await isolated.insertRun({
+      id: `${runId}-reconnect`,
+      mode: "paper",
+      model: "mock",
+      pairs: "SOL-USD",
+      config: { reconnect: true },
+      git_sha: null,
+      started_at: Date.now(),
+    });
+    const found = await isolated.sql<{ id: string }[]>`SELECT id FROM runs WHERE id = ${`${runId}-reconnect`}`;
+    expect(found.length).toBe(1);
+  } finally {
+    await isolated.sql`DELETE FROM runs WHERE id = ${`${runId}-reconnect`}`.catch(() => undefined);
+    await isolated.close();
+  }
+});
+

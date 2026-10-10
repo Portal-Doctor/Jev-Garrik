@@ -11,6 +11,7 @@ assertPairBooks(pairs, {
 });
 if (pairs.length === 0) throw new Error("CB_PAIRS has no enabled book");
 import { Store } from "./db/store";
+import { isPostgresDisconnect } from "./db/reconnect";
 import { Feed } from "./feed";
 import { createModel } from "./model";
 import { Engine } from "./engine";
@@ -34,6 +35,23 @@ const gitSha = await (async () => {
 })();
 
 const store = new Store(config.databaseUrl);
+
+const absorbPostgres = (err: unknown, label: string): boolean => {
+  if (!isPostgresDisconnect(err)) return false;
+  console.error(`${label}: ${(err as Error).message}`);
+  void store.reconnect();
+  return true;
+};
+process.on("uncaughtException", (err) => {
+  if (absorbPostgres(err, "postgres uncaught")) return;
+  console.error(err);
+  process.exit(1);
+});
+process.on("unhandledRejection", (err) => {
+  if (absorbPostgres(err, "postgres rejection")) return;
+  console.error("unhandledRejection", err);
+});
+
 await store.init();
 
 const runId = crypto.randomUUID();
