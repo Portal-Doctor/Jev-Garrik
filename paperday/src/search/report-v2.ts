@@ -58,6 +58,7 @@ export interface SearchV2Report {
   foldLines: string[];
   parity: { blind: number; proxy: number; searchBlind: number; searchProxy: number; pass: boolean };
   breakoutTrades: number | null;
+  breakoutByAllocator: string;
   repoReplayNet: number | null;
   repoReplayTrades: number | null;
   repoDocNet: number;
@@ -122,7 +123,7 @@ export function renderSearchV2(report: SearchV2Report): string {
   lines.push("## Repo breakout sanity");
   lines.push("");
   lines.push(
-    `Search rows closed ${report.breakoutTrades ?? "n/a"} trades across the two breakout allocators' out-of-sample folds (sum of the two rows, so a trade is not double-counted in the answer). Jul–Sep 2026 cb/breakout.ts replay net $${money(report.repoReplayNet)} on ${report.repoReplayTrades ?? "n/a"} trades. The repo doc is $${report.repoDocNet.toFixed(2)} at 50/90 on the book notionals. Gap $${money(report.repoReplayNet == null ? null : report.repoReplayNet - report.repoDocNet)}. Different sizing and fill model; the gap is not a pass/fail.`,
+    `Out-of-sample breakout trades by allocator: ${report.breakoutByAllocator}. Jul–Sep 2026 cb/breakout.ts replay net $${money(report.repoReplayNet)} on ${report.repoReplayTrades ?? "n/a"} trades. The repo doc is $${report.repoDocNet.toFixed(2)} at 50/90 on the book notionals. Gap $${money(report.repoReplayNet == null ? null : report.repoReplayNet - report.repoDocNet)}. Different sizing and fill model; the gap is not a pass/fail.`,
   );
   lines.push("");
   lines.push("## 6b stop widths");
@@ -229,6 +230,7 @@ export function renderSearchV2(report: SearchV2Report): string {
   lines.push("");
   lines.push(`Config hash \`${report.configHash ?? "none"}\`. Planned start: ${report.plannedStart}`);
   lines.push("The 30-day clock has not started. It starts when Brian runs the command on the home PC.");
+  if (!report.configHash) lines.push("No config was eligible, so that command refuses and does not start the clock.");
   lines.push("");
   lines.push("```bash");
   lines.push(report.command);

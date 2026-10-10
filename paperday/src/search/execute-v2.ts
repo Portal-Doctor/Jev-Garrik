@@ -477,7 +477,7 @@ export async function runSearchV2(paths: V2Paths = v2Paths()): Promise<void> {
   const replay = replayRepoBreakout(candles, Date.UTC(2026, 6, 1), Date.UTC(2026, 9, 1));
   const breakoutRanked = ranked.filter((row) => row.score.strategy === "repo_breakout_4h");
   const bestBreakout = breakoutRanked.slice().sort((a, b) => b.score.oosNetUsd - a.score.oosNetUsd)[0] ?? null;
-  const sides = sideBySide(answer, jev.variants, bestBreakout);
+  const sides = sideBySide(answer, ranked[0] ?? null, jev.variants, bestBreakout);
   const top = ranked.slice(0, 10);
   let attempts = 0;
   let fills = 0;
@@ -525,6 +525,7 @@ export async function runSearchV2(paths: V2Paths = v2Paths()): Promise<void> {
     foldLines,
     parity,
     breakoutTrades: breakoutRanked.reduce((s, row) => s + row.score.oosTrades, 0),
+    breakoutByAllocator: breakoutRanked.map((row) => `${row.score.id} ${row.score.oosTrades}`).join("; ") || "none",
     repoReplayNet: replay.netUsd,
     repoReplayTrades: replay.trades,
     repoDocNet: 1171.8,
@@ -565,6 +566,7 @@ export async function runSearchV2(paths: V2Paths = v2Paths()): Promise<void> {
 }
 
 function freezeConfigs(configs: readonly SearchConfig[], answer: RankedV2 | null, variants: JevVariantReport[], baseline: RankedV2 | null): SearchConfig[] {
+  if (!answer) return [];
   const ids = new Set<string>();
   const out: SearchConfig[] = [];
   const add = (id: string | null | undefined) => {
@@ -574,7 +576,7 @@ function freezeConfigs(configs: readonly SearchConfig[], answer: RankedV2 | null
     ids.add(id);
     out.push(cfg);
   };
-  add(answer?.score.id);
+  add(answer.score.id);
   add(baseline?.score.id);
   for (const variant of variants) {
     if (variant.wins) add(variant.baseId);
@@ -582,8 +584,9 @@ function freezeConfigs(configs: readonly SearchConfig[], answer: RankedV2 | null
   return out;
 }
 
-function sideBySide(answer: RankedV2 | null, variants: JevVariantReport[], baseline: RankedV2 | null): SideRow[] {
+function sideBySide(answer: RankedV2 | null, topOff: RankedV2 | null, variants: JevVariantReport[], baseline: RankedV2 | null): SideRow[] {
   const winner = variants.filter((row) => row.wins).sort((a, b) => b.totalJevAfterCost - a.totalJevAfterCost)[0];
+  const shown = answer ?? topOff;
   const jevRow: SideRow = winner
     ? {
         label: "best Jev",
@@ -597,16 +600,16 @@ function sideBySide(answer: RankedV2 | null, variants: JevVariantReport[], basel
         jevSpendUsd: winner.totalCostUsd,
       }
     : { label: "best Jev", id: "none", oosNetUsd: null, oosMaxDrawdownUsd: null, oosTrades: null, eR: null, pStar: null, positiveFolds: "", jevSpendUsd: 0 };
-  const off: SideRow = answer
+  const off: SideRow = shown
     ? {
-        label: "best jev_off",
-        id: answer.score.id,
-        oosNetUsd: answer.score.oosNetUsd,
-        oosMaxDrawdownUsd: answer.score.oosMaxDrawdownUsd,
-        oosTrades: answer.score.oosTrades,
-        eR: answer.score.eR,
-        pStar: answer.score.pStar,
-        positiveFolds: `${answer.score.positiveFolds}/${answer.score.foldCount}`,
+        label: shown.eligible ? "best jev_off" : "best jev_off (not eligible)",
+        id: shown.score.id,
+        oosNetUsd: shown.score.oosNetUsd,
+        oosMaxDrawdownUsd: shown.score.oosMaxDrawdownUsd,
+        oosTrades: shown.score.oosTrades,
+        eR: shown.score.eR,
+        pStar: shown.score.pStar,
+        positiveFolds: `${shown.score.positiveFolds}/${shown.score.foldCount}`,
         jevSpendUsd: 0,
       }
     : { label: "best jev_off", id: "none", oosNetUsd: null, oosMaxDrawdownUsd: null, oosTrades: null, eR: null, pStar: null, positiveFolds: "", jevSpendUsd: 0 };

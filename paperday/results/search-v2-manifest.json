@@ -867,12 +867,20 @@
   },
   "gridHash": "83dcf3dff0bd47de9832a667edfa2e43a74a74989553bef9c87400e9a6f29ce2",
   "gridHashedAt": "2026-10-10T13:38:40.741Z",
-  "pnlStartedAt": null,
+  "pnlStartedAt": "2026-10-10T13:40:14.124Z",
   "priorProbe": {
     "calls": 1,
     "tokens": 405,
     "spendUsd": 0.00001701,
     "responseModel": "jev-1.13.0",
     "note": "Stopped probe of the direct API. Public id typesafe-ai/jev is unknown there; jev-latest answered as jev-1.13.0. Not a grid-v1 run."
-  }
+  },
+  "parity": {
+    "blind": 12,
+    "proxy": 11,
+    "searchBlind": 12,
+    "searchProxy": 11,
+    "pass": true
+  },
+  "candleHash": "fcd7391e0efd5ec545e526df598f98c4d12bfc089c89d5535a19e50b9fa82a81"
 }
