@@ -273,8 +273,9 @@ export async function measureParity(candles: Record<string, Candle[]>, btc: Cand
   };
   const blind = await runSwing(base);
   const proxyRun = await runSwing({ ...base, sentimentMode: "market_proxy", proxy });
-  const searchBlind = await runSwing({ ...base, targetR: 3 });
-  const searchProxy = await runSwing({ ...base, targetR: 3, sentimentMode: "market_proxy", proxy });
+  const searchTarget = harnessTarget("swing_combined", 3);
+  const searchBlind = await runSwing({ ...base, targetR: searchTarget });
+  const searchProxy = await runSwing({ ...base, targetR: searchTarget, sentimentMode: "market_proxy", proxy });
   const pass = blind.trades === 12 && proxyRun.trades === 11 && searchBlind.trades === 12 && searchProxy.trades === 11;
   return { blind: blind.trades, proxy: proxyRun.trades, searchBlind: searchBlind.trades, searchProxy: searchProxy.trades, pass };
 }
@@ -294,6 +295,16 @@ function loadCheckpoint(path: string): Map<string, CheckpointRow> {
     out.set(row.id, row);
   }
   return out;
+}
+
+/**
+ * The 1h grid's registered 3R is the turn-1 target band (2.5R–4R, or the nearer
+ * 4h swing high). A fixed 3R multiple on that same window produced 1 trade
+ * instead of 12. 4R stays the fixed multiple. swing_4h keeps searchSwingTarget.
+ */
+export function harnessTarget(strategy: string, targetR: number | null): number | undefined {
+  if (strategy !== "swing_4h" && strategy !== "repo_breakout_4h" && targetR === 3) return undefined;
+  return targetR ?? undefined;
 }
 
 async function runConfigWindow(
@@ -319,7 +330,7 @@ async function runConfigWindow(
     variant: extra.variant ?? "jev_off",
     prepared,
     stopAtrMult: cfg.stopAtrMult ?? undefined,
-    targetR: cfg.targetR ?? undefined,
+    targetR: harnessTarget(cfg.strategy, cfg.targetR),
     maxHoldMs: cfg.maxHoldHours != null ? cfg.maxHoldHours * 3_600_000 : undefined,
     activityWindow: false,
     ...extra,

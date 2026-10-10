@@ -112,7 +112,7 @@ export function renderSearchV2(report: SearchV2Report): string {
   lines.push("## Harness parity");
   lines.push("");
   lines.push(
-    `Turn-1 6m swing_combined, 2× ATR, turn-1 target band, 48h, POOL equal, Chicago window on: sentiment-blind ${report.parity.blind} trades, market-proxy ${report.parity.proxy} trades. Expected 12 and 11. Search runWindow at the same defaults: blind ${report.parity.searchBlind}, proxy ${report.parity.searchProxy}. Pass: ${report.parity.pass}.`,
+    `Turn-1 6m swing_combined, 2× ATR, the 2.5R–4R band, 48h, POOL equal, Chicago window on: sentiment-blind ${report.parity.blind} trades, market-proxy ${report.parity.proxy} trades. Expected 12 and 11. Search runWindow at 2× / 3R / 48h uses that same band for every 1h 3R row: blind ${report.parity.searchBlind}, proxy ${report.parity.searchProxy}. A fixed 3R multiple on this window produced 1 and 1, so it is not the harness. 4R stays a fixed multiple. swing_4h 3R stays the fixed multiple or the nearer daily swing high. Pass: ${report.parity.pass}.`,
   );
   lines.push("");
   lines.push("## Folds");

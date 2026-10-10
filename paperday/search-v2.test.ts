@@ -3,7 +3,7 @@ import { SWING_APPROVED } from "./src/config";
 import { btcClauseFlag, emptyClauses } from "./src/proxy";
 import { buildFoldsV2, ninthOnOrAfter } from "./src/search/folds-v2";
 import { applyCellDrops, assertGridCap, buildGridV2Universe, dropCell, median, validateGridV2, gridFileV2, GRID_V2_CAP } from "./src/search/grid-v2";
-import { dropsBeforePnl, forwardCommand } from "./src/search/execute-v2";
+import { dropsBeforePnl, forwardCommand, harnessTarget } from "./src/search/execute-v2";
 import { eligibilityV2, foldBeats, positiveFoldShare, scoreConfigV2, selectTestable, vetoMargin, type FoldScoreV2 } from "./src/search/rank-v2";
 import { planForward } from "./src/forward-paper";
 import { openHoldout } from "./src/search/holdout";
@@ -100,6 +100,14 @@ test("BTC clause flag trips above 40 percent of pair-days", () => {
   const over = { ...emptyClauses(), pairDays: 10, btcPairDays: 5 };
   expect(btcClauseFlag(under)).toBe(false);
   expect(btcClauseFlag(over)).toBe(true);
+});
+
+test("1h target 3 is the turn-1 band and 4R stays a fixed multiple", () => {
+  expect(harnessTarget("swing_combined", 3)).toBeUndefined();
+  expect(harnessTarget("swing_A", 4)).toBe(4);
+  expect(harnessTarget("swing_4h", 3)).toBe(3);
+  expect(harnessTarget("swing_4h", 4)).toBe(4);
+  expect(harnessTarget("repo_breakout_4h", null)).toBeUndefined();
 });
 
 test("drop timestamp is earlier than the first P&L, and swing stays unapproved", () => {
