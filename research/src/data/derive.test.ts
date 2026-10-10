@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { MinuteRow } from "./candles";
 import { deriveBars } from "./derive";
+import { BAR_SEC } from "./time";
 
 function filled(minuteSec: number, close: string, high = close, low = close, volume = "1"): MinuteRow {
   return { minuteSec, empty: false, open: close, high, low, close, volume };
@@ -12,14 +13,14 @@ function empty(minuteSec: number): MinuteRow {
 
 function grid(start: number, end: number, at: (minuteSec: number) => MinuteRow): MinuteRow[] {
   const rows: MinuteRow[] = [];
-  for (let minuteSec = start; minuteSec < end; minuteSec += 60) rows.push(at(minuteSec));
+  for (let minuteSec = start; minuteSec < end; minuteSec += BAR_SEC) rows.push(at(minuteSec));
   return rows;
 }
 
 test("bars that end at 00:00 UTC belong to the previous period", () => {
   const start = Date.parse("2023-10-01T00:00:00.000Z") / 1000;
   const end = Date.parse("2023-10-02T00:00:00.000Z") / 1000;
-  const minutes = grid(start, end, (minuteSec) => filled(minuteSec, minuteSec === end - 60 ? "2" : "1"));
+  const minutes = grid(start, end, (minuteSec) => filled(minuteSec, minuteSec === end - BAR_SEC ? "2" : "1"));
   const days = deriveBars(minutes, "1d", start, end);
   expect(days).toHaveLength(1);
   expect(days[0]?.openTs).toBe(start);
@@ -69,9 +70,10 @@ test("empty minutes stay empty and are not filled from neighbors", () => {
   expect(blank?.close).toBeNull();
   expect(blank?.volume).toBeNull();
 
+  const barsInHour = 3600 / BAR_SEC;
   const mixed = grid(start, start + 3600, (minuteSec) => {
     if (minuteSec === start) return filled(minuteSec, "5", "6", "4", "1.5");
-    if (minuteSec === start + 59 * 60) return filled(minuteSec, "8", "9", "7", "2.5");
+    if (minuteSec === start + (barsInHour - 1) * BAR_SEC) return filled(minuteSec, "8", "9", "7", "2.5");
     return empty(minuteSec);
   });
   const [bar] = deriveBars(mixed, "1h", start, start + 3600);
@@ -81,7 +83,7 @@ test("empty minutes stay empty and are not filled from neighbors", () => {
   expect(bar?.high).toBe("9");
   expect(bar?.low).toBe("4");
   expect(bar?.volume).toBe("4");
-  expect(bar?.emptyMinutes).toBe(58);
+  expect(bar?.emptyMinutes).toBe(barsInHour - 2);
 
   const previous = grid(start, start + 3600, (minuteSec) => filled(minuteSec, "100"));
   const following = grid(start + 3600, start + 7200, empty);

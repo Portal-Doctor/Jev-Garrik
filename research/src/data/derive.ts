@@ -1,6 +1,6 @@
 import type { MinuteRow } from "./candles";
 import { addDecimal, compareDecimal, formatDecimal, parseDecimal } from "./decimal";
-import { DAY_SEC, FOUR_HOUR_SEC, HOUR_SEC, MINUTE_SEC } from "./time";
+import { BAR_SEC, DAY_SEC, FOUR_HOUR_SEC, HOUR_SEC } from "./time";
 
 export type Timeframe = "1h" | "4h" | "1d";
 
@@ -47,7 +47,7 @@ export function deriveBars(
 function aggregate(byMinute: Map<number, MinuteRow>, open: number, end: number, timeframe: Timeframe): DerivedBar {
   const filled: MinuteRow[] = [];
   let emptyMinutes = 0;
-  for (let minuteSec = open; minuteSec < end; minuteSec += MINUTE_SEC) {
+  for (let minuteSec = open; minuteSec < end; minuteSec += BAR_SEC) {
     const row = byMinute.get(minuteSec);
     if (!row) throw new Error(`missing minute ${minuteSec} in ${timeframe} bucket ${open}`);
     if (row.empty) emptyMinutes += 1;

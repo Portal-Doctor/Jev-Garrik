@@ -1,4 +1,4 @@
-import { MINUTE_SEC } from "./time";
+import { BAR_SEC } from "./time";
 
 /** One exchange candle, with price and volume kept as the JSON number tokens. */
 export interface CandleLexeme {
@@ -47,17 +47,17 @@ export function parseCandlePayload(text: string): CandleLexeme[] {
   return out;
 }
 
-/** Every minute in [startSec, endSec) is present. Missing minutes are empty, not filled. */
+/** Every bar in [startSec, endSec) is present. Missing bars are empty, not filled. */
 export function minutesForChunk(startSec: number, endSec: number, candles: readonly CandleLexeme[]): MinuteRow[] {
   const byMinute = new Map<number, CandleLexeme>();
   for (const candle of candles) {
     if (candle.minuteSec < startSec || candle.minuteSec >= endSec) continue;
-    if (candle.minuteSec % MINUTE_SEC !== 0) throw new Error(`off-grid candle ${candle.minuteSec}`);
+    if (candle.minuteSec % BAR_SEC !== 0) throw new Error(`off-grid candle ${candle.minuteSec}`);
     if (byMinute.has(candle.minuteSec)) throw new Error(`duplicate candle ${candle.minuteSec}`);
     byMinute.set(candle.minuteSec, candle);
   }
   const rows: MinuteRow[] = [];
-  for (let minuteSec = startSec; minuteSec < endSec; minuteSec += MINUTE_SEC) {
+  for (let minuteSec = startSec; minuteSec < endSec; minuteSec += BAR_SEC) {
     const candle = byMinute.get(minuteSec);
     if (!candle) {
       rows.push({ minuteSec, empty: true, open: null, high: null, low: null, close: null, volume: null });

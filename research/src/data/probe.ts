@@ -98,7 +98,7 @@ async function requestWindow(
     start: isoFromSec(window.startSec),
     end: isoFromSec(window.endSec),
   };
-  const url = candlesUrl(pair, window.startSec, window.endSec - MINUTE_SEC);
+  const url = candlesUrl(pair, window.startSec, window.endSec - MINUTE_SEC, 60);
   for (let attempt = 0; attempt < 6; attempt++) {
     await pace();
     try {

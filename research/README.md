@@ -19,7 +19,7 @@ bunx tsc --noEmit -p research/tsconfig.json
 
 ## Commands
 
-Public exchange endpoints only. `RESEARCH_DATA_DIR` overrides the data directory (default `research/data`). `RESEARCH_REQUEST_INTERVAL_MS` defaults to 150.
+Public exchange endpoints only. `RESEARCH_DATA_DIR` overrides the data directory (default `research/data`). Download uses `RESEARCH_REQUEST_INTERVAL_MS` (default 100) and `RESEARCH_DOWNLOAD_CONCURRENCY` (default 10). Probe and other commands that take the interval use the same variable, and probe still defaults to 100 when it is unset.
 
 ```
 bun run research/src/cli.ts snapshot
@@ -32,7 +32,13 @@ bun run research/src/cli.ts seal-snapshot
 bun run research/src/cli.ts p1-report
 ```
 
-`download` refuses to resume after `seal-snapshot`. The owner froze this download on 2026-10-10. Do not start it again against this manifest.
+`download` resumes an in-progress manifest. A freeze that was applied before every USD product was stored is lifted and the reason is written to `snapshotLift`. A freeze with `universeComplete: true` stays frozen and download refuses to resume.
+
+Public candle requests stay at or under Coinbase's sustained public limit of 10 requests per second per IP (`RESEARCH_REQUEST_INTERVAL_MS` defaults to 100). `RESEARCH_DOWNLOAD_CONCURRENCY` defaults to 10 so that many requests can be in flight without raising the start rate. Each request aborts after 20 seconds and retries. Remove `research/data/STOP` before resuming. The candle files under `research/data/candles/` have to still be on this machine; the manifest records their hashes and does not contain the bytes.
+
+```
+bun run research/src/cli.ts download
+```
 
 P1 task 9, the 24h revision check, was dropped by Brian on 2026-10-10 18:16 CT. `research/src/data/revision.ts` and its tests remain in the tree unused. The CLI names `revision-sample` and `revision-check` exit without fetching or writing a sample. The revision check is not an open item for the hash.
 
@@ -42,9 +48,9 @@ P1 task 9, the 24h revision check, was dropped by Brian on 2026-10-10 18:16 CT. 
 |---|---|---|
 | `research/data/products/exchange-products.raw.json` | yes | Exact exchange `/products` response bytes |
 | `research/data/products/usd-spot.json` | yes | USD quote rows: status, base, quote, current `quote_increment`, listing date null |
-| `research/data/candles/<PAIR>/<YYYY-MM>.sqlite` | no | One file per pair-month. Empty minutes are stored as empty |
+| `research/data/candles/<PAIR>/<YYYY-MM>.sqlite` | no | One file per pair-month. Empty bars are stored as empty |
 | `research/data/data-manifest.json` | yes | Per-file SHA-256, the root hash, and the freeze record |
-| `research/data/derived/` | no | 1h, 4h, and daily bars derived from the 1m files |
+| `research/data/derived/` | no | 1h, 4h, and daily bars derived from the stored candles |
 | `research/data/reports/` | yes | Delisted probe, tick flags, coverage, P1 report |
 
 Candle and derived files are gitignored. This snapshot's pair-month files were written under `research/data/candles/` on the download host and are not in git. `data-manifest.json` is the committed record of each path, byte size, and SHA-256. Recomputing the root hash requires those sqlite files.
@@ -77,10 +83,12 @@ That checks the files on disk against the frozen manifest. It does not re-downlo
 
 ## Window
 
-1-minute candles from 2023-10-01T00:00:00.000Z through 00:00 UTC of the day the download ran (the latest completed UTC day). The exchange product payload has no listing timestamp, so this run did not start any product later than 2023-10-01.
+Candles use `BAR_SEC` in `research/src/data/time.ts` (300 for five-minute, 900 for fifteen-minute). The window is 365 days ending at 00:00 UTC of the day the download started. Empty bars at that spacing are stored as empty. The exchange product payload has no listing timestamp. `effectiveListing` is the first nonempty bar inside the window and is not a listing-date decision.
 
-The frozen root hash covers 58 complete pair-month files: `00-USD` from 2023-10 through 2026-10, and `1INCH-USD` from 2023-10 through 2025-06. An incomplete `1INCH-USD/2025-07.partial.sqlite` was left on the download host when the process stopped. It is not in the root hash. Coverage lists that month as incomplete. The other 490 USD products in the snapshot have no candle files.
+The download covers every USD product in the snapshot, including delisted products that return candles, unless an owner decision recorded in `reports/owner-decision.json` cuts the universe. A 404 does not invent empty bars; that product is marked unavailable and the rest of its months are skipped.
 
-## Snapshot freeze
+Coverage leaves `listingDate` null. When a product has a nonempty candle, `effectiveListing` is `first available candle`. That flag is not a listing-date decision. The listing-date questions stay open.
 
-`data-manifest.json` field `snapshot` records `downloadStartedAt`, `downloadUpdatedAt`, and `frozenAt`. The same block is copied into `research/data/reports/p1-report.json`.
+## Snapshot
+
+An earlier freeze of the partial 58-file download was lifted. Its root `67b8963191a52383657fff6bd6bc505327aa540fe4009de6d264e2c4cd2799d8` is the superseded hash recorded on `snapshotLift` until a completed download replaces it. Download start stays `createdAt` on the manifest. When every product has been processed, download seals `snapshot.status` as `frozen` with `universeComplete: true`, the final root hash, the download start, the last update, and the freeze timestamp. The same block is copied into `research/data/reports/p1-report.json`.

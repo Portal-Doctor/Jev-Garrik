@@ -11,7 +11,7 @@ export interface PairMonthMeta {
   month: string;
   windowStart: string;
   windowEnd: string;
-  granularitySec: "60";
+  granularitySec: string;
   emptyPolicy: "recorded-not-filled";
   writerVersion: typeof WRITER_VERSION;
 }
@@ -93,7 +93,7 @@ export function readPairMonth(path: string): { meta: PairMonthMeta; rows: Minute
       month: required(metaMap, "month"),
       windowStart: required(metaMap, "window_start"),
       windowEnd: required(metaMap, "window_end"),
-      granularitySec: "60",
+      granularitySec: required(metaMap, "granularity_sec"),
       emptyPolicy: "recorded-not-filled",
       writerVersion: WRITER_VERSION,
     };
@@ -102,6 +102,16 @@ export function readPairMonth(path: string): { meta: PairMonthMeta; rows: Minute
     }
     const sqlRows = db.query("SELECT minute_ts, open, high, low, close, volume, empty FROM minutes ORDER BY minute_ts").all() as SqlMinute[];
     return { meta, rows: sqlRows.map(toMinute) };
+  } finally {
+    db.close();
+  }
+}
+
+export function minuteCount(path: string): number {
+  const db = new Database(path, { readonly: true });
+  try {
+    const row = db.query("SELECT COUNT(*) AS n FROM minutes").get() as { n: number };
+    return row.n;
   } finally {
     db.close();
   }

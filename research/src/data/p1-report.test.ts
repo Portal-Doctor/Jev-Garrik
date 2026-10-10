@@ -32,6 +32,7 @@ test("the P1 report freezes the snapshot and does not leave the revision check o
   const coverage = {
     ...stamp,
     dataRootHash: "root",
+    barSec: 300,
     productCount: 2,
     products: [
       {
@@ -43,6 +44,7 @@ test("the P1 report freezes the snapshot and does not leave the revision check o
         delisted: false,
         tickSize: "0.0001",
         listingDate: null,
+        effectiveListing: "first available candle",
         probe: { sampled: false, candlesServed: null },
         unavailable: null,
         firstNonemptyBar: "2023-10-01T00:09:00.000Z",
@@ -59,6 +61,7 @@ test("the P1 report freezes the snapshot and does not leave the revision check o
         delisted: true,
         tickSize: "0.0001",
         listingDate: null,
+        effectiveListing: null,
         probe: { sampled: true, candlesServed: true },
         unavailable: null,
         firstNonemptyBar: null,
@@ -89,13 +92,13 @@ test("the P1 report freezes the snapshot and does not leave the revision check o
     ],
   } satisfies TickReport;
   const report = buildP1Report({ stamp, manifest, coverage, probe, ticks });
-  expect(report.snapshot.status).toBe("frozen");
+  expect(report.snapshot?.status).toBe("frozen");
   expect(report.revisionCheck).toEqual({
     status: "dropped",
     openItemForHash: false,
     note: expect.stringContaining("not an open item"),
   });
-  expect(report.openQuestions.map((item) => item.id)).toEqual(["listing-date", "delisted-trading-life"]);
+  expect(report.openQuestions.map((item) => item.id)).toEqual(["listing-date", "effective-listing", "delisted-trading-life"]);
   expect(report.coverage.products[0]?.yearsOfDownloadedHistory).toBe("3.00");
   expect(report.coverage.products[1]?.yearsOfDownloadedHistory).toBeNull();
   expect(findBannedKeys(report)).toEqual([]);

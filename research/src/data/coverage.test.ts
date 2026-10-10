@@ -9,10 +9,11 @@ import { writePairMonth, WRITER_VERSION } from "./store";
 
 const stamp = {
   commitSha: "f".repeat(40),
-  dataRootHash: "abc",
-  createdAt: "2026-10-10T00:00:00.000Z",
-  phaseId: "P1",
-};
+    dataRootHash: "abc",
+    createdAt: "2026-10-10T00:00:00.000Z",
+    phaseId: "P1",
+    barSec: 300,
+  };
 
 function product(productId: string, statusRaw: string): UsdSpotProduct {
   return {
@@ -62,6 +63,9 @@ test("coverage lists every snapshot product, including delisted, with the probe 
   expect(btc?.probe).toEqual({ sampled: false, candlesServed: null });
   expect(btc?.months[0]?.pctNonempty).toBe("50.0000");
   expect(btc?.firstNonemptyBar).toBe("2023-10-01T00:00:00.000Z");
+  expect(btc?.effectiveListing).toBe("first available candle");
+  expect(btc?.listingDate).toBeNull();
+  expect(lrc?.effectiveListing).toBeNull();
   expect(lrc?.delisted).toBe(true);
   expect(lrc?.probe).toEqual({ sampled: true, candlesServed: true });
   expect(lrc?.months).toEqual([]);

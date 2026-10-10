@@ -8,7 +8,7 @@ import { candleFile, partialFile } from "./paths";
 import type { ProbeProductResult } from "./probe";
 import type { UsdSpotProduct } from "./products";
 import { openPartial, readPairMonth, readPartialMinutes } from "./store";
-import { DAY_SEC, isoFromSec } from "./time";
+import { BAR_SEC, DAY_SEC, isoFromSec } from "./time";
 
 export interface CoverageMonth {
   month: string;
@@ -29,6 +29,8 @@ export interface CoverageRow {
   delisted: boolean;
   tickSize: string | null;
   listingDate: null;
+  /** Set when a nonempty candle exists. This is not a decided listing date. */
+  effectiveListing: "first available candle" | null;
   probe: {
     sampled: boolean;
     candlesServed: boolean | null;
@@ -41,6 +43,7 @@ export interface CoverageRow {
 }
 
 export interface CoverageReport extends ArtifactStamp {
+  barSec: number;
   productCount: number;
   products: CoverageRow[];
 }
@@ -55,6 +58,7 @@ export function buildCoverage(opts: {
   const products = opts.products.map((product) => coverageRow(product, probeById.get(product.productId), opts.dataDir));
   const report: CoverageReport = {
     ...opts.stamp,
+    barSec: BAR_SEC,
     productCount: products.length,
     products,
   };
@@ -76,6 +80,7 @@ function coverageRow(product: UsdSpotProduct, probe: ProbeProductResult | undefi
     delisted: product.status === "delisted",
     tickSize: product.tickSize,
     listingDate: null,
+    effectiveListing: first == null ? null : "first available candle",
     probe: {
       sampled: probe != null,
       candlesServed: probe ? probe.candlesServed : null,
