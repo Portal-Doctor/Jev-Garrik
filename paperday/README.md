@@ -8,6 +8,8 @@ bun test paperday
 
 `bun run paperday/src/backtest-cli.ts` replays the `jev_off` variant on the Coinbase public candle cache. `jev_veto` and `jev_select` are wired and unit-tested with a mock transport. The backtest does not call them.
 
+`bun run paperday/src/search-cli.ts` runs the pre-registered walk-forward search in `paperday/search/grid-v1.json`. The grid hash is locked before the run. The last month is a holdout and is opened once.
+
 Home PC stack: `docker compose -f paperday/compose.yml up -d`. Postgres and the report bind to `127.0.0.1`. Startup throws if `COINBASE_API_*` or another order-capable credential is set.
 
 ## Assumptions

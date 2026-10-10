@@ -41,7 +41,7 @@ import { findSetups, type Candidate, type DecisionSnapshot } from "./rules";
 import { blankAllocator, release } from "./allocator";
 import { MemoryStore } from "./store";
 import type { EngineResult } from "./engine";
-import { lossToStopUsd, overnightRiskUsd, swingFloor, swingStop, swingTarget } from "./swing";
+import { lossToStopUsd, overnightRiskUsd, searchSwingTarget, SWING_ATR_MULT, swingFloor, swingStop, swingTarget } from "./swing";
 import { proxyAt, type ProxyBook } from "./proxy";
 
 const M15 = 900_000;
@@ -79,6 +79,10 @@ export interface HigherOpts {
   variant: VariantId;
   /** Reused across windows that share `toMs`. Built with prepareSwingPairs. */
   prepared?: SwingPair[];
+  /** Search knobs. Absent keeps the turn-1 swing: 2× ATR, the 2.5–4R band, 48h. */
+  stopAtrMult?: number;
+  targetR?: number;
+  maxHoldMs?: number;
 }
 
 function bump(map: Record<string, number>, key: string): void {
@@ -410,13 +414,16 @@ export async function runSwing(opts: HigherOpts): Promise<EngineResult> {
       }
     }
     for (const setup of setups) {
-      const geom = swingStop(setup.entry, series.h1Swing[h1i] ?? null, snap.atr);
+      const geom = swingStop(setup.entry, series.h1Swing[h1i] ?? null, snap.atr, opts.stopAtrMult ?? SWING_ATR_MULT);
       if (!geom) {
         bump(rejects, "no_structure");
         continue;
       }
       const nextHigh = h4i >= 0 ? nearestSwingHighAbove(series.h4, h4i, setup.entry) : null;
-      const targetPx = swingTarget(setup.entry, geom.stop, nextHigh);
+      const targetPx =
+        opts.targetR == null
+          ? swingTarget(setup.entry, geom.stop, nextHigh)
+          : searchSwingTarget(setup.entry, geom.stop, opts.targetR, nextHigh);
       const floor = swingFloor(setup.entry, geom.stop, targetPx);
       (stopsByPair[series.pair] ??= []).push(floor.stopBps);
       if (!floor.pass || belowFeeFloor(floor.stopBps, floor.targetBps)) {
@@ -505,7 +512,7 @@ export async function runSwing(opts: HigherOpts): Promise<EngineResult> {
         openedTs: decisionTs,
         entryFeeUsd: filledFee,
         target2Price: targetPx,
-        maxHoldMs: SWING_MAX_HOLD_MS,
+        maxHoldMs: opts.maxHoldMs ?? SWING_MAX_HOLD_MS,
         flatAtMidnight: false,
         vwapExit: false,
         plannedStopBps: floor.stopBps,

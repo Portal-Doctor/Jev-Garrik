@@ -19,11 +19,15 @@ export interface SwingStop {
   atrDist: number;
 }
 
-/** Wider of the structural distance and 2×ATR. No swing low below the entry means no stop. */
-export function swingStop(entry: number, swingLow: number | null, atr: number): SwingStop | null {
-  if (!(entry > 0) || !(atr > 0) || swingLow == null || !(swingLow < entry)) return null;
+/**
+ * Wider of the structural distance and `atrMult` × ATR.
+ * The default multiple is 2. The pre-registered search may pass 1.5 or 2.5.
+ * No swing low below the entry means no stop.
+ */
+export function swingStop(entry: number, swingLow: number | null, atr: number, atrMult = SWING_ATR_MULT): SwingStop | null {
+  if (!(entry > 0) || !(atr > 0) || !(atrMult > 0) || swingLow == null || !(swingLow < entry)) return null;
   const swingDist = entry - swingLow;
-  const atrDist = SWING_ATR_MULT * atr;
+  const atrDist = atrMult * atr;
   const dist = Math.max(swingDist, atrDist);
   const stop = entry - dist;
   if (!(stop > 0) || !(stop < entry)) return null;
@@ -42,6 +46,23 @@ export function swingTarget(entry: number, stop: number, next4hSwingHigh: number
   if (next4hSwingHigh != null && next4hSwingHigh > low && next4hSwingHigh <= high) return next4hSwingHigh;
   if (next4hSwingHigh != null && next4hSwingHigh > high) return high;
   return low;
+}
+
+/**
+ * Search target: the registered R multiple, or the next 4h swing high when that
+ * high is strictly nearer to the entry. The turn-1 band helper above is unchanged.
+ */
+export function searchSwingTarget(
+  entry: number,
+  stop: number,
+  targetR: number,
+  next4hSwingHigh: number | null,
+): number {
+  const r = entry - stop;
+  if (!(r > 0) || !(targetR > 0)) return entry;
+  const planned = entry + targetR * r;
+  if (next4hSwingHigh != null && next4hSwingHigh > entry && next4hSwingHigh < planned) return next4hSwingHigh;
+  return planned;
 }
 
 export function swingFloor(entry: number, stop: number, target: number): { pass: boolean; stopBps: number; targetBps: number } {
