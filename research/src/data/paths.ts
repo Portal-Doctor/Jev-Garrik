@@ -12,6 +12,7 @@ export function dataPaths(dataDir: string) {
     probe: join(dataDir, "reports", "delisted-probe.json"),
     coverage: join(dataDir, "reports", "coverage.json"),
     ticks: join(dataDir, "reports", "tick-size.json"),
+    p1Report: join(dataDir, "reports", "p1-report.json"),
     revisionSample: join(dataDir, "reports", "revision-sample.json"),
     stopFile: join(dataDir, "STOP"),
   };

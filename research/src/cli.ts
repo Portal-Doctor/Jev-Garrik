@@ -7,13 +7,11 @@
  *   bun run research/src/cli.ts derive
  *   bun run research/src/cli.ts ticks
  *   bun run research/src/cli.ts coverage
- *   bun run research/src/cli.ts revision-sample
- *   bun run research/src/cli.ts revision-check
+ *   bun run research/src/cli.ts seal-snapshot
+ *   bun run research/src/cli.ts p1-report
  */
 
-import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { boot } from "./index";
 import { gitCommitSha, stampArtifact, type ArtifactStamp } from "./manifest";
@@ -21,15 +19,14 @@ import { createPacer, downloadUsdSpot } from "./data/download";
 import { derivePairMonthFile } from "./data/derive-store";
 import { sha256Bytes } from "./data/hash";
 import { writeBytes, writeJson } from "./data/io";
-import { buildCoverage } from "./data/coverage";
-import { scanCandleFiles } from "./data/manifest-file";
+import { buildCoverage, type CoverageReport } from "./data/coverage";
+import { scanCandleFiles, sealFrozenSnapshot, type DataManifest } from "./data/manifest-file";
 import { dataPaths } from "./data/paths";
-import { probeDelisted } from "./data/probe";
+import { probeDelisted, type DelistedProbeReport } from "./data/probe";
 import { usdSpotFromExchange, type UsdSpotProduct } from "./data/products";
 import { productsUrl, publicHeaders } from "./data/public";
-import { buildRevisionSample, runRevisionCheck, type RevisionFile, type RevisionSample } from "./data/revision";
-import { readPairMonth } from "./data/store";
-import { tickReport } from "./data/tick";
+import { buildP1Report } from "./data/p1-report";
+import { tickReport, type TickReport } from "./data/tick";
 
 const started = boot();
 if (!started.ok) {
@@ -67,16 +64,18 @@ async function main(): Promise<void> {
     case "coverage":
       coverage();
       return;
-    case "revision-sample":
-      revisionSample();
+    case "seal-snapshot":
+      sealSnapshot();
       return;
+    case "p1-report":
+      p1Report();
+      return;
+    case "revision-sample":
     case "revision-check":
-      await revisionCheck();
+      console.log("P1 task 9 was dropped by owner decision on 2026-10-10. The revision check is not run.");
       return;
     default:
-      throw new Error(
-        "usage: snapshot | download | probe | derive | ticks | coverage | revision-sample | revision-check",
-      );
+      throw new Error("usage: snapshot | download | probe | derive | ticks | coverage | seal-snapshot | p1-report");
   }
 }
 
@@ -110,7 +109,7 @@ function stamp(phaseId: string): ArtifactStamp {
 function applyRootHash(): void {
   const hash = currentRootHash();
   if (hash == null) return;
-  for (const path of [paths.usdSpot, paths.probe, paths.ticks, paths.coverage, paths.revisionSample]) {
+  for (const path of [paths.usdSpot, paths.probe, paths.ticks, paths.coverage, paths.p1Report]) {
     if (!existsSync(path)) continue;
     const body = JSON.parse(readFileSync(path, "utf8")) as { dataRootHash?: string | null };
     if (body.dataRootHash === hash) continue;
@@ -137,6 +136,12 @@ async function snapshot(): Promise<void> {
 }
 
 async function download(): Promise<void> {
+  if (existsSync(paths.manifest)) {
+    const existing = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
+    if (existing.snapshot?.status === "frozen") {
+      throw new Error("snapshot is frozen by owner decision; download will not resume");
+    }
+  }
   const intervalMs = Number(process.env.RESEARCH_REQUEST_INTERVAL_MS ?? "150");
   const summary = await downloadUsdSpot({
     products: loadProducts(),
@@ -198,58 +203,30 @@ function coverage(): void {
   console.log(`coverage ${report.productCount} products`);
 }
 
-function revisionSample(): void {
-  const files = scanCandleFiles(paths.root);
-  const sample = buildRevisionSample({
-    files,
-    stamp: stamp("P1"),
-    seed: randomBytes(16).toString("hex"),
-    now: new Date(),
-  });
-  writeJson(paths.revisionSample, sample);
-  applyRootHash();
-  console.log(JSON.stringify({ status: sample.status, population: sample.population, sampleCount: sample.sampleCount, earliestCompareAt: sample.earliestCompareAt }));
-}
-
-async function revisionCheck(): Promise<void> {
-  if (!existsSync(paths.revisionSample)) throw new Error("revision sample is missing");
-  const sample = JSON.parse(readFileSync(paths.revisionSample, "utf8")) as RevisionSample;
-  const result = await runRevisionCheck(sample, new Date(), () => redownload(sample));
-  if (!result.compared) {
-    console.log(JSON.stringify({ status: "pending", earliestCompareAt: result.earliestCompareAt, compared: false }));
+function sealSnapshot(): void {
+  const manifest = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
+  if (manifest.snapshot?.status === "frozen") {
+    console.log(`already frozen ${manifest.snapshot.frozenAt} root ${manifest.dataRootHash}`);
     return;
   }
-  writeJson(join(paths.reports, "revision-check.json"), { ...stamp("P1"), ...result });
-  console.log(JSON.stringify({ status: result.status, mismatches: result.mismatches?.length ?? 0 }));
+  const sealed = sealFrozenSnapshot(manifest, new Date());
+  writeJson(paths.manifest, sealed);
+  console.log(`frozen ${sealed.snapshot?.frozenAt} root ${sealed.dataRootHash}`);
 }
 
-async function redownload(sample: RevisionSample): Promise<RevisionFile[]> {
-  const only = new Set<string>();
-  const ranges = new Map<string, { startSec: number; endSec: number }>();
-  for (const file of sample.files) {
-    const match = /^candles\/([^/]+)\/(\d{4}-\d{2})\.sqlite$/.exec(file.path);
-    if (!match || !match[1] || !match[2]) throw new Error(`unexpected candle path ${file.path}`);
-    const key = `${match[1]}/${match[2]}`;
-    only.add(key);
-    const stored = readPairMonth(join(paths.root, file.path));
-    ranges.set(key, {
-      startSec: Date.parse(stored.meta.windowStart) / 1000,
-      endSec: Date.parse(stored.meta.windowEnd) / 1000,
-    });
-  }
-  const temp = mkdtempSync(join(tmpdir(), "research-revision-"));
-  try {
-    await downloadUsdSpot({
-      products: loadProducts().filter((product) => [...only].some((key) => key.startsWith(`${product.productId}/`))),
-      dataDir: temp,
-      now: new Date(),
-      stamp: stamp("P1"),
-      only,
-      ranges,
-      log: () => {},
-    });
-    return scanCandleFiles(temp).map((file) => ({ path: file.path, sha256: file.sha256 }));
-  } finally {
-    rmSync(temp, { recursive: true, force: true });
-  }
+function p1Report(): void {
+  const manifest = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
+  const coverageReport = JSON.parse(readFileSync(paths.coverage, "utf8")) as CoverageReport;
+  const probe = JSON.parse(readFileSync(paths.probe, "utf8")) as DelistedProbeReport;
+  const ticksReport = JSON.parse(readFileSync(paths.ticks, "utf8")) as TickReport;
+  const report = buildP1Report({
+    stamp: stamp("P1"),
+    manifest,
+    coverage: coverageReport,
+    probe,
+    ticks: ticksReport,
+  });
+  writeJson(paths.p1Report, report);
+  applyRootHash();
+  console.log(`p1 report ${report.coverage.productCount} products root ${report.dataRootHash}`);
 }

@@ -28,11 +28,13 @@ bun run research/src/cli.ts ticks
 bun run research/src/cli.ts download
 bun run research/src/cli.ts derive
 bun run research/src/cli.ts coverage
-bun run research/src/cli.ts revision-sample
-bun run research/src/cli.ts revision-check
+bun run research/src/cli.ts seal-snapshot
+bun run research/src/cli.ts p1-report
 ```
 
-`download` is resumable. Create `research/data/STOP` to finish the current request and exit. Delete that file before resuming.
+`download` refuses to resume after `seal-snapshot`. The owner froze this download on 2026-10-10. Do not start it again against this manifest.
+
+P1 task 9, the 24h revision check, was dropped by Brian on 2026-10-10 18:16 CT. `research/src/data/revision.ts` and its tests remain in the tree unused. The CLI names `revision-sample` and `revision-check` exit without fetching or writing a sample. The revision check is not an open item for the hash.
 
 ## Where the data lives
 
@@ -41,11 +43,11 @@ bun run research/src/cli.ts revision-check
 | `research/data/products/exchange-products.raw.json` | yes | Exact exchange `/products` response bytes |
 | `research/data/products/usd-spot.json` | yes | USD quote rows: status, base, quote, current `quote_increment`, listing date null |
 | `research/data/candles/<PAIR>/<YYYY-MM>.sqlite` | no | One file per pair-month. Empty minutes are stored as empty |
-| `research/data/data-manifest.json` | yes | Per-file SHA-256 and the root hash |
+| `research/data/data-manifest.json` | yes | Per-file SHA-256, the root hash, and the freeze record |
 | `research/data/derived/` | no | 1h, 4h, and daily bars derived from the 1m files |
-| `research/data/reports/` | yes | Delisted probe, tick flags, coverage, revision sample |
+| `research/data/reports/` | yes | Delisted probe, tick flags, coverage, P1 report |
 
-Candle and derived files are gitignored. Reproduce them with the commands above; do not expect them in the clone.
+Candle and derived files are gitignored. This snapshot's pair-month files were written under `research/data/candles/` on the download host and are not in git. `data-manifest.json` is the committed record of each path, byte size, and SHA-256. Recomputing the root hash requires those sqlite files.
 
 ## Root hash
 
@@ -56,10 +58,29 @@ Candle and derived files are gitignored. Reproduce them with the commands above;
 3. Sort by relative path (`candles/AAA-USD/2023-10.sqlite` before `candles/AAA-USD/2023-11.sqlite`).
 4. Hash the UTF-8 text formed by one line per file: `relativePath`, tab, hex sha256, newline.
 
-The writer is version `1` (`research/src/data/store.ts`): bun:sqlite, `page_size` 4096, meta then minutes in timestamp order, then `VACUUM`. Two writes of the same minutes match byte for byte on the same bun version. This run uses bun 1.4.3. A different bun or SQLite build can change file bytes even when the minute rows match.
+The writer is version `1` (`research/src/data/store.ts`): bun:sqlite, `page_size` 4096, meta then minutes in timestamp order, then `VACUUM`. Two writes of the same minutes match byte for byte on bun 1.4.3, which produced this snapshot. A different bun or SQLite build can change file bytes even when the minute rows match.
 
-An independent re-download reproduces the root hash when it uses this writer on the same bun version, the same pair-month windows recorded in each file's `file_meta`, and the exchange returns the same candle tokens. `revision-check` re-fetches the recorded sample with those stored windows. It refuses to run until 24 hours after `research/data/reports/revision-sample.json` `createdAt`.
+To recompute the root hash from the candle files named in `data-manifest.json`:
+
+```
+python3 - << 'PY'
+import hashlib, pathlib
+root = pathlib.Path("research/data")
+manifest = __import__("json").loads((root / "data-manifest.json").read_text())
+lines = "".join(f"{item['path']}\t{hashlib.sha256((root / item['path']).read_bytes()).hexdigest()}\n" for item in sorted(manifest["files"], key=lambda item: item["path"]))
+print(hashlib.sha256(lines.encode()).hexdigest())
+print(manifest["dataRootHash"])
+PY
+```
+
+That checks the files on disk against the frozen manifest. It does not re-download.
 
 ## Window
 
-1-minute candles from 2023-10-01T00:00:00.000Z, or from a listing timestamp when one is supplied, through 00:00 UTC of the current day (the latest completed UTC day). The exchange product payload used here has no listing timestamp, so this run starts every product at 2023-10-01. The CLI does not invent one.
+1-minute candles from 2023-10-01T00:00:00.000Z through 00:00 UTC of the day the download ran (the latest completed UTC day). The exchange product payload has no listing timestamp, so this run did not start any product later than 2023-10-01.
+
+The frozen root hash covers 58 complete pair-month files: `00-USD` from 2023-10 through 2026-10, and `1INCH-USD` from 2023-10 through 2025-06. An incomplete `1INCH-USD/2025-07.partial.sqlite` was left on the download host when the process stopped. It is not in the root hash. Coverage lists that month as incomplete. The other 490 USD products in the snapshot have no candle files.
+
+## Snapshot freeze
+
+`data-manifest.json` field `snapshot` records `downloadStartedAt`, `downloadUpdatedAt`, and `frozenAt`. The same block is copied into `research/data/reports/p1-report.json`.

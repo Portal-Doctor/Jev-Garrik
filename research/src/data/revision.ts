@@ -1,3 +1,5 @@
+/** Unused. Owner dropped P1 task 9 on 2026-10-10. Do not schedule a re-download comparison. */
+
 import type { ArtifactStamp } from "../manifest";
 import type { HashedFile } from "./hash";
 

@@ -8,6 +8,17 @@ import { sha256File } from "./store";
 
 export const ROOT_HASH_INPUT = "sorted lines of relativePath TAB sha256 LF, UTF-8";
 
+export const SNAPSHOT_FREEZE_REASON =
+  "Owner decision (Brian, 2026-10-10 18:16 CT): P1 task 9, the 24h revision check, is dropped. This download is the final snapshot. The revision check is not an open item for the hash.";
+
+export interface SnapshotFreeze {
+  status: "frozen";
+  reason: string;
+  downloadStartedAt: string;
+  downloadUpdatedAt: string;
+  frozenAt: string;
+}
+
 export interface DataManifest extends ArtifactStamp {
   updatedAt: string;
   hashAlgorithm: "sha256";
@@ -15,6 +26,7 @@ export interface DataManifest extends ArtifactStamp {
   bunVersion: string;
   writerVersion: "1";
   files: HashedFile[];
+  snapshot?: SnapshotFreeze;
 }
 
 export function scanCandleFiles(dataDir: string): HashedFile[] {
@@ -57,4 +69,18 @@ export function buildDataManifest(opts: {
 
 export function writeDataManifest(dataDir: string, manifest: DataManifest): void {
   writeJson(dataPaths(dataDir).manifest, manifest);
+}
+
+/** Records the owner freeze. File hashes and the root hash stay as they are. */
+export function sealFrozenSnapshot(manifest: DataManifest, frozenAt: Date): DataManifest {
+  return {
+    ...manifest,
+    snapshot: {
+      status: "frozen",
+      reason: SNAPSHOT_FREEZE_REASON,
+      downloadStartedAt: manifest.createdAt,
+      downloadUpdatedAt: manifest.updatedAt,
+      frozenAt: frozenAt.toISOString(),
+    },
+  };
 }
