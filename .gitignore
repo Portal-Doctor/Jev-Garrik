@@ -1,6 +1,11 @@
 node_modules
 .env
-data/
+/data/
+
+# research candle files are large. Manifests, product snapshots, and reports stay tracked.
+research/data/candles/
+research/data/derived/
+research/data/STOP
 
 # cb runtime logs (redirected stdout/stderr from `bun run cb`)
 cb_run.out
