@@ -1,0 +1,14 @@
+{
+  "granularitySec": 900,
+  "windowDays": 365,
+  "windowStart": "2025-10-10T00:00:00.000Z",
+  "windowEnd": "2026-10-10T00:00:00.000Z",
+  "measuredRequestsPerSec": 9.997,
+  "sampleSeconds": 60,
+  "fiveMinuteChunkCount": 174168,
+  "fiveMinuteProjectedSec": 17422,
+  "fifteenMinuteChunkCount": 59040,
+  "fifteenMinuteProjectedSec": 5906,
+  "choice": "Fifteen-minute candles. The 5-minute download started at 2026-10-10T23:45:34Z. A 60-second sample, from chunk 200 to chunk 800, ran at 9.997 requests per second with no retries. 174168 five-minute requests project to 17422 seconds (4.84 hours), past the 2-hour limit. 59040 fifteen-minute requests at the same rate project to 5906 seconds (1.64 hours), inside the limit. No names were dropped.",
+  "universeCut": null
+}

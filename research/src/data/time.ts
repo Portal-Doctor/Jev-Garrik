@@ -3,8 +3,8 @@
 export const HISTORY_START_ISO = "2023-10-01T00:00:00.000Z";
 export const HISTORY_START_SEC = Date.parse(HISTORY_START_ISO) / 1000;
 export const MINUTE_SEC = 60;
-/** Owner decision: 300 is five-minute, 900 is fifteen-minute. */
-export const BAR_SEC = 300;
+/** Owner decision: 900-second bars. Five-minute (300) projected past two hours. */
+export const BAR_SEC = 900;
 export const HISTORY_DAYS = 365;
 export const HOUR_SEC = 3600;
 export const FOUR_HOUR_SEC = 4 * 3600;

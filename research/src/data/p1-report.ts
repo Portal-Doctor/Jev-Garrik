@@ -51,8 +51,13 @@ export interface P1Report extends ArtifactStamp {
 export interface OwnerDecision {
   granularitySec: number;
   windowDays: number;
+  windowStart: string;
+  windowEnd: string;
   measuredRequestsPerSec: number;
+  sampleSeconds: number;
+  fiveMinuteChunkCount: number;
   fiveMinuteProjectedSec: number;
+  fifteenMinuteChunkCount: number;
   fifteenMinuteProjectedSec: number | null;
   choice: string;
   universeCut: {
