@@ -28,6 +28,33 @@ export const TIME_STOP_MS = 60 * 60_000;
 export const FLAT_BUFFER_MS = 60 * 60_000;
 export const DATA_GAP_EXIT_SEC = 120;
 
+/** Swing max hold and the overnight loss-to-stop cap. Forward paper stays off until Brian approves. */
+export const SWING_MAX_HOLD_MS = 48 * 60 * 60_000;
+export const OVERNIGHT_RISK_CAP_USD = 500;
+export const SWING_APPROVED = false;
+
+/** Repo 4h breakout knobs (Donchian / EMA / ATR / trail / 14-day hold). Not fitted. */
+export const BREAKOUT_BARS = 20;
+export const BREAKOUT_EMA_BARS = 50;
+export const BREAKOUT_ATR_BARS = 14;
+export const BREAKOUT_TRAIL_ATR = 3;
+export const BREAKOUT_MAX_HOLD_MS = 1_209_600_000;
+
+/**
+ * Initial stop distances from the repo pair book. The breakout still has no
+ * resting maker target, so these do not by themselves clear the fee floor.
+ */
+export const REPO_BREAKOUT_STOP_BPS: Record<string, number> = {
+  "UNI-USD": 295,
+  "NEAR-USD": 331,
+  "BCH-USD": 242,
+  "SUI-USD": 219,
+  "AVAX-USD": 227,
+  "ARB-USD": 390,
+  "VVV-USD": 312,
+  "ZEC-USD": 273,
+};
+
 export const JEV_MONTHLY_BUDGET_USD = 100;
 export const JEV_TIMEOUT_MS = 8_000;
 
@@ -37,7 +64,19 @@ export type JevStage = 0 | 1 | 2;
 export type AllocatorMode = "POOL" | "SILO";
 export type ShareFormula = "equal" | "atr_scaled";
 export type StrategyId = "combined" | "A" | "B" | "C";
+export type RunStrategy =
+  | "swing_A"
+  | "swing_B"
+  | "swing_C"
+  | "swing_combined"
+  | "repo_breakout_4h"
+  | "intraday_research";
+export type SentimentMode = "sentiment_blind" | "market_proxy";
 export type VariantId = "jev_off" | "jev_veto" | "jev_select";
+
+export function swingEntryAllowed(approved: boolean = SWING_APPROVED): boolean {
+  return approved === true;
+}
 
 export const ENABLED_PAIRS = [
   "UNI-USD",

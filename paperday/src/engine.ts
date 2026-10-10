@@ -5,6 +5,8 @@
  */
 
 import {
+  DAILY_LOSS_HALT_USD,
+  PAIR_LOSS_HALT_USD,
   RESERVE_USD,
   STARTING_BUDGET_USD,
   TAKER_FEE_BPS,
@@ -25,6 +27,8 @@ import { findSetups, type Candidate, type DecisionSnapshot, type Sentiment } fro
 import { freshBook, PaperSession } from "./pipeline";
 import { openPosition, stepPosition, type Position } from "./position";
 import { MemoryStore } from "./store";
+import { belowFeeFloor, type ClosedSample } from "./expectancy";
+import { stopBpsOf } from "./fees";
 
 export interface EngineOpts {
   candles: Record<string, Candle[]>;
@@ -38,6 +42,8 @@ export interface EngineOpts {
   variant: VariantId;
   jev?: JevReviewService | null;
   stage?: JevStage;
+  /** Point-in-time proxy. Absent means the constant `sentiment` is used for the whole run. */
+  sentimentAt?: (pair: string, ts: number) => "clear" | "veto" | "caution";
 }
 
 export interface EngineResult {
@@ -58,6 +64,12 @@ export interface EngineResult {
   quarters: Array<{ quarter: string; netUsd: number }>;
   rejects: Record<string, number>;
   exits: Record<string, number>;
+  samples: ClosedSample[];
+  stopsByPair: Record<string, number[]>;
+  pairHaltBreached: boolean;
+  dailyHaltBreached: boolean;
+  wins: number;
+  avgR: number | null;
 }
 
 interface Prepared {
@@ -196,6 +208,13 @@ export async function runEngine(opts: EngineOpts): Promise<EngineResult> {
   const quarters = new Map<string, number>();
   const rejects: Record<string, number> = {};
   const exits: Record<string, number> = {};
+  const samples: ClosedSample[] = [];
+  const stopsByPair: Record<string, number[]> = {};
+  let pairHalt = false;
+  let dailyHalt = false;
+  let wins = 0;
+  let rSum = 0;
+  const cautionIdeas = new Map<string, number>();
   const positions = new Map<string, Position>();
   const resting = new Map<string, LiveOrder>();
   const reservedLeft = new Map<string, number>();
@@ -269,6 +288,7 @@ export async function runEngine(opts: EngineOpts): Promise<EngineResult> {
     if (local !== ctDay) {
       ctDay = local;
       book.ideasTodayCt = 0;
+      cautionIdeas.clear();
     }
 
     for (const i of batch) {
@@ -309,6 +329,21 @@ export async function runEngine(opts: EngineOpts): Promise<EngineResult> {
               book.lossesTodayUtc += 1;
               book.pairLossUsd[series.pair] = (book.pairLossUsd[series.pair] ?? 0) + -total;
             }
+            const plannedStop = pos.plannedStopBps ?? stopBpsOf(pos.entry, pos.initialStop);
+            const plannedTarget = pos.plannedTargetBps ?? plannedStop * 3;
+            const riskUsd = (pos.entry - pos.initialStop) * pos.initialUnits;
+            const roundR = riskUsd > 0 ? total / riskUsd : 0;
+            samples.push({
+              closeTs: bar.ts,
+              stopBps: plannedStop,
+              targetBps: plannedTarget,
+              win: total > 0,
+              rMultiple: roundR,
+            });
+            rSum += roundR;
+            if (total > 0) wins += 1;
+            if (book.realizedUsdTodayUtc <= -DAILY_LOSS_HALT_USD) dailyHalt = true;
+            if ((book.pairLossUsd[series.pair] ?? 0) >= PAIR_LOSS_HALT_USD) pairHalt = true;
             dropReserve(series.pair, reservedLeft.get(series.pair) ?? 0);
           }
         }
@@ -344,6 +379,9 @@ export async function runEngine(opts: EngineOpts): Promise<EngineResult> {
               stop: live.stop,
               openedTs: bar.ts,
               entryFeeUsd: live.filledFee,
+              plannedStopBps: stopBpsOf(live.order.limit, live.stop),
+              plannedTargetBps: live.candidate.plannedTargetBps ?? stopBpsOf(live.order.limit, live.stop) * 3,
+              target2Price: live.candidate.targetPrice,
             });
             const managed = stepPosition(posNew, bar, {
               gapSec: 0,
@@ -352,19 +390,36 @@ export async function runEngine(opts: EngineOpts): Promise<EngineResult> {
               vwap: null,
               confirmedSwingLow: null,
             });
+            let legNet = 0;
             for (const ev of managed.events) {
               cash += ev.units * ev.price - ev.feeUsd;
               fees += ev.feeUsd;
               addNet(bar.ts, ev.netUsd);
               book.realizedUsdTodayUtc += ev.netUsd;
               book.rTodayUtc += ev.rMultiple;
+              legNet += ev.netUsd;
               if (ev.kind === "exit") {
                 trades += 1;
                 bump(exits, ev.reason);
-                if (ev.netUsd < 0) {
+                if (legNet < 0) {
                   book.lossesTodayUtc += 1;
-                  book.pairLossUsd[series.pair] = (book.pairLossUsd[series.pair] ?? 0) + -ev.netUsd;
+                  book.pairLossUsd[series.pair] = (book.pairLossUsd[series.pair] ?? 0) + -legNet;
                 }
+                const plannedStop = posNew.plannedStopBps ?? stopBpsOf(posNew.entry, posNew.initialStop);
+                const plannedTarget = posNew.plannedTargetBps ?? plannedStop * 3;
+                const riskUsd = (posNew.entry - posNew.initialStop) * posNew.initialUnits;
+                const roundR = riskUsd > 0 ? legNet / riskUsd : 0;
+                samples.push({
+                  closeTs: bar.ts,
+                  stopBps: plannedStop,
+                  targetBps: plannedTarget,
+                  win: legNet > 0,
+                  rMultiple: roundR,
+                });
+                rSum += roundR;
+                if (legNet > 0) wins += 1;
+                if (book.realizedUsdTodayUtc <= -DAILY_LOSS_HALT_USD) dailyHalt = true;
+                if ((book.pairLossUsd[series.pair] ?? 0) >= PAIR_LOSS_HALT_USD) pairHalt = true;
                 dropReserve(series.pair, reservedLeft.get(series.pair) ?? 0);
               }
             }
@@ -398,12 +453,35 @@ export async function runEngine(opts: EngineOpts): Promise<EngineResult> {
       if (decisionCt !== ctDay) {
         ctDay = decisionCt;
         book.ideasTodayCt = 0;
+        cautionIdeas.clear();
       }
       const snap = snapshotAt(series, fiveIdx);
       if (!snap || snap.atr == null || !(snap.atr > 0)) continue;
       session.opts.atrByPair[series.pair] = snap.atr;
-      const setups = findSetups(snap, opts.sentiment, opts.strategy);
+      const mark = opts.sentimentAt ? opts.sentimentAt(series.pair, decisionTs) : null;
+      if (mark === "veto") {
+        bump(rejects, "sentiment");
+        continue;
+      }
+      const sentimentForRules = mark === "caution" ? "clear" : (opts.sentiment as "clear" | "veto" | "unknown");
+      let setups = findSetups(snap, sentimentForRules, opts.strategy);
+      if (mark === "caution") {
+        setups = setups.filter((s) => s.setup === "A");
+        if ((cautionIdeas.get(series.pair) ?? 0) >= 1) {
+          bump(rejects, "sentiment");
+          continue;
+        }
+      }
       for (const candidate of setups) {
+        const plannedStop = stopBpsOf(candidate.entry, candidate.stop);
+        const plannedTarget = candidate.plannedTargetBps ?? plannedStop * 3;
+        (stopsByPair[series.pair] ??= []).push(plannedStop);
+        if (belowFeeFloor(plannedStop, plannedTarget)) {
+          bump(rejects, "below_fee_floor");
+          continue;
+        }
+        candidate.plannedTargetBps = plannedTarget;
+        candidate.entryProfile = "intraday";
         const packet: PacketInput = {
           asOf: decisionTs,
           pair: candidate.pair,
@@ -426,6 +504,7 @@ export async function runEngine(opts: EngineOpts): Promise<EngineResult> {
           continue;
         }
         ideas += 1;
+        if (mark === "caution") cautionIdeas.set(series.pair, (cautionIdeas.get(series.pair) ?? 0) + 1);
         const notional = session.proposedNotional(series.pair);
         const units = notional / candidate.entry;
         resting.set(series.pair, {
@@ -458,6 +537,14 @@ export async function runEngine(opts: EngineOpts): Promise<EngineResult> {
     if (net < 0) {
       book.pairLossUsd[pos.pair] = (book.pairLossUsd[pos.pair] ?? 0) + -net;
     }
+    const plannedStop = pos.plannedStopBps ?? stopBpsOf(pos.entry, pos.initialStop);
+    const plannedTarget = pos.plannedTargetBps ?? plannedStop * 3;
+    const risk = (pos.entry - pos.initialStop) * pos.initialUnits;
+    const rMultiple = risk > 0 ? net / risk : 0;
+    samples.push({ closeTs: opts.toMs - 1, stopBps: plannedStop, targetBps: plannedTarget, win: net > 0, rMultiple });
+    rSum += rMultiple;
+    if (net > 0) wins += 1;
+    if ((book.pairLossUsd[pos.pair] ?? 0) >= PAIR_LOSS_HALT_USD) pairHalt = true;
     positions.delete(pos.pair);
   }
   const ending = noteEquity();
@@ -482,5 +569,11 @@ export async function runEngine(opts: EngineOpts): Promise<EngineResult> {
     quarters: quarterRows,
     rejects,
     exits,
+    samples,
+    stopsByPair,
+    pairHaltBreached: pairHalt,
+    dailyHaltBreached: dailyHalt,
+    wins,
+    avgR: trades > 0 ? rSum / trades : null,
   };
 }

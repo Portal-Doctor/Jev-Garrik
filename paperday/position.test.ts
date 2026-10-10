@@ -109,6 +109,33 @@ test("rollover_flat forces the long out on the last minute of the UTC day", () =
   expect(hit.events[0]?.price).toBe(105);
 });
 
+test("an unfilled target sold at market is taker, not the resting maker fee", () => {
+  const hit = stepPosition(
+    pos(),
+    bar({ ts: OPEN + 60_000, open: 100, high: 130, low: 96, close: 120 }),
+    { ...quiet, forceMarketExit: true },
+  );
+  expect(hit.position).toBeNull();
+  expect(hit.events[0]?.reason).toBe("market_exit");
+  expect(hit.events[0]?.feeBps).toBe(90);
+  expect(hit.events[0]?.price).toBe(120);
+  expect(hit.events[0]?.feeUsd).toBeCloseTo((10 * 120 * 90) / 10_000, 8);
+});
+
+test("swing hold is 48h and does not flatten at UTC midnight", () => {
+  const held = pos({ maxHoldMs: 48 * 60 * 60_000, flatAtMidnight: false, vwapExit: false });
+  const midnight = Date.parse("2026-10-07T23:59:00.000Z");
+  const stay = stepPosition(held, bar({ ts: midnight, open: 105, high: 106, low: 104, close: 105 }), quiet);
+  expect(stay.position).not.toBeNull();
+  expect(stay.events).toEqual([]);
+  const early = stepPosition(held, bar({ ts: OPEN + 48 * 60 * 60_000 - 120_000, open: 101, high: 102, low: 96, close: 101 }), quiet);
+  expect(early.position).not.toBeNull();
+  const due = stepPosition(held, bar({ ts: OPEN + 48 * 60 * 60_000 - 60_000, open: 101, high: 102, low: 96, close: 101.25 }), quiet);
+  expect(due.position).toBeNull();
+  expect(due.events[0]?.reason).toBe("max_hold");
+  expect(due.events[0]?.feeBps).toBe(90);
+});
+
 test("data_gap exits at the next bar open", () => {
   const hit = stepPosition(
     pos(),

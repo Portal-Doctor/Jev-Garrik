@@ -152,6 +152,28 @@ export function confirmedSwingLow(bars: Ohlcv[], index: number): number | null {
   return null;
 }
 
+/** Confirmed swing high: high[index] is strictly above both neighbors. The next bar must already exist. */
+export function confirmedSwingHigh(bars: Ohlcv[], index: number): number | null {
+  if (index < 1 || index + 1 >= bars.length) return null;
+  const high = bars[index]!.high;
+  if (high > bars[index - 1]!.high && high > bars[index + 1]!.high) return high;
+  return null;
+}
+
+/**
+ * Nearest confirmed swing high strictly above `price`.
+ * `confirmThrough` is the last bar allowed to confirm a swing, so the swing bar is at most confirmThrough-1.
+ */
+export function nearestSwingHighAbove(bars: Ohlcv[], confirmThrough: number, price: number): number | null {
+  let best: number | null = null;
+  const lastSwing = Math.min(confirmThrough - 1, bars.length - 2);
+  for (let swing = lastSwing; swing >= 1; swing--) {
+    const high = confirmedSwingHigh(bars, swing);
+    if (high != null && high > price && (best == null || high < best)) best = high;
+  }
+  return best;
+}
+
 /** Most recent swing low confirmed at or before `index` (the confirming bar is index itself, so the swing bar is index-1). */
 export function latestSwingLow(bars: Ohlcv[], index: number): number | null {
   for (let swing = index - 1; swing >= 1; swing--) {

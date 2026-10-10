@@ -14,9 +14,11 @@ export type ExitReason =
   | "trail"
   | "t2"
   | "time_stop"
+  | "max_hold"
   | "vwap_invalidation"
   | "rollover_flat"
-  | "data_gap";
+  | "data_gap"
+  | "market_exit";
 
 export interface Position {
   id: string;
@@ -30,6 +32,15 @@ export interface Position {
   entryFeeUsd: number;
   t1Done: boolean;
   lastTs: number;
+  /** Resting maker target. Unset means the 3R intraday target. */
+  target2Price?: number;
+  maxHoldMs?: number;
+  /** Default true. Swing sets this false and uses the 48h hold plus the overnight cap. */
+  flatAtMidnight?: boolean;
+  /** Default true. Swing does not exit on a VWAP break. */
+  vwapExit?: boolean;
+  plannedStopBps?: number;
+  plannedTargetBps?: number;
 }
 
 export interface PosEvent {
@@ -49,8 +60,12 @@ export interface StepContext {
   fiveMinComplete: boolean;
   fiveMinClose: number | null;
   vwap: number | null;
-  /** Confirmed 5-minute swing low. Applied only after T1, and only if it tightens the stop. */
+  /** Confirmed swing low. Applied only after T1, and only if it tightens the stop. */
   confirmedSwingLow: number | null;
+  /** Bar width. One minute unless the caller is stepping a higher-timeframe bar. */
+  barMs?: number;
+  /** Sell an unfilled target at market. Charged taker even if price is through the target. */
+  forceMarketExit?: boolean;
 }
 
 export interface StepResult {
@@ -89,6 +104,12 @@ export function openPosition(opts: {
   stop: number;
   openedTs: number;
   entryFeeUsd: number;
+  target2Price?: number;
+  maxHoldMs?: number;
+  flatAtMidnight?: boolean;
+  vwapExit?: boolean;
+  plannedStopBps?: number;
+  plannedTargetBps?: number;
 }): Position {
   return {
     id: opts.id,
@@ -102,6 +123,12 @@ export function openPosition(opts: {
     entryFeeUsd: opts.entryFeeUsd,
     t1Done: false,
     lastTs: opts.openedTs,
+    target2Price: opts.target2Price,
+    maxHoldMs: opts.maxHoldMs,
+    flatAtMidnight: opts.flatAtMidnight,
+    vwapExit: opts.vwapExit,
+    plannedStopBps: opts.plannedStopBps,
+    plannedTargetBps: opts.plannedTargetBps,
   };
 }
 
@@ -139,10 +166,14 @@ function stopReason(pos: Position): ExitReason {
 }
 
 export function stepPosition(pos: Position, bar: MinuteBar, ctx: StepContext): StepResult {
+  const barMs = ctx.barMs ?? 60_000;
+  if (ctx.forceMarketExit) {
+    return closeAll(pos, bar.close, TAKER_FEE_BPS, "market_exit");
+  }
   if (ctx.gapSec > DATA_GAP_EXIT_SEC) {
     return closeAll(pos, bar.open, TAKER_FEE_BPS, "data_gap");
   }
-  if (barEndsAtUtcMidnight(bar.ts)) {
+  if (pos.flatAtMidnight !== false && barEndsAtUtcMidnight(bar.ts, barMs)) {
     return closeAll(pos, bar.open, TAKER_FEE_BPS, "rollover_flat");
   }
 
@@ -155,7 +186,7 @@ export function stepPosition(pos: Position, bar: MinuteBar, ctx: StepContext): S
   }
 
   const t1 = target(next.entry, next.initialStop, 1.5);
-  const t2 = target(next.entry, next.initialStop, 3);
+  const t2 = next.target2Price ?? target(next.entry, next.initialStop, 3);
 
   if (bar.high >= t2) {
     return closeAll(next, t2, MAKER_FEE_BPS, "t2");
@@ -187,13 +218,15 @@ export function stepPosition(pos: Position, bar: MinuteBar, ctx: StepContext): S
     next = { ...next, stop: tightened.stop };
   }
 
-  if (ctx.fiveMinComplete && ctx.fiveMinClose != null && ctx.vwap != null && ctx.fiveMinClose < ctx.vwap) {
+  if (next.vwapExit !== false && ctx.fiveMinComplete && ctx.fiveMinClose != null && ctx.vwap != null && ctx.fiveMinClose < ctx.vwap) {
     const closed = closeAll(next, ctx.fiveMinClose, TAKER_FEE_BPS, "vwap_invalidation");
     return { position: null, events: [...events, ...closed.events] };
   }
 
-  if (bar.ts + 60_000 >= next.openedTs + TIME_STOP_MS && bar.ts > next.openedTs) {
-    const closed = closeAll(next, bar.close, TAKER_FEE_BPS, "time_stop");
+  const holdMs = next.maxHoldMs ?? TIME_STOP_MS;
+  if (bar.ts + barMs >= next.openedTs + holdMs && bar.ts > next.openedTs) {
+    const reason = next.maxHoldMs != null && next.maxHoldMs > TIME_STOP_MS ? "max_hold" : "time_stop";
+    const closed = closeAll(next, bar.close, TAKER_FEE_BPS, reason);
     return { position: null, events: [...events, ...closed.events] };
   }
 

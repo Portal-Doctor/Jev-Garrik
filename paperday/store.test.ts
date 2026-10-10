@@ -10,7 +10,7 @@ import { dailySummary, quarterTracker, rejectHistogram, scorecard } from "./src/
 import { judgePosts, XSentiment } from "./src/sentiment";
 import { MemoryStore } from "./src/store";
 import { runEngine } from "./src/engine";
-import { revenueGate } from "./src/backtest";
+import { requiredGate, targetGate } from "./src/gate";
 
 test("store keys are idempotent and the JSONL mirror writes once", () => {
   const dir = mkdtempSync(join(tmpdir(), "paperday-store-"));
@@ -119,23 +119,26 @@ test("manifest records stage 0, 50/90, and the locked budget", () => {
   expect(manifest.pairLossHaltUsd).toBe(500);
   expect(manifest.jevMonthlyBudgetUsd).toBe(100);
   expect(manifest.paper).toBe(true);
+  expect(manifest.swingApproved).toBe(false);
 });
 
-test("revenue gate thresholds and the engine refuses unpaid Jev variants", async () => {
-  expect(revenueGate("1m", { netUsd: 400, maxDrawdownUsd: 10, quarters: [] }).pass).toBe(true);
-  expect(revenueGate("1m", { netUsd: 399.99, maxDrawdownUsd: 10, quarters: [] }).pass).toBe(false);
-  expect(revenueGate("6m", { netUsd: 2400, maxDrawdownUsd: 10, quarters: [{ quarter: "2026Q3", netUsd: 1199 }] }).pass).toBe(false);
-  expect(revenueGate("6m", { netUsd: 5000, maxDrawdownUsd: 10, quarters: [{ quarter: "2026Q3", netUsd: 5000 }] }).pass).toBe(false);
-  expect(revenueGate("6m", {
-    netUsd: 3600,
+test("required gate is net above zero with a sample floor, and unpaid Jev variants refuse to run", async () => {
+  const base = {
+    window: "1m" as const,
+    netUsd: 0.01,
     maxDrawdownUsd: 10,
-    quarters: [
-      { quarter: "2026Q2", netUsd: 1200 },
-      { quarter: "2026Q3", netUsd: 1200 },
-      { quarter: "2026Q4", netUsd: 1200 },
-    ],
-  }).pass).toBe(true);
-  expect(revenueGate("6m", { netUsd: 8000, maxDrawdownUsd: 8000.01, quarters: [{ quarter: "2026Q3", netUsd: 1200 }] }).pass).toBe(false);
+    trades: 12,
+    expectancyPass: true,
+    pairHaltBreached: false,
+    dailyHaltBreached: false,
+    research: false,
+  };
+  expect(requiredGate(base).pass).toBe(true);
+  expect(requiredGate({ ...base, netUsd: 0 }).pass).toBe(false);
+  expect(requiredGate({ ...base, trades: 11 }).sample).toBe("insufficient_sample");
+  expect(requiredGate({ ...base, trades: 11 }).pass).toBe(false);
+  expect(requiredGate({ ...base, maxDrawdownUsd: 8000 }).pass).toBe(false);
+  expect(requiredGate({ ...base, research: true }).pass).toBe(false);
   await expect(
     runEngine({
       candles: {},

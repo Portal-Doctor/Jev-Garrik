@@ -54,6 +54,10 @@ export interface Candidate {
   rsi: number | null;
   /** True only if a caller tried to manufacture an entry from sentiment. Rules never set this. */
   originatedFromSentiment: boolean;
+  plannedTargetBps?: number | null;
+  entryProfile?: "intraday" | "swing" | "breakout";
+  lossToStopUsd?: number;
+  targetPrice?: number;
 }
 
 export function candidateId(pair: string, setup: SetupId, barTs: number): string {

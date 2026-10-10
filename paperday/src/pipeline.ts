@@ -44,6 +44,9 @@ function toOverride(c: Candidate & { side?: "long" | "short"; addOn?: boolean; s
     rsi: c.rsi,
     originatedFromSentiment: c.originatedFromSentiment,
     addOn: c.addOn,
+    plannedTargetBps: c.plannedTargetBps,
+    entryProfile: c.entryProfile,
+    lossToStopUsd: c.lossToStopUsd,
   };
 }
 

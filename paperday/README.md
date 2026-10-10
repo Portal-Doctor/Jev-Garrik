@@ -13,10 +13,10 @@ Home PC stack: `docker compose -f paperday/compose.yml up -d`. Postgres and the 
 ## Assumptions
 
 - Setups A/B/C were not numerically specified. A is a 5-minute EMA20 pullback above session VWAP. B is a VWAP reclaim. C is a 5-minute Donchian break while the completed 4-hour close is through its prior 20-bar high. All three require the `cb/trend.ts` bias gate (first-value EMA, not the TradingView SMA seed).
-- The 50/90 fee gate uses a 3R target and a 1R stop: winner = 3R − 140 bps, loser = 1R + 140 bps, and the winner must be at least twice the loser. A structural stop inside 420 bps is rejected. The stop is not widened to pass the gate.
+- Fees stay 50/90. A resting target is maker, so the winner's round trip is 100 bps. Stop, time, invalidation, rollover, data-gap, and an unfilled target sold at market are taker, so the loser's round trip is 140 bps. The per-trade floor is (T − 100) ≥ 1.5 × (S + 140). Class acceptance is walk-forward: p* = (S + 140) / (T + S − 40) ≤ 45%, and out-of-sample expectancy ≥ +0.15R or ≥ +25 bps in at least two of three time splits. Stops and targets are not widened to pass.
 - Session VWAP (hlc3) resets at 00:00 America/Chicago. The entry window is 08:00–15:00 CT. The weekend idea cap uses the Chicago calendar day. The daily loss stop and the flat-before-midnight rule use UTC.
 - Missing macro calendar blocks 07:15–08:00, 08:45–09:15, and 12:45–13:30 CT.
-- Sentiment unknown (no X read, including historical backtests) allows only setup A and one open idea.
+- Forward paper still reads X as a veto only. Backtests label two modes: sentiment-blind (filter neutral, an upper bound) and market-proxy (return z-score, shock candle, BTC 4h trend). Swing entries are behind SWING_APPROVED, which defaults to false.
 - Per-pair $500 gate accumulates losing closes. Later winners do not reopen the pair.
 - POOL equal share and each SILO bucket are deployable / enabled pairs ($8,000 / 8). POOL ATR-scaled weights are inverse ATR. An idea that does not fit is refused whole.
 - Same-bar stop and target: the stop fills. Candle fills use 0.5 × bar volume when the bar trades through the limit. A limit that would cross is canceled.

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { ENABLED_PAIRS } from "./src/config";
+import { perTradeFloor } from "./src/fees";
 import { evaluateOverrides, OVERRIDE_RULES, payoffAt5090, type OverrideBook, type OverrideCandidate } from "./src/overrides";
 import { blankAllocator } from "./src/allocator";
 import { freshBook, PaperSession } from "./src/pipeline";
@@ -42,14 +43,18 @@ test("base candidate passes every hard override", () => {
   expect(result.checks.map((c) => c.rule)).toEqual([...OVERRIDE_RULES]);
 });
 
-test("fee_gate requires the 3R winner to be at least twice the loser after 50/90", () => {
-  const exact = payoffAt5090(100, 95.8);
-  expect(exact.stopBps).toBeCloseTo(420, 6);
-  expect(exact.pass).toBe(true);
-  const tight = payoffAt5090(100, 95.81);
+test("fee_gate is the 1.5 net reward:risk floor after the 100/140 split", () => {
+  const wide = payoffAt5090(100, 94);
+  expect(wide.pass).toBe(true);
+  const tight = payoffAt5090(100, 99);
   expect(tight.pass).toBe(false);
-  const result = failed({}, { stop: 99 });
-  expect(result.failed).toContain("fee_gate");
+  expect(failed({}, { stop: 99 }).failed).toContain("fee_gate");
+  const s = 310 / 1.5;
+  const boundary = perTradeFloor(s, s * 3);
+  expect(boundary.winnerBps).toBeCloseTo(1.5 * boundary.loserBps, 6);
+  expect(boundary.pass).toBe(true);
+  expect(perTradeFloor(s - 0.01, (s - 0.01) * 3).pass).toBe(false);
+  expect(payoffAt5090(100, 97.9).pass).toBe(true);
 });
 
 test("daily_two_losses halts at two losing closes", () => {

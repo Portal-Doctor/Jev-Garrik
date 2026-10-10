@@ -12,11 +12,13 @@ import {
   MAX_CONCURRENT,
   MAX_IDEAS_WEEKDAY,
   MAX_IDEAS_WEEKEND,
+  OVERNIGHT_RISK_CAP_USD,
   PAIR_LOSS_HALT_USD,
   STARTING_BUDGET_USD,
   TAKER_FEE_BPS,
 } from "./config";
 import { clockStatus } from "./clock";
+import { perTradeFloor } from "./fees";
 import type { Sentiment, SetupId } from "./rules";
 
 export const OVERRIDE_RULES = [
@@ -43,6 +45,7 @@ export const OVERRIDE_RULES = [
   "macro_blackout",
   "data_gap",
   "sentiment_caution",
+  "overnight_risk",
 ] as const;
 
 export type OverrideRule = (typeof OVERRIDE_RULES)[number];
@@ -60,6 +63,12 @@ export interface OverrideCandidate {
   originatedFromSentiment: boolean;
   /** Explicit add to an open long. Always refused. */
   addOn?: boolean;
+  /** Planned target distance. Absent on the 4h breakout, which has no resting maker target. */
+  plannedTargetBps?: number | null;
+  /** Swing replaces the UTC flat rule with the overnight cap. Breakout is not a day-trade card. */
+  entryProfile?: "intraday" | "swing" | "breakout";
+  /** Loss-to-stop of this idea if it would be held through the next UTC midnight. */
+  lossToStopUsd?: number;
 }
 
 export interface OverrideBook {
@@ -86,6 +95,8 @@ export interface OverrideBook {
   kill: boolean;
   paper: boolean;
   macroCalendarPresent: boolean;
+  /** Sum of open loss-to-stop on positions that are still open at the next UTC midnight. */
+  overnightOpenRiskUsd?: number;
 }
 
 export interface OverrideCheck {
@@ -108,23 +119,30 @@ export interface Payoff {
   pass: boolean;
 }
 
-/** Winner is 3R minus the 50/90 round trip. Loser is 1R plus that round trip. */
-export function payoffAt5090(entry: number, stop: number, makerBps = MAKER_FEE_BPS, takerBps = TAKER_FEE_BPS): Payoff {
+/**
+ * Per-trade floor at 50/90. Default target is 3R for the intraday research arm.
+ * Winner pays maker+maker. Loser pays maker+taker. Pass when winner >= 1.5 × loser.
+ */
+export function payoffAt5090(
+  entry: number,
+  stop: number,
+  makerBps = MAKER_FEE_BPS,
+  takerBps = TAKER_FEE_BPS,
+  targetMultiple = 3,
+): Payoff {
   if (!(entry > 0) || !(stop > 0) || !(entry > stop)) {
     return { stopBps: 0, targetBps: 0, winnerBps: 0, loserBps: 0, pass: false };
   }
   const stopBps = ((entry - stop) / entry) * 10_000;
-  const targetBps = stopBps * 3;
-  const fees = makerBps + takerBps;
-  const winnerBps = targetBps - fees;
-  const loserBps = stopBps + fees;
-  return {
-    stopBps,
-    targetBps,
-    winnerBps,
-    loserBps,
-    pass: winnerBps > 0 && loserBps > 0 && winnerBps >= 2 * loserBps,
-  };
+  const targetBps = stopBps * targetMultiple;
+  const winnerBps = targetBps - 2 * makerBps;
+  const loserBps = stopBps + makerBps + takerBps;
+  const floor = perTradeFloor(stopBps, targetBps);
+  const pass =
+    makerBps === MAKER_FEE_BPS && takerBps === TAKER_FEE_BPS
+      ? floor.pass
+      : loserBps > 0 && winnerBps >= 1.5 * loserBps;
+  return { stopBps, targetBps, winnerBps, loserBps, pass };
 }
 
 export function evaluateOverrides(
@@ -134,7 +152,25 @@ export function evaluateOverrides(
   nowMs: number,
 ): OverrideResult {
   const clock = clockStatus(nowMs, book.macroCalendarPresent);
-  const payoff = payoffAt5090(candidate.entry, candidate.stop);
+  const profile = candidate.entryProfile ?? "intraday";
+  const stopBps =
+    candidate.entry > candidate.stop && candidate.entry > 0
+      ? ((candidate.entry - candidate.stop) / candidate.entry) * 10_000
+      : 0;
+  const explicitTarget = candidate.plannedTargetBps;
+  const targetBps = explicitTarget == null ? stopBps * 3 : explicitTarget;
+  const missingBreakoutTarget = profile === "breakout" && explicitTarget == null;
+  const payoff = missingBreakoutTarget
+    ? { stopBps, targetBps: 0, winnerBps: 0, loserBps: stopBps + 140, pass: false }
+    : explicitTarget == null
+      ? payoffAt5090(candidate.entry, candidate.stop)
+      : {
+          stopBps,
+          targetBps,
+          winnerBps: targetBps - 100,
+          loserBps: stopBps + 140,
+          pass: perTradeFloor(stopBps, targetBps).pass,
+        };
   const openOnPair = book.openPairs.includes(candidate.pair);
   const concurrentCap = book.sentiment === "unknown" ? CAUTION_MAX_CONCURRENT : MAX_CONCURRENT;
   const ideaCap = clock.weekend ? MAX_IDEAS_WEEKEND : MAX_IDEAS_WEEKDAY;
@@ -153,7 +189,9 @@ export function evaluateOverrides(
     {
       rule: "fee_gate",
       pass: payoff.pass,
-      detail: `winner ${payoff.winnerBps.toFixed(2)} bps vs 2x loser ${(2 * payoff.loserBps).toFixed(2)} bps at 50/90`,
+      detail: missingBreakoutTarget
+        ? "no resting maker target"
+        : `winner ${payoff.winnerBps.toFixed(2)} bps vs 1.5x loser ${(1.5 * payoff.loserBps).toFixed(2)} bps`,
     },
     {
       rule: "daily_two_losses",
@@ -182,8 +220,11 @@ export function evaluateOverrides(
     },
     {
       rule: "flat_before_utc_midnight",
-      pass: !clock.mustFlatBeforeEntry,
-      detail: `ms until UTC midnight ${clock.msUntilUtcMidnight}`,
+      pass: profile !== "intraday" || !clock.mustFlatBeforeEntry,
+      detail:
+        profile === "intraday"
+          ? `ms until UTC midnight ${clock.msUntilUtcMidnight}`
+          : `${profile} uses max hold instead of the UTC flat`,
     },
     {
       rule: "one_per_pair",
@@ -197,7 +238,7 @@ export function evaluateOverrides(
     },
     {
       rule: "ideas_per_day",
-      pass: book.ideasTodayCt < ideaCap,
+      pass: profile === "breakout" || book.ideasTodayCt < ideaCap,
       detail: `ideas ${book.ideasTodayCt} cap ${ideaCap} weekend ${clock.weekend}`,
     },
     {
@@ -247,12 +288,12 @@ export function evaluateOverrides(
     },
     {
       rule: "outside_session",
-      pass: clock.inEntryWindow,
+      pass: profile === "breakout" || clock.inEntryWindow,
       detail: `ct ${clock.ctHour}:${String(clock.ctMinute).padStart(2, "0")} window ${clock.inEntryWindow}`,
     },
     {
       rule: "macro_blackout",
-      pass: !clock.inMacroBlackout,
+      pass: profile === "breakout" || !clock.inMacroBlackout,
       detail: clock.macroCalendarMissing ? "calendar missing; default slots" : "calendar loaded",
     },
     {
@@ -266,6 +307,13 @@ export function evaluateOverrides(
         book.sentiment !== "unknown" ||
         (candidate.setup === "A" && book.openCount + book.restingCount < CAUTION_MAX_CONCURRENT),
       detail: `sentiment ${book.sentiment} setup ${candidate.setup}`,
+    },
+    {
+      rule: "overnight_risk",
+      pass:
+        profile !== "swing" ||
+        (book.overnightOpenRiskUsd ?? 0) + (candidate.lossToStopUsd ?? 0) <= OVERNIGHT_RISK_CAP_USD,
+      detail: `open ${book.overnightOpenRiskUsd ?? 0} plus idea ${candidate.lossToStopUsd ?? 0} cap ${OVERNIGHT_RISK_CAP_USD}`,
     },
   ];
 

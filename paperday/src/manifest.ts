@@ -8,6 +8,7 @@ import {
   PAIR_LOSS_HALT_USD,
   RESERVE_USD,
   STARTING_BUDGET_USD,
+  SWING_APPROVED,
   TAKER_FEE_BPS,
   type JevStage,
 } from "./config";
@@ -31,6 +32,7 @@ export interface RunManifest {
   formula: string;
   strategy: string;
   variant: string;
+  swingApproved: boolean;
   paper: true;
 }
 
@@ -62,6 +64,7 @@ export function buildManifest(opts: {
     formula: opts.formula,
     strategy: opts.strategy,
     variant: opts.variant,
+    swingApproved: SWING_APPROVED,
     paper: true,
   };
 }

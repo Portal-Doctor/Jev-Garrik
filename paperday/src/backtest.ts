@@ -1,62 +1,58 @@
 /**
- * Revenue gate and candle-cache loader for the 1/3/6-month matrix.
- * jev_veto and jev_select are not executed here: they need paid Jev reviews.
+ * Revenue gates and the jev_off matrix loader.
+ * jev_veto and jev_select are not executed: they need a real gateway key.
  */
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { BOOK_DRAWDOWN_HALT_USD, ENABLED_PAIRS, type AllocatorMode, type ShareFormula, type StrategyId } from "./config";
+import { ENABLED_PAIRS, type AllocatorMode, type RunStrategy, type SentimentMode, type ShareFormula } from "./config";
 import type { Candle } from "./bars";
-import { quarterKey } from "./clock";
+import { classExpectancy, type ExpectancyReport } from "./expectancy";
 import { runEngine, type EngineResult } from "./engine";
+import { MIN_TRADES, requiredGate, TARGET_PACE_USD, targetGate, type SampleStatus, type WindowId } from "./gate";
+import { prepareSwingPairs, runBreakoutPaper, runSwing, type SwingPair } from "./higher";
+import { buildMarketProxy, proxyAt, type ProxyBook } from "./proxy";
 
 export const WINDOW_END_MS = Date.parse("2026-10-09T00:00:00.000Z");
 
 export const WINDOWS = {
-  "1m": { fromMs: Date.parse("2026-09-09T00:00:00.000Z"), toMs: WINDOW_END_MS, netUsd: 400 },
-  "3m": { fromMs: Date.parse("2026-07-09T00:00:00.000Z"), toMs: WINDOW_END_MS, netUsd: 1_200 },
-  "6m": { fromMs: Date.parse("2026-04-09T00:00:00.000Z"), toMs: WINDOW_END_MS, netUsd: 2_400 },
+  "1m": { fromMs: Date.parse("2026-09-09T00:00:00.000Z"), toMs: WINDOW_END_MS },
+  "3m": { fromMs: Date.parse("2026-07-09T00:00:00.000Z"), toMs: WINDOW_END_MS },
+  "6m": { fromMs: Date.parse("2026-04-09T00:00:00.000Z"), toMs: WINDOW_END_MS },
 } as const;
 
-export type WindowId = keyof typeof WINDOWS;
+export type { WindowId };
+export { MIN_TRADES, requiredGate, targetGate };
 
-export interface GateResult {
-  pass: boolean;
-  reasons: string[];
+export interface WidthStats {
+  n: number;
+  min: number | null;
+  p25: number | null;
+  p50: number | null;
+  p75: number | null;
+  max: number | null;
+  mean: number | null;
 }
 
-/** Calendar quarters touched by [fromMs, toMs). A quarter with no closes counts as $0. */
-export function quartersTouched(fromMs: number, toMs: number): string[] {
-  const seen: string[] = [];
-  const mark = (ts: number) => {
-    const q = quarterKey(ts);
-    if (!seen.includes(q)) seen.push(q);
+export function widthStats(values: number[]): WidthStats {
+  if (values.length === 0) return { n: 0, min: null, p25: null, p50: null, p75: null, max: null, mean: null };
+  const xs = values.slice().sort((a, b) => a - b);
+  const q = (p: number) => {
+    const i = (xs.length - 1) * p;
+    const lo = Math.floor(i);
+    const hi = Math.ceil(i);
+    if (lo === hi) return xs[lo]!;
+    return xs[lo]! * (hi - i) + xs[hi]! * (i - lo);
   };
-  if (toMs <= fromMs) return seen;
-  for (let t = fromMs; t < toMs; t += 15 * 86_400_000) mark(t);
-  mark(toMs - 1);
-  return seen;
-}
-
-/**
- * Section 7. Every calendar quarter touched by the 6-month window, including
- * partial quarters and quarters with no closes, must clear $1,200.
- */
-export function revenueGate(window: WindowId, result: Pick<EngineResult, "netUsd" | "maxDrawdownUsd" | "quarters">): GateResult {
-  const reasons: string[] = [];
-  const need = WINDOWS[window].netUsd;
-  if (!(result.netUsd >= need)) reasons.push(`net ${result.netUsd.toFixed(2)} < ${need}`);
-  if (!(result.maxDrawdownUsd <= BOOK_DRAWDOWN_HALT_USD)) {
-    reasons.push(`max drawdown ${result.maxDrawdownUsd.toFixed(2)} > ${BOOK_DRAWDOWN_HALT_USD}`);
-  }
-  if (window === "6m") {
-    const byQ = new Map(result.quarters.map((q) => [q.quarter, q.netUsd]));
-    for (const quarter of quartersTouched(WINDOWS["6m"].fromMs, WINDOWS["6m"].toMs)) {
-      const net = byQ.get(quarter) ?? 0;
-      if (!(net >= 1_200)) reasons.push(`${quarter} net ${net.toFixed(2)} < 1200`);
-    }
-  }
-  return { pass: reasons.length === 0, reasons };
+  return {
+    n: xs.length,
+    min: xs[0]!,
+    p25: q(0.25),
+    p50: q(0.5),
+    p75: q(0.75),
+    max: xs[xs.length - 1]!,
+    mean: xs.reduce((s, x) => s + x, 0) / xs.length,
+  };
 }
 
 export function loadCandleCsv(path: string): Candle[] {
@@ -97,94 +93,181 @@ export function hashCandles(candles: Record<string, Candle[]>): string {
 }
 
 export interface MatrixRow {
-  strategy: StrategyId;
+  strategy: RunStrategy;
   variant: "jev_off" | "jev_veto" | "jev_select";
   mode: AllocatorMode;
   formula: ShareFormula;
   window: WindowId;
+  sentimentMode: SentimentMode;
+  sentimentLabel: "upper bound" | "proxy";
   fromMs: number;
   toMs: number;
   netUsd: number | null;
   maxDrawdownUsd: number | null;
-  quarters: EngineResult["quarters"];
   trades: number | null;
+  wins: number | null;
+  winRate: number | null;
+  avgR: number | null;
+  eR: number | null;
+  eBps: number | null;
+  pStar: number | null;
   ideas: number | null;
   rejects: Record<string, number>;
   exits: Record<string, number>;
-  gatePass: boolean | null;
-  reasons: string[];
-  status: "pass" | "fail" | "not_run";
+  stopWidth: Record<string, WidthStats>;
+  sample: SampleStatus | "not_run";
+  requiredPass: boolean | null;
+  requiredReasons: string[];
+  targetPass: boolean | null;
+  targetReasons: string[];
+  jevCalls: number;
+  jevTokens: number;
+  jevSpendUsd: number;
+  status: "pass" | "fail" | "not_run" | "blocked";
   note: string;
 }
 
-export async function runJevOffCell(opts: {
-  candles: Record<string, Candle[]>;
-  strategy: StrategyId;
-  mode: AllocatorMode;
-  formula: ShareFormula;
-  window: WindowId;
-}): Promise<MatrixRow> {
+function sentimentLabel(mode: SentimentMode): "upper bound" | "proxy" {
+  return mode === "sentiment_blind" ? "upper bound" : "proxy";
+}
+
+function rowFromResult(
+  strategy: RunStrategy,
+  opts: { mode: AllocatorMode; formula: ShareFormula; window: WindowId; sentimentMode: SentimentMode },
+  result: EngineResult,
+  research: boolean,
+): MatrixRow {
   const w = WINDOWS[opts.window];
-  const result = await runEngine({
-    candles: opts.candles,
+  const exp: ExpectancyReport = classExpectancy(result.samples);
+  const required = requiredGate({
+    window: opts.window,
+    netUsd: result.netUsd,
+    maxDrawdownUsd: result.maxDrawdownUsd,
+    trades: result.trades,
+    expectancyPass: exp.pass,
+    pairHaltBreached: result.pairHaltBreached,
+    dailyHaltBreached: result.dailyHaltBreached,
+    research,
+  });
+  const target = targetGate({
+    paceUsd: TARGET_PACE_USD[opts.window],
     fromMs: w.fromMs,
     toMs: w.toMs,
-    mode: opts.mode,
-    formula: opts.formula,
-    strategy: opts.strategy,
-    sentiment: "unknown",
-    enabledPairs: ENABLED_PAIRS,
-    variant: "jev_off",
+    netUsd: result.netUsd,
+    quarters: result.quarters,
   });
-  const gate = revenueGate(opts.window, result);
+  const stopWidth: Record<string, WidthStats> = {};
+  for (const [pair, widths] of Object.entries(result.stopsByPair)) stopWidth[pair] = widthStats(widths);
   return {
-    strategy: opts.strategy,
+    strategy,
     variant: "jev_off",
     mode: opts.mode,
     formula: opts.formula,
     window: opts.window,
+    sentimentMode: opts.sentimentMode,
+    sentimentLabel: sentimentLabel(opts.sentimentMode),
     fromMs: w.fromMs,
     toMs: w.toMs,
     netUsd: result.netUsd,
     maxDrawdownUsd: result.maxDrawdownUsd,
-    quarters: result.quarters,
     trades: result.trades,
+    wins: result.wins,
+    winRate: result.trades > 0 ? result.wins / result.trades : null,
+    avgR: result.avgR,
+    eR: exp.eR,
+    eBps: exp.eBps,
+    pStar: exp.pStar,
     ideas: result.ideas,
     rejects: result.rejects,
     exits: result.exits,
-    gatePass: gate.pass,
-    reasons: gate.reasons,
-    status: gate.pass ? "pass" : "fail",
-    note: "sentiment unknown (no historical X read) so only setup A, caution cap 1",
+    stopWidth,
+    sample: required.sample,
+    requiredPass: required.pass,
+    requiredReasons: required.reasons,
+    targetPass: target.pass,
+    targetReasons: target.reasons,
+    jevCalls: 0,
+    jevTokens: 0,
+    jevSpendUsd: 0,
+    status: required.pass ? "pass" : "fail",
+    note: research
+      ? "intraday research arm, excluded from the required gate"
+      : opts.sentimentMode === "sentiment_blind"
+        ? "sentiment-blind upper bound"
+        : "market-proxy sentiment",
   };
 }
 
-export function notRunRow(
-  strategy: StrategyId,
-  variant: "jev_veto" | "jev_select",
-  mode: AllocatorMode,
-  formula: ShareFormula,
-  window: WindowId,
-): MatrixRow {
-  const w = WINDOWS[window];
+export interface RunContext {
+  candles: Record<string, Candle[]>;
+  btc: Candle[];
+  prepared: SwingPair[];
+  proxy: ProxyBook;
+}
+
+export function buildRunContext(candles: Record<string, Candle[]>, btc: Candle[]): RunContext {
   return {
-    strategy,
-    variant,
-    mode,
-    formula,
-    window,
+    candles,
+    btc,
+    prepared: prepareSwingPairs(candles, ENABLED_PAIRS, WINDOW_END_MS),
+    proxy: buildMarketProxy(candles, btc, WINDOW_END_MS),
+  };
+}
+
+export async function runJevOffCell(opts: {
+  ctx: RunContext;
+  strategy: RunStrategy;
+  mode: AllocatorMode;
+  formula: ShareFormula;
+  window: WindowId;
+  sentimentMode: SentimentMode;
+}): Promise<MatrixRow> {
+  const w = WINDOWS[opts.window];
+  const common = {
+    candles: opts.ctx.candles,
     fromMs: w.fromMs,
     toMs: w.toMs,
-    netUsd: null,
-    maxDrawdownUsd: null,
-    quarters: [],
-    trades: null,
-    ideas: null,
-    rejects: {},
-    exits: {},
-    gatePass: null,
-    reasons: [],
-    status: "not_run",
-    note: "not run: needs paid Jev reviews",
+    mode: opts.mode,
+    formula: opts.formula,
+    strategy: opts.strategy,
+    sentimentMode: opts.sentimentMode,
+    proxy: opts.sentimentMode === "market_proxy" ? opts.ctx.proxy : null,
+    swingApproved: true,
+    enabledPairs: ENABLED_PAIRS,
+    variant: "jev_off" as const,
+    prepared: opts.ctx.prepared,
   };
+  if (opts.strategy === "repo_breakout_4h") {
+    const result = await runBreakoutPaper(common);
+    return rowFromResult(opts.strategy, opts, result, false);
+  }
+  if (opts.strategy === "intraday_research") {
+    const result = await runEngine({
+      candles: opts.ctx.candles,
+      fromMs: w.fromMs,
+      toMs: w.toMs,
+      mode: opts.mode,
+      formula: opts.formula,
+      strategy: "combined",
+      sentiment: opts.sentimentMode === "sentiment_blind" ? "clear" : "clear",
+      enabledPairs: ENABLED_PAIRS,
+      variant: "jev_off",
+      sentimentAt:
+        opts.sentimentMode === "market_proxy"
+          ? (pair, ts) => {
+              const mark = proxyAt(opts.ctx.proxy, pair, ts);
+              if (mark.veto) return "veto";
+              if (mark.caution) return "caution";
+              return "clear";
+            }
+          : undefined,
+    });
+    return rowFromResult(opts.strategy, opts, result, true);
+  }
+  const result = await runSwing(common);
+  return rowFromResult(opts.strategy, opts, result, false);
+}
+
+export function blockedJevNote(): string {
+  return "blocked: AI_GATEWAY_API_KEY not present";
 }
