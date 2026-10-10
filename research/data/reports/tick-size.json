@@ -1,0 +1,3945 @@
+{
+  "commitSha": "db465cb0f63b925eaaaed3a2dbdcde3beb58126d",
+  "dataRootHash": "67b8963191a52383657fff6bd6bc505327aa540fe4009de6d264e2c4cd2799d8",
+  "createdAt": "2026-10-10T22:46:29.167Z",
+  "phaseId": "P1",
+  "note": "Report only. No pair is treated as having a constant tick.",
+  "flags": [
+    {
+      "productId": "00-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "1INCH-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "2Z-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "A8-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AAVE-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ABT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ACH-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ACS-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ACX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ADA-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AERGO-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AERO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AGLD-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AI-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AIOZ-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AKT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ALCX-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ALEO-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ALEPH-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ALGO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ALICE-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ALIGN-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ALLO-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ALT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AMP-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ANKR-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ANT-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "APE-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "API3-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "APR-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "APT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ARB-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ARKM-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ARPA-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ARX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ASM-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AST-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ASTER-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ATA-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ATH-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ATOM-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AUCTION-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AUDIO-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AURORA-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AVAX-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AVNT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AVT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AWE-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AXL-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AXS-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "AZTEC-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "B3-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BADGER-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BAL-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BAND-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BARD-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BASECAT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BASED1-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BAT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BCH-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BEAM-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BERA-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BICO-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BIGTIME-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BILL-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BIO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BIRB-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BIT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BLAST-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BLEND-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BLUECHIP-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BLUR-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BLZ-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BNB-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BNKR-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BNT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BOBA-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BOBBOB-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BOND-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BONK-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BREV-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BTC-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BTRST-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "BUSD-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "C98-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CAKE-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CAP-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CBETH-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CELR-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CFG-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CGLD-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CHECK-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CHIP-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CHZ-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CLANKER-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CLV-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "COMP-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "COOKIE-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CORECHAIN-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "COSMOSDYDX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "COTI-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "COVAL-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "COW-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CP-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CRO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CRPT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CRV-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CTR-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CTSI-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CTX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CVC-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "CVX-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DAI-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DAR-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DASH-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DATA-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DBR-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DDX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DEEP-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DEGEN-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DESO-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DEXT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DIA-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DIEM-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DIMO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DNT-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DOGE-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DOGINME-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DOLO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DOOD-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DOT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DRB-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DREP-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DRIFT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DRV-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "DYP-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "EDGE-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "EDGEX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "EGLD-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "EIGEN-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ELA-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ELSA-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ENA-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ENJ-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ENS-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "EOS-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ERA-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ERN-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ESP-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ETC-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ETH-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ETHFI-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "EUL-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "EURC-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FAI-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FARM-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FARTCOIN-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FET-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FIDA-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FIGHT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FIL-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FIS-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FLOCK-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FLOKI-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FLOW-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FLR-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FLUID-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FORT-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FORTH-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FOX-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FUN1-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "FX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "G-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GAL-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GALA-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GEOD-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GFI-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GHST-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GIGA-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GLM-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GMT-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GNO-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GODS-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GRASS-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GROVE-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GRT-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GRVT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GST-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GTC-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GUSD-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GWEI-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "GYEN-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "HBAR-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "HFT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "HIGH-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "HNT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "HOME-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "HONEY-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "HOPR-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "HYPE-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "HYPER-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ICNT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ICP-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "IDEX-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ILV-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "IMU-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "IMX-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "INDEX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "INJ-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "INV-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "INX-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "IO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "IOTX-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "IP-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "IRYS-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "JASMY-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "JITOSOL-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "JTO-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "JUP-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "JUPITER-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KAIO-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KAITO-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KARRAT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KAT-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KAVA-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KEEP-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KERNEL-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KEYCAT-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KITE-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KMNO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KNC-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KRL-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KSM-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "KTA-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "L3-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LA-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LAYER-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LCX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LDO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LIGHTER-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LINEA-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LINK-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LIT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LMTS-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LOKA-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LOOM-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LPT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LQTY-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LRC-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LRDS-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LSETH-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "LTC-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MAGIC-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MAMO-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MANA-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MANTLE-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MASK-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MATH-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MATIC-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MCO2-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MDT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ME-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MEDIA-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MEGA-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MET-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "META-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "METIS-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MEZO-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MINA-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MIR-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MKR-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MLN-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MNDE-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MOBILE-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MOG-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MON-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MONA-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MOODENG-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MORPHO-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MOVE-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MPL-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MPLX-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MSOL-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MTL-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MULTI-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MUSD-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MUSE-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "MXC-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "NCT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "NEAR-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "NEON-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "NEST-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "NEWT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "NEX-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "NKN-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "NMR-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "NOICE-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "NOM-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "NU-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "O-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "OCEAN-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "OGN-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "OMG-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "OMNI-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ONDO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "OOKI-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "OP-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "OPG-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "OPN-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ORCA-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ORN-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "OSMO-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "OXT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PAX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PAXG-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PENDLE-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PENGU-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PEPE-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PERP-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PIRATE-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PLA-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PLU-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PLUME-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PNG-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PNUT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "POL-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "POLS-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "POLY-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "POND-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PONS-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "POPCAT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "POWR-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PRCL-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PRIME-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PRL-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PRO-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PROMPT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PROS-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PROVE-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PRQ-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PUMP-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PUNDIX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PYR-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PYTH-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "PYUSD-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "QI-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "QNT-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "QSP-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "QUICK-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RAD-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RAI-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RARE-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RARI-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RAVE-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RAY-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RBN-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RE-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RECALL-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RED-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "REN-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RENDER-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "REP-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "REQ-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "REZ-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RGT-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RLC-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RLS-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RLY-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RNBW-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RNDR-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ROBO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RONIN-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ROSE-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RPL-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RSC-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "RSR-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "S-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SAFE-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SAND-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SAPIEN-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SD-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SEAM-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SEI-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SENT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SHDW-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SHIB-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SHPING-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SIGN-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SKL-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SKR-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SKY-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SNT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SNX-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SOL-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SPA-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SPELL-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SPK-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SPX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SQD-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "STG-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "STORJ-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "STRK-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "STX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SUI-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SUKU-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SUP-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SUPER-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SUSHI-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SWELL-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SWFTC-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SXT-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SYLO-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SYN-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SYND-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "SYRUP-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "T-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TAO-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "THQ-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TIA-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TIME-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TNSR-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TON-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TONE-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TOSHI-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TOWNS-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TRAC-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TRB-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TREE-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TRIA-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TRIBE-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TROLL-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TRU-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TRUMP-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TRUST-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TURBO-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "TVK-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "UMA-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "UNFI-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "UNI-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "UP-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "UPI-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "USD1-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "USDS-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "USDT-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "USELESS-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "UST-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "VARA-USD",
+      "tickSize": "0.0000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "VELO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "VET-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "VGX-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "VIRTUAL-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "VOXEL-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "VTHO-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "VVV-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "W-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WAL-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WAMPL-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WAXL-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WBTC-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WCFG-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WCT-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WELL-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WET-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WHUF-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WIF-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WLD-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WLFI-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WLUNA-USD",
+      "tickSize": "0.00000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WMTX-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "WRON-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "XAN-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "XCN-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "XLM-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "XPL-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "XRP-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "XTZ-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "XYO-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "YB-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "YFI-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "YFII-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ZAMA-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ZEC-USD",
+      "tickSize": "0.01",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ZEN-USD",
+      "tickSize": "0.001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ZETA-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ZETACHAIN-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ZK-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ZKC-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ZKP-USD",
+      "tickSize": "0.00001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ZORA-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ZRO-USD",
+      "tickSize": "0.0001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    },
+    {
+      "productId": "ZRX-USD",
+      "tickSize": "0.000001",
+      "tickField": "quote_increment",
+      "historyAvailable": false,
+      "tickMayHaveChanged": true,
+      "reason": "product payload publishes only the current quote_increment; no tick-size history is in the snapshot"
+    }
+  ]
+}

@@ -1,0 +1,4932 @@
+{
+  "commitSha": "db465cb0f63b925eaaaed3a2dbdcde3beb58126d",
+  "dataRootHash": "67b8963191a52383657fff6bd6bc505327aa540fe4009de6d264e2c4cd2799d8",
+  "createdAt": "2026-10-10T22:44:56.430Z",
+  "phaseId": "P1",
+  "source": "https://api.exchange.coinbase.com/products",
+  "rawSha256": "c6f1d6b37a5c862482e8a3f6493eb73295d9aca9a8eb9f58e5e9ae1c5e5ae83c",
+  "rawBytes": 355056,
+  "listingDateNote": "listing date is not in the exchange products payload",
+  "products": [
+    {
+      "productId": "00-USD",
+      "base": "00",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "1INCH-USD",
+      "base": "1INCH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "2Z-USD",
+      "base": "2Z",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "A8-USD",
+      "base": "A8",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AAVE-USD",
+      "base": "AAVE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ABT-USD",
+      "base": "ABT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ACH-USD",
+      "base": "ACH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ACS-USD",
+      "base": "ACS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ACX-USD",
+      "base": "ACX",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "ADA-USD",
+      "base": "ADA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AERGO-USD",
+      "base": "AERGO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AERO-USD",
+      "base": "AERO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AGLD-USD",
+      "base": "AGLD",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AI-USD",
+      "base": "AI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AIOZ-USD",
+      "base": "AIOZ",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AKT-USD",
+      "base": "AKT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ALCX-USD",
+      "base": "ALCX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ALEO-USD",
+      "base": "ALEO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ALEPH-USD",
+      "base": "ALEPH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ALGO-USD",
+      "base": "ALGO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ALICE-USD",
+      "base": "ALICE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ALIGN-USD",
+      "base": "ALIGN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ALLO-USD",
+      "base": "ALLO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ALT-USD",
+      "base": "ALT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AMP-USD",
+      "base": "AMP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ANKR-USD",
+      "base": "ANKR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ANT-USD",
+      "base": "ANT",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "APE-USD",
+      "base": "APE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "API3-USD",
+      "base": "API3",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "APR-USD",
+      "base": "APR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "APT-USD",
+      "base": "APT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ARB-USD",
+      "base": "ARB",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ARKM-USD",
+      "base": "ARKM",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ARPA-USD",
+      "base": "ARPA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ARX-USD",
+      "base": "ARX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ASM-USD",
+      "base": "ASM",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AST-USD",
+      "base": "AST",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ASTER-USD",
+      "base": "ASTER",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ATA-USD",
+      "base": "ATA",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "ATH-USD",
+      "base": "ATH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ATOM-USD",
+      "base": "ATOM",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AUCTION-USD",
+      "base": "AUCTION",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AUDIO-USD",
+      "base": "AUDIO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AURORA-USD",
+      "base": "AURORA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AVAX-USD",
+      "base": "AVAX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AVNT-USD",
+      "base": "AVNT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AVT-USD",
+      "base": "AVT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AWE-USD",
+      "base": "AWE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AXL-USD",
+      "base": "AXL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AXS-USD",
+      "base": "AXS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "AZTEC-USD",
+      "base": "AZTEC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "B3-USD",
+      "base": "B3",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BADGER-USD",
+      "base": "BADGER",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "BAL-USD",
+      "base": "BAL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BAND-USD",
+      "base": "BAND",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BARD-USD",
+      "base": "BARD",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BASECAT-USD",
+      "base": "BASECAT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BASED1-USD",
+      "base": "BASED1",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BAT-USD",
+      "base": "BAT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BCH-USD",
+      "base": "BCH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BEAM-USD",
+      "base": "BEAM",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BERA-USD",
+      "base": "BERA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BICO-USD",
+      "base": "BICO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BIGTIME-USD",
+      "base": "BIGTIME",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BILL-USD",
+      "base": "BILL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BIO-USD",
+      "base": "BIO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BIRB-USD",
+      "base": "BIRB",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BIT-USD",
+      "base": "BIT",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "BLAST-USD",
+      "base": "BLAST",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BLEND-USD",
+      "base": "BLEND",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BLUECHIP-USD",
+      "base": "BLUECHIP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BLUR-USD",
+      "base": "BLUR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BLZ-USD",
+      "base": "BLZ",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BNB-USD",
+      "base": "BNB",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BNKR-USD",
+      "base": "BNKR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BNT-USD",
+      "base": "BNT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BOBA-USD",
+      "base": "BOBA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BOBBOB-USD",
+      "base": "BOBBOB",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BOND-USD",
+      "base": "BOND",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "BONK-USD",
+      "base": "BONK",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BREV-USD",
+      "base": "BREV",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BTC-USD",
+      "base": "BTC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BTRST-USD",
+      "base": "BTRST",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "BUSD-USD",
+      "base": "BUSD",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "C98-USD",
+      "base": "C98",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CAKE-USD",
+      "base": "CAKE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CAP-USD",
+      "base": "CAP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CBETH-USD",
+      "base": "CBETH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CELR-USD",
+      "base": "CELR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CFG-USD",
+      "base": "CFG",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CGLD-USD",
+      "base": "CGLD",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CHECK-USD",
+      "base": "CHECK",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CHIP-USD",
+      "base": "CHIP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CHZ-USD",
+      "base": "CHZ",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CLANKER-USD",
+      "base": "CLANKER",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CLV-USD",
+      "base": "CLV",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "COMP-USD",
+      "base": "COMP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "COOKIE-USD",
+      "base": "COOKIE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CORECHAIN-USD",
+      "base": "CORECHAIN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "COSMOSDYDX-USD",
+      "base": "COSMOSDYDX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "COTI-USD",
+      "base": "COTI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "COVAL-USD",
+      "base": "COVAL",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "COW-USD",
+      "base": "COW",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CP-USD",
+      "base": "CP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CRO-USD",
+      "base": "CRO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CRPT-USD",
+      "base": "CRPT",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "CRV-USD",
+      "base": "CRV",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CT-USD",
+      "base": "CT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CTR-USD",
+      "base": "CTR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CTSI-USD",
+      "base": "CTSI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CTX-USD",
+      "base": "CTX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CVC-USD",
+      "base": "CVC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "CVX-USD",
+      "base": "CVX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DAI-USD",
+      "base": "DAI",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "DAR-USD",
+      "base": "DAR",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "DASH-USD",
+      "base": "DASH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DATA-USD",
+      "base": "DATA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DBR-USD",
+      "base": "DBR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DDX-USD",
+      "base": "DDX",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "DEEP-USD",
+      "base": "DEEP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DEGEN-USD",
+      "base": "DEGEN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DESO-USD",
+      "base": "DESO",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "DEXT-USD",
+      "base": "DEXT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DIA-USD",
+      "base": "DIA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DIEM-USD",
+      "base": "DIEM",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DIMO-USD",
+      "base": "DIMO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DNT-USD",
+      "base": "DNT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DOGE-USD",
+      "base": "DOGE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DOGINME-USD",
+      "base": "DOGINME",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DOLO-USD",
+      "base": "DOLO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DOOD-USD",
+      "base": "DOOD",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DOT-USD",
+      "base": "DOT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DRB-USD",
+      "base": "DRB",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DREP-USD",
+      "base": "DREP",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "DRIFT-USD",
+      "base": "DRIFT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DRV-USD",
+      "base": "DRV",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "DYP-USD",
+      "base": "DYP",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "EDGE-USD",
+      "base": "EDGE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "EDGEX-USD",
+      "base": "EDGEX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "EGLD-USD",
+      "base": "EGLD",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "EIGEN-USD",
+      "base": "EIGEN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ELA-USD",
+      "base": "ELA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ELSA-USD",
+      "base": "ELSA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ENA-USD",
+      "base": "ENA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ENJ-USD",
+      "base": "ENJ",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "ENS-USD",
+      "base": "ENS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "EOS-USD",
+      "base": "EOS",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "ERA-USD",
+      "base": "ERA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ERN-USD",
+      "base": "ERN",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "ESP-USD",
+      "base": "ESP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ETC-USD",
+      "base": "ETC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ETH-USD",
+      "base": "ETH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ETHFI-USD",
+      "base": "ETHFI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "EUL-USD",
+      "base": "EUL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "EURC-USD",
+      "base": "EURC",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "FAI-USD",
+      "base": "FAI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FARM-USD",
+      "base": "FARM",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FARTCOIN-USD",
+      "base": "FARTCOIN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FET-USD",
+      "base": "FET",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FIDA-USD",
+      "base": "FIDA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FIGHT-USD",
+      "base": "FIGHT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FIL-USD",
+      "base": "FIL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FIS-USD",
+      "base": "FIS",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.000001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "FLOCK-USD",
+      "base": "FLOCK",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FLOKI-USD",
+      "base": "FLOKI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FLOW-USD",
+      "base": "FLOW",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FLR-USD",
+      "base": "FLR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FLUID-USD",
+      "base": "FLUID",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FORT-USD",
+      "base": "FORT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FORTH-USD",
+      "base": "FORTH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FOX-USD",
+      "base": "FOX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FUN1-USD",
+      "base": "FUN1",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "FX-USD",
+      "base": "FX",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "G-USD",
+      "base": "G",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GAL-USD",
+      "base": "GAL",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "GALA-USD",
+      "base": "GALA",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "GEOD-USD",
+      "base": "GEOD",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GFI-USD",
+      "base": "GFI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GHST-USD",
+      "base": "GHST",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GIGA-USD",
+      "base": "GIGA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GLM-USD",
+      "base": "GLM",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GMT-USD",
+      "base": "GMT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GNO-USD",
+      "base": "GNO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GODS-USD",
+      "base": "GODS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GRASS-USD",
+      "base": "GRASS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GROVE-USD",
+      "base": "GROVE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GRT-USD",
+      "base": "GRT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GRVT-USD",
+      "base": "GRVT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GST-USD",
+      "base": "GST",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GTC-USD",
+      "base": "GTC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GUSD-USD",
+      "base": "GUSD",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "GWEI-USD",
+      "base": "GWEI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "GYEN-USD",
+      "base": "GYEN",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.000001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "HBAR-USD",
+      "base": "HBAR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "HFT-USD",
+      "base": "HFT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "HIGH-USD",
+      "base": "HIGH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "HNT-USD",
+      "base": "HNT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "HOME-USD",
+      "base": "HOME",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "HONEY-USD",
+      "base": "HONEY",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "HOPR-USD",
+      "base": "HOPR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "HYPE-USD",
+      "base": "HYPE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "HYPER-USD",
+      "base": "HYPER",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ICNT-USD",
+      "base": "ICNT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ICP-USD",
+      "base": "ICP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "IDEX-USD",
+      "base": "IDEX",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "ILV-USD",
+      "base": "ILV",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "IMU-USD",
+      "base": "IMU",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "IMX-USD",
+      "base": "IMX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "INDEX-USD",
+      "base": "INDEX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "INJ-USD",
+      "base": "INJ",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "INV-USD",
+      "base": "INV",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "INX-USD",
+      "base": "INX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "IO-USD",
+      "base": "IO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "IOTX-USD",
+      "base": "IOTX",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "IP-USD",
+      "base": "IP",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "IRYS-USD",
+      "base": "IRYS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "JASMY-USD",
+      "base": "JASMY",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "JITOSOL-USD",
+      "base": "JITOSOL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "JTO-USD",
+      "base": "JTO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "JUP-USD",
+      "base": "JUP",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.000001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "JUPITER-USD",
+      "base": "JUPITER",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KAIO-USD",
+      "base": "KAIO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KAITO-USD",
+      "base": "KAITO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KARRAT-USD",
+      "base": "KARRAT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KAT-USD",
+      "base": "KAT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KAVA-USD",
+      "base": "KAVA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KEEP-USD",
+      "base": "KEEP",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "KERNEL-USD",
+      "base": "KERNEL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KEYCAT-USD",
+      "base": "KEYCAT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KITE-USD",
+      "base": "KITE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KMNO-USD",
+      "base": "KMNO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KNC-USD",
+      "base": "KNC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KRL-USD",
+      "base": "KRL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KSM-USD",
+      "base": "KSM",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "KTA-USD",
+      "base": "KTA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "L3-USD",
+      "base": "L3",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LA-USD",
+      "base": "LA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LAYER-USD",
+      "base": "LAYER",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LCX-USD",
+      "base": "LCX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LDO-USD",
+      "base": "LDO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LIGHTER-USD",
+      "base": "LIGHTER",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LINEA-USD",
+      "base": "LINEA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LINK-USD",
+      "base": "LINK",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LIT-USD",
+      "base": "LIT",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "LMTS-USD",
+      "base": "LMTS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LOKA-USD",
+      "base": "LOKA",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "LOOM-USD",
+      "base": "LOOM",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "LPT-USD",
+      "base": "LPT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LQTY-USD",
+      "base": "LQTY",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LRC-USD",
+      "base": "LRC",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "LRDS-USD",
+      "base": "LRDS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LSETH-USD",
+      "base": "LSETH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "LTC-USD",
+      "base": "LTC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MAGIC-USD",
+      "base": "MAGIC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MAMO-USD",
+      "base": "MAMO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MANA-USD",
+      "base": "MANA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MANTLE-USD",
+      "base": "MANTLE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MASK-USD",
+      "base": "MASK",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MATH-USD",
+      "base": "MATH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MATIC-USD",
+      "base": "MATIC",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MCO2-USD",
+      "base": "MCO2",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MDT-USD",
+      "base": "MDT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ME-USD",
+      "base": "ME",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MEDIA-USD",
+      "base": "MEDIA",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MEGA-USD",
+      "base": "MEGA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MET-USD",
+      "base": "MET",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "META-USD",
+      "base": "META",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "METIS-USD",
+      "base": "METIS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MEZO-USD",
+      "base": "MEZO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MINA-USD",
+      "base": "MINA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MIR-USD",
+      "base": "MIR",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MKR-USD",
+      "base": "MKR",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MLN-USD",
+      "base": "MLN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MNDE-USD",
+      "base": "MNDE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MOBILE-USD",
+      "base": "MOBILE",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.000001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MOG-USD",
+      "base": "MOG",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MON-USD",
+      "base": "MON",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MONA-USD",
+      "base": "MONA",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MOODENG-USD",
+      "base": "MOODENG",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MORPHO-USD",
+      "base": "MORPHO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MOVE-USD",
+      "base": "MOVE",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MPL-USD",
+      "base": "MPL",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MPLX-USD",
+      "base": "MPLX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MSOL-USD",
+      "base": "MSOL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "MTL-USD",
+      "base": "MTL",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MULTI-USD",
+      "base": "MULTI",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MUSD-USD",
+      "base": "MUSD",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MUSE-USD",
+      "base": "MUSE",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "MXC-USD",
+      "base": "MXC",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "NCT-USD",
+      "base": "NCT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "NEAR-USD",
+      "base": "NEAR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "NEON-USD",
+      "base": "NEON",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "NEST-USD",
+      "base": "NEST",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "NEWT-USD",
+      "base": "NEWT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "NEX-USD",
+      "base": "NEX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "NKN-USD",
+      "base": "NKN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "NMR-USD",
+      "base": "NMR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "NOICE-USD",
+      "base": "NOICE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "NOM-USD",
+      "base": "NOM",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "NU-USD",
+      "base": "NU",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "O-USD",
+      "base": "O",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "OCEAN-USD",
+      "base": "OCEAN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "OGN-USD",
+      "base": "OGN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "OMG-USD",
+      "base": "OMG",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "OMNI-USD",
+      "base": "OMNI",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "ONDO-USD",
+      "base": "ONDO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "OOKI-USD",
+      "base": "OOKI",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.000001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "OP-USD",
+      "base": "OP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "OPG-USD",
+      "base": "OPG",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "OPN-USD",
+      "base": "OPN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ORCA-USD",
+      "base": "ORCA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ORN-USD",
+      "base": "ORN",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "OSMO-USD",
+      "base": "OSMO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "OXT-USD",
+      "base": "OXT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PAX-USD",
+      "base": "PAX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PAXG-USD",
+      "base": "PAXG",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PENDLE-USD",
+      "base": "PENDLE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PENGU-USD",
+      "base": "PENGU",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PEPE-USD",
+      "base": "PEPE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PERP-USD",
+      "base": "PERP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PIRATE-USD",
+      "base": "PIRATE",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.000001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "PLA-USD",
+      "base": "PLA",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "PLU-USD",
+      "base": "PLU",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PLUME-USD",
+      "base": "PLUME",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PNG-USD",
+      "base": "PNG",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PNUT-USD",
+      "base": "PNUT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "POL-USD",
+      "base": "POL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "POLS-USD",
+      "base": "POLS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "POLY-USD",
+      "base": "POLY",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "POND-USD",
+      "base": "POND",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PONS-USD",
+      "base": "PONS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "POPCAT-USD",
+      "base": "POPCAT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "POWR-USD",
+      "base": "POWR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PRCL-USD",
+      "base": "PRCL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PRIME-USD",
+      "base": "PRIME",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PRL-USD",
+      "base": "PRL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PRO-USD",
+      "base": "PRO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PROMPT-USD",
+      "base": "PROMPT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PROS-USD",
+      "base": "PROS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PROVE-USD",
+      "base": "PROVE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PRQ-USD",
+      "base": "PRQ",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "PUMP-USD",
+      "base": "PUMP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PUNDIX-USD",
+      "base": "PUNDIX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PYR-USD",
+      "base": "PYR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PYTH-USD",
+      "base": "PYTH",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "PYUSD-USD",
+      "base": "PYUSD",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "QI-USD",
+      "base": "QI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "QNT-USD",
+      "base": "QNT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "QSP-USD",
+      "base": "QSP",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "QUICK-USD",
+      "base": "QUICK",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "RAD-USD",
+      "base": "RAD",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RAI-USD",
+      "base": "RAI",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "RARE-USD",
+      "base": "RARE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RARI-USD",
+      "base": "RARI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RAVE-USD",
+      "base": "RAVE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RAY-USD",
+      "base": "RAY",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RBN-USD",
+      "base": "RBN",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "RE-USD",
+      "base": "RE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RECALL-USD",
+      "base": "RECALL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RED-USD",
+      "base": "RED",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "REN-USD",
+      "base": "REN",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "RENDER-USD",
+      "base": "RENDER",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "REP-USD",
+      "base": "REP",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "REQ-USD",
+      "base": "REQ",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "REZ-USD",
+      "base": "REZ",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RGT-USD",
+      "base": "RGT",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "RLC-USD",
+      "base": "RLC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RLS-USD",
+      "base": "RLS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RLY-USD",
+      "base": "RLY",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "RNBW-USD",
+      "base": "RNBW",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RNDR-USD",
+      "base": "RNDR",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "ROBO-USD",
+      "base": "ROBO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RONIN-USD",
+      "base": "RONIN",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "ROSE-USD",
+      "base": "ROSE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RPL-USD",
+      "base": "RPL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RSC-USD",
+      "base": "RSC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "RSR-USD",
+      "base": "RSR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "S-USD",
+      "base": "S",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SAFE-USD",
+      "base": "SAFE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SAND-USD",
+      "base": "SAND",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SAPIEN-USD",
+      "base": "SAPIEN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SD-USD",
+      "base": "SD",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SEAM-USD",
+      "base": "SEAM",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "SEI-USD",
+      "base": "SEI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SENT-USD",
+      "base": "SENT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SHDW-USD",
+      "base": "SHDW",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SHIB-USD",
+      "base": "SHIB",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SHPING-USD",
+      "base": "SHPING",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SIGN-USD",
+      "base": "SIGN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SKL-USD",
+      "base": "SKL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SKR-USD",
+      "base": "SKR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SKY-USD",
+      "base": "SKY",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SNT-USD",
+      "base": "SNT",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "SNX-USD",
+      "base": "SNX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SOL-USD",
+      "base": "SOL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SPA-USD",
+      "base": "SPA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SPELL-USD",
+      "base": "SPELL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SPK-USD",
+      "base": "SPK",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SPX-USD",
+      "base": "SPX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SQD-USD",
+      "base": "SQD",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "STG-USD",
+      "base": "STG",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "STORJ-USD",
+      "base": "STORJ",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "STRK-USD",
+      "base": "STRK",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "STX-USD",
+      "base": "STX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SUI-USD",
+      "base": "SUI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SUKU-USD",
+      "base": "SUKU",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SUP-USD",
+      "base": "SUP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SUPER-USD",
+      "base": "SUPER",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SUSHI-USD",
+      "base": "SUSHI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SWELL-USD",
+      "base": "SWELL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SWFTC-USD",
+      "base": "SWFTC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SXT-USD",
+      "base": "SXT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SYLO-USD",
+      "base": "SYLO",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.000001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "SYN-USD",
+      "base": "SYN",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "SYND-USD",
+      "base": "SYND",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "SYRUP-USD",
+      "base": "SYRUP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "T-USD",
+      "base": "T",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TAO-USD",
+      "base": "TAO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "THQ-USD",
+      "base": "THQ",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TIA-USD",
+      "base": "TIA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TIME-USD",
+      "base": "TIME",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "TNSR-USD",
+      "base": "TNSR",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TON-USD",
+      "base": "TON",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TONE-USD",
+      "base": "TONE",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "TOSHI-USD",
+      "base": "TOSHI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TOWNS-USD",
+      "base": "TOWNS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TRAC-USD",
+      "base": "TRAC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TRB-USD",
+      "base": "TRB",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TREE-USD",
+      "base": "TREE",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TRIA-USD",
+      "base": "TRIA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TRIBE-USD",
+      "base": "TRIBE",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "TROLL-USD",
+      "base": "TROLL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TRU-USD",
+      "base": "TRU",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "TRUMP-USD",
+      "base": "TRUMP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TRUST-USD",
+      "base": "TRUST",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TURBO-USD",
+      "base": "TURBO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "TVK-USD",
+      "base": "TVK",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "UMA-USD",
+      "base": "UMA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "UNFI-USD",
+      "base": "UNFI",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "UNI-USD",
+      "base": "UNI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "UP-USD",
+      "base": "UP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "UPI-USD",
+      "base": "UPI",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "USD1-USD",
+      "base": "USD1",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "USDS-USD",
+      "base": "USDS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "USDT-USD",
+      "base": "USDT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "USELESS-USD",
+      "base": "USELESS",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "UST-USD",
+      "base": "UST",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "VARA-USD",
+      "base": "VARA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "VELO-USD",
+      "base": "VELO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "VET-USD",
+      "base": "VET",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "VGX-USD",
+      "base": "VGX",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.0001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "VIRTUAL-USD",
+      "base": "VIRTUAL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "VOXEL-USD",
+      "base": "VOXEL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "VTHO-USD",
+      "base": "VTHO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "VVV-USD",
+      "base": "VVV",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "W-USD",
+      "base": "W",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "WAL-USD",
+      "base": "WAL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "WAMPL-USD",
+      "base": "WAMPL",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "WAXL-USD",
+      "base": "WAXL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "WBTC-USD",
+      "base": "WBTC",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "WCFG-USD",
+      "base": "WCFG",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "WCT-USD",
+      "base": "WCT",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "WELL-USD",
+      "base": "WELL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "WET-USD",
+      "base": "WET",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "WHUF-USD",
+      "base": "WHUF",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "WIF-USD",
+      "base": "WIF",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "WLD-USD",
+      "base": "WLD",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "WLFI-USD",
+      "base": "WLFI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "WLUNA-USD",
+      "base": "WLUNA",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.00000001",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "WMTX-USD",
+      "base": "WMTX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "WRON-USD",
+      "base": "WRON",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "XAN-USD",
+      "base": "XAN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "XCN-USD",
+      "base": "XCN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "XLM-USD",
+      "base": "XLM",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "XPL-USD",
+      "base": "XPL",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "XRP-USD",
+      "base": "XRP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "XTZ-USD",
+      "base": "XTZ",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "XYO-USD",
+      "base": "XYO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "YB-USD",
+      "base": "YB",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "YFI-USD",
+      "base": "YFI",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "YFII-USD",
+      "base": "YFII",
+      "quote": "USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "tickSize": "0.01",
+      "tradingDisabled": true,
+      "listingDate": null
+    },
+    {
+      "productId": "ZAMA-USD",
+      "base": "ZAMA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ZEC-USD",
+      "base": "ZEC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.01",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ZEN-USD",
+      "base": "ZEN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ZETA-USD",
+      "base": "ZETA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ZETACHAIN-USD",
+      "base": "ZETACHAIN",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ZK-USD",
+      "base": "ZK",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ZKC-USD",
+      "base": "ZKC",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ZKP-USD",
+      "base": "ZKP",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.00001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ZORA-USD",
+      "base": "ZORA",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ZRO-USD",
+      "base": "ZRO",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.0001",
+      "tradingDisabled": false,
+      "listingDate": null
+    },
+    {
+      "productId": "ZRX-USD",
+      "base": "ZRX",
+      "quote": "USD",
+      "status": "online",
+      "statusRaw": "online",
+      "tickSize": "0.000001",
+      "tradingDisabled": false,
+      "listingDate": null
+    }
+  ]
+}

@@ -1,0 +1,4288 @@
+{
+  "commitSha": "db465cb0f63b925eaaaed3a2dbdcde3beb58126d",
+  "dataRootHash": "67b8963191a52383657fff6bd6bc505327aa540fe4009de6d264e2c4cd2799d8",
+  "createdAt": "2026-10-10T22:45:22.256Z",
+  "phaseId": "P1",
+  "note": "Sample windows only. The exchange product payload has no listing or delist timestamp, so this does not decide whether candles exist across a product's whole trading life.",
+  "sampleDays": [
+    "2019-01-01",
+    "2021-01-01",
+    "2023-10-01",
+    "2025-01-01",
+    "2026-10-09"
+  ],
+  "products": [
+    {
+      "productId": "ACX-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 93,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "ANT-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 5,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "ATA-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 19,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "BADGER-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 9,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 25,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "BIT-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 3,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 13,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "BOND-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "BUSD-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "CLV-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 37,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 148,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "COVAL-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 13,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "CRPT-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 13,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "DAI-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 297,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 57,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 93,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "DAR-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 11,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 55,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "DDX-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "DESO-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 20,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "DREP-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 2,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "DYP-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 7,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 15,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "ENJ-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 30,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "EOS-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 245,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 49,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 164,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "ERN-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 8,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 19,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "EURC-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "FIS-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 10,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 34,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "FX-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 2,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 28,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "GAL-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 31,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 167,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "GALA-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "GUSD-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 5,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 3,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "GYEN-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 4,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 4,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "IDEX-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 15,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 107,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "IOTX-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 43,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 73,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "IP-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "JUP-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "KEEP-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "LIT-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 11,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 14,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "LOKA-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 2,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 10,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "LOOM-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "LRC-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 240,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 48,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 81,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MATIC-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 247,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 273,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MCO2-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 26,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MEDIA-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 2,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 5,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MIR-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MKR-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 278,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 184,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 131,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MOBILE-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 166,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MONA-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 9,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MOVE-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 299,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MPL-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 8,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 41,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MTL-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 15,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MULTI-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MUSD-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MUSE-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 4,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 58,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "MXC-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 25,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "NEST-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "NU-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 255,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "OMG-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 218,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "OMNI-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 10,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "OOKI-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "ORN-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 10,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 15,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "PIRATE-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 17,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "PLA-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 7,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "POLY-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 14,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "PRQ-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 34,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 172,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "PYUSD-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 11,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 57,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "QSP-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 4,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "QUICK-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 5,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "RAI-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "RBN-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 2,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 9,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "REN-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 291,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 17,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "REP-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 113,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "RGT-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "RLY-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "RNDR-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 89,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 217,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "RONIN-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 142,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "SEAM-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 51,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "SNT-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 28,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "STORJ-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 165,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 96,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "SYLO-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 5,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "SYN-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 27,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 185,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "TIME-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 19,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 31,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "TONE-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 91,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "TRIBE-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "TRU-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 21,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 53,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "TVK-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 14,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 48,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "UNFI-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 21,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "UPI-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "UST-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "VGX-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "WAMPL-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 12,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "WBTC-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 122,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 15,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "WCFG-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": true,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 5,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 30,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "WLUNA-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "productId": "YFII-USD",
+      "status": "delisted",
+      "statusRaw": "delisted",
+      "candlesServed": false,
+      "windows": [
+        {
+          "label": "2019-01-01",
+          "start": "2019-01-01T00:00:00.000Z",
+          "end": "2019-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2021-01-01",
+          "start": "2021-01-01T00:00:00.000Z",
+          "end": "2021-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2023-10-01",
+          "start": "2023-10-01T00:00:00.000Z",
+          "end": "2023-10-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2025-01-01",
+          "start": "2025-01-01T00:00:00.000Z",
+          "end": "2025-01-01T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        },
+        {
+          "label": "2026-10-09",
+          "start": "2026-10-09T00:00:00.000Z",
+          "end": "2026-10-09T04:59:00.000Z",
+          "httpStatus": 200,
+          "candleCount": 0,
+          "error": null
+        }
+      ]
+    }
+  ]
+}
