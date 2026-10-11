@@ -45,6 +45,7 @@ import { jevSmoke } from "./p3/jev";
 import { assertScanSchema } from "./p3/scan-schema";
 import { survivorshipReport } from "./p3/survivorship";
 import { buildP5Report } from "./p5/run";
+import { assertP5OutputPath, P5_V31_RESULTS } from "./p5/output";
 
 const started = boot();
 if (!started.ok) {
@@ -587,8 +588,10 @@ function p5(): void {
   requireFrozenWrites();
   const artifact = stamp("P5");
   const report = buildP5Report(artifact, realDataDir());
-  writeJson(join(paths.reports, "p5-registered.json"), report);
-  console.log(`p5 registered ${String(report.resultsHash)}`);
+  const name = P5_V31_RESULTS;
+  assertP5OutputPath(name);
+  writeJson(join(paths.reports, name), report);
+  console.log(`p5 v31 ${String(report.resultsHash)}`);
 }
 
 async function writeJevSmoke(): Promise<void> {

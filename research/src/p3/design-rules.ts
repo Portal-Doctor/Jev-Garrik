@@ -259,7 +259,8 @@ export function backstopTripped(dailyLossUsd: number, pairLossUsd: number, bookD
 /**
  * Kelly = E/Var on the lower 80% bound of realized net R, then half of that, capped at 0.75%.
  * A non-positive bound or a non-positive variance returns null.
- * kellyRiskUsd turns that null into the $20 paper minimum.
+ * kellyRiskUsd turns a null or non-positive lower-80% bound into the $20 paper minimum.
+ * A small positive fraction may size below $20. A non-positive bankroll does not raise it.
  */
 export function kellyFraction(meanNetR: number, variance: number): number | null {
   if (!(meanNetR > 0) || !(variance > 0)) return null;
@@ -269,7 +270,7 @@ export function kellyFraction(meanNetR: number, variance: number): number | null
 }
 
 export function kellyRiskUsd(riskUsd: number, fraction: number | null, bankrollUsd: number): number {
-  if (fraction == null || !(bankrollUsd > 0)) return PAPER_MINIMUM_USD;
+  if (fraction == null || !(fraction > 0)) return PAPER_MINIMUM_USD;
   return Math.min(riskUsd, fraction * bankrollUsd);
 }
 

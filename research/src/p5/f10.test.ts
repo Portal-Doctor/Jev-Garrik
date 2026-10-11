@@ -52,19 +52,30 @@ test("open risk, gross notional, and beta block the extra name", () => {
   expect(beta.hits.beta).toBe(1);
 });
 
-test("a missing beta does not block and is not applied as zero weight", () => {
+test("a missing beta is applied as 1 and a negative beta adds no weight", () => {
   const quiet = new Map([[0, bar(0, 100, 99, 100)]]);
-  const result = runBook({
-    pairs: [pair("AAA", quiet)],
-    candidates: [{ classId: "B", productId: "AAA", signalDate: "1970-01-01", entryTs: 0, stopDistance: 10 }],
+  const names = ["AAA", "BBB"];
+  const missing = runBook({
+    pairs: names.map((id) => pair(id, quiet)),
+    candidates: names.map((id) => ({ classId: "B" as const, productId: id, signalDate: "1970-01-01", entryTs: 0, stopDistance: 1 })),
     ruleExitTs: () => null,
     sBtBps: 5,
     endTs: 900,
-    betaOf: () => null,
+    betaOf: (id) => (id === "BBB" ? null : 4),
   });
-  expect(result.taken).toBe(1);
-  expect(result.hits.beta).toBe(0);
-  expect(result.betaUnresolved).toBe(1);
+  expect(missing.betaUnresolved).toBe(1);
+  expect(missing.hits.beta).toBe(1);
+  expect(missing.taken).toBe(1);
+  const negative = runBook({
+    pairs: names.map((id) => pair(id, quiet)),
+    candidates: names.map((id) => ({ classId: "B" as const, productId: id, signalDate: "1970-01-01", entryTs: 0, stopDistance: 1 })),
+    ruleExitTs: () => null,
+    sBtBps: 5,
+    endTs: 900,
+    betaOf: (id) => (id === "BBB" ? -3 : 4),
+  });
+  expect(negative.taken).toBe(2);
+  expect(negative.hits.beta).toBe(0);
 });
 
 test("equity halts, backstops, and the 20R kill block the next entry", () => {
@@ -149,6 +160,132 @@ test("average linkage keeps non-members and short histories out of the cluster",
   expect(month.get("AAA")).toBe(month.get("BBB"));
   expect(month.get("SHORT")).toBe("SHORT");
   expect(month.get("SHORT")).not.toBe(month.get("AAA"));
+});
+
+test("breadth state is logged and does not change an entry or a size", () => {
+  const quiet = new Map([[0, bar(0, 100, 99, 100)]]);
+  const candidates = [{ classId: "B" as const, productId: "AAA", signalDate: "1970-01-01", entryTs: 0, stopDistance: 10 }];
+  const on = runBook({
+    pairs: [pair("AAA", quiet)],
+    candidates,
+    ruleExitTs: () => null,
+    sBtBps: 5,
+    endTs: 900,
+    breadthOf: () => "on",
+  });
+  const off = runBook({
+    pairs: [pair("AAA", quiet)],
+    candidates,
+    ruleExitTs: () => null,
+    sBtBps: 5,
+    endTs: 900,
+    breadthOf: () => "off",
+  });
+  expect(on.taken).toBe(off.taken);
+  expect(on.breadthLog.map((row) => row.riskUsd)).toEqual(off.breadthLog.map((row) => row.riskUsd));
+  expect(on.breadthLog.map((row) => row.notionalUsd)).toEqual(off.breadthLog.map((row) => row.notionalUsd));
+  expect(on.trades.map((row) => row.breadth)).toEqual(["on"]);
+  expect(off.trades.map((row) => row.breadth)).toEqual(["off"]);
+});
+
+test("a mark above the stop trips the daily halt", () => {
+  const marked = new Map([
+    [0, bar(0, 100, 99.5, 100)],
+    [900, bar(900, 90.2, 90.05, 90.05)],
+  ]);
+  const later = new Map([[1_800, bar(1_800, 100, 99, 100)]]);
+  const ids = ["A", "B", "C", "D", "AA"];
+  const result = runBook({
+    pairs: [...ids.map((id) => pair(id, marked)), pair("E", later)],
+    candidates: [
+      ...ids.slice(0, 4).map((id) => ({ classId: "B" as const, productId: id, signalDate: "1970-01-01", entryTs: 0, stopDistance: 10 })),
+      { classId: "A" as const, productId: "AA", signalDate: "1970-01-01", entryTs: 0, stopDistance: 10 },
+      { classId: "B", productId: "E", signalDate: "1970-01-01", entryTs: 1_800, stopDistance: 10 },
+    ],
+    ruleExitTs: () => null,
+    sBtBps: 5,
+    endTs: 2_700,
+  });
+  expect(result.trades.filter((row) => row.productId !== "E").every((row) => row.reason !== "stop" && row.reason !== "gap")).toBe(true);
+  expect(result.hits.dailyHalt).toBe(1);
+  expect(result.taken).toBe(5);
+});
+
+test("pair equity across weeks trips the pair backstop on its own", () => {
+  const start = (date: string) => Date.parse(`${date}T00:00:00.000Z`) / 1000;
+  const dates = ["1970-01-05", "1970-01-12", "1970-01-19", "1970-01-26"];
+  const bars = new Map<number, ReturnType<typeof bar>>();
+  for (const date of dates.slice(0, 3)) {
+    const ts = start(date);
+    bars.set(ts, bar(ts, 100, 99.5, 100));
+    bars.set(ts + 900, bar(ts + 900, 70, 60, 70));
+  }
+  const next = start(dates[3]!);
+  bars.set(next, bar(next, 100, 99, 100));
+  const result = runBook({
+    pairs: [pair("AAA", bars)],
+    candidates: dates.map((date) => ({ classId: "B" as const, productId: "AAA", signalDate: date, entryTs: start(date), stopDistance: 1 })),
+    ruleExitTs: () => null,
+    sBtBps: 5,
+    endTs: next + 900,
+  });
+  expect(result.taken).toBe(2);
+  expect(result.hits.pairBackstop).toBe(2);
+  expect(result.hits.dailyHalt).toBe(0);
+  expect(result.hits.weeklyHalt).toBe(0);
+  expect(result.hits.bookHalt).toBe(0);
+  expect(result.hits.bookBackstop).toBe(0);
+});
+
+test("giving back a marked gain trips the book halt before the $8k backstop, then the backstop", () => {
+  const bars = new Map([
+    [0, bar(0, 100, 99, 100)],
+    [900, bar(900, 100, 90, 8_000)],
+    [86_400, bar(86_400, 8_000, 7_990, 5_000)],
+    [86_400 + 900, bar(86_400 + 900, 5_000, 4_990, 5_000)],
+    [2 * 86_400, bar(2 * 86_400, 5_000, 4_990, 100)],
+    [2 * 86_400 + 900, bar(2 * 86_400 + 900, 100, 99, 100)],
+  ]);
+  const later = (id: string, ts: number) => pair(id, new Map([[ts, bar(ts, 100, 99, 100)]]));
+  const result = runBook({
+    pairs: [pair("AAA", bars, "AAA", new Map(), 0), later("B1", 86_400 + 900), later("B2", 2 * 86_400 + 900)],
+    candidates: [
+      { classId: "A", productId: "AAA", signalDate: "1970-01-01", entryTs: 0, stopDistance: 40 },
+      { classId: "B", productId: "B1", signalDate: "1970-01-02", entryTs: 86_400 + 900, stopDistance: 10 },
+      { classId: "B", productId: "B2", signalDate: "1970-01-03", entryTs: 2 * 86_400 + 900, stopDistance: 10 },
+    ],
+    ruleExitTs: () => null,
+    sBtBps: 5,
+    endTs: 2 * 86_400 + 1_800,
+  });
+  expect(result.hits.bookHalt).toBe(2);
+  expect(result.hits.bookBackstop).toBe(1);
+  expect(result.breadthLog.filter((row) => row.entryTs === 86_400 + 900).every((row) => row.taken === false)).toBe(true);
+});
+
+test("the 20R kill stays on after a later winner", () => {
+  const loser = new Map([
+    [0, bar(0, 100, 99.5, 100)],
+    [900, bar(900, 1, 0.5, 1)],
+  ]);
+  const winner = new Map([
+    [0, bar(0, 100, 95, 100)],
+    [1_800, bar(1_800, 2_000, 1_990, 2_000)],
+  ]);
+  const after = new Map([[2_700, bar(2_700, 100, 99, 100)]]);
+  const result = runBook({
+    pairs: [pair("LOSE", loser), pair("WIN", winner), pair("NEXT", after)],
+    candidates: [
+      { classId: "B", productId: "LOSE", signalDate: "1970-01-01", entryTs: 0, stopDistance: 1 },
+      { classId: "B", productId: "WIN", signalDate: "1970-01-01", entryTs: 0, stopDistance: 10 },
+      { classId: "B", productId: "NEXT", signalDate: "1970-01-01", entryTs: 2_700, stopDistance: 10 },
+    ],
+    ruleExitTs: (_candidate, _entry, _stop) => ({ ts: 1_800, at: "open" as const }),
+    sBtBps: 5,
+    endTs: 3_600,
+  });
+  expect(result.hits.classRKill).toBeGreaterThan(0);
+  expect(result.trades.some((row) => row.productId === "NEXT")).toBe(false);
 });
 
 test("chase, ten-day close, stop, and per-fold purge stay on the v3.1 side of the probes", () => {

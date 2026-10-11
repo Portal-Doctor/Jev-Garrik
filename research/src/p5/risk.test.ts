@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
 import { averageLinkage, assignBetas, classKillTripped, entryOpenRiskUsd, olsBeta, openRiskAfterMove, sizingCostBps } from "./risk";
-import { breadthPaused, entryDecision, exitGuardFires, freshRCurve, jevReadPlan, momentumCrashOn, rolling20Paused, stepRCurve } from "./guards";
+import { breadthByEntryDate, breadthNetRSplit, breadthPaused, entryDecision, exitGuardFires, freshRCurve, jevReadPlan, momentumCrashOn, rolling20Paused, sprtReport, stepRCurve } from "./guards";
 
 test("sizing cost is 190 and 200, and entry open risk is the risk budget", () => {
   expect(sizingCostBps(5)).toBe(190);
   expect(sizingCostBps(10)).toBe(200);
   const notional = 60 / ((1_000 + 190) / 10_000);
   expect(entryOpenRiskUsd(notional, 1_000, 190)).toBeCloseTo(60, 8);
-  expect(openRiskAfterMove(1, 100, 90, 110, 5)).toBeCloseTo(10 + 110 * 0.0095, 8);
+  expect(openRiskAfterMove(1, 100, 90, 5)).toBeCloseTo(10 + 90 * 0.0095, 8);
 });
 
 test("OLS beta of a unit series is 1, and a short name takes the highest signed beta", () => {
@@ -20,7 +20,7 @@ test("OLS beta of a unit series is 1, and a short name takes the highest signed 
     { id: "CCC", beta: null },
   ]);
   expect(assigned.get("CCC")).toBe(0.4);
-  expect(assignBetas([{ id: "DDD", beta: null }]).get("DDD")).toBeNull();
+  expect(assignBetas([{ id: "DDD", beta: null }]).get("DDD")).toBe(1);
 });
 
 test("average linkage keeps a negative series out and merges the pair with the higher rho", () => {
@@ -34,9 +34,10 @@ test("average linkage keeps a negative series out and merges the pair with the h
 });
 
 test("the 20R kill and the dollar backstop both trip", () => {
-  expect(classKillTripped(0, -20, -100)).toBe(true);
-  expect(classKillTripped(0, -19, -1_200)).toBe(true);
-  expect(classKillTripped(0, -19, -1_199)).toBe(false);
+  expect(classKillTripped(0, -20, 0, -100)).toBe(true);
+  expect(classKillTripped(0, -19, 0, -1_200)).toBe(true);
+  expect(classKillTripped(0, -19, 500, -700)).toBe(true);
+  expect(classKillTripped(0, -19, 0, -1_199)).toBe(false);
 });
 
 test("forward pauses shrink or block and do not call Jev", () => {
@@ -50,9 +51,28 @@ test("forward pauses shrink or block and do not call Jev", () => {
   const killed = stepRCurve(freshRCurve(), -20);
   expect(killed.killed).toBe(true);
   expect(entryDecision(["pause-1b"], false)).toEqual({ entries: true, riskUsd: 20 });
-  expect(entryDecision(["pause-2a"], false)).toEqual({ entries: false, riskUsd: 20 });
+  expect(entryDecision(["pause-2b"], false)).toEqual({ entries: false, riskUsd: 20 });
+  expect(entryDecision(["pause-2a"], false)).toEqual(entryDecision([], false));
+  expect(entryDecision(["pause-2a"], true)).toEqual(entryDecision([], true));
   expect(entryDecision(["halt"], false).entries).toBe(false);
-  expect(entryDecision(["kill-switch"], true)).toEqual({ entries: true, riskUsd: 20 });
+  expect(entryDecision(["kill-switch"], true)).toEqual({ entries: false, riskUsd: 20 });
+  expect(entryDecision(["r-kill"], true).entries).toBe(false);
+  expect(entryDecision(["backstop"], true).entries).toBe(false);
+  const sprt = sprtReport([0.2, -0.1, 0.4, -0.2, 0.1, -0.3, 0.2, -0.1]);
+  expect(sprt.pauses).toBe(false);
+  expect(sprt.reportOnly).toBe(true);
+  expect(sprt.upper).toBeCloseTo(Math.log(4), 8);
+  expect(sprt.fixedSigma).toBe(1.5);
+  expect(sprt.llrFixed).not.toBeNull();
+  expect(sprt.llrRealized).not.toBeNull();
+  const labels = breadthByEntryDate(["2026-01-01", "2026-01-02"], () => [{ member: true, close: 1, ema50: 2 }]);
+  expect(labels.get("2026-01-01")).toBe("off");
+  expect(breadthNetRSplit([{ breadth: "on", netR: 1 }, { breadth: "off", netR: -2 }])).toEqual({
+    label: "diagnostic, no selection",
+    selects: false,
+    on: { n: 1, sumNetR: 1 },
+    off: { n: 1, sumNetR: -2 },
+  });
   expect(exitGuardFires({ toxicHigh: true, stressedHigh: true, consecutive: 3, unrealizedR: 1, warmed: true })).toBe(true);
   expect(exitGuardFires({ toxicHigh: true, stressedHigh: true, consecutive: 3, unrealizedR: 1.1, warmed: true })).toBe(false);
   expect(jevReadPlan(40).executed).toBe(0);

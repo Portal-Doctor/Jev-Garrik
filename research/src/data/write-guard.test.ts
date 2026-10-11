@@ -25,6 +25,22 @@ test("artifact commands refuse an empty data dir and write nothing", () => {
   }
 });
 
+test("prehash refuses an empty data dir and writes no geometry", () => {
+  const dir = mkdtempSync(join(tmpdir(), "guard-prehash-"));
+  const script = join(import.meta.dir, "..", "p5", "prehash.ts");
+  try {
+    const proc = spawnSync(process.execPath, [script], {
+      env: { ...process.env, RESEARCH_DATA_DIR: dir },
+      encoding: "utf8",
+    });
+    expect(proc.status).not.toBe(0);
+    expect(`${proc.stderr}\n${proc.stdout}`).toContain("refusing");
+    expect(readdirSync(dir)).toEqual([]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("download-daily does not restamp a frozen manifest whose files are missing", () => {
   const dir = mkdtempSync(join(tmpdir(), "guard-daily-"));
   const daily = join(dir, "daily");

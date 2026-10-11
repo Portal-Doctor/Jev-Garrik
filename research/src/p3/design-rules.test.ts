@@ -149,6 +149,7 @@ test("clusters, beta, halts, backstops, Kelly, and class kills", () => {
   expect(kellyFraction(0, 1)).toBeNull();
   expect(kellyRiskUsd(60, null, 10_000)).toBe(20);
   expect(kellyRiskUsd(60, 0.005, 1_000)).toBe(5);
+  expect(kellyRiskUsd(60, 0.005, 0)).toBe(0);
   expect(classKill({ n: 10, meanGrossBps: -1, upper80Bps: -1, hurdleBps: 1 })).toBe("insufficient");
   expect(classKill({ n: 30, meanGrossBps: -1, upper80Bps: 0, hurdleBps: 1 })).toBe("kill");
   expect(classKill({ n: 30, meanGrossBps: 1, upper80Bps: 2, hurdleBps: 1 })).toBe("keep");

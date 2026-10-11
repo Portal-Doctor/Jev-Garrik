@@ -33,6 +33,42 @@ export function breadthPaused(share: number | null, paused: boolean): boolean {
   return paused;
 }
 
+export type BreadthLabel = "on" | "off";
+
+/** Off while the hysteresis pause is on. The label is a log. It does not size or block. */
+export function breadthLabel(paused: boolean): BreadthLabel {
+  return paused ? "off" : "on";
+}
+
+/** Entry-day labels. The pause starts off, so the first label is on until a share falls below 25 percent. */
+export function breadthByEntryDate(dates: readonly string[], rowAt: (entryDate: string) => readonly BreadthRow[]): Map<string, BreadthLabel> {
+  let paused = false;
+  const out = new Map<string, BreadthLabel>();
+  for (const date of dates) {
+    const count = breadthCount(rowAt(date));
+    const share = count.defined > 0 ? count.above / count.defined : null;
+    paused = breadthPaused(share, paused);
+    out.set(date, breadthLabel(paused));
+  }
+  return out;
+}
+
+/**
+ * Forward review split. Diagnostic only: the label does not select a book.
+ */
+export function breadthNetRSplit(rows: readonly { breadth: BreadthLabel; netR: number }[]): {
+  label: "diagnostic, no selection";
+  selects: false;
+  on: { n: number; sumNetR: number };
+  off: { n: number; sumNetR: number };
+} {
+  const sum = (label: BreadthLabel) => {
+    const kept = rows.filter((row) => row.breadth === label);
+    return { n: kept.length, sumNetR: kept.reduce((total, row) => total + row.netR, 0) };
+  };
+  return { label: "diagnostic, no selection", selects: false, on: sum("on"), off: sum("off") };
+}
+
 export function momentumCrashOn(btc60: number, btc10: number): boolean {
   return btc60 <= -0.25 && btc10 >= 0.15;
 }
@@ -88,26 +124,88 @@ export function forwardAbKill(n: number, meanNetR: number, l80UsdPerMonth: numbe
   return "keep";
 }
 
-/** 1a. Boundaries are not specified. The function reports the count and never pauses. */
-export function sprtReport(n: number): { reportOnly: true; pauses: false; n: number } {
-  return { reportOnly: true, pauses: false, n };
+const SPRT_BOUND = Math.log(4);
+
+/** Sample standard deviation. Fewer than two observations has no realized sigma. */
+export function sampleSigma(values: readonly number[]): number | null {
+  if (values.length < 2) return null;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1);
+  return variance > 0 ? Math.sqrt(variance) : null;
+}
+
+/** Normal log likelihood of H1 against H0, known sigma. Positive favors H1. */
+export function normalLlr(values: readonly number[], mu0: number, mu1: number, sigma: number): number | null {
+  if (!(sigma > 0) || values.length === 0) return null;
+  let far = 0;
+  let near = 0;
+  for (const value of values) {
+    const from0 = value - mu0;
+    const from1 = value - mu1;
+    far += from0 * from0;
+    near += from1 * from1;
+  }
+  return (far - near) / (2 * sigma * sigma);
+}
+
+function sprtCrossing(llr: number | null): "upper" | "lower" | null {
+  if (llr == null) return null;
+  if (llr >= SPRT_BOUND) return "upper";
+  if (llr <= -SPRT_BOUND) return "lower";
+  return null;
+}
+
+/**
+ * 1a. Wald bounds at +/- ln 4. H0 is +0.25R and H1 is 0.
+ * The realized-sigma path and the 1.5R path are both reported. Neither acts.
+ */
+export function sprtReport(values: readonly number[]): {
+  reportOnly: true;
+  pauses: false;
+  lower: number;
+  upper: number;
+  h0: 0.25;
+  h1: 0;
+  fixedSigma: 1.5;
+  realizedSigma: number | null;
+  llrFixed: number | null;
+  llrRealized: number | null;
+  fixedCrossing: "upper" | "lower" | null;
+  realizedCrossing: "upper" | "lower" | null;
+} {
+  const realizedSigma = sampleSigma(values);
+  const llrFixed = normalLlr(values, 0.25, 0, 1.5);
+  const llrRealized = realizedSigma == null ? null : normalLlr(values, 0.25, 0, realizedSigma);
+  return {
+    reportOnly: true,
+    pauses: false,
+    lower: -SPRT_BOUND,
+    upper: SPRT_BOUND,
+    h0: 0.25,
+    h1: 0,
+    fixedSigma: 1.5,
+    realizedSigma,
+    llrFixed,
+    llrRealized,
+    fixedCrossing: sprtCrossing(llrFixed),
+    realizedCrossing: sprtCrossing(llrRealized),
+  };
 }
 
 export type Blocker = "halt" | "backstop" | "r-kill" | "kill-switch" | "pause-1b" | "pause-1c" | "pause-2a" | "pause-2b";
 
 /**
- * Halts, backstops, the 20R kill, and kill switches block new entries.
+ * Halts, backstops, the 20R kill, and the 1d kill stop new entries at any size.
  * 1b and 1c shrink the class to $20 and still allow entries.
- * 2a, and 2b for the class it covers, shrink to $20 and block new entries.
- * Overlapping pauses stay at $20. A class already at $20 is unchanged by 1b, 1c, or 1d.
+ * 2b shrinks B to $20 and blocks new entries. 2a is logged and does not change a decision.
+ * Overlapping pauses stay at $20. Flag-only at $20 applies to pauses, not to kills.
  */
 export function entryDecision(blockers: readonly Blocker[], alreadyMinimum: boolean): { entries: boolean; riskUsd: number } {
-  const haltLike = blockers.some((item) => item === "halt" || item === "backstop" || item === "r-kill");
-  const killOnly = blockers.includes("kill-switch") && !alreadyMinimum;
-  const shrunk = alreadyMinimum || blockers.some((item) => item.startsWith("pause"));
-  if (haltLike || killOnly) return { entries: false, riskUsd: shrunk ? PAPER_MINIMUM_USD : 60 };
-  if (blockers.includes("pause-2a") || blockers.includes("pause-2b")) return { entries: false, riskUsd: PAPER_MINIMUM_USD };
-  if (blockers.includes("pause-1b") || blockers.includes("pause-1c") || alreadyMinimum) return { entries: true, riskUsd: PAPER_MINIMUM_USD };
+  const kill = blockers.some((item) => item === "halt" || item === "backstop" || item === "r-kill" || item === "kill-switch");
+  if (kill) return { entries: false, riskUsd: alreadyMinimum ? PAPER_MINIMUM_USD : 60 };
+  const pauses = blockers.filter((item) => item === "pause-1b" || item === "pause-1c" || item === "pause-2b");
+  if (pauses.includes("pause-2b")) return { entries: false, riskUsd: PAPER_MINIMUM_USD };
+  if (pauses.includes("pause-1b") || pauses.includes("pause-1c") || alreadyMinimum) return { entries: true, riskUsd: PAPER_MINIMUM_USD };
   return { entries: true, riskUsd: 60 };
 }
 

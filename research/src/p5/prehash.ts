@@ -7,15 +7,17 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { assertNoBannedKeys } from "../data/banned";
 import { dataPaths } from "../data/paths";
+import { assertFrozenRoots } from "../data/refresh";
+import { assertCleanWorkTree, stampFromGit } from "../manifest";
 import { ema } from "../p2/indicators";
 import { FIRST_UNIVERSE_DATE, OOS_END } from "../p2/universe";
-import { classBarInputs } from "../p3/bar-access";
+import { classBarInputs, correlationCloses } from "../p3/bar-access";
 import { WINDOW_START } from "../p3/f5";
 import { loadPair } from "../p3/geometry-run";
 import { monthlyRebalanceDates } from "../p3/schedule";
 import { monthlyClusters, type ClosePoint } from "./book";
 import { registeredFlags } from "./flags";
-import { breadthCount, breadthPaused, momentumBlocked, momentumCrashOn } from "./guards";
+import { breadthByEntryDate, momentumBlocked, momentumCrashOn } from "./guards";
 import { addDays } from "./stats";
 
 export interface PrehashGeometry {
@@ -49,6 +51,7 @@ export interface PrehashGeometry {
     flag: boolean;
   };
   maxOpen: null;
+  maxOpenNote: "G2 concurrency measured in the post-hash rerun";
   skipped: string[];
 }
 
@@ -110,21 +113,17 @@ export function buildPrehashGeometry(dataDir: string): PrehashGeometry {
       byDate.set(row.date, { close: row.close, ema50: ema50[index] ?? null });
     });
     series.set(id, byDate);
-    closes.set(id, inputs.ema.filter((row) => row.close > 0).map((row) => ({ date: row.date, close: row.close })));
+    closes.set(id, correlationCloses(flags, pair.days));
   }
-  let paused = false;
-  const pausedDates: string[] = [];
-  for (const entryDate of datesFrom(FIRST_UNIVERSE_DATE, OOS_END)) {
+  const entryDates = datesFrom(FIRST_UNIVERSE_DATE, OOS_END);
+  const breadth = breadthByEntryDate(entryDates, (entryDate) => {
     const closeDate = addDays(entryDate, -1);
-    const rows = names.filter((id) => id !== "BTC-USD" && isMember(id, entryDate)).map((id) => {
+    return names.filter((id) => id !== "BTC-USD" && isMember(id, entryDate)).map((id) => {
       const point = series.get(id)?.get(closeDate);
       return { member: true, close: point?.close ?? null, ema50: point?.ema50 ?? null };
     });
-    const count = breadthCount(rows);
-    const share = count.defined > 0 ? count.above / count.defined : null;
-    paused = breadthPaused(share, paused);
-    if (paused) pausedDates.push(entryDate);
-  }
+  });
+  const pausedDates = entryDates.filter((date) => breadth.get(date) === "off");
   const entryDays = datesFrom(FIRST_UNIVERSE_DATE, OOS_END).length;
   const conditionDates: string[] = [];
   const btcDates = [...btcDays.keys()].sort();
@@ -183,6 +182,7 @@ export function buildPrehashGeometry(dataDir: string): PrehashGeometry {
       flag: clusterMonths.length > 0 && monthsAbove60 > clusterMonths.length / 2,
     },
     maxOpen: null,
+    maxOpenNote: "G2 concurrency measured in the post-hash rerun",
     skipped: flagBook.missing,
   };
   assertNoBannedKeys(doc, "v3.1 geometry");
@@ -191,7 +191,10 @@ export function buildPrehashGeometry(dataDir: string): PrehashGeometry {
 
 if (import.meta.main) {
   const dataDir = process.env.RESEARCH_DATA_DIR ?? join(import.meta.dir, "..", "..", "data");
-  const doc = buildPrehashGeometry(dataDir);
+  assertCleanWorkTree();
+  const roots = assertFrozenRoots(dataDir);
+  const stamp = stampFromGit({ phaseId: "P5", dataRootHash: roots.manifest.dataRootHash });
+  const doc = { ...buildPrehashGeometry(dataDir), commitSha: stamp.commitSha, createdAt: stamp.createdAt };
   const { writeJson } = await import("../data/io.ts");
   writeJson(join(dataDir, "reports", "p5-v31-geometry.json"), doc);
   console.log(`breadth ${doc.breadth.pausedDays}/${doc.breadth.entryDays} flag ${doc.breadth.flag} clusters flag ${doc.clusters.flag} conditions ${doc.momentum.conditionDates.length}`);

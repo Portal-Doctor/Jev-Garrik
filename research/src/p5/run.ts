@@ -12,7 +12,7 @@ import type { ArtifactStamp } from "../manifest";
 import { readPairMonth } from "../data/store";
 import { dataPaths } from "../data/paths";
 import { wilderAtr, ema } from "../p2/indicators";
-import { OOS_END } from "../p2/universe";
+import { FIRST_UNIVERSE_DATE, OOS_END } from "../p2/universe";
 import { classATrigger, classBScore } from "../p3/classes";
 import {
   CLASS_B_DISASTER_ATR,
@@ -22,7 +22,7 @@ import {
   classBSelected,
   classKill,
 } from "../p3/design-rules";
-import { classBarInputs, type ClassBarInputs, type GroupFlags } from "../p3/bar-access";
+import { classBarInputs, correlationCloses, type ClassBarInputs, type GroupFlags } from "../p3/bar-access";
 import { registeredFlags } from "./flags";
 import { WINDOW_START } from "../p3/f5";
 import { foldStartDates } from "../p3/schedule";
@@ -79,7 +79,8 @@ import {
   type ClosedTrade,
   type ClosePoint,
 } from "./book";
-import { OPEN_QUESTIONS } from "./questions";
+import { breadthByEntryDate, type BreadthLabel } from "./guards";
+import { RESOLVED_DEFAULTS } from "./questions";
 import { alignedBeta, assignBetas, sizingCostBps } from "./risk";
 
 const REGISTRATION_SHA = "49bc506092114e2dec3e3ec73faa1adad4afdf04b0941d4c7b01bd22cd2317f3";
@@ -122,6 +123,7 @@ interface PairState {
   aSignals: ASignal[];
   flags: GroupFlags;
   closes: ClosePoint[];
+  emaByDate: Map<string, { close: number; ema50: number | null }>;
   bars: PxBar[];
 }
 
@@ -226,7 +228,7 @@ function collectA(
   return out;
 }
 
-function aRuleDate(ohlc: readonly { date: string; low: number; close: number }[], entryDate: string, entry: number, stop: number): { date: string; at: "open" | "close" } | null {
+export function aRuleDate(ohlc: readonly { date: string; low: number; close: number }[], entryDate: string, entry: number, stop: number): { date: string; at: "open" } | null {
   for (let i = 0; i < ohlc.length; i += 1) {
     const day = ohlc[i]!;
     if (day.date <= entryDate || day.date > OOS_END) continue;
@@ -235,9 +237,14 @@ function aRuleDate(ohlc: readonly { date: string; low: number; close: number }[]
     const risk = entry - stop;
     const unrealized = risk > 0 ? (day.close - entry) / risk : 0;
     if (classATenDayExit(day.close, priorCloses)) return { date: day.date, at: "open" };
-    if (held >= 30 && unrealized < 1) return { date: day.date, at: "close" };
+    if (held >= 30 && unrealized < 1) return { date: day.date, at: "open" };
   }
   return null;
+}
+
+/** Held-set exit is the next 1h open after that Monday 00:00 close, minus s_bt at the open fill. */
+export function bHeldExitTs(ruleDate: string): { ts: number; at: "open" } {
+  return { ts: x1EntryTs(ruleDate), at: "open" };
 }
 
 function bRuleDate(weeks: readonly WeekBook[], productId: string, entryDate: string): string | null {
@@ -386,8 +393,8 @@ function ruleExitTs(state: PairState, weeks: readonly WeekBook[], candidate: Boo
   }
   const ruleDate = bRuleDate(weeks, candidate.productId, entryDate);
   if (ruleDate == null) return null;
-  const ts = dayTs(addDays(ruleDate, 1));
-  return ts <= WINDOW_END_TS ? { ts, at: "close" } : null;
+  const exit = bHeldExitTs(ruleDate);
+  return exit.ts <= WINDOW_END_TS ? exit : null;
 }
 
 function memberFn(rows: readonly { date: string; names: string[] }[]): (productId: string, date: string) => boolean {
@@ -480,7 +487,16 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       hourAtr: pair.hour.map((bar, index) => ({ ts: bar.ts, atr: hourAtrSeries[index] ?? null })),
       aSignals: collectA(id, inputs, atrByDate, pair.hour, (date) => isMember(id, date), young, veto),
       flags,
-      closes: inputs.ema.filter((row) => Number.isFinite(row.close) && row.close > 0).map((row) => ({ date: row.date, close: row.close })),
+      closes: correlationCloses(flags, pair.days),
+      emaByDate: (() => {
+        const level = ema(inputs.ema.map((row) => row.close), 50);
+        const byDate = new Map<string, { close: number; ema50: number | null }>();
+        inputs.ema.forEach((row, index) => {
+          if (!(row.close > 0)) return;
+          byDate.set(row.date, { close: row.close, ema50: level[index] ?? null });
+        });
+        return byDate;
+      })(),
       bars: [],
     });
   }
@@ -548,6 +564,15 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
     }
     return found ? chosen : null;
   };
+  const breadthDates: string[] = [];
+  for (let cursor = FIRST_UNIVERSE_DATE; cursor <= OOS_END; cursor = addDays(cursor, 1)) breadthDates.push(cursor);
+  const breadthLabels: Map<string, BreadthLabel> = breadthByEntryDate(breadthDates, (entryDate) => {
+    const closeDate = addDays(entryDate, -1);
+    return ordered.filter((state) => isMember(state.productId, entryDate)).map((state) => {
+      const point = state.emaByDate.get(closeDate);
+      return { member: true, close: point?.close ?? null, ema50: point?.ema50 ?? null };
+    });
+  });
   const bookPairs: BookPair[] = ordered.map((state) => ({
     productId: state.productId,
     bars: new Map(state.bars.map((bar) => [bar.ts, bar])),
@@ -568,6 +593,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
         sBtBps: path === "base" ? 5 : 10,
         endTs: WINDOW_END_TS,
         betaOf,
+        breadthOf: (entryDate) => breadthLabels.get(entryDate) ?? "on",
       });
       ran.set(`${config.id}|${path}`, { result, trades: result.trades.map((trade) => tagTrade(path, config.id, trade)) });
     }
@@ -711,7 +737,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       B: concentration(stitchedB),
     },
     blocked: {
-      note: "A rejected attempt increments every gate that failed. Hits belong to each config's full-window book. Beta uses signed OLS. A missing beta does not block that name.",
+      note: "A rejected attempt increments every gate that failed. Hits belong to each config's full-window book. Beta weight is max(beta, 0). A missing beta is 1 and the cap is applied.",
       configs: A_CONFIGS.map((config) => ({
         config: config.id,
         base: ran.get(`${config.id}|base`)!.result.hits,
@@ -755,7 +781,8 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       missing: flagBook.missing,
       conflicts: flagBook.conflicts,
     },
-    questions: [...OPEN_QUESTIONS],
+    resolvedDefaults: RESOLVED_DEFAULTS.map((row) => ({ ...row })),
+    breadthReview: { label: "diagnostic, no selection", selects: false },
     trades,
   };
   return {

@@ -1,0 +1,20 @@
+# Architect: rulings on P5 capped-rerun deviations (2026-10-11)
+Sources: TDF = trading-design-final.md, ADD = trading-design-15m-addendum.md, registration 49bc5060.
+
+1. Beta cap: PARTLY COVERED. TDF §6 says "BTC-beta-weighted notional <= $6,000", so the beta is against BTC-USD. The window, frequency and estimator aren't specified. Amendment (a): OLS beta of daily returns against BTC-USD over 60 days (the same window as the clusters), recomputed monthly at membership. BTC = 1. A name with fewer than 60 in-window days takes that month's highest member beta. Practical effect: TDF's own sizing note puts all 8 slots at about $2.4K gross, so the cap binds only if the weighted average beta exceeds 2.5. Senior should report the maximum beta-weighted notional seen, to show the omission didn't change any result.
+
+2. Halts: no-flatten is COVERED and correct. TDF §6: "Halts stop new entries only." Realized-only versus open MTM is NOT specified. Amendment (b): the daily and weekly halts and the -$1,600 / $8K drawdown run on equity (realized net plus open MTM at each completed 15m close, with exit costs charged on the MTM). That's conservative, and it's how a drawdown is normally measured. The $500 per-pair backstop uses the same basis.
+
+3. Holm first step: Senior is RIGHT. My 0.01 was ADD §5's table for the forward 5-stream family (0.05/5). The historical family is A and B (2 streams), so the first step is 0.025. It's exploratory in any case.
+
+4. A selection: DEVIATION, needs a rerun (registered, not an amendment). ADD §5 "Folds" requires an anchored, expanding IS: the first IS is 3 months from 2025-11-10, then 1-month OOS steps, with A's 6 configs re-chosen in-sample at every fold. That gives 8 selections for 8 OOS months, with the OOS stitched. The ADD purge applies: fold k's IS counts only trades that exited before OOS month k, and an IS trade open at the boundary is dropped and counted. B is a single config and is unaffected. Selecting once is not what §8 or ADD §5 says.
+
+5. Sizing and open risk: PARTLY WRONG. TDF §6 sets $60 risk with fees inside and notional = $60 / (S + C). With X1 taker entry and taker exits (q = 0 for A and B), C = 2 x (90 + s_bt) = 190 bps base and 200 stress, not 180. The 180 leaves out the spread and oversizes slightly, by about 0.5% at S of about 1,850. At entry, open risk must equal notional x (S + C), which is $60 by construction. Units x entry-to-stop leaves out the fees, so it lets about 9% more risk under the $480 cap. After the stop moves, the docs don't say how open risk is measured. Amendment (c): units x max(0, entry - current stop) plus the exit cost on current notional.
+
+Cluster cap (for Brian before forward paper): this is a registered rule (TDF §6: single linkage, rho >= 0.8, 60 days, max 2 per cluster) behaving as written. Single linkage chains together in a high-correlation regime, so since January most names form one cluster, and the book is effectively capped at about 2 positions, plus any names outside the cluster. Consequences:
+- The realized trade rate falls far below TDF's 30-60 per quarter. A3 and B4 slots mostly go unused, and B is effectively capped at 2.
+- Forward n >= 30 per class (the promotion minimum) takes much longer than 90 days.
+- The quarterly dollar result at $60 risk shrinks further from $1,200.
+It's not a defect. It's risk control doing its job in a market where everything moves with BTC. Changing it (for example average or complete linkage, a higher rho, or a cap on beta-weighted exposure instead of a count) is a strategy change for Quant and Trader, and would mean a new registration. The cheapest moment for that is before forward paper starts, because forward paper is the holdout. Before Brian decides, Senior or Quant should report: the share of days the cluster cap binds, the signals blocked by it per class, and the uncapped-cluster counterfactual as a diagnostic only.
+
+Post-hash amendments for Brian: (a) beta definition; (b) halts and drawdown on equity including open MTM; (c) open-risk measure after the stop moves. Plus the earlier (a)-(c) from p5-gap-rulings.md.

@@ -27,7 +27,8 @@ import {
 import { intrabarFill } from "../p3/fills";
 import { MAX_POSITIONS, SLOT_CAPS, notionalUsd, tieRank } from "../p3/portfolio";
 import { weekKey } from "./stats";
-import { averageLinkage, classKillTripped, entryOpenRiskUsd, openRiskAfterMove, sizingCostBps } from "./risk";
+import type { BreadthLabel } from "./guards";
+import { averageLinkage, betaWeight, classKillTripped, entryOpenRiskUsd, openRiskAfterMove, sizingCostBps } from "./risk";
 import { grossBps, netBps } from "./walk";
 
 const DAY = 86_400;
@@ -84,6 +85,7 @@ export interface ClosedTrade {
   entryRiskUsd: number;
   stopBps: number;
   costBps: number;
+  breadth: BreadthLabel | null;
 }
 
 export interface GateHits {
@@ -116,6 +118,7 @@ export interface BookResult {
   hitsByClass: { A: GateHits; B: GateHits };
   betaApplied: boolean;
   betaUnresolved: number;
+  breadthLog: { productId: string; entryTs: number; taken: boolean; breadth: BreadthLabel | null; notionalUsd: number; riskUsd: number }[];
 }
 
 interface Position {
@@ -139,6 +142,7 @@ interface Position {
   costBps: number;
   beta: number | null;
   stopMoved: boolean;
+  breadth: BreadthLabel | null;
 }
 
 function emptyHits(): GateHits {
@@ -172,7 +176,7 @@ export function isDayCloseBar(ts: number): boolean {
 
 function liveRisk(pos: Position, sBtBps: number): number {
   if (!pos.stopMoved) return pos.entryRiskUsd;
-  return openRiskAfterMove(pos.units, pos.fillEntry, pos.stop, pos.lastBar.close, sBtBps);
+  return openRiskAfterMove(pos.units, pos.fillEntry, pos.stop, sBtBps);
 }
 
 function markUsd(pos: Position, sBtBps: number): number {
@@ -207,6 +211,7 @@ function closeTrade(pos: Position, reason: ClosedTrade["reason"], exitTs: number
     entryRiskUsd: pos.entryRiskUsd,
     stopBps: pos.stopBps,
     costBps: pos.costBps,
+    breadth: pos.breadth,
   };
 }
 
@@ -226,6 +231,7 @@ export function runBook(opts: {
   endTs: number;
   costBps?: number;
   betaOf?: (productId: string, entryDate: string) => number | null;
+  breadthOf?: (entryDate: string) => BreadthLabel;
 }): BookResult {
   const pairs = new Map(opts.pairs.map((pair) => [pair.productId, pair]));
   const costBps = opts.costBps ?? sizingCostBps(opts.sBtBps);
@@ -256,6 +262,9 @@ export function runBook(opts: {
   let noBar = 0;
   let invalidStop = 0;
   let betaUnresolved = 0;
+  const breadthLog: BookResult["breadthLog"] = [];
+  const classUsdPeak = { A: 0, B: 0 };
+  const classKilled = { A: false, B: false };
   let dayKey = "";
   let dayStart = 0;
   let weekStartKey = "";
@@ -272,8 +281,12 @@ export function runBook(opts: {
     pairPnl.set(trade.productId, (pairPnl.get(trade.productId) ?? 0) + trade.netUsd);
     const r = entryRiskUsd > 0 ? trade.netUsd / entryRiskUsd : 0;
     classUsd[trade.classId] += trade.netUsd;
+    classUsdPeak[trade.classId] = Math.max(classUsdPeak[trade.classId], classUsd[trade.classId]);
     classR[trade.classId] += r;
     classPeak[trade.classId] = Math.max(classPeak[trade.classId], classR[trade.classId]);
+    if (classKillTripped(classPeak[trade.classId], classR[trade.classId], classUsdPeak[trade.classId], classUsd[trade.classId])) {
+      classKilled[trade.classId] = true;
+    }
     lastExit.set(trade.productId, trade.exitTs);
     bumpPeak();
   };
@@ -333,7 +346,9 @@ export function runBook(opts: {
       const pairMark = open.filter((pos) => pos.productId === candidate.productId).reduce((sum, pos) => sum + markUsd(pos, opts.sBtBps), 0);
       const pairLoss = Math.max(0, -((pairPnl.get(candidate.productId) ?? 0) + pairMark));
       const drawdown = Math.max(0, peakEquity - now);
-      const beta = opts.betaOf ? opts.betaOf(candidate.productId, entryDate) : null;
+      const rawBeta = opts.betaOf ? opts.betaOf(candidate.productId, entryDate) : null;
+      const beta = opts.betaOf ? (rawBeta ?? 1) : null;
+      const breadth = opts.breadthOf?.(entryDate) ?? null;
       const failed: (keyof GateHits)[] = [];
       if (!reentryAllowed(lastExit.has(candidate.productId) ? lastExit.get(candidate.productId)! * 1000 : null, ts * 1000)) failed.push("reentry");
       if (!onePerPairAllows(open.map((pos) => pos.productId), candidate.productId)) failed.push("onePerPair");
@@ -345,11 +360,9 @@ export function runBook(opts: {
       if (!openRiskAllows(openRisk, addRisk)) failed.push("openRisk");
       if (!grossNotionalAllows(gross, notional)) failed.push("grossNotional");
       if (opts.betaOf) {
-        if (beta == null) betaUnresolved += 1;
-        else {
-          const weighted = open.reduce((sum, pos) => sum + (pos.beta == null ? 0 : pos.notionalUsd * pos.beta), 0) + notional * beta;
-          if (!betaAllows(weighted)) failed.push("beta");
-        }
+        if (rawBeta == null) betaUnresolved += 1;
+        const weighted = open.reduce((sum, pos) => sum + pos.notionalUsd * betaWeight(pos.beta ?? 0), 0) + notional * betaWeight(beta ?? 1);
+        if (!betaAllows(weighted)) failed.push("beta");
       }
       if (dailyLoss >= DAILY_HALT_USD) failed.push("dailyHalt");
       if (weeklyLoss >= WEEKLY_HALT_USD) failed.push("weeklyHalt");
@@ -357,7 +370,11 @@ export function runBook(opts: {
       if (dailyLoss >= BACKSTOP_DAILY_USD) failed.push("dailyBackstop");
       if (pairLoss >= BACKSTOP_PAIR_USD) failed.push("pairBackstop");
       if (drawdown >= BACKSTOP_BOOK_USD) failed.push("bookBackstop");
-      if (classKillTripped(classPeak[candidate.classId], classR[candidate.classId], classUsd[candidate.classId])) failed.push("classRKill");
+      if (classKilled[candidate.classId] || classKillTripped(classPeak[candidate.classId], classR[candidate.classId], classUsdPeak[candidate.classId], classUsd[candidate.classId])) {
+        classKilled[candidate.classId] = true;
+        failed.push("classRKill");
+      }
+      breadthLog.push({ productId: candidate.productId, entryTs: ts, taken: failed.length === 0, breadth, notionalUsd: notional, riskUsd: addRisk });
       if (failed.length > 0) {
         for (const gate of failed) {
           hits[gate] += 1;
@@ -388,6 +405,7 @@ export function runBook(opts: {
         costBps,
         beta,
         stopMoved: false,
+        breadth,
       });
     }
     for (const pos of open.slice()) {
@@ -424,7 +442,7 @@ export function runBook(opts: {
     drop(pos, "window", pos.lastBar.close, x1FillPrice(pos.lastBar.close, "sell", opts.sBtBps), true);
   }
   trades.sort((a, b) => a.entryTs - b.entryTs || (a.productId < b.productId ? -1 : 1) || (a.classId < b.classId ? -1 : 1));
-  return { trades, attempts, taken, noBar, invalidStop, hits, hitsByClass, betaApplied: opts.betaOf != null, betaUnresolved };
+  return { trades, attempts, taken, noBar, invalidStop, hits, hitsByClass, betaApplied: opts.betaOf != null, betaUnresolved, breadthLog };
 }
 
 export interface ClosePoint {

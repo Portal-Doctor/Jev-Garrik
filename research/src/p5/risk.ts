@@ -29,11 +29,16 @@ export function entryOpenRiskUsd(notional: number, stopBps: number, costBps: num
   return (notional * (stopBps + costBps)) / 10_000;
 }
 
-/** After the stop moves: price distance from the entry fill, plus one exit leg on the marked notional. */
-export function openRiskAfterMove(units: number, entry: number, stop: number, mark: number, sBtBps: number): number {
+/** After the stop moves: price distance from the entry fill, plus one exit leg on units times the current stop. */
+export function openRiskAfterMove(units: number, entry: number, stop: number, sBtBps: number): number {
   const price = units * Math.max(0, entry - stop);
-  const exitCost = (units * mark * exitLegBps(sBtBps)) / 10_000;
+  const exitCost = (units * Math.max(0, stop) * exitLegBps(sBtBps)) / 10_000;
   return price + exitCost;
+}
+
+/** Negative beta does not offset a long book. */
+export function betaWeight(beta: number): number {
+  return Math.max(beta, 0);
 }
 
 export function olsBeta(asset: readonly number[], benchmark: readonly number[]): number | null {
@@ -67,11 +72,11 @@ export function alignedBeta(asset: readonly ClosePoint[], benchmark: readonly Cl
   return olsBeta(dates.map((date) => left.get(date)!), dates.map((date) => right.get(date)!));
 }
 
-/** A missing beta takes the highest signed member beta. None defined stays missing. */
-export function assignBetas(rows: readonly { id: string; beta: number | null }[]): Map<string, number | null> {
+/** A missing beta takes the highest signed member beta. None defined falls back to 1. */
+export function assignBetas(rows: readonly { id: string; beta: number | null }[]): Map<string, number> {
   const defined = rows.map((row) => row.beta).filter((beta): beta is number => beta != null);
-  const highest = defined.length === 0 ? null : Math.max(...defined);
-  const out = new Map<string, number | null>();
+  const highest = defined.length === 0 ? 1 : Math.max(...defined);
+  const out = new Map<string, number>();
   for (const row of rows) out.set(row.id, row.beta ?? highest);
   return out;
 }
@@ -127,6 +132,7 @@ export function averageLinkage(ids: readonly string[], rhoOf: (left: string, rig
   return out;
 }
 
-export function classKillTripped(peakR: number, cumR: number, cumUsd: number): boolean {
-  return peakR - cumR >= CLASS_R_KILL || cumUsd <= -CLASS_DOLLAR_BACKSTOP_USD;
+/** 20R from the class peak, or $1,200 from the class peak cumulative net dollars. */
+export function classKillTripped(peakR: number, cumR: number, peakUsd: number, cumUsd: number): boolean {
+  return peakR - cumR >= CLASS_R_KILL || peakUsd - cumUsd >= CLASS_DOLLAR_BACKSTOP_USD;
 }

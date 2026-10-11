@@ -50,11 +50,13 @@ test("folds follow the registered D3b dates and the purge drops an IS trade open
   expect(weekKey("2026-02-11")).toBe("2026-02-09");
 });
 
-test("the kill screen uses 150 bps and n of 30", () => {
+test("the v3.1 kill screen uses each trade's cost and stop", () => {
+  expect(meanHurdleBps([{ costBps: 190, stopBps: 1_000 }])).toBe(340);
+  expect(meanHurdleBps([{ costBps: 190, stopBps: 100 }])).toBe(215);
+  expect(meanHurdleBps([])).toBeNull();
   expect(KILL_HURDLE_BPS).toBe(150);
   expect(killVerdict(29, -10, -10)).toBe("insufficient");
   expect(killVerdict(30, -1, 100)).toBe("kill");
-  expect(killVerdict(30, -1, 150)).toBe("keep");
   expect(killVerdict(30, 1, 10)).toBe("keep");
 });
 

@@ -5,6 +5,7 @@ import {
   BOUNDARY_SAVED_NAMES,
   VOLUME_FALLBACK_NAMES,
   classBarInputs,
+  correlationCloses,
   clusterKey,
   dailyBarsFor,
   dHistoryStart,
@@ -22,6 +23,17 @@ const volumeFallback: GroupFlags = { priceGroupPasses: false, volumeGroupPasses:
 function day(date: string, high: number, low = 1, close = 2, volume = 3): SourceDay {
   return { date, ts: Date.parse(`${date}T00:00:00.000Z`) / 1000, open: close, high, low, close, volume, empty: false };
 }
+
+test("correlation closes stay in-window for every boundary-saved name, including WIF", () => {
+  const days = [day("2025-09-01", 10, 8, 50, 4), day("2025-10-11", 10, 8, 9, 4), day("2025-10-12", 11, 7, 10, 5)];
+  expect(BOUNDARY_SAVED_NAMES).toContain("WIF-USD");
+  for (const name of BOUNDARY_SAVED_NAMES) {
+    const flags: GroupFlags = { priceGroupPasses: false, volumeGroupPasses: true, boundarySaved: true };
+    expect(name.endsWith("-USD")).toBe(true);
+    expect(correlationCloses(flags, days).map((row) => row.date)).toEqual(["2025-10-11", "2025-10-12"]);
+  }
+  expect(correlationCloses(pricePass, days).some((row) => row.date < WINDOW_START)).toBe(true);
+});
 
 test("the seven boundary-saved names do not read pre-window highs, lows, or volume", () => {
   expect([...BOUNDARY_SAVED_NAMES]).toEqual(["AVNT-USD", "FIL-USD", "IP-USD", "LIGHTER-USD", "TRUMP-USD", "VVV-USD", "WIF-USD"]);
