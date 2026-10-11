@@ -20,5 +20,6 @@ export const OPEN_QUESTIONS = [
   "SPRT boundaries are not in the delta. The report-only function counts observations and never pauses.",
   "The 2b block is 14 calendar dates beginning on the condition date. The condition dates and those blocked dates are both reported.",
   "G2's realized maximum concurrent positions needs the capped book. That book is the rerun and was not run, so the field is empty.",
+  "Breadth uses the entry day's membership and the prior open-dated daily close. The pause starts off, and a share from 25 percent through 35 percent keeps the prior state.",
   "The v3.1 source notes named by G3 are not in this workspace, so their hashes are not invented.",
 ] as const;
