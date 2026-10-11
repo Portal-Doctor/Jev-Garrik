@@ -62,3 +62,40 @@ test("the uncapped diagnostic keeps its results hash and the amendment is stampe
   expect(amendment.approvedAt).toBe("2026-10-11T19:45:00Z");
   expect(amendment.registrationEdited).toBe(false);
 });
+
+test("the registered capped run keeps its results hash", () => {
+  const report = JSON.parse(readFileSync(join(reports, "p5-registered.json"), "utf8")) as {
+    commitSha: string;
+    amendmentSha256: string;
+    registrationSha256: string;
+    jevCalls: number;
+    resultsHash: string;
+    results: {
+      selection: { chosen: string; l80NetUsdPerMonth: number };
+      maxOfN: { registered: number };
+      dsr: { registeredTrials: number; sensitivityTrials: number };
+      blocked: { officialBase: { betaApplied?: boolean; hits: { slotA: number; beta?: number } } };
+      holm: { historical: { id: string; holmPass: boolean }[]; alpha: number };
+      configs: { config: string; selected: boolean; base: { oos: { n: number; verdict: string } } }[];
+      classB: { base: { oos: { n: number; verdict: string } } };
+    };
+  };
+  expect(report.commitSha).toBe("79258bd11a3763a6365ca13e8d6a292f072cc8bb");
+  expect(report.registrationSha256).toBe("49bc506092114e2dec3e3ec73faa1adad4afdf04b0941d4c7b01bd22cd2317f3");
+  expect(report.amendmentSha256).toBe("e0948e26f2bbe2ec7c113d23db8b4dbb9daed70a9d2cef0e3f0a0c49f70d7760");
+  expect(report.jevCalls).toBe(0);
+  expect(report.resultsHash).toBe("47444899b20c3f3f035c65f613898aba547ca8ddc77426f61282fac505c50d51");
+  expect(createHash("sha256").update(JSON.stringify(report.results)).digest("hex")).toBe(report.resultsHash);
+  expect(report.results.selection.chosen).toBe("A55-k3");
+  expect(report.results.maxOfN.registered).toBe(7);
+  expect(report.results.dsr.registeredTrials).toBe(135);
+  expect(report.results.dsr.sensitivityTrials).toBe(154);
+  expect(report.results.holm.alpha).toBe(0.05);
+  expect(report.results.holm.historical.every((row) => row.holmPass === false)).toBe(true);
+  const selected = report.results.configs.find((row) => row.selected);
+  expect(selected?.base.oos.n).toBe(8);
+  expect(selected?.base.oos.verdict).toBe("insufficient");
+  expect(report.results.classB.base.oos.n).toBe(34);
+  expect(report.results.classB.base.oos.verdict).toBe("keep");
+  expect(report.results.blocked.officialBase.hits.slotA).toBe(32);
+});
