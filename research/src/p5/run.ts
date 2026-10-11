@@ -17,7 +17,7 @@ import { classATrigger, classBScore } from "../p3/classes";
 import {
   CLASS_B_DISASTER_ATR,
   classAChaseSkip,
-  classAExit,
+  classATenDayExit,
   classBHeld,
   classBSelected,
 } from "../p3/design-rules";
@@ -98,6 +98,7 @@ interface ASignal {
   lookback: 20 | 55;
   date: string;
   entryDate: string;
+  entryTs: number;
   atr: number;
 }
 
@@ -124,6 +125,16 @@ function sha256(bytes: Buffer | string): string {
 
 function dayTs(date: string): number {
   return Date.parse(`${date}T00:00:00.000Z`) / 1000;
+}
+
+/** Next 1h open after the 00:00 close of an open-dated daily bar. */
+export function x1EntryTs(signalBarDate: string): number {
+  return dayTs(addDays(signalBarDate, 1)) + 3_600;
+}
+
+/** Monday 00:00 UTC is the close of the Sunday-dated bar in this store. */
+export function isMondayCloseBar(date: string): boolean {
+  return new Date(`${date}T00:00:00.000Z`).getUTCDay() === 0;
 }
 
 function dateOf(ts: number): string {
@@ -169,9 +180,18 @@ function emaPoint(inputs: ClassBarInputs): Map<string, { e50: number | null; e20
   return out;
 }
 
-function collectA(productId: string, inputs: ClassBarInputs, atrByDate: Map<string, number>, memberOn: (date: string) => boolean, young: boolean, veto: (date: string) => boolean): ASignal[] {
+function collectA(
+  productId: string,
+  inputs: ClassBarInputs,
+  atrByDate: Map<string, number>,
+  hour: readonly { ts: number; open: number }[],
+  memberOn: (date: string) => boolean,
+  young: boolean,
+  veto: (date: string) => boolean,
+): ASignal[] {
   const bars = inputs.closeLookback;
   const points = emaPoint(inputs);
+  const hourOpen = new Map(hour.map((bar) => [bar.ts, bar.open]));
   const out: ASignal[] = [];
   for (let i = 0; i < bars.length; i += 1) {
     const bar = bars[i]!;
@@ -180,29 +200,30 @@ function collectA(productId: string, inputs: ClassBarInputs, atrByDate: Map<stri
     if (dailyAtr == null || !(dailyAtr > 0)) continue;
     const point = points.get(bar.date);
     if (!point) continue;
+    const entryTs = x1EntryTs(bar.date);
+    const entryOpen = hourOpen.get(entryTs);
+    if (entryOpen == null || !(entryOpen > 0)) continue;
     for (const lookback of [20, 55] as const) {
       if (!classATrigger(bars, i, lookback, young, undefined, point)) continue;
-      const prior = bars.slice(i - lookback, i);
-      const priorHigh = Math.max(...prior.map((row) => row.close));
-      if (classAChaseSkip(bar.close, priorHigh, dailyAtr)) continue;
+      if (classAChaseSkip(entryOpen, bar.close, dailyAtr)) continue;
       const entryDate = addDays(bar.date, 1);
       if (entryDate > OOS_END) continue;
-      out.push({ lookback, date: bar.date, entryDate, atr: dailyAtr });
+      out.push({ lookback, date: bar.date, entryDate, entryTs, atr: dailyAtr });
     }
   }
   return out;
 }
 
-function aRuleDate(ohlc: readonly { date: string; low: number; close: number }[], entryDate: string, entry: number, stop: number): string | null {
+function aRuleDate(ohlc: readonly { date: string; low: number; close: number }[], entryDate: string, entry: number, stop: number): { date: string; at: "open" | "close" } | null {
   for (let i = 0; i < ohlc.length; i += 1) {
     const day = ohlc[i]!;
     if (day.date <= entryDate || day.date > OOS_END) continue;
-    const prior = ohlc.slice(Math.max(0, i - 10), i).filter((row) => Number.isFinite(row.low));
-    const priorLow = prior.length >= 10 ? Math.min(...prior.slice(-10).map((row) => row.low)) : day.close;
+    const priorCloses = ohlc.slice(Math.max(0, i - 10), i).map((row) => row.close).filter((close) => Number.isFinite(close));
     const held = daysBetween(entryDate, day.date);
     const risk = entry - stop;
     const unrealized = risk > 0 ? (day.close - entry) / risk : 0;
-    if (classAExit(day.close, priorLow, held, unrealized)) return day.date;
+    if (classATenDayExit(day.close, priorCloses)) return { date: day.date, at: "open" };
+    if (held >= 30 && unrealized < 1) return { date: day.date, at: "close" };
   }
   return null;
 }
@@ -314,7 +335,7 @@ function aCandidates(state: PairState, lookback: 20 | 55, k: number): BookCandid
     classId: "A" as const,
     productId: state.productId,
     signalDate: row.date,
-    entryTs: dayTs(row.entryDate),
+    entryTs: row.entryTs,
     stopDistance: k * row.atr,
   }));
 }
@@ -323,27 +344,33 @@ function bCandidates(state: PairState, weeks: readonly WeekBook[], veto: (date: 
   const out: BookCandidate[] = [];
   for (const week of weeks) {
     if (!week.selected.has(state.productId) || veto(week.date)) continue;
-    const entryDate = addDays(week.date, 1);
-    if (entryDate > OOS_END) continue;
+    const entryTs = x1EntryTs(week.date);
+    if (dateOf(entryTs) > OOS_END) continue;
     const atr = state.atrByDate.get(week.date);
     if (atr == null || !(atr > 0)) continue;
     out.push({
       classId: "B",
       productId: state.productId,
       signalDate: week.date,
-      entryTs: dayTs(entryDate),
+      entryTs,
       stopDistance: CLASS_B_DISASTER_ATR * atr,
     });
   }
   return out;
 }
 
-function ruleExitTs(state: PairState, weeks: readonly WeekBook[], candidate: BookCandidate, rawEntry: number, initialStop: number): number | null {
+function ruleExitTs(state: PairState, weeks: readonly WeekBook[], candidate: BookCandidate, rawEntry: number, initialStop: number): { ts: number; at: "open" | "close" } | null {
   const entryDate = dateOf(candidate.entryTs);
-  const ruleDate = candidate.classId === "A" ? aRuleDate(state.ohlc, entryDate, rawEntry, initialStop) : bRuleDate(weeks, candidate.productId, entryDate);
+  if (candidate.classId === "A") {
+    const rule = aRuleDate(state.ohlc, entryDate, rawEntry, initialStop);
+    if (rule == null) return null;
+    const ts = dayTs(addDays(rule.date, 1));
+    return ts <= WINDOW_END_TS ? { ts, at: rule.at } : null;
+  }
+  const ruleDate = bRuleDate(weeks, candidate.productId, entryDate);
   if (ruleDate == null) return null;
   const ts = dayTs(addDays(ruleDate, 1));
-  return ts <= WINDOW_END_TS ? ts : null;
+  return ts <= WINDOW_END_TS ? { ts, at: "close" } : null;
 }
 
 function memberFn(rows: readonly { date: string; names: string[] }[]): (productId: string, date: string) => boolean {
@@ -421,7 +448,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
     const young = pair.listedDate != null && pair.days.filter((row) => !row.empty && row.date < "2025-11-10").length < 200;
     const closes = inputs.closeLookback.map((row) => row.close);
     inputs.closeLookback.forEach((bar, index) => {
-      if (new Date(`${bar.date}T00:00:00.000Z`).getUTCDay() !== 1) return;
+      if (!isMondayCloseBar(bar.date)) return;
       const score = classBScore(closes, index);
       if (score == null || !isMember(id, bar.date)) return;
       bScores.push({ id, date: bar.date, score, member: true });
@@ -432,7 +459,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       atrByDate,
       daily,
       hourAtr: pair.hour.map((bar, index) => ({ ts: bar.ts, atr: hourAtrSeries[index] ?? null })),
-      aSignals: collectA(id, inputs, atrByDate, (date) => isMember(id, date), young, veto),
+      aSignals: collectA(id, inputs, atrByDate, pair.hour, (date) => isMember(id, date), young, veto),
       flags,
       bars: [],
     });

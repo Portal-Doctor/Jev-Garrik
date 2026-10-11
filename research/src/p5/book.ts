@@ -125,6 +125,7 @@ interface Position {
   stop: number;
   highestClose: number;
   ruleExitTs: number | null;
+  ruleExitAt: "open" | "close";
   cluster: string;
   lastBar: BookBar;
   spreadBps: number;
@@ -188,10 +189,18 @@ function closeTrade(pos: Position, reason: ClosedTrade["reason"], exitTs: number
   };
 }
 
+export type RuleExit = { ts: number; at: "open" | "close" };
+
+function ruleExitOf(value: number | RuleExit | null): RuleExit | null {
+  if (value == null) return null;
+  if (typeof value === "number") return { ts: value, at: "open" };
+  return value;
+}
+
 export function runBook(opts: {
   pairs: readonly BookPair[];
   candidates: readonly BookCandidate[];
-  ruleExitTs: (candidate: BookCandidate, rawEntry: number, initialStop: number) => number | null;
+  ruleExitTs: (candidate: BookCandidate, rawEntry: number, initialStop: number) => number | RuleExit | null;
   sBtBps: number;
   endTs: number;
   costBps?: number;
@@ -247,8 +256,7 @@ export function runBook(opts: {
       const bar = pairs.get(pos.productId)?.bars.get(ts);
       if (!bar) continue;
       pos.lastBar = bar;
-      const worsened = stopFillPrice(pos.stop, pos.rawEntry, opts.sBtBps, pairs.get(pos.productId)?.atr1h(ts) ?? 0);
-      if (bar.open <= worsened) drop(pos, "gap", bar.open, bar.open, false);
+      if (bar.open <= pos.stop) drop(pos, "gap", bar.open, bar.open, false);
     }
     const due = byTs.get(ts) ?? [];
     for (const candidate of due) {
@@ -302,6 +310,7 @@ export function runBook(opts: {
         continue;
       }
       taken += 1;
+      const ruleExit = ruleExitOf(opts.ruleExitTs(candidate, rawEntry, initialStop));
       open.push({
         classId: candidate.classId,
         productId: candidate.productId,
@@ -313,7 +322,8 @@ export function runBook(opts: {
         notionalUsd: notional,
         stop: initialStop,
         highestClose: Number.NEGATIVE_INFINITY,
-        ruleExitTs: opts.ruleExitTs(candidate, rawEntry, initialStop),
+        ruleExitTs: ruleExit?.ts ?? null,
+        ruleExitAt: ruleExit?.at ?? "open",
         cluster,
         lastBar: bar,
         spreadBps: opts.sBtBps,
@@ -323,13 +333,17 @@ export function runBook(opts: {
       const bar = pos.lastBar.ts === ts ? pos.lastBar : pairs.get(pos.productId)?.bars.get(ts);
       if (!bar) continue;
       pos.lastBar = bar;
-      const worsened = stopFillPrice(pos.stop, pos.rawEntry, opts.sBtBps, pairs.get(pos.productId)?.atr1h(ts) ?? 0);
-      const fill = intrabarFill(bar, worsened, Number.POSITIVE_INFINITY);
-      if (fill.kind === "stop" && fill.price != null && bar.open > worsened) {
-        drop(pos, "stop", pos.stop, fill.price, false);
+      const deduction = stopFillPrice(pos.stop, pos.rawEntry, opts.sBtBps, pairs.get(pos.productId)?.atr1h(ts) ?? 0);
+      const fill = intrabarFill(bar, pos.stop, Number.POSITIVE_INFINITY);
+      if (fill.kind === "stop" && fill.price != null && bar.open > pos.stop) {
+        drop(pos, "stop", pos.stop, deduction, false);
         continue;
       }
-      if (pos.ruleExitTs != null && bar.ts + BAR >= pos.ruleExitTs && bar.ts < pos.ruleExitTs) {
+      if (pos.ruleExitTs != null && pos.ruleExitAt === "open" && bar.ts === pos.ruleExitTs) {
+        drop(pos, "rule", bar.open, x1FillPrice(bar.open, "sell", opts.sBtBps), false);
+        continue;
+      }
+      if (pos.ruleExitTs != null && pos.ruleExitAt === "close" && bar.ts + BAR >= pos.ruleExitTs && bar.ts < pos.ruleExitTs) {
         drop(pos, "rule", bar.close, x1FillPrice(bar.close, "sell", opts.sBtBps), false);
         continue;
       }

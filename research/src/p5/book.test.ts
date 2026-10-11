@@ -42,6 +42,24 @@ test("a third name in one cluster is blocked", () => {
   expect(result.hits.cluster).toBe(1);
 });
 
+test("a low between the stop and the worsened fill still stops", () => {
+  const bars = new Map([
+    [0, bar(0, 100, 99, 100)],
+    [900, bar(900, 95, 89, 94)],
+  ]);
+  const result = runBook({
+    pairs: [pair("AAA", bars, "AAA", new Map(), 20)],
+    candidates: [{ classId: "B", productId: "AAA", signalDate: "1970-01-01", entryTs: 0, stopDistance: 10 }],
+    ruleExitTs: () => null,
+    sBtBps: 5,
+    endTs: 1800,
+  });
+  expect(result.trades).toHaveLength(1);
+  expect(result.trades[0]?.reason).toBe("stop");
+  expect(result.trades[0]?.rawExit).toBeCloseTo(90, 8);
+  expect(result.trades[0]?.fillExit).toBeCloseTo(88, 8);
+});
+
 test("a stop fill uses the larger of s_bt and 0.1 times the 1h ATR", () => {
   const bars = new Map([
     [0, bar(0, 100, 99, 100)],

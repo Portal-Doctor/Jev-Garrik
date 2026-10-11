@@ -6,6 +6,7 @@ import {
   betaAllows,
   classAChaseSkip,
   classAExit,
+  classATenDayExit,
   classBDisasterStop,
   classBHeld,
   classBSelected,
@@ -34,9 +35,12 @@ import {
   x1FillPrice,
 } from "./design-rules";
 
-test("class A skips a chase beyond half an ATR and exits on the 10-day low or a 30-day sub-1R hold", () => {
-  expect(classAChaseSkip(104, 100, 10)).toBe(false);
-  expect(classAChaseSkip(106, 100, 10)).toBe(true);
+test("class A skips a 1h open above the signal close plus half an ATR, and exits on the prior 10 closes", () => {
+  expect(classAChaseSkip(105, 100, 10)).toBe(false);
+  expect(classAChaseSkip(105.01, 100, 10)).toBe(true);
+  expect(classATenDayExit(9, Array(10).fill(10))).toBe(true);
+  expect(classATenDayExit(10, Array(10).fill(10))).toBe(false);
+  expect(classATenDayExit(9, Array(9).fill(10))).toBe(false);
   expect(classAExit(9, 10, 1, 2)).toBe(true);
   expect(classAExit(11, 10, 30, 0.9)).toBe(true);
   expect(classAExit(11, 10, 29, 0.9)).toBe(false);

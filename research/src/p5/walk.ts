@@ -1,8 +1,8 @@
 /**
  * One long trade on 15m bars.
  * X1 buys the entry open plus s_bt and pays the taker fee.
- * A stop fill is the registered stop model. A rule exit or a window-end mark
- * sells the close plus s_bt and pays the taker fee.
+ * A stop triggers at the stop price. The fill is one deduction below that price.
+ * A 10-day rule exit sells the next open minus s_bt. A window-end mark sells the close.
  * The same bar never fills a target ahead of the stop: the target is absent.
  */
 
@@ -43,7 +43,7 @@ export function netBps(fillEntry: number, fillExit: number, entryFeeBps: number,
 /**
  * `entryTs` must be the open timestamp of a bar.
  * `endTs` is exclusive.
- * `ruleExitTs`, when set, is the exclusive end of the daily bar whose close is the rule exit.
+ * `ruleExitTs`, when set, is the open timestamp of the 15m bar that fills the rule exit.
  */
 export function walkLong(opts: {
   bars: readonly PxBar[];
@@ -65,16 +65,17 @@ export function walkLong(opts: {
     const bar = opts.bars[i]!;
     if (bar.ts >= opts.endTs) break;
     last = bar;
-    const worsened = stopFillPrice(opts.stop, rawEntry, opts.sBtBps, opts.atr1h(bar.ts));
-    const fill = intrabarFill(bar, worsened, Number.POSITIVE_INFINITY);
+    const deduction = stopFillPrice(opts.stop, rawEntry, opts.sBtBps, opts.atr1h(bar.ts));
+    const fill = intrabarFill(bar, opts.stop, Number.POSITIVE_INFINITY);
     if (fill.kind === "stop" && fill.price != null) {
-      const gapped = bar.open <= worsened;
+      const gapped = bar.open <= opts.stop;
       const rawExit = gapped ? bar.open : opts.stop;
-      return leg(gapped ? "gap" : "stop", bar.ts, rawEntry, rawExit, fillEntry, fill.price, opts.sBtBps);
+      const fillExit = gapped ? bar.open : deduction;
+      return leg(gapped ? "gap" : "stop", bar.ts, rawEntry, rawExit, fillEntry, fillExit, opts.sBtBps);
     }
-    if (opts.ruleExitTs != null && bar.ts + 900 >= opts.ruleExitTs && bar.ts < opts.ruleExitTs) {
-      const fillExit = x1FillPrice(bar.close, "sell", opts.sBtBps);
-      return leg("rule", bar.ts, rawEntry, bar.close, fillEntry, fillExit, opts.sBtBps);
+    if (opts.ruleExitTs != null && bar.ts === opts.ruleExitTs) {
+      const fillExit = x1FillPrice(bar.open, "sell", opts.sBtBps);
+      return leg("rule", bar.ts, rawEntry, bar.open, fillEntry, fillExit, opts.sBtBps);
     }
   }
   if (!last || !(last.close > 0)) return null;

@@ -62,12 +62,19 @@ export function section1HurdleBps(costBps: number, stopBps: number): number {
   return costBps + Math.max(25, 0.15 * stopBps);
 }
 
-export function classAChaseSkip(close: number, priorHigh: number, atr: number): boolean {
-  return atr > 0 && close - priorHigh > 0.5 * atr;
+/** Skip when the X1 entry, the next 1h open, is above the signal close plus half a daily ATR. */
+export function classAChaseSkip(entryPrice: number, signalClose: number, atr: number): boolean {
+  return atr > 0 && entryPrice > signalClose + 0.5 * atr;
 }
 
-export function classAExit(close: number, prior10DayLow: number, heldDays: number, unrealizedR: number): boolean {
-  if (close < prior10DayLow) return true;
+/** True when ten prior daily closes exist and this close is strictly below the lowest of them. */
+export function classATenDayExit(close: number, priorCloses: readonly number[]): boolean {
+  if (priorCloses.length < 10) return false;
+  return close < Math.min(...priorCloses.slice(-10));
+}
+
+export function classAExit(close: number, prior10DayClose: number, heldDays: number, unrealizedR: number): boolean {
+  if (close < prior10DayClose) return true;
   return heldDays >= 30 && unrealizedR < 1;
 }
 
