@@ -1,16 +1,16 @@
 {
-  "commitSha": "e806e0242631575020ff60299c5c64af8cc48204",
+  "commitSha": "722719b16c5d290749b13650ea159acaf1139ba3",
   "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
-  "createdAt": "2026-10-11T03:08:09.177Z",
+  "createdAt": "2026-10-11T03:56:30.320Z",
   "phaseId": "P3",
   "dailyRootHash": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
   "openItems": [
-    "Exclusion proposal is unconfirmed.",
-    "Overlap tolerance is unconfirmed.",
-    "Fee tier is unconfirmed.",
-    "Class E blackout calendar is not applied.",
-    "Class D full-engine parity on the earlier candle set is not run. Numeric swing geometry is tested. The v3 target multiple is 4. The 87b35d0 omitted-argument default is 3.",
-    "The class C book-wide cap of 3 entries per UTC day is not applied to geometry counts.",
-    "Purge, embargo, and Holm are registration work and are not built."
+    "Exclusion list is the agreed 23. confirmed stays false until the registration hash.",
+    "Fee tier is unconfirmed. Coinbase maker and taker bps stay null until Brian pastes the logged-in tier.",
+    "Brian has not approved the registration. The registration file is not hashed.",
+    "Class E has no historical row. Counts are geometry only.",
+    "Whether a non-positive Kelly bound trades at the $20 paper minimum is Brian's choice. The hook adds no size.",
+    "Purge, embargo, and Holm are not built.",
+    "Class E target is the nearer of a 50% retrace of the 6h high to the event low, or 2.5R, from the design text. It is applied to the fee floor."
   ]
 }

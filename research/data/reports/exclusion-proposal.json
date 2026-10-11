@@ -1,22 +1,151 @@
 {
-  "commitSha": "e806e0242631575020ff60299c5c64af8cc48204",
+  "commitSha": "722719b16c5d290749b13650ea159acaf1139ba3",
   "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
-  "createdAt": "2026-10-11T03:08:09.177Z",
+  "createdAt": "2026-10-11T03:56:30.320Z",
   "phaseId": "P3",
   "dailyRootHash": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
   "confirmed": false,
-  "note": "Proposed from metadata by base-asset name. Edge cases are not decided. Quant/Trader confirm before the hash.",
+  "note": "Quant and Trader accepted these names. confirmed stays false until the registration hash. Native W, WAL, WCT, WELL, WET, WHUF, WIF, WLD, WLFI, and WMTX stay in.",
   "productIds": [
+    "BUSD-USD",
     "CBETH-USD",
     "DAI-USD",
+    "EURC-USD",
     "GUSD-USD",
+    "GYEN-USD",
     "JITOSOL-USD",
+    "LSETH-USD",
     "MSOL-USD",
+    "MUSD-USD",
+    "PAX-USD",
     "PAXG-USD",
     "PYUSD-USD",
     "USD1-USD",
     "USDS-USD",
     "USDT-USD",
-    "WBTC-USD"
+    "UST-USD",
+    "WAMPL-USD",
+    "WAXL-USD",
+    "WBTC-USD",
+    "WCFG-USD",
+    "WLUNA-USD",
+    "WRON-USD"
+  ],
+  "entries": [
+    {
+      "productId": "BUSD-USD",
+      "rule": "fiat-or-fx",
+      "source": "Coinbase fx_stablecoin = true."
+    },
+    {
+      "productId": "CBETH-USD",
+      "rule": "staking-receipt",
+      "source": "Liquid staked ETH. Staking receipt, same class as the original proposed list."
+    },
+    {
+      "productId": "DAI-USD",
+      "rule": "fiat-or-fx",
+      "source": "Original proposed list. Fiat-pegged stablecoin."
+    },
+    {
+      "productId": "EURC-USD",
+      "rule": "fiat-or-fx",
+      "source": "Coinbase fx_stablecoin = true. Euro stablecoin."
+    },
+    {
+      "productId": "GUSD-USD",
+      "rule": "fiat-or-fx",
+      "source": "Original proposed list. Fiat-pegged stablecoin."
+    },
+    {
+      "productId": "GYEN-USD",
+      "rule": "fiat-or-fx",
+      "source": "Coinbase fx_stablecoin = true."
+    },
+    {
+      "productId": "JITOSOL-USD",
+      "rule": "staking-receipt",
+      "source": "Original proposed list. Liquid-staking receipt."
+    },
+    {
+      "productId": "LSETH-USD",
+      "rule": "staking-receipt",
+      "source": "Liquid Staked ETH: a staking receipt on ETH plus rewards."
+    },
+    {
+      "productId": "MSOL-USD",
+      "rule": "staking-receipt",
+      "source": "Original proposed list. Liquid-staking receipt."
+    },
+    {
+      "productId": "MUSD-USD",
+      "rule": "fiat-or-fx",
+      "source": "Coinbase fx_stablecoin = true."
+    },
+    {
+      "productId": "PAX-USD",
+      "rule": "fiat-or-fx",
+      "source": "USDP. Coinbase fx_stablecoin = true."
+    },
+    {
+      "productId": "PAXG-USD",
+      "rule": "commodity",
+      "source": "Original proposed list. Gold-backed token."
+    },
+    {
+      "productId": "PYUSD-USD",
+      "rule": "fiat-or-fx",
+      "source": "Original proposed list. Fiat-pegged stablecoin."
+    },
+    {
+      "productId": "USD1-USD",
+      "rule": "fiat-or-fx",
+      "source": "Original proposed list. Fiat-pegged stablecoin."
+    },
+    {
+      "productId": "USDS-USD",
+      "rule": "fiat-or-fx",
+      "source": "Original proposed list. Fiat-pegged stablecoin."
+    },
+    {
+      "productId": "USDT-USD",
+      "rule": "fiat-or-fx",
+      "source": "Original proposed list. Issuer peg; Coinbase fx_stablecoin is false, so the flag alone is not the source."
+    },
+    {
+      "productId": "UST-USD",
+      "rule": "fiat-or-fx",
+      "source": "Coinbase fx_stablecoin = true."
+    },
+    {
+      "productId": "WAMPL-USD",
+      "rule": "wrapped-or-bridged",
+      "source": "Wrapped Ampleforth, a non-rebasing wrapper of AMPL."
+    },
+    {
+      "productId": "WAXL-USD",
+      "rule": "wrapped-or-bridged",
+      "source": "Coinbase asset page: WAXL is an ERC-20 that represents AXL, 1:1. AXL-USD is also listed."
+    },
+    {
+      "productId": "WBTC-USD",
+      "rule": "wrapped-or-bridged",
+      "source": "Original proposed list. Wrapped bitcoin."
+    },
+    {
+      "productId": "WCFG-USD",
+      "rule": "wrapped-or-bridged",
+      "source": "Wrapped Centrifuge. CFG-USD was listed at the same time."
+    },
+    {
+      "productId": "WLUNA-USD",
+      "rule": "wrapped-or-bridged",
+      "source": "Wrapped LUNA (Classic)."
+    },
+    {
+      "productId": "WRON-USD",
+      "rule": "wrapped-or-bridged",
+      "source": "Wrapped Ronin. Coinbase page and Ronin: 1 wRON = 1 RON."
+    }
   ]
 }

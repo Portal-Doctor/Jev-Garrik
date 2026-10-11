@@ -1,0 +1,163 @@
+{
+  "document": "p4-registration",
+  "approved": false,
+  "hashed": false,
+  "note": "Draft written from the architect registration section and the agreed Quant/Trader decisions. This file has no content hash and is not approved. Brian's fee tier and approval are placeholders.",
+  "scanStampCommit": "722719b16c5d290749b13650ea159acaf1139ba3",
+  "scanCreatedAt": "2026-10-11T03:56:30.320Z",
+  "identity": {
+    "designTexts": {
+      "tradingDesignFinalSha256": "a945e5960b48d01a97fe0cf1c36c4c907acfd759c85d2991be82266d0f10699f",
+      "addendumSha256": "19602b306799e4dc9bb52d5f2074c3bd5ea504ee009d2d30e4b0bbf7c0b07b69",
+      "citedFrom": "Architect P4 draft, as of that review",
+      "filesInCheckout": false
+    },
+    "codeCommitAtHash": null,
+    "data": {
+      "fifteenRoot": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+      "dailyRoot": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
+      "dailyFrozenAt": "2026-10-11T02:35:46.619Z",
+      "dailyFreezeCommit": "a30b246a95951faa4f99882bf9ddba0a2fad24d1"
+    },
+    "artifactSha256": {
+      "exclusionProposal": "02ac09921d6434a54702f13357371e3112f49956d17505610c1d5ade8aa20ba9",
+      "universeMembership": "05615af82a570f8c8d013dabe10ece96ad8d7139f5a1dc6e6dad648b5c74628c",
+      "overlapCheck": "500f84ddffcd000e76b3431bb726cd0cb95a56db83303eb742bba5c7b895b0ab",
+      "geometryScan": "457865be9043bc70fd113b693b5f8f8deb1931b91fea9416f805d019ad6d89ff",
+      "blackoutCalendarFile": "d7e032f94758ebb906a0403b6355a0bcb316336b57f59302d0719363a0362daa",
+      "blackoutEvents": "c91d4b46f46d167d2bb20ed6cf1482ef0d29bb4df4da5978b7a3dd16ffef2ea1"
+    }
+  },
+  "feeTier": {
+    "status": "placeholder",
+    "owner": "Brian",
+    "makerBps": null,
+    "takerBps": null,
+    "profileId": "coinbase-at-brian-tier",
+    "source": "The logged-in Coinbase fee page has not been pasted."
+  },
+  "approval": {
+    "approved": false,
+    "approver": "Brian",
+    "approvedAt": null
+  },
+  "universe": {
+    "legs": "99/97 percent nonempty 15m, 10000/6000 dollar median 15m quote, CS15m at most 20 bps and exit above 25",
+    "tier": "3M/2M",
+    "cap": 40,
+    "listingProxy": "first candle; D1 before the window when that group is kept",
+    "btcAdmittedBy": "the same rule as any other name"
+  },
+  "classes": {
+    "A": "design section 3, six configs, historical",
+    "B": "top 20 percent of the eligible universe, score above 0, at most 4 names, historical",
+    "C": "geometry-only in this registration",
+    "D": "87b35d0 geometry with target multiple 4, no historical row",
+    "E": "geometry-only in this registration",
+    "tieOrder": ["A", "C", "B", "D", "E"],
+    "onePerPair": true,
+    "noReentryHours": 24,
+    "slots": { "A": 3, "B": 4, "C": 2, "D": 1, "E": 1 }
+  },
+  "classCGate": {
+    "rule": "at least 30 OOS entries on at least 15 distinct UTC days, before slots",
+    "oosEntries": 9,
+    "distinctUtcDays": 7,
+    "meetsRule": false,
+    "historicalRow": false
+  },
+  "validation": {
+    "label": "1-year, 15m, short-history, EXPLORATORY",
+    "isStart": "2025-11-10",
+    "isEnd": "2026-02-09",
+    "oosStart": "2026-02-10",
+    "oosEnd": "2026-10-09",
+    "nLabel": "before slots",
+    "historicalFamily": ["A", "B"],
+    "maxOfN": 7,
+    "paperFamilyStreams": 5,
+    "nCum": 135,
+    "nCumSensitivity": 154,
+    "purge": "not built; a trade belongs to the fold where it entered",
+    "embargoDays": 0
+  },
+  "execution": {
+    "historicalEntry": "X1",
+    "stopModel": "stop minus the larger of s_bt and 0.1 times 1h ATR",
+    "intrabar": "stop first; trails and the class E break-even move on completed 15m bars",
+    "sBt": { "csMedianBps": 6.829227760250422, "baseBps": 5, "stressBps": 10 },
+    "makerLegsPay": 0,
+    "feeProfiles": ["0/0", "10/10", "25/40", "Kraken 40/80", "Coinbase AT_BRIAN_TIER"]
+  },
+  "risk": {
+    "riskUsd": 60,
+    "notionalCapUsd": 1500,
+    "openRiskCapUsd": 480,
+    "bookNotionalCapUsd": 6000,
+    "clusterMaxOpen": 2,
+    "betaWeightedNotionalCapUsd": 6000,
+    "haltsUsd": { "daily": 240, "weekly": 480, "book": -1600 },
+    "backstopsUsd": { "daily": 900, "pair": 500, "book": 8000 },
+    "kelly": "half of E/Var, capped at 0.75 percent; a non-positive bound adds no size",
+    "kellyPaperMinimumUsd": null
+  },
+  "filters": {
+    "btcVetoDayShare": 0.0547945205479452,
+    "btcOldClauseDayShare": 0.3506849315068493,
+    "btcCautionDayShare": 0.5068493150684932,
+    "vetoedShareA20": 0.019704433497536946,
+    "vetoedShareA55": 0.023255813953488372,
+    "vetoedShareB": 0.04678362573099415,
+    "blackout": "30 minutes before through 60 minutes after CPI, NFP, and FOMC"
+  },
+  "exclusion": {
+    "confirmed": false,
+    "count": 23,
+    "productIds": [
+      "BUSD-USD", "CBETH-USD", "DAI-USD", "EURC-USD", "GUSD-USD", "GYEN-USD", "JITOSOL-USD",
+      "LSETH-USD", "MSOL-USD", "MUSD-USD", "PAX-USD", "PAXG-USD", "PYUSD-USD", "USD1-USD",
+      "USDS-USD", "USDT-USD", "UST-USD", "WAMPL-USD", "WAXL-USD", "WBTC-USD", "WCFG-USD",
+      "WLUNA-USD", "WRON-USD"
+    ]
+  },
+  "overlap": {
+    "memberNames": 51,
+    "overlapDays": 18353,
+    "missingSlotDays": 0,
+    "priceFailDays": 67,
+    "volumeFailDays": 23,
+    "openFailDays": 47,
+    "highFailDays": 4,
+    "lowFailDays": 4,
+    "closeFailDays": 63,
+    "priceGroupFailNames": ["AVNT-USD", "FIL-USD", "IP-USD", "LIGHTER-USD", "TRUMP-USD", "VVV-USD", "WIF-USD"],
+    "volumeGroupFailNames": ["LIGHTER-USD", "WIF-USD"],
+    "boundaryBestSide": "before-00:00",
+    "boundarySavesCloses": ["AVNT-USD", "FIL-USD", "IP-USD", "LIGHTER-USD", "TRUMP-USD", "VVV-USD", "WIF-USD"],
+    "prewindowBadNames": [],
+    "wifLostDates": ["2025-11-10", "2025-12-01"],
+    "decemberCapAdmitted": "INJ-USD"
+  },
+  "section3": [
+    "Identity: design-text hashes, code commit at hash time, data roots, overlap, exclusion, blackout, membership",
+    "Universe: section 2 legs, the mechanical tier, cap 40, monthly and fold-start recompute, listing proxy",
+    "Classes: A, B, C, E by the design text; D is the vendored geometry at 4R with no historical row",
+    "Tie order, one position per pair, 24h no re-entry, slots",
+    "Execution and costs: X1, the stop model, intrabar stop-first, s_bt and the stress row, fee profiles",
+    "Risk: section 6 numbers, cluster cap, beta-weighted notional, halts, backstops, Kelly ceiling, class kills",
+    "Filters: BTC veto, the old clause, caution, and the blackout file",
+    "Validation: anchored folds, purge description, kill screen, Holm family, max-of-N, trial count",
+    "Paper path: 90 days and n at least 30, Holm over 5 streams",
+    "Jev: direct latest, gap-18 packet, Fallback B until TypeSafe answers"
+  ],
+  "openItems": [
+    "Brian's Coinbase fee tier is not pasted.",
+    "Brian has not approved this file, and it is not hashed.",
+    "The exclusion list is agreed and still unconfirmed for the hash.",
+    "A non-positive Kelly bound trading at 20 dollars is Brian's choice and is not applied.",
+    "Open is reported beside high, low, and close. It is not part of the price-group pass.",
+    "Purge and Holm are described and not built.",
+    "TypeSafe has not answered, so Jev stays on Fallback B.",
+    "The design-text files named by the architect draft are not in this checkout, so those hashes are cited, not recomputed."
+  ]
+}
