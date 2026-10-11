@@ -1,4 +1,6 @@
 {
+  "role": "UNCAPPED DIAGNOSTIC",
+  "roleNote": "resultsHash 608c52b8c6f9c2e48591d39873571497454ef55936c06a160e2ea98441f2d601 is the uncapped diagnostic. The results object was not edited. The registered capped run is p5-registered.json.",
   "commitSha": "122894c7151faa6d344f1d57c2641dc7a07eb7ab",
   "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
   "createdAt": "2026-10-11T19:35:34.858Z",

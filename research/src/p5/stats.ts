@@ -1,8 +1,8 @@
 /**
  * P5 statistics. The kill hurdle of 150 bps is the figure for this run.
  * section1HurdleBps stays available and is not substituted: it depends on the stop.
- * Holm and BH adjusted p-values are reported without an alpha cut. The registration
- * does not name an alpha.
+ * Amendment c makes every 80 percent bound one-sided: U80 is p80 and L80 is p20.
+ * The historical Holm family is [A, B] at alpha 0.05. N is the registered 7 and 135.
  */
 
 import { classKill } from "../p3/design-rules";
@@ -12,10 +12,15 @@ import { foldStartDates } from "../p3/schedule";
 export const KILL_HURDLE_BPS = 150;
 export const BOOTSTRAP_REPS = 2000;
 export const BOOTSTRAP_SEED = 20261011;
+/** Kept so the prior diagnostic can be read. The registration governs, so the capped run does not use these. */
 export const DSR_TRIALS_REQUESTED = 136;
 export const DSR_TRIALS_REGISTERED = 135;
+export const N_CUM_SENSITIVITY = 154;
 export const MAX_OF_N_REQUESTED = 8;
 export const MAX_OF_N_REGISTERED = 7;
+export const HOLM_ALPHA = 0.05;
+/** Mean dollars per week times this factor is mean dollars per month. */
+export const WEEKS_PER_MONTH = 365.25 / 12 / 7;
 
 const EULER = 0.5772156649015329;
 
@@ -81,8 +86,8 @@ function mulberry32(seed: number): () => number {
 }
 
 /**
- * Upper end of a central 80 percent interval for the mean.
- * Weeks are resampled together. Fewer than two weeks returns the sample mean.
+ * Prior diagnostic bound: the 90th percentile of a weekly block bootstrap of the trade mean.
+ * Amendment c replaces this for the registered run. The uncapped report was not recomputed.
  */
 export function upper80Mean(values: readonly number[], weekKeys: readonly string[], reps = BOOTSTRAP_REPS, seed = BOOTSTRAP_SEED): number | null {
   if (values.length === 0) return null;
@@ -282,6 +287,146 @@ export function expectedMaxSharpe(nTrials: number): number | null {
   const z1 = normInv(1 - 1 / nTrials);
   const z2 = normInv(1 - 1 / (nTrials * Math.E));
   return (1 - EULER) * z1 + EULER * z2;
+}
+
+/** Monday-aligned weeks from the week containing `start` through the week containing `end`. */
+export function mondayWeeks(start: string, end: string): string[] {
+  const out: string[] = [];
+  let cursor = weekKey(start);
+  const last = weekKey(end);
+  while (cursor <= last) {
+    out.push(cursor);
+    cursor = addDays(cursor, 7);
+  }
+  return out;
+}
+
+/** Hyndman-Fan type 7. The index is (n − 1) times p, with linear interpolation. */
+export function percentileLinear(sorted: readonly number[], p: number): number {
+  if (sorted.length === 0) throw new Error("percentile of an empty sample");
+  if (!(p >= 0) || !(p <= 1)) throw new Error("percentile must be in [0, 1]");
+  if (sorted.length === 1) return sorted[0]!;
+  const h = (sorted.length - 1) * p;
+  const lo = Math.floor(h);
+  const hi = Math.ceil(h);
+  if (lo === hi) return sorted[lo]!;
+  const weight = h - lo;
+  return sorted[lo]! * (1 - weight) + sorted[hi]! * weight;
+}
+
+export interface BoundDraw {
+  l80: number;
+  u80: number;
+  seed: number;
+  reps: number;
+  drawsUsed: number;
+  weeks: number;
+  zeroWeeks: number;
+  interpolation: "linear, index (n-1)*p";
+}
+
+function boundsOf(stats: number[], weeks: number, zeroWeeks: number, seed: number, reps: number): BoundDraw {
+  const sorted = stats.slice().sort((a, b) => a - b);
+  return {
+    l80: percentileLinear(sorted, 0.2),
+    u80: percentileLinear(sorted, 0.8),
+    seed,
+    reps,
+    drawsUsed: sorted.length,
+    weeks,
+    zeroWeeks,
+    interpolation: "linear, index (n-1)*p",
+  };
+}
+
+/**
+ * One-sided bounds of the mean of weekly values.
+ * A week with no trades is already 0 in `weekValues`. Draws resample weeks with replacement.
+ * `scale` turns a weekly mean into the reported mean. Use 1 for a weekly mean and WEEKS_PER_MONTH for $/month.
+ */
+export function oneSided80(weekValues: readonly number[], opts?: { reps?: number; seed?: number; scale?: number }): BoundDraw | null {
+  if (weekValues.length === 0) return null;
+  const reps = opts?.reps ?? BOOTSTRAP_REPS;
+  const seed = opts?.seed ?? BOOTSTRAP_SEED;
+  const scale = opts?.scale ?? 1;
+  const rand = mulberry32(seed);
+  const stats: number[] = [];
+  const n = weekValues.length;
+  for (let rep = 0; rep < reps; rep += 1) {
+    let sum = 0;
+    for (let i = 0; i < n; i += 1) sum += weekValues[Math.floor(rand() * n)]!;
+    stats.push((sum / n) * scale);
+  }
+  return boundsOf(stats, n, weekValues.filter((value) => value === 0).length, seed, reps);
+}
+
+/**
+ * One-sided bounds of the mean of trade values, with whole weeks kept together.
+ * An empty week adds no trades. A draw that picks no trades is omitted.
+ */
+export function oneSided80TradeMean(weekTrades: readonly (readonly number[])[], opts?: { reps?: number; seed?: number }): BoundDraw | null {
+  if (weekTrades.length === 0 || weekTrades.every((week) => week.length === 0)) return null;
+  const reps = opts?.reps ?? BOOTSTRAP_REPS;
+  const seed = opts?.seed ?? BOOTSTRAP_SEED;
+  const rand = mulberry32(seed);
+  const stats: number[] = [];
+  const n = weekTrades.length;
+  for (let rep = 0; rep < reps; rep += 1) {
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < n; i += 1) {
+      const week = weekTrades[Math.floor(rand() * n)]!;
+      for (const value of week) {
+        sum += value;
+        count += 1;
+      }
+    }
+    if (count > 0) stats.push(sum / count);
+  }
+  if (stats.length === 0) return null;
+  return boundsOf(stats, n, weekTrades.filter((week) => week.length === 0).length, seed, reps);
+}
+
+export function weeklyValues(entries: readonly { week: string; value: number }[], weeks: readonly string[]): number[] {
+  const sums = new Map(weeks.map((week) => [week, 0]));
+  for (const entry of entries) {
+    if (!sums.has(entry.week)) continue;
+    sums.set(entry.week, (sums.get(entry.week) ?? 0) + entry.value);
+  }
+  return weeks.map((week) => sums.get(week) ?? 0);
+}
+
+export function weeklyGroups(entries: readonly { week: string; value: number }[], weeks: readonly string[]): number[][] {
+  const groups = new Map(weeks.map((week) => [week, [] as number[]]));
+  for (const entry of entries) groups.get(entry.week)?.push(entry.value);
+  return weeks.map((week) => groups.get(week) ?? []);
+}
+
+/** Integer cents. Amendment a calls two amounts tied when these are equal. */
+export function cents(value: number): number {
+  return Math.round(value * 100);
+}
+
+export function selectInSample<T>(rows: readonly T[], l80Of: (row: T) => number, totalOf: (row: T) => number): T {
+  if (rows.length === 0) throw new Error("in-sample selection needs a config");
+  let best = 0;
+  for (let i = 1; i < rows.length; i += 1) {
+    const l80 = cents(l80Of(rows[i]!)) - cents(l80Of(rows[best]!));
+    if (l80 > 0) {
+      best = i;
+      continue;
+    }
+    if (l80 < 0) continue;
+    const total = cents(totalOf(rows[i]!)) - cents(totalOf(rows[best]!));
+    if (total > 0) best = i;
+  }
+  return rows[best]!;
+}
+
+/** Amendment b. A forward stream with n below 30 enters at p = 1 and is not testable. */
+export function forwardStreamP(n: number, p: number | null): { p: number; status: "testable" | "not testable" } {
+  if (!(n >= 30) || p == null || !Number.isFinite(p)) return { p: 1, status: "not testable" };
+  return { p, status: "testable" };
 }
 
 /** Bailey and López de Prado deflated Sharpe, as a probability. */

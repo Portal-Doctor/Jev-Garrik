@@ -586,8 +586,8 @@ function writeGeometry(): void {
 function p5(): void {
   const artifact = stamp("P5");
   const report = buildP5Report(artifact, realDataDir());
-  writeJson(join(paths.reports, "p5-historical.json"), report);
-  console.log(`p5 results ${String(report.resultsHash)}`);
+  writeJson(join(paths.reports, "p5-registered.json"), report);
+  console.log(`p5 registered ${String(report.resultsHash)}`);
 }
 
 async function writeJevSmoke(): Promise<void> {

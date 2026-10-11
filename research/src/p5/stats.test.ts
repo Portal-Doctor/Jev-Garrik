@@ -4,15 +4,21 @@ import {
   addDays,
   bhAdjusted,
   boundaryPurge,
+  cents,
   deflatedSharpe,
   expectedMaxSharpe,
   foldOf,
+  forwardStreamP,
   historicalFolds,
   holmAdjusted,
   killVerdict,
   meanAboveZeroP,
+  mondayWeeks,
   normCdf,
   normInv,
+  oneSided80,
+  percentileLinear,
+  selectInSample,
   studentTCdf,
   tradeMoments,
   upper80Mean,
@@ -82,4 +88,36 @@ test("the weekly block bootstrap is deterministic and DSR is a probability", () 
   expect(dsr!).toBeGreaterThanOrEqual(0);
   expect(dsr!).toBeLessThanOrEqual(1);
   expect(expectedMaxSharpe(8)).toBeGreaterThan(expectedMaxSharpe(7)!);
+});
+
+test("amendment c uses one-sided percentiles, Monday weeks, and zero weeks", () => {
+  expect(percentileLinear([0, 10], 0.2)).toBeCloseTo(2, 8);
+  expect(percentileLinear([0, 10], 0.8)).toBeCloseTo(8, 8);
+  expect(mondayWeeks("2026-02-10", "2026-02-16")).toEqual(["2026-02-09", "2026-02-16"]);
+  const bound = oneSided80([0, 0, 10], { reps: 200, seed: 7 });
+  expect(bound).not.toBeNull();
+  expect(bound!.zeroWeeks).toBe(2);
+  expect(bound!.l80).toBeLessThan(10);
+  expect(bound!.u80).toBeLessThanOrEqual(10);
+  expect(bound!.l80).toBeLessThanOrEqual(bound!.u80);
+  expect(oneSided80([0, 0, 10], { reps: 200, seed: 7 })).toEqual(bound);
+});
+
+test("the in-sample tie breaks on cents, then keeps registration order", () => {
+  const rows = [
+    { id: "A20-k2", l80: 1.004, total: 10 },
+    { id: "A20-k2.5", l80: 1.001, total: 12.004 },
+    { id: "A20-k3", l80: 2, total: 1 },
+  ];
+  expect(selectInSample(rows, (row) => row.l80, (row) => row.total).id).toBe("A20-k3");
+  const tied = rows.slice(0, 2);
+  expect(selectInSample(tied, (row) => row.l80, (row) => row.total).id).toBe("A20-k2.5");
+  expect(cents(1.004)).toBe(cents(1.001));
+  expect(selectInSample(
+    [{ id: "first", l80: 1, total: 5.004 }, { id: "second", l80: 1, total: 5.001 }],
+    (row) => row.l80,
+    (row) => row.total,
+  ).id).toBe("first");
+  expect(forwardStreamP(29, 0.01)).toEqual({ p: 1, status: "not testable" });
+  expect(forwardStreamP(30, 0.01)).toEqual({ p: 0.01, status: "testable" });
 });
