@@ -17,7 +17,7 @@ import { loadPair } from "../p3/geometry-run";
 import { monthlyRebalanceDates } from "../p3/schedule";
 import { monthlyClusters, type ClosePoint } from "./book";
 import { registeredFlags } from "./flags";
-import { breadthByEntryDate, momentumBlocked, momentumCrashOn } from "./guards";
+import { breadthByEntryDate, breadthIncludes, momentumBlocked, momentumCrashOn } from "./guards";
 import { addDays } from "./stats";
 
 export interface PrehashGeometry {
@@ -100,7 +100,7 @@ export function buildPrehashGeometry(dataDir: string): PrehashGeometry {
     if (!row.empty && row.close > 0) btcDays.set(row.date, row.close);
   }
   for (const id of names) {
-    if (id === "BTC-USD") continue;
+    if (!breadthIncludes(id)) continue;
     const flags = flagBook.byId.get(id);
     if (!flags) continue;
     const pair = loadPair(id, dailyDir, paths.candles);
@@ -118,7 +118,7 @@ export function buildPrehashGeometry(dataDir: string): PrehashGeometry {
   const entryDates = datesFrom(FIRST_UNIVERSE_DATE, OOS_END);
   const breadth = breadthByEntryDate(entryDates, (entryDate) => {
     const closeDate = addDays(entryDate, -1);
-    return names.filter((id) => id !== "BTC-USD" && isMember(id, entryDate)).map((id) => {
+    return names.filter((id) => breadthIncludes(id) && isMember(id, entryDate)).map((id) => {
       const point = series.get(id)?.get(closeDate);
       return { member: true, close: point?.close ?? null, ema50: point?.ema50 ?? null };
     });
@@ -194,7 +194,7 @@ if (import.meta.main) {
   assertCleanWorkTree();
   const roots = assertFrozenRoots(dataDir);
   const stamp = stampFromGit({ phaseId: "P5", dataRootHash: roots.manifest.dataRootHash });
-  const doc = { ...buildPrehashGeometry(dataDir), commitSha: stamp.commitSha, createdAt: stamp.createdAt };
+  const doc = { ...buildPrehashGeometry(dataDir), commitSha: stamp.commitSha, dataRootHash: stamp.dataRootHash, createdAt: stamp.createdAt };
   const { writeJson } = await import("../data/io.ts");
   writeJson(join(dataDir, "reports", "p5-v31-geometry.json"), doc);
   console.log(`breadth ${doc.breadth.pausedDays}/${doc.breadth.entryDays} flag ${doc.breadth.flag} clusters flag ${doc.clusters.flag} conditions ${doc.momentum.conditionDates.length}`);

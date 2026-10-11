@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { averageLinkage, assignBetas, classKillTripped, entryOpenRiskUsd, olsBeta, openRiskAfterMove, sizingCostBps } from "./risk";
-import { breadthByEntryDate, breadthNetRSplit, breadthPaused, entryDecision, exitGuardFires, freshRCurve, jevReadPlan, momentumCrashOn, rolling20Paused, sprtReport, stepRCurve } from "./guards";
+import { breadthByEntryDate, breadthIncludes, breadthNetRSplit, breadthPaused, entryDecision, exitGuardFires, freshRCurve, jevReadPlan, momentumCrashOn, normalLlr, rolling20Paused, sampleSigma, SPRT_RULE, sprtReport, stepRCurve } from "./guards";
+import { RESOLVED_DEFAULTS } from "./questions";
 
 test("sizing cost is 190 and 200, and entry open risk is the risk budget", () => {
   expect(sizingCostBps(5)).toBe(190);
@@ -77,4 +78,31 @@ test("forward pauses shrink or block and do not call Jev", () => {
   expect(exitGuardFires({ toxicHigh: true, stressedHigh: true, consecutive: 3, unrealizedR: 1.1, warmed: true })).toBe(false);
   expect(jevReadPlan(40).executed).toBe(0);
   expect(jevReadPlan(40).callsPerMonth).toBe(41 * 96 * 30);
+  expect(breadthIncludes("BTC-USD")).toBe(false);
+  expect(breadthIncludes("ETH-USD")).toBe(true);
+});
+
+test("SPRT sigma is 1.5R until trade 20 and then stays at the SD of trades 1-20", () => {
+  const rule = "sigma = 1.5R until 20 forward trades, then frozen at the realized SD of net R over trades 1-20; Wald +/- ln 4, H0 +0.25R vs H1 0, report-only. Report both LLR paths (the frozen-realized path and the fixed 1.5R path).";
+  expect(SPRT_RULE).toBe(rule);
+  expect(RESOLVED_DEFAULTS.find((row) => row.id === 15)?.text).toBe(rule);
+  const first19 = Array.from({ length: 19 }, (_, i) => (i % 2 === 0 ? 1 : 0));
+  const first20 = [...first19, 0];
+  const later = [...first20, 5];
+  const before = sprtReport(first19);
+  const at = sprtReport(first20);
+  const after = sprtReport(later);
+  const frozenSd = sampleSigma(first20);
+  expect(before.frozen).toBe(false);
+  expect(before.realizedSigma).toBe(1.5);
+  expect(before.llrRealized).toBeCloseTo(before.llrFixed ?? NaN, 10);
+  expect(at.frozen).toBe(true);
+  expect(at.realizedSigma).toBe(frozenSd);
+  expect(at.realizedSigma).not.toBe(1.5);
+  expect(at.llrRealized).toBeCloseTo(normalLlr(first20, 0.25, 0, frozenSd ?? NaN) ?? NaN, 10);
+  expect(at.llrFixed).toBeCloseTo(normalLlr(first20, 0.25, 0, 1.5) ?? NaN, 10);
+  expect(after.realizedSigma).toBe(at.realizedSigma);
+  expect(sampleSigma(later)).not.toBe(after.realizedSigma);
+  expect(after.pauses).toBe(false);
+  expect(after.rule).toBe(rule);
 });

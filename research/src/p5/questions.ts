@@ -24,7 +24,7 @@ export const RESOLVED_DEFAULTS: readonly ResolvedDefault[] = [
   { id: 12, status: "ratified", text: "Average linkage merges two clusters only when every member pair has a 60-day rho and the mean is at least 0.80. An equal mean merges the lexicographically earliest pair of cluster ids." },
   { id: 13, status: "ratified", text: "The $20 paper minimum applies to a null or non-positive lower-80% Kelly bound. A small positive fraction may size below $20." },
   { id: 14, status: "corrected", text: "Pauses may shrink a class to $20 and, for 2b, block new entries. The 1d kill, the 20R kill, and the dollar backstops stop the class at any size. Flag-only at $20 applies to pauses only. Breadth does not resize or block." },
-  { id: 15, status: "corrected", text: "SPRT is report-only. Wald bounds are plus or minus ln 4. H0 is +0.25R and H1 is 0. The realized-sigma path and the 1.5R path are both reported. It never acts." },
+  { id: 15, status: "corrected", text: "sigma = 1.5R until 20 forward trades, then frozen at the realized SD of net R over trades 1-20; Wald +/- ln 4, H0 +0.25R vs H1 0, report-only. Report both LLR paths (the frozen-realized path and the fixed 1.5R path)." },
   { id: 16, status: "ratified", text: "The 2b block is 14 calendar dates beginning on the condition date." },
   { id: 17, status: "ratified", text: "G2 concurrency is measured in the post-hash rerun. The pre-hash field stays empty." },
   { id: 18, status: "ratified", text: "Breadth state uses entry-day membership, the prior close, and hysteresis. It starts off. A share from 25 percent through 35 percent keeps the prior state. Option (c) logs the state and does not use it." },

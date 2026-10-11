@@ -126,12 +126,30 @@ export function forwardAbKill(n: number, meanNetR: number, l80UsdPerMonth: numbe
 
 const SPRT_BOUND = Math.log(4);
 
-/** Sample standard deviation. Fewer than two observations has no realized sigma. */
+/** Sample standard deviation. Fewer than two observations, or a zero sample variance, has no realized sigma. */
 export function sampleSigma(values: readonly number[]): number | null {
   if (values.length < 2) return null;
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
   const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1);
   return variance > 0 ? Math.sqrt(variance) : null;
+}
+
+/** BTC-USD is the veto series. Breadth counts the other members. */
+export function breadthIncludes(productId: string): boolean {
+  return productId !== "BTC-USD";
+}
+
+export const SPRT_RULE =
+  "sigma = 1.5R until 20 forward trades, then frozen at the realized SD of net R over trades 1-20; Wald +/- ln 4, H0 +0.25R vs H1 0, report-only. Report both LLR paths (the frozen-realized path and the fixed 1.5R path).";
+
+const SPRT_FREEZE_TRADES = 20;
+const SPRT_FIXED_SIGMA = 1.5;
+
+/** 1.5R until 20 trades. From trade 20 on, the SD of trades 1-20, and later trades do not move it. */
+export function frozenRealizedSigma(values: readonly number[]): { sigma: number | null; frozen: boolean } {
+  if (values.length < SPRT_FREEZE_TRADES) return { sigma: SPRT_FIXED_SIGMA, frozen: false };
+  const sigma = sampleSigma(values.slice(0, SPRT_FREEZE_TRADES));
+  return { sigma, frozen: sigma != null };
 }
 
 /** Normal log likelihood of H1 against H0, known sigma. Positive favors H1. */
@@ -156,35 +174,38 @@ function sprtCrossing(llr: number | null): "upper" | "lower" | null {
 }
 
 /**
- * 1a. Wald bounds at +/- ln 4. H0 is +0.25R and H1 is 0.
- * The realized-sigma path and the 1.5R path are both reported. Neither acts.
+ * sigma = 1.5R until 20 forward trades, then frozen at the realized SD of net R over trades 1-20; Wald +/- ln 4, H0 +0.25R vs H1 0, report-only. Report both LLR paths (the frozen-realized path and the fixed 1.5R path).
  */
 export function sprtReport(values: readonly number[]): {
   reportOnly: true;
   pauses: false;
+  rule: typeof SPRT_RULE;
   lower: number;
   upper: number;
   h0: 0.25;
   h1: 0;
   fixedSigma: 1.5;
   realizedSigma: number | null;
+  frozen: boolean;
   llrFixed: number | null;
   llrRealized: number | null;
   fixedCrossing: "upper" | "lower" | null;
   realizedCrossing: "upper" | "lower" | null;
 } {
-  const realizedSigma = sampleSigma(values);
-  const llrFixed = normalLlr(values, 0.25, 0, 1.5);
-  const llrRealized = realizedSigma == null ? null : normalLlr(values, 0.25, 0, realizedSigma);
+  const frozenSigma = frozenRealizedSigma(values);
+  const llrFixed = normalLlr(values, 0.25, 0, SPRT_FIXED_SIGMA);
+  const llrRealized = frozenSigma.sigma == null ? null : normalLlr(values, 0.25, 0, frozenSigma.sigma);
   return {
     reportOnly: true,
     pauses: false,
+    rule: SPRT_RULE,
     lower: -SPRT_BOUND,
     upper: SPRT_BOUND,
     h0: 0.25,
     h1: 0,
-    fixedSigma: 1.5,
-    realizedSigma,
+    fixedSigma: SPRT_FIXED_SIGMA,
+    realizedSigma: frozenSigma.sigma,
+    frozen: frozenSigma.frozen,
     llrFixed,
     llrRealized,
     fixedCrossing: sprtCrossing(llrFixed),

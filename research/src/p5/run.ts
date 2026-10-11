@@ -79,7 +79,7 @@ import {
   type ClosedTrade,
   type ClosePoint,
 } from "./book";
-import { breadthByEntryDate, type BreadthLabel } from "./guards";
+import { breadthByEntryDate, breadthIncludes, type BreadthLabel } from "./guards";
 import { RESOLVED_DEFAULTS } from "./questions";
 import { alignedBeta, assignBetas, sizingCostBps } from "./risk";
 
@@ -568,7 +568,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
   for (let cursor = FIRST_UNIVERSE_DATE; cursor <= OOS_END; cursor = addDays(cursor, 1)) breadthDates.push(cursor);
   const breadthLabels: Map<string, BreadthLabel> = breadthByEntryDate(breadthDates, (entryDate) => {
     const closeDate = addDays(entryDate, -1);
-    return ordered.filter((state) => isMember(state.productId, entryDate)).map((state) => {
+    return ordered.filter((state) => breadthIncludes(state.productId) && isMember(state.productId, entryDate)).map((state) => {
       const point = state.emaByDate.get(closeDate);
       return { member: true, close: point?.close ?? null, ema50: point?.ema50 ?? null };
     });

@@ -588,9 +588,9 @@ function p5(): void {
   requireFrozenWrites();
   const artifact = stamp("P5");
   const report = buildP5Report(artifact, realDataDir());
-  const name = P5_V31_RESULTS;
-  assertP5OutputPath(name);
-  writeJson(join(paths.reports, name), report);
+  const out = join(paths.reports, P5_V31_RESULTS);
+  assertP5OutputPath(out);
+  writeJson(out, report);
   console.log(`p5 v31 ${String(report.resultsHash)}`);
 }
 
