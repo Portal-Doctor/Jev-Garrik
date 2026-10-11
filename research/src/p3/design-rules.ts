@@ -37,13 +37,13 @@ export interface FeeProfile {
   takerBps: number | null;
 }
 
-/** Section 1 profiles. The Coinbase tier is Brian's placeholder and is not a number. */
+/** Section 1 profiles. Coinbase Advanced Trade Intro is maker 50 and taker 90. */
 export const FEE_PROFILES: readonly FeeProfile[] = [
   { id: "zero", makerBps: 0, takerBps: 0 },
   { id: "10-10", makerBps: 10, takerBps: 10 },
   { id: "25-40", makerBps: 25, takerBps: 40 },
   { id: "kraken-40-80", makerBps: 40, takerBps: 80 },
-  { id: "coinbase-at-brian-tier", makerBps: null, takerBps: null },
+  { id: "coinbase-at-brian-tier", makerBps: 50, takerBps: 90 },
 ];
 
 /**

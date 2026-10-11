@@ -114,7 +114,7 @@ test("section 1 costs, one name, 24h, and the dollar caps", () => {
   const row = stressRow(40);
   expect(row).toEqual({ baseBps: 15, stressBps: 30 });
   expect(FEE_PROFILES.map((profile) => profile.id)).toEqual(["zero", "10-10", "25-40", "kraken-40-80", "coinbase-at-brian-tier"]);
-  expect(FEE_PROFILES.find((profile) => profile.id === "coinbase-at-brian-tier")?.takerBps).toBeNull();
+  expect(FEE_PROFILES.find((profile) => profile.id === "coinbase-at-brian-tier")).toEqual({ id: "coinbase-at-brian-tier", makerBps: 50, takerBps: 90 });
   expect(section1CostBps(0, 10)).toBe(150);
   expect(section1CostBps(1, 10)).toBe(100);
   expect(section1HurdleBps(100, 200)).toBe(130);
