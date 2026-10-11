@@ -32025,5 +32025,16 @@
     "completedMonths": 1716,
     "requests": 15840,
     "stopped": "finished"
+  },
+  "lastRefreshed": {
+    "commit": "adffce73412dc71b7dfc78d2cbc4459778ee5b09",
+    "at": "2026-10-11T03:04:54.722Z"
+  },
+  "derivedManifest": {
+    "path": "derived-manifest.json",
+    "sha256": "8d2405db5bf1b9fdd3f29905fa22b754015e9559062408ea05eaea0f0983a32c",
+    "derivedRootHash": "bd6dc35cc0b7212c0e4a95bfba6a6aafe1bb19dcdf3091196ce47953498a1eb5",
+    "fileCount": 19188,
+    "bytes": 1047259324
   }
 }
