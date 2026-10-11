@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { wilderAtr } from "../p2/indicators";
 import type { DailyBar } from "./classes";
-import { countClassA, countClassB, countClassE, type BarOHLC } from "./signals";
+import { classCSetups, countClassA, countClassB, countClassE, type BarOHLC } from "./signals";
 
 test("class B keeps the top fifth of the universe, then at most four names, and counts an OOS date", () => {
   const rows = [1, 2, 3, 4, 5].map((score) => ({ id: String(score), date: "2026-03-02", score, member: true }));
@@ -73,4 +73,29 @@ test("class A records stop widths at k = 2, 2.5, and 3", () => {
   expect(counts.stopBpsByK.L20[3].length).toBe(counts.L20.signals);
   const index = counts.stopBpsByK.L20[2].length - 1;
   expect(counts.stopBpsByK.L20[3][index]).toBeCloseTo(counts.stopBpsByK.L20[2][index]! * 1.5, 6);
+});
+
+test("class C triggers only on 4h closes after the daily event close", () => {
+  const bars: DailyBar[] = [];
+  for (let i = 0; i < 36; i += 1) {
+    const date = new Date(Date.parse("2026-01-01T00:00:00.000Z") + i * 86_400_000).toISOString().slice(0, 10);
+    const close = 100 + Math.sin(i) * 0.4;
+    bars.push({ date, high: close + 4, low: close - 4, close, volume: 10 });
+  }
+  const event = bars[35]!;
+  bars[35] = { date: event.date, high: 130, low: 96, close: 90, volume: 10 };
+  const atr = wilderAtr(bars.map((bar) => bar.high), bars.map((bar) => bar.low), bars.map((bar) => bar.close), 14);
+  const dayStart = Date.parse(`${event.date}T00:00:00.000Z`) / 1000;
+  const four: BarOHLC[] = [
+    { ts: dayStart + 8 * 3600, open: 100, high: 97, low: 96, close: 96.5, volume: 1 },
+    { ts: dayStart + 12 * 3600, open: 96.5, high: 101, low: 96.5, close: 99, volume: 1 },
+    { ts: dayStart + 20 * 3600, open: 99, high: 101, low: 98, close: 99, volume: 1 },
+    { ts: dayStart + 86400, open: 99, high: 102, low: 98, close: 100, volume: 1 },
+  ];
+  const setups = classCSetups("SYN-USD", bars, four, () => true, atr);
+  expect(setups).toHaveLength(1);
+  expect(setups[0]?.entryTs).toBe((dayStart + 86400 + 14400) * 1000);
+  const eventDate = new Date(dayStart * 1000).toISOString().slice(0, 10);
+  expect(setups[0]?.date).not.toBe(eventDate);
+  expect(setups[0]?.date).toBe(new Date((dayStart + 86400) * 1000).toISOString().slice(0, 10));
 });

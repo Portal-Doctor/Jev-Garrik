@@ -17,6 +17,13 @@ const FILES = [
   "clock.ts",
   "config.ts",
   "jev.ts",
+  "bars.ts",
+  "pipeline.ts",
+  "allocator.ts",
+  "store.ts",
+  "overrides.ts",
+  "higher.ts",
+  "proxy.ts",
 ] as const;
 
 test("vendored class D sources match the 87b35d0 blobs", () => {

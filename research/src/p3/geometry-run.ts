@@ -12,7 +12,8 @@ import { spreadCost } from "../p2/costs";
 import { ema, wilderAtr } from "../p2/indicators";
 import { csMedianBps, corwinSchultzBps, medianUsdWithGaps } from "../p2/liquidity";
 import { passCountFlag, type VolumeTierDecision } from "../p2/universe";
-import { classBScore, type DailyBar } from "./classes";
+import { classBarInputs, groupFlagsOf, type GroupFlags } from "./bar-access";
+import { classBScore } from "./classes";
 import { classBSelected, classCDayCap } from "./design-rules";
 import { buildMembership, type NameDateSample } from "./membership-build";
 import { classDCandidates } from "./d-geometry";
@@ -333,6 +334,19 @@ export interface GeometryResult {
   warmup: { names: number; ema200ReadyByFirstUniverse: number; leftCensored: number };
   warmupRows: WarmupRow[];
   firstUniverseDate: "2025-11-10";
+  barAccess: {
+    rule: string;
+    names: {
+      productId: string;
+      priceGroupPasses: boolean;
+      volumeGroupPasses: boolean;
+      boundarySaved: boolean;
+      dHistoryStart: string;
+      listingProxySource: string;
+      listingProxyDate: string | null;
+    }[];
+  };
+  dParityNote: string;
 }
 
 function indicatorReady(days: readonly DayRow[], length: number): { date: string; source: "D1" | "15m-derived" } | null {
@@ -462,8 +476,15 @@ export function scanTwoPass(
     }
   }
   if (adjusted) built = buildMembership(membershipInput);
-  const dropPrices = new Set<string>();
-  for (const id of scope) if (f5ByPair.get(id)?.dropPrewindowPrices) dropPrices.add(id);
+  const barAccess: {
+    productId: string;
+    priceGroupPasses: boolean;
+    volumeGroupPasses: boolean;
+    boundarySaved: boolean;
+    dHistoryStart: string;
+    listingProxySource: string;
+    listingProxyDate: string | null;
+  }[] = [];
   const { passCounts, members } = built;
   const tier = built.volumeTier;
   const universeMembers = dates.map((date) => ({ date, names: [...(members.get(date) ?? [])].sort() }));
@@ -494,13 +515,24 @@ export function scanTwoPass(
     pairMonth.set(key, (pairMonth.get(key) ?? 0) + 1);
   };
   for (const pair of load()) {
-    const sourceDays = dropPrices.has(pair.productId) ? pair.days.filter((row) => row.date >= WINDOW_START) : pair.days;
-    const filled = sourceDays.filter((row) => !row.empty);
-    const bars: DailyBar[] = filled.map((row) => ({ date: row.date, high: row.high, low: row.low, close: row.close, volume: row.volume }));
-    const atr = wilderAtr(bars.map((b) => b.high), bars.map((b) => b.low), bars.map((b) => b.close), 14);
+    const flags: GroupFlags = groupFlagsOf(f5ByPair.get(pair.productId));
+    const inputs = classBarInputs(flags, pair.days, pair.listedDate ?? WINDOW_START);
+    barAccess.push({
+      productId: pair.productId,
+      priceGroupPasses: flags.priceGroupPasses,
+      volumeGroupPasses: flags.volumeGroupPasses,
+      boundarySaved: flags.boundarySaved,
+      dHistoryStart: inputs.dHistoryStart,
+      listingProxySource: inputs.listingProxySource,
+      listingProxyDate: inputs.listingProxyDate,
+    });
+    const bars = inputs.closeLookback;
+    const atrOnOhlc = wilderAtr(inputs.ohlc.map((b) => b.high), inputs.ohlc.map((b) => b.low), inputs.ohlc.map((b) => b.close), 14);
+    const atrByDate = new Map(inputs.ohlc.map((row, index) => [row.date, atrOnOhlc[index] ?? null]));
+    const atr = bars.map((row) => atrByDate.get(row.date) ?? null);
     const young = pair.listedDate != null && pair.days.filter((row) => !row.empty && row.date < "2025-11-10").length < 200;
     const eReady = pair.hour.length >= 20 ? new Date(pair.hour[19]!.ts * 1000).toISOString().slice(0, 10) : null;
-    const a = countClassA(bars, (date) => memberOn(pair.productId, date), atr, btcByDate, young, WINDOW_START);
+    const a = countClassA(bars, (date) => memberOn(pair.productId, date), atr, btcByDate, young, undefined, inputs.ema);
     addCounts(totals.A20!, a.L20);
     addCounts(totals.A55!, a.L55);
     for (const k of CLASS_A_STOP_K) {
@@ -531,13 +563,13 @@ export function scanTwoPass(
     }
     for (const date of a.L20.dates) bumpMonth("A20", pair.productId, date);
     for (const date of a.L55.dates) bumpMonth("A55", pair.productId, date);
-    cSetups.push(...classCSetups(pair.productId, bars, pair.four, (date) => memberOn(pair.productId, date), atr));
+    const cAtr = inputs.classC.map((row) => atrByDate.get(row.date) ?? null);
+    cSetups.push(...classCSetups(pair.productId, inputs.classC, pair.four, (date) => memberOn(pair.productId, date), cAtr));
     const eCounts = countClassE(pair.hour, pair.quarter, (date) => memberOn(pair.productId, date), blackout);
     addCounts(totals.E!, eCounts);
     for (const date of eCounts.dates) bumpMonth("E", pair.productId, date);
     const h4 = pair.four.map((bar) => ({ ts: bar.ts * 1000, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume }));
-    const d1 = pair.days.filter((row) => !row.empty).map((row) => ({ ts: row.ts * 1000, open: row.close, high: row.high, low: row.low, close: row.close, volume: row.volume }));
-    for (const signal of classDCandidates(pair.productId, h4, d1)) {
+    for (const signal of classDCandidates(pair.productId, h4, inputs.swing, inputs.bias)) {
       const date = new Date(signal.barTs).toISOString().slice(0, 10);
       if (!memberOn(pair.productId, date)) continue;
       const counts = emptyCounts();
@@ -663,6 +695,12 @@ export function scanTwoPass(
     }),
     warmupLostDays,
     classGate: { E: "geometry-only", C: classCGate.meetsRule ? "historical" : "geometry-only" },
+    barAccess: {
+      rule: "In-window daily bars are 15m-derived. Price-group passes may use pre-window D1 OHLC, and D1 volume only when the volume group passes. The seven boundary-saved names use pre-window D1 closes only, for EMA50/200 and the listing proxy. D swing history starts at the first D1 candle, or at 2025-10-11 for names that fail the price group.",
+      names: barAccess.sort((a, b) => (a.productId < b.productId ? -1 : 1)),
+    },
+    dParityNote:
+      "NEAR-USD and SUI-USD can differ from PR #29. That run loaded a longer D1 history. This scan pins D to each name's first D1 candle in root 76c41956, or to 2025-10-11 for the seven boundary-saved names. That difference is expected and is not a parity failure.",
     warmup: {
       names: warmupRows.length,
       ema200ReadyByFirstUniverse: warmupRows.filter((row) => {

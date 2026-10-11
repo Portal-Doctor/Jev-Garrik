@@ -1,4 +1,4 @@
-import { wilderAtr } from "../p2/indicators";
+import { ema, wilderAtr } from "../p2/indicators";
 import { classATrigger, classBScore, type DailyBar } from "./classes";
 import { classBSelected } from "./design-rules";
 import { classCEntry, classEFloorPasses, classETarget, type ClassCBar } from "./design-rules";
@@ -79,14 +79,30 @@ export function countClassA(
   btcByDate: ReadonlyMap<string, BtcDay>,
   shortHistory: boolean,
   signalCloseFrom?: string,
+  emaBars?: readonly DailyBar[],
 ): ClassACounts {
   const out: ClassACounts = { L20: emptyCounts(), L55: emptyCounts(), stopBpsByK: { L20: emptyStopGrid(), L55: emptyStopGrid() } };
+  const emaByDate = new Map<string, { e50: number | null; e200: number | null; e50TenAgo: number | null; index: number }>();
+  if (emaBars) {
+    const ema50 = ema(emaBars.map((row) => row.close), 50);
+    const ema200 = ema(emaBars.map((row) => row.close), 200);
+    for (let i = 0; i < emaBars.length; i += 1) {
+      emaByDate.set(emaBars[i]!.date, {
+        e50: ema50[i] ?? null,
+        e200: ema200[i] ?? null,
+        e50TenAgo: i >= 10 ? (ema50[i - 10] ?? null) : null,
+        index: i,
+      });
+    }
+  }
   for (let i = 0; i < bars.length; i += 1) {
     const bar = bars[i]!;
     if (!memberOn(bar.date)) continue;
     const dailyAtr = atr[i];
+    const emaPoint = emaBars ? emaByDate.get(bar.date) : undefined;
+    if (emaBars && !emaPoint) continue;
     for (const lookback of [20, 55] as const) {
-      if (!classATrigger(bars, i, lookback, shortHistory, signalCloseFrom)) continue;
+      if (!classATrigger(bars, i, lookback, shortHistory, signalCloseFrom, emaPoint)) continue;
       const bucket = lookback === 20 ? out.L20 : out.L55;
       const grid = lookback === 20 ? out.stopBpsByK.L20 : out.stopBpsByK.L55;
       const stop = dailyAtr != null && bar.close > 0 ? { bps: (2.5 * dailyAtr / bar.close) * 10_000, atrMultiple: 2.5 } : null;
@@ -227,7 +243,10 @@ export function classCSetups(
     }
     const dailyAtr = atr[i];
     const volWindow = bars.slice(Math.max(0, i - 20), i);
-    const volAvg = volWindow.length === 20 ? volWindow.reduce((s, row) => s + row.volume, 0) / 20 : null;
+    const volAvg =
+      volWindow.length === 20 && volWindow.every((row) => Number.isFinite(row.volume))
+        ? volWindow.reduce((s, row) => s + row.volume, 0) / 20
+        : null;
     const range = bar.high - bar.low;
     const crash =
       dailyAtr != null &&
@@ -237,20 +256,26 @@ export function classCSetups(
       range > 0 &&
       (bar.close - bar.low) / range <= 1 / 3;
     if (!(z != null && z <= -2.5) && !crash) continue;
-    if (dailyAtr == null) continue;
+    if (dailyAtr == null || !Number.isFinite(bar.volume)) continue;
     const dayStart = Date.parse(`${bar.date}T00:00:00.000Z`) / 1000;
     const onDay = four.filter((row) => row.ts >= dayStart && row.ts < dayStart + 86400);
     if (onDay.length === 0) continue;
     const eventCandle = onDay.reduce((best, row) => (row.low < best.low ? row : best));
     const drop = bars.slice(Math.max(0, i - 6), i + 1);
     if (drop.length < 7) continue;
+    // The daily event is knowable at the 00:00 UTC close. A 4h trigger is its close, and the 48h window starts there.
+    const eventCloseSec = dayStart + 86400;
+    const h4Sec = 14400;
     const later: ClassCBar[] = four
-      .filter((row) => row.ts > eventCandle.ts)
-      .map((row) => ({ ts: row.ts * 1000, high: row.high, close: row.close }));
+      .filter((row) => {
+        const closeSec = row.ts + h4Sec;
+        return closeSec > eventCloseSec && closeSec <= eventCloseSec + 48 * 3600;
+      })
+      .map((row) => ({ ts: (row.ts + h4Sec) * 1000, high: row.high, close: row.close }));
     const entry = classCEntry(
       {
         pair,
-        eventTs: eventCandle.ts * 1000,
+        eventTs: eventCloseSec * 1000,
         eventLow: eventCandle.low,
         eventHigh: eventCandle.high,
         dailyAtr,

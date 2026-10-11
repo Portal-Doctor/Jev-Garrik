@@ -115,22 +115,29 @@ export function dGeometryAt(
   return { stop: geom.stop, target, stopBps: floor.stopBps, targetBps: floor.targetBps };
 }
 
-/** Geometry candidates only. No fill is simulated. */
-export function classDCandidates(pair: string, h4: readonly Ohlcv[], d1: readonly Ohlcv[]): DSignal[] {
-  if (h4.length === 0 || d1.length === 0) return [];
+/**
+ * Geometry candidates only. No fill is simulated.
+ * `biasDays` is the EMA close series when it is longer than the swing-high series.
+ * Omit it and both reads use `d1`.
+ */
+export function classDCandidates(pair: string, h4: readonly Ohlcv[], d1: readonly Ohlcv[], biasDays?: readonly Ohlcv[]): DSignal[] {
+  const days = biasDays ?? d1;
+  if (h4.length === 0 || d1.length === 0 || days.length === 0) return [];
   const four = h4.slice();
-  const days = d1.slice();
-  const bias = dailyBiasUp(days);
+  const swing = d1.slice();
+  const biasSource = days.slice();
+  const bias = dailyBiasUp(biasSource);
   const ind4 = indicatorSeries(four);
   const out: DSignal[] = [];
   for (let h4i = 0; h4i < h4.length; h4i++) {
     const bar = h4[h4i]!;
     const decisionTs = bar.ts + H4_MS;
-    const d1i = lastClosed(d1, D1_MS, decisionTs);
-    const snap = snapshot4(pair, four, ind4, h4i, d1i >= 0 && bias[d1i] === true);
+    const d1i = lastClosed(swing, D1_MS, decisionTs);
+    const biasI = lastClosed(biasSource, D1_MS, decisionTs);
+    const snap = snapshot4(pair, four, ind4, h4i, biasI >= 0 && bias[biasI] === true);
     if (!snap || snap.atr == null || !(snap.atr > 0) || !snap.biasUp) continue;
     for (const setup of findSetups(snap, "clear", "combined")) {
-      const geom = dGeometryAt(setup.entry, snap.atr, four, h4i, days, d1i);
+      const geom = dGeometryAt(setup.entry, snap.atr, four, h4i, swing, d1i);
       if (!geom) continue;
       out.push({
         barTs: decisionTs,
