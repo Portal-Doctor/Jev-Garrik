@@ -1,7 +1,7 @@
 {
-  "commitSha": "db465cb0f63b925eaaaed3a2dbdcde3beb58126d",
-  "dataRootHash": "a222f69716094e26b90c10ab4fe145d342ff6728f6c0b589ed08bb255711c282",
-  "createdAt": "2026-10-10T22:44:56.430Z",
+  "commitSha": "c306b3a0afa632ef65cb9007d22e78fd94cf5383",
+  "dataRootHash": "e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968",
+  "createdAt": "2026-10-11T01:42:36.815Z",
   "phaseId": "P1",
   "source": "https://api.exchange.coinbase.com/products",
   "rawSha256": "c6f1d6b37a5c862482e8a3f6493eb73295d9aca9a8eb9f58e5e9ae1c5e5ae83c",

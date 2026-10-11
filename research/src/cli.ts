@@ -363,6 +363,10 @@ function refreshReports(): void {
     products,
   });
   writeJson(paths.ticks, tickReport(products, artifact));
+  if (existsSync(paths.probe)) {
+    const probe = JSON.parse(readFileSync(paths.probe, "utf8")) as DelistedProbeReport;
+    writeJson(paths.probe, { ...probe, ...artifact });
+  }
   const probes = existsSync(paths.probe)
     ? (JSON.parse(readFileSync(paths.probe, "utf8")) as { products: { productId: string; status: UsdSpotProduct["status"]; statusRaw: string; candlesServed: boolean | null; windows: [] }[] }).products
     : [];
