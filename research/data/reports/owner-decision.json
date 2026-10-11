@@ -1,4 +1,9 @@
 {
+  "commitSha": "7c5034ff9a432b2cf2b70f66085691ca0878ce1f",
+  "dataRootHash": "e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968",
+  "createdAt": "2026-10-11T02:01:04.720Z",
+  "phaseId": "P1",
+  "stampNote": "Stamp written on clean commit 7c5034ff, which corrected granularity decidedAt. createdAt is the stamp time. Each entry keeps its own decidedAt.",
   "entries": [
     {
       "id": "granularity",

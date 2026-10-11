@@ -64,6 +64,20 @@ test("product-stats carries a commit, a root, and a created time", () => {
   expect(stats.fetchedAt).toBe("2026-10-11T00:08:06.000Z");
 });
 
+test("owner-decision carries a commit, a root, and a created time", () => {
+  const decision = JSON.parse(readFileSync(join(import.meta.dir, "..", "..", "data", "reports", "owner-decision.json"), "utf8")) as {
+    commitSha: string;
+    dataRootHash: string;
+    createdAt: string;
+    entries: { id: string; decidedAt: string }[];
+  };
+  expect(decision.commitSha).toBe("7c5034ff9a432b2cf2b70f66085691ca0878ce1f");
+  expect(decision.dataRootHash).toBe("e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968");
+  expect(decision.createdAt.endsWith("Z")).toBe(true);
+  expect(decision.entries[0]?.decidedAt).toBe("2026-10-10T23:47:41.000Z");
+  expect(findBannedKeys(decision)).toEqual([]);
+});
+
 test("committed stats and decision documents still have no banned fields", () => {
   const reports = join(import.meta.dir, "..", "..", "data", "reports");
   for (const name of ["product-stats.json", "owner-decision.json", "p1-report.json", "coverage.json", "delisted-probe.json"]) {
