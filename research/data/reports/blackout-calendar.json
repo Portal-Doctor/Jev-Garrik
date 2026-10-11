@@ -527,5 +527,10 @@
       "zone": "America/New_York",
       "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
     }
-  ]
+  ],
+  "commitSha": "c5ee11de33b7d67e819a1c37320fdd374c74694d",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "dailyRootHash": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
+  "createdAt": "2026-10-11T12:22:00.931Z",
+  "phaseId": "P3"
 }
