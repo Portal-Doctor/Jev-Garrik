@@ -24,7 +24,7 @@ import { derivePairMonthFile } from "./data/derive-store";
 import { sha256Bytes } from "./data/hash";
 import { writeBytes, writeJson } from "./data/io";
 import { buildCoverage, type CoverageReport } from "./data/coverage";
-import { BELOW_RANK_CUTOFF_LIFT_REASON, D2_LIFT_REASON, liftCompletedFreeze, scanCandleFiles, sealFrozenSnapshot, type DataManifest, type SnapshotLift } from "./data/manifest-file";
+import { BELOW_RANK_CUTOFF_LIFT_REASON, D1_FREEZE_REASON, D2_LIFT_REASON, liftCompletedFreeze, scanCandleFiles, sealFrozenSnapshot, type DataManifest, type SnapshotLift } from "./data/manifest-file";
 import { assertFrozenRoots, withLastRefreshed } from "./data/refresh";
 import { convertBareProductStats, fetchProductStats, parseProductStats } from "./data/product-stats";
 import { sha256File } from "./data/store";
@@ -281,6 +281,16 @@ async function downloadDaily(artifact: ArtifactStamp): Promise<void> {
   if (existsSync(dailyPaths.manifest)) {
     const existing = JSON.parse(readFileSync(dailyPaths.manifest, "utf8")) as DataManifest;
     if (existing.snapshot?.universeComplete && existing.barSec === DAY_SEC) {
+      if (existing.snapshot.reason !== D1_FREEZE_REASON) {
+        const artifact = stamp("P1");
+        existing.snapshot.reason = D1_FREEZE_REASON;
+        existing.commitSha = artifact.commitSha;
+        existing.createdAt = artifact.createdAt;
+        existing.phaseId = artifact.phaseId;
+        writeJson(dailyPaths.manifest, existing);
+        console.log(`daily freeze restamped ${artifact.commitSha} root ${existing.dataRootHash}`);
+        return;
+      }
       console.log(`daily snapshot already frozen ${existing.snapshot.frozenAt} root ${existing.dataRootHash}`);
       return;
     }
@@ -308,8 +318,7 @@ async function downloadDaily(artifact: ArtifactStamp): Promise<void> {
     const manifest = JSON.parse(readFileSync(dailyPaths.manifest, "utf8")) as DataManifest;
     manifest.snapshot = {
       status: "frozen",
-      reason:
-        "D1 daily supplement frozen. Three years or since listing, ending 2026-10-11T00:00:00.000Z. Used only for warmup and listing dates before 2025-10-11. Not part of the 15m candle root.",
+      reason: D1_FREEZE_REASON,
       downloadStartedAt: manifest.createdAt,
       downloadUpdatedAt: manifest.updatedAt,
       frozenAt: new Date().toISOString(),

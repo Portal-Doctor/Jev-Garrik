@@ -17,6 +17,9 @@ export const SNAPSHOT_LIFT_REASON =
 
 /** Brian, 2026-10-10 20:19 CT, which is 2026-10-11 01:19Z. */
 /** Brian approved D1-D5 at 8:50 PM CT on 2026-10-10, which is 01:50Z on 2026-10-11. */
+export const D1_FREEZE_REASON =
+  "Owner decision (Brian, 2026-10-10 20:50 CT (01:50Z)): D1 daily supplement frozen. Three years or since listing, ending 2026-10-11T00:00:00.000Z. Used only for warmup and listing dates before 2025-10-11. Not part of the 15m candle root.";
+
 export const D2_LIFT_REASON =
   "Owner decision (Brian, 2026-10-10 20:50 CT (01:50Z)): D2 downloads the same 15m window (2025-10-11T00:00:00.000Z inclusive through 2026-10-11T00:00:00.000Z exclusive) for delisted products whose probe served candles and for names the owner cut dropped. Chained to the prior frozen root. The owner cut is not the trading universe.";
 

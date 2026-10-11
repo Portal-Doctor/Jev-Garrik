@@ -13,6 +13,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.3
+      - name: fetch class D source commit
+        run: git fetch --depth=1 origin 87b35d093710e3683d5910ee81bf7b1a46276bbc
       - name: install
         run: bun install --frozen-lockfile
       - name: test
