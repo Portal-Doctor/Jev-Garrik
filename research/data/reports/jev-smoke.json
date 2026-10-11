@@ -1,0 +1,10 @@
+{
+  "commitSha": "b99fe3ab82a843e9c6c51187c6d4842267fa24ad",
+  "dataRootHash": "e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968",
+  "createdAt": "2026-10-11T02:23:42.875Z",
+  "phaseId": "P3",
+  "ran": true,
+  "modelId": "jev-1.13.0",
+  "latencyMs": 172.789897,
+  "synthetic": true
+}
