@@ -1,8 +1,8 @@
 {
   "commitSha": "a54ba663654d70f5663c9326d73d666f72288cbf",
-  "dataRootHash": "f3fe1f9e4649cc30db478d177cafd8d74039f9b2fbdf9694f52df278bd8aebba",
+  "dataRootHash": "dc3a36901b10fc9f6ed4e1f2c0784124cb5849760473b2a4569b6a6b4610f3b2",
   "createdAt": "2026-10-10T23:47:55.410Z",
-  "updatedAt": "2026-10-11T00:42:23.714Z",
+  "updatedAt": "2026-10-11T00:52:25.629Z",
   "phaseId": "P1",
   "hashAlgorithm": "sha256",
   "rootHashInput": "sorted lines of relativePath TAB sha256 LF, UTF-8",
@@ -13588,6 +13588,21 @@
       "bytes": 143360
     },
     {
+      "path": "candles/PROMPT-USD/2026-08.sqlite",
+      "sha256": "86fb642a7958aac3894c64d9ce5b029b979d965232cbc763b3c8b034a903fe69",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/PROMPT-USD/2026-09.sqlite",
+      "sha256": "084c0dd51c478e0285557e8c09eb6325c095d64a1279a20d49321c43c40dc05e",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/PROMPT-USD/2026-10.sqlite",
+      "sha256": "3e4a5d008b18e6f8ea11009573febc29cf06251b39f6021f9334233e5c281cbb",
+      "bytes": 61440
+    },
+    {
       "path": "candles/PROS-USD/2025-10.sqlite",
       "sha256": "296aa3ffdd7e845669a105154f55144bfbbc10e5ff7fe523fa5375648b6ec712",
       "bytes": 49152
@@ -13643,6 +13658,16 @@
       "bytes": 122880
     },
     {
+      "path": "candles/PROS-USD/2026-09.sqlite",
+      "sha256": "38db983275788c7c47a270a8fc66a4768b7c142a9009135056250697bf3b71ab",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/PROS-USD/2026-10.sqlite",
+      "sha256": "7df12329aff178efc964bfd107e798f4b0766ae86c1f0d6f76be6155efabc352",
+      "bytes": 53248
+    },
+    {
       "path": "candles/PROVE-USD/2025-10.sqlite",
       "sha256": "846985c196942598f6ce860dc2d5b9352daa957f753dd4ff3189663dc57b22da",
       "bytes": 110592
@@ -13676,6 +13701,36 @@
       "path": "candles/PROVE-USD/2026-04.sqlite",
       "sha256": "b4d1c7d2ee0464abc17efe33117c89f31b48662ecfb56af8024a1f65efe46662",
       "bytes": 135168
+    },
+    {
+      "path": "candles/PROVE-USD/2026-05.sqlite",
+      "sha256": "f4dbb5b4ec378d8907a0f4f9fb10510ba865ffe4c2a986377b4a9991db03c259",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/PROVE-USD/2026-06.sqlite",
+      "sha256": "4eaa765bc9b27a73e2ef6a94dfad3328f429319ffd5a0fed4ee716388a092c5e",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/PROVE-USD/2026-07.sqlite",
+      "sha256": "a543c14a83fb9ab08f58cfc83f3e7aafd1d53508abdfd9498df6d5a31fc33ec8",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/PROVE-USD/2026-08.sqlite",
+      "sha256": "22c100338a1b180859d5be187b6b363935c134388f89b06309684ce9997e0336",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/PROVE-USD/2026-09.sqlite",
+      "sha256": "d863aa8cc5924995d11f70deba72b576af1841c9ab0534ab3f86bdf3f3bcdbae",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/PROVE-USD/2026-10.sqlite",
+      "sha256": "17ee4d391fbc8985ddbdfce48bfbb1c52eed204edf23116f41fd1ab4885ad785",
+      "bytes": 57344
     },
     {
       "path": "candles/PUMP-USD/2025-10.sqlite",
@@ -13713,6 +13768,36 @@
       "bytes": 176128
     },
     {
+      "path": "candles/PUMP-USD/2026-05.sqlite",
+      "sha256": "3951511444549fc02aa1bd4c49df030bc5caaf1571d82d3579ffd7bd4fc9630f",
+      "bytes": 180224
+    },
+    {
+      "path": "candles/PUMP-USD/2026-06.sqlite",
+      "sha256": "06930de9bf0e581696f67ba6dea387123f738d4636c999e0c8f8b149457dab3d",
+      "bytes": 176128
+    },
+    {
+      "path": "candles/PUMP-USD/2026-07.sqlite",
+      "sha256": "3b4738302e46e69126c9d75eca7528a13da81666c08e105e4fe0a4f311d03a81",
+      "bytes": 184320
+    },
+    {
+      "path": "candles/PUMP-USD/2026-08.sqlite",
+      "sha256": "a41b3f2c941388d5dd28eaa2c99252df34c246a49b62758f25ba5b1cad6ecffc",
+      "bytes": 184320
+    },
+    {
+      "path": "candles/PUMP-USD/2026-09.sqlite",
+      "sha256": "04f5188209868a7cc54499ec0b09cc1c12a76fa5f0efe0149516bdb1d18ffa94",
+      "bytes": 180224
+    },
+    {
+      "path": "candles/PUMP-USD/2026-10.sqlite",
+      "sha256": "1fa5569018bb3028676a55e7e321acfe284f5b747ab426568ab244adc744236c",
+      "bytes": 73728
+    },
+    {
       "path": "candles/PUNDIX-USD/2025-10.sqlite",
       "sha256": "f73f3da540bf70d87965860a97debc25d01029be05e4172a18257e6bf4ff253d",
       "bytes": 86016
@@ -13748,9 +13833,99 @@
       "bytes": 77824
     },
     {
+      "path": "candles/PUNDIX-USD/2026-05.sqlite",
+      "sha256": "3b3081925b3e4a18d2756f5213ad54d6d97d7175011ccd3f928fe9f2934d62f6",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/PUNDIX-USD/2026-06.sqlite",
+      "sha256": "aac13a474c360797591e46c5e5e8fd79208bb92b7bc4d3e5f8297315ecdcb93f",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/PUNDIX-USD/2026-07.sqlite",
+      "sha256": "e08841ee380178f180ab1cc6cd1dfd74b9fce01b1b1f12ba507f22c9a66559b7",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/PUNDIX-USD/2026-08.sqlite",
+      "sha256": "d81b576ca1b573c58865ea17ae55b14f7c8d3c0281d4552233f881bcec01b9a3",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/PUNDIX-USD/2026-09.sqlite",
+      "sha256": "d1f8c5e7b30d7f92ee7e57abee85e04983c1dd50abbc937736eb9c1fc833d6a6",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/PUNDIX-USD/2026-10.sqlite",
+      "sha256": "092bace72e51a4f7ed084bd50636662e0d527f0b155e4f87b4cff100e31c4e19",
+      "bytes": 40960
+    },
+    {
       "path": "candles/PYTH-USD/2025-10.sqlite",
       "sha256": "a21cedda484c264016cc2a0a8084600c81eac886190062c2340fb9a0dbc32e5b",
       "bytes": 110592
+    },
+    {
+      "path": "candles/PYTH-USD/2025-11.sqlite",
+      "sha256": "249c617354ded354e1d692f6ff053a69fee694d50efcbb8fb3244bde75226800",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/PYTH-USD/2025-12.sqlite",
+      "sha256": "2f454123639c00f99ee6d6b60ee364ab304f8ba9d9e32e25cd7893dd2ac7d5ac",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/PYTH-USD/2026-01.sqlite",
+      "sha256": "01c00b36ff874430c88a618eabd0e98cd0ca73637fe8082b64d386eb2e7ce131",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/PYTH-USD/2026-02.sqlite",
+      "sha256": "cbb051d612b9ccbb60f43df7bee1b400cb8240fef4f03e1f2d699ed6679b5b28",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/PYTH-USD/2026-03.sqlite",
+      "sha256": "6a8b5a1e1ba4990982c7f58f401660c69ed907813c2c0b586dbe58ecc9948f17",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/PYTH-USD/2026-04.sqlite",
+      "sha256": "d0045d66337e4ec44e26b9dc1553bc249bf806338ed2bac289609cbc711edd4f",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/PYTH-USD/2026-05.sqlite",
+      "sha256": "f18bfbbc65bd34e5e2642657b2924ada8e9736e0ca017a5d25f598d2d4a1fbf1",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/PYTH-USD/2026-06.sqlite",
+      "sha256": "f1d8ee657d153e9e610f19ec0134f564311d644aa57d09818d9150436c4c7075",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/PYTH-USD/2026-07.sqlite",
+      "sha256": "1482192c848a7eac2ac4b5d50a08fb85d920cd64f88d0ff9eeb068b6a0735e5c",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/PYTH-USD/2026-08.sqlite",
+      "sha256": "522ca3659531d6b29eb2a21433a76a4c8df413208ef99242f433683df0725e26",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/PYTH-USD/2026-09.sqlite",
+      "sha256": "60ad686f6f6801852bbd7506ec55d23997c86df619ed61ab6920b6c8162559bf",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/PYTH-USD/2026-10.sqlite",
+      "sha256": "1399db9217820c4f3cfc6b89fbf5bb0044a18db1050bc75d06b2e2541aa0b957",
+      "bytes": 65536
     },
     {
       "path": "candles/QI-USD/2025-10.sqlite",
@@ -13758,9 +13933,129 @@
       "bytes": 94208
     },
     {
+      "path": "candles/QI-USD/2025-11.sqlite",
+      "sha256": "d6c973d41ded0f335dc98c8d75110e5ec00e972206f3e528e2c34161e3905492",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/QI-USD/2025-12.sqlite",
+      "sha256": "d79dbef1ef99f0307895aceeb198638ef968a3784536eae6198b4133df6faf97",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/QI-USD/2026-01.sqlite",
+      "sha256": "a3543e3c6f028b96abc818d0b1d1476bc4cd2d195cbb1d51d3cbfb891269e4a0",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/QI-USD/2026-02.sqlite",
+      "sha256": "283e6d2a1656bfe44a84d442e90f2a0f38f6d1dbbb3c02945a9c2ce685544404",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/QI-USD/2026-03.sqlite",
+      "sha256": "c13411082368d354c3f635a7b0b8e40d3324c05b3c16c3f67e1e40087dfcfacc",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/QI-USD/2026-04.sqlite",
+      "sha256": "2fa18803f9c721b49789d122619b2bc56df6fd072f56d4352c35ee9c8d40a73c",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/QI-USD/2026-05.sqlite",
+      "sha256": "39b56f2165bd9e0f3b37010ad6b5198783f36daead71231b6c2ada85611ad007",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/QI-USD/2026-06.sqlite",
+      "sha256": "a4c806c77f7fbb79b56fb92050912cf4e293c212441d189501333071cbe206a7",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/QI-USD/2026-07.sqlite",
+      "sha256": "ab84454c5db58d070c1ca82f8259237851244c730775cb6027d29d54b7fde90c",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/QI-USD/2026-08.sqlite",
+      "sha256": "1038ba9101c7aafa29a4d6ddcf83fff5c2a361e5a7eb825edb91a742af590c3d",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/QI-USD/2026-09.sqlite",
+      "sha256": "9843953d2b7f90998dc3ed398018a2b91d2e6ac252567a5274c224ccd188cb2d",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/QI-USD/2026-10.sqlite",
+      "sha256": "2a58107027781541976cab0f07dd637565666a5a26379dae714b37b361113c4f",
+      "bytes": 65536
+    },
+    {
       "path": "candles/QNT-USD/2025-10.sqlite",
       "sha256": "99850fd7930a338ec468a2b54fe8315ba9d40760348d0c5070e10b06faabf0a7",
       "bytes": 102400
+    },
+    {
+      "path": "candles/QNT-USD/2025-11.sqlite",
+      "sha256": "72d7d11841b5edb27ed6cb50dc0d570d5a8099e8bc8961b33e442175803212f3",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/QNT-USD/2025-12.sqlite",
+      "sha256": "817a36e55fee101d375a31f9ff2c1646e5c0709ce135088218b3cf172d048236",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/QNT-USD/2026-01.sqlite",
+      "sha256": "71739fd3b60977bcf011a675022dcd8f9469a903d06c7abbe05a11425ed42579",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/QNT-USD/2026-02.sqlite",
+      "sha256": "0ef2169819950d31136d9d71458421f2856a45f35c1681399f0b0c9fccc232d3",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/QNT-USD/2026-03.sqlite",
+      "sha256": "010549c68c59853d39f385dc7d06ad87f2f50345d347fdc927c4f4b4cb3faa4c",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/QNT-USD/2026-04.sqlite",
+      "sha256": "41731d2b5d30e44c707dcf50fb956140dcf9db6bcc0a67ed991619c34aa0f7fc",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/QNT-USD/2026-05.sqlite",
+      "sha256": "d7e64df3ce4c96ec01b3de50b0057382b8ee23cdc12abacfdc0b51e97eaad85b",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/QNT-USD/2026-06.sqlite",
+      "sha256": "9ed661c95392c2a868d97afc74fdd156aa982688d7e3de2f85bd42c05ab09d90",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/QNT-USD/2026-07.sqlite",
+      "sha256": "f5f48e6edc78ae6d6c53c22186e29c606ff1460046c7386517b3969899bf2442",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/QNT-USD/2026-08.sqlite",
+      "sha256": "16e424f4c4712de7bf9389543ff53639eda1a5fc4cda35aeb325928324f99d9b",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/QNT-USD/2026-09.sqlite",
+      "sha256": "7d98c864ca38cc0687e677c47b2718ff389efb61fb79bad8212712d6b88bbd6b",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/QNT-USD/2026-10.sqlite",
+      "sha256": "a6e5fb114bcdd62d15f3614da7e176f8be2d9478eaee52b760ba434802e8ca94",
+      "bytes": 61440
     },
     {
       "path": "candles/RAD-USD/2025-10.sqlite",
@@ -13768,9 +14063,2984 @@
       "bytes": 61440
     },
     {
+      "path": "candles/RAD-USD/2025-11.sqlite",
+      "sha256": "629581c238c07535acbbd4587e03d5bd59c53330ad2486750310d94dcf966a21",
+      "bytes": 77824
+    },
+    {
+      "path": "candles/RAD-USD/2025-12.sqlite",
+      "sha256": "7ec1265ff041f89eba83b6c14677209114c0376ec0ae9b6016b4217f01cd9983",
+      "bytes": 77824
+    },
+    {
+      "path": "candles/RAD-USD/2026-01.sqlite",
+      "sha256": "15a553c18abc9f165c888ba3f453b654401635ca3e40ffd3167b00f20f504945",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/RAD-USD/2026-02.sqlite",
+      "sha256": "61c44b9fa20065d401b5aec603396bb22aeebaa3f1c44a96003b78fac3dd1db4",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/RAD-USD/2026-03.sqlite",
+      "sha256": "aad2611cdab310268f5a60473e9211bd3c41db72f2e024197f89ec62e94ec1d0",
+      "bytes": 77824
+    },
+    {
+      "path": "candles/RAD-USD/2026-04.sqlite",
+      "sha256": "b085aebbc54733a96679641c26c26519cabc9a63b2be5ae31036088143c1b915",
+      "bytes": 81920
+    },
+    {
+      "path": "candles/RAD-USD/2026-05.sqlite",
+      "sha256": "3a022727da843e02be9ee62b672cdc604905772b72bc61458dfda6942369bb4c",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RAD-USD/2026-06.sqlite",
+      "sha256": "446e24b6efbf9014982aee0036a8e0a9679905c541d4e938c149be1f2d028b30",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/RAD-USD/2026-07.sqlite",
+      "sha256": "30db624895840fb594a601aea5f276f75084f604df2e18331406e36d61e49766",
+      "bytes": 77824
+    },
+    {
+      "path": "candles/RAD-USD/2026-08.sqlite",
+      "sha256": "330cb0826e7a0e6991bc2a840091b2e752a6a0c532c3f63aad89c25261428179",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/RAD-USD/2026-09.sqlite",
+      "sha256": "7031dc118a5eeaa154d7bf4e0136ee869a3e3a5f0c14522e91754f54d84bbf0b",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/RAD-USD/2026-10.sqlite",
+      "sha256": "7afcfc36e687928f41bd32cb0e20e8f729346466885eaf291d647e4a552e2998",
+      "bytes": 49152
+    },
+    {
       "path": "candles/RARE-USD/2025-10.sqlite",
       "sha256": "f8c09d987d5e9c805f6e701fb1233af85bb0e38476144a88d842ab1e3aa25c23",
       "bytes": 110592
+    },
+    {
+      "path": "candles/RARE-USD/2025-11.sqlite",
+      "sha256": "83e9a0cf6d3d2cd4b5591758dd045b6296591f04bfe81693300fe2b36b6e54bc",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/RARE-USD/2025-12.sqlite",
+      "sha256": "ebf458a361b6a02003eb8db4a3dd19839f30f0686f65f108f1fab54113792376",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/RARE-USD/2026-01.sqlite",
+      "sha256": "be8d7e98bbb8acc32420421a596b2c48009ccc3608998fb8c438cdd16e96fcf3",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/RARE-USD/2026-02.sqlite",
+      "sha256": "06fb0a79af2a1ef24e542073e7c80552d558011d550f5d9909b2277e006058cf",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/RARE-USD/2026-03.sqlite",
+      "sha256": "33fec118f5e5b21dcb8c27591165dd8a2ada2feb6e8da454f6d44f35b7f4cb95",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RARE-USD/2026-04.sqlite",
+      "sha256": "5ec9f563171cb8d5c8ca5033abcf00193919e607e24a2a15c7935f953ee7100f",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/RARE-USD/2026-05.sqlite",
+      "sha256": "1d64b9af1d9a106499d32a87a7261063078252a1daa816635a91a0f1dc2889d6",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RARE-USD/2026-06.sqlite",
+      "sha256": "f5debcd5e61b5d7132ab8548672be1346eb9b61a908a2c6643413b07cb508c0c",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RARE-USD/2026-07.sqlite",
+      "sha256": "f01c82ddecf388b926c2f85f8caafd71052fabde0f90e59fbd81b99802c620f1",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/RARE-USD/2026-08.sqlite",
+      "sha256": "a5c99ad446ea16169871fd42b03ec85bac632a34c0c118cbad5ff9cafe34f772",
+      "bytes": 98304
+    },
+    {
+      "path": "candles/RARE-USD/2026-09.sqlite",
+      "sha256": "651d0f000777750c1a6b842fc1fcc2d434e801724f373cfecb39a24dac979f56",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/RARE-USD/2026-10.sqlite",
+      "sha256": "f9dfe1cd21a0d532f51da9679bcd2062e6044add7c729467587ed438d8839c95",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RARI-USD/2025-10.sqlite",
+      "sha256": "95a86fd9361d874ad273516afbaf4b7b7b4b4ca8ab4f55dcf6c3ee7234ee987c",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RARI-USD/2025-11.sqlite",
+      "sha256": "ee5595186f15754127417d6bda338d104999c71680f1e28cc9aea943741e6ee5",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/RARI-USD/2025-12.sqlite",
+      "sha256": "8f092cd2102fb0ab589c0314199b8b07264a563255b6e69b8a3886106ff3ae7b",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/RARI-USD/2026-01.sqlite",
+      "sha256": "10d9011baa3d18c2acc54d02e7967b97d9360303c99be715947b390038d2ef7e",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/RARI-USD/2026-02.sqlite",
+      "sha256": "f832ed2471b6dc4e1346df2ec5c81396a4b2830c4379c4ccc03ff754fde51fb0",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/RARI-USD/2026-03.sqlite",
+      "sha256": "602e23bf52e961e85b4f3d13a98ea87d1cea186753173c8949480eb81631a0b3",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/RARI-USD/2026-04.sqlite",
+      "sha256": "5016d0af3f6869cb7e06a9e8ee39b2693e09ecbe09c51f6ee86e51643fafe007",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/RARI-USD/2026-05.sqlite",
+      "sha256": "737182d340c81aa59d7c38b17a1168260c05ec965511b93960ae96084ea0abb2",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/RARI-USD/2026-06.sqlite",
+      "sha256": "88622b40ca8597e4443827530d848da7934599f832fc7ea89de18c4fc0bb3088",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RARI-USD/2026-07.sqlite",
+      "sha256": "a3c764b9aca3baa570d55aeebbab122df72fcb26241b1657d9d79fd70f64f8aa",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RARI-USD/2026-08.sqlite",
+      "sha256": "01e5886ddc30ed9eafe12ef56bba9f9b11252125618ac110ca72454907d192eb",
+      "bytes": 94208
+    },
+    {
+      "path": "candles/RARI-USD/2026-09.sqlite",
+      "sha256": "a3fb8a8420a3bbac042ee3b1e56502588e1633414f6b5ea55cdb950d301b784d",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RARI-USD/2026-10.sqlite",
+      "sha256": "967c2ec3da6bdc81f428cb4a8c44e5f48e8d7f8d888970a22f4007cd9df5a830",
+      "bytes": 53248
+    },
+    {
+      "path": "candles/RAVE-USD/2025-10.sqlite",
+      "sha256": "01f74a266e913c70e88208a73d17a39b419449b9cada7b5c68478c18556edc31",
+      "bytes": 49152
+    },
+    {
+      "path": "candles/RAVE-USD/2025-11.sqlite",
+      "sha256": "51281d024185ad958c93a0ccffe607444d241889cb473f0770bf75b56bea5723",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RAVE-USD/2025-12.sqlite",
+      "sha256": "3015b8656dc34766f806c952729688fa41441a43427c5c174897bb3bab9cbe45",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RAVE-USD/2026-01.sqlite",
+      "sha256": "7644be6c981606f682211b3a50af0293caf749d3625f8d4da4fd67433a44d6ce",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RAVE-USD/2026-02.sqlite",
+      "sha256": "7b995e6aa46ed4bdfc0a3602dcf4a6bb182a8d9abf755279ac5fabf33827ad98",
+      "bytes": 98304
+    },
+    {
+      "path": "candles/RAVE-USD/2026-03.sqlite",
+      "sha256": "f0c1d5de54d4f7d9a3e9230be0e9b28afe6f18fbdd91fdc456f321893c6ffb01",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/RAVE-USD/2026-04.sqlite",
+      "sha256": "5cbb2901472a9469d2d32ec532d810c0b59de88cdf0ec37486c5e4f902f714f4",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/RAVE-USD/2026-05.sqlite",
+      "sha256": "c404ccce1cbbc9dc7dea68edcb887ba67ec67d070451bd09912546c3ceb2c6de",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/RAVE-USD/2026-06.sqlite",
+      "sha256": "7cfd0ba5294387f91964b50bb488b90aeca854995d2d32965536b0be8cb093e2",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/RAVE-USD/2026-07.sqlite",
+      "sha256": "efa625d72df10fd1c0d5ef4ae64dda179c6dcb7a8db7f876fca7fa70cf25d55d",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/RAVE-USD/2026-08.sqlite",
+      "sha256": "61e2e3028ae1e2d4ccd1559c0dcd174964feb11bbedefd161a22528e2bd02f7f",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/RAVE-USD/2026-09.sqlite",
+      "sha256": "8cf183f0f21baeff41d3f398dcf8ce9dc8f7ec460c954907b1448fb2f01bd6eb",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/RAVE-USD/2026-10.sqlite",
+      "sha256": "216d9bb17f32f5c52ce70b788cd198015b427c8c6ffc2e3578ba9f7312689f41",
+      "bytes": 57344
+    },
+    {
+      "path": "candles/RAY-USD/2025-10.sqlite",
+      "sha256": "8bc5dced003b1c5802176288dbe3f503c81e68d4461b8f665faf632c9b797697",
+      "bytes": 49152
+    },
+    {
+      "path": "candles/RAY-USD/2025-11.sqlite",
+      "sha256": "f4bbd7fea6353ca154f17b0fc69ce9ece73304deca822d9421b63b27b4bd18c2",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RAY-USD/2025-12.sqlite",
+      "sha256": "aa866aa526f2ef0f86f1f02194ad27ef70eb094094f1dfcf7fac10530c5ad551",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RAY-USD/2026-01.sqlite",
+      "sha256": "2f2bdbb79d9ce4817e50e87a47f747bfd2a4fe1a077492df0704dfbd72fb27ee",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/RAY-USD/2026-02.sqlite",
+      "sha256": "8d99b7f1504a8f43bc6126f377b3dff533f2f34e686d995599fecef557ca61e9",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/RAY-USD/2026-03.sqlite",
+      "sha256": "f7199ab0b22d3da7dfef40f2756c6556f0e9e286a2f5c3889cdb68f25a6e28b2",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/RAY-USD/2026-04.sqlite",
+      "sha256": "a50b2686b9b22f98ce4ea8f7f80f9a86a8925bba02f08db11097816e28aa9c50",
+      "bytes": 94208
+    },
+    {
+      "path": "candles/RAY-USD/2026-05.sqlite",
+      "sha256": "9fbce0ced4339fbb560517df81ba793864737cbfd409e43dedc9679551225bf4",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/RAY-USD/2026-06.sqlite",
+      "sha256": "1c6981ebe298ecbed027ef76382a260c0ab3d9842bd069c82bd246fe1eb9172b",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RAY-USD/2026-07.sqlite",
+      "sha256": "b849864ed65bcea2ef607726c889c2453f3e21999f40adcfe28ab32bf58d7d0b",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RAY-USD/2026-08.sqlite",
+      "sha256": "adf65272813f26c035d77535d30239aa8019a0bbe2a6bde664ef4c95f5df978a",
+      "bytes": 98304
+    },
+    {
+      "path": "candles/RAY-USD/2026-09.sqlite",
+      "sha256": "fd0b757240460198c16b4b01bba139be6a7f1b1e52157a56cef4f6fedd6ce953",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/RAY-USD/2026-10.sqlite",
+      "sha256": "a83b311e02c145839427894a554a569c614292734357136f846d8dfce0e6babb",
+      "bytes": 61440
+    },
+    {
+      "path": "candles/RE-USD/2025-10.sqlite",
+      "sha256": "4919aa0c8a84c615f4bf23be21689f6bf24b6f2a724bd6b617728ac305f351ae",
+      "bytes": 49152
+    },
+    {
+      "path": "candles/RE-USD/2025-11.sqlite",
+      "sha256": "1b83c824ea7f6c565e299019d5ad4ea97f79537199129b2f0a45237d333bd198",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RE-USD/2025-12.sqlite",
+      "sha256": "a9193a79215473393efae85c2696b05f466d2dd6776565ffb1deef9e83cc0cc5",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RE-USD/2026-01.sqlite",
+      "sha256": "18bd37c152cdc2cc4a10115bb5c523c49796e24fc47bd1a17ba57fa76bcdbdcc",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RE-USD/2026-02.sqlite",
+      "sha256": "1419c6e62d03013cfe53e068284f3897979c601d7657bfbef54cebef7a1d7a13",
+      "bytes": 61440
+    },
+    {
+      "path": "candles/RE-USD/2026-03.sqlite",
+      "sha256": "9ac69e9f16400c70b9ecf7ec6ba3eb92af50e887131483f4a06f53ef415cb197",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RE-USD/2026-04.sqlite",
+      "sha256": "074759c44cf732668070d9dd4511dd4d9311206b25639a14c2692953a4349291",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RE-USD/2026-05.sqlite",
+      "sha256": "cb58b04f743b7d438ed7bc65186c7936a3dc8848eb211cad4207883644bf77c8",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RE-USD/2026-06.sqlite",
+      "sha256": "5ec115dbc2382e702bd8dd25f8e11bdec62a5fb712070d8180210526cbe2d2a3",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RE-USD/2026-07.sqlite",
+      "sha256": "cd88241e9791a0a2f9ca88c0e75c41392435d15ddbbdbe2947532c863c1c3761",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/RE-USD/2026-08.sqlite",
+      "sha256": "aa8be903452ffa01eebcc827071fc4ed3b1733c5d64d6d26747ff132a5806d9b",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/RE-USD/2026-09.sqlite",
+      "sha256": "1cd9c3aad78973307fa0e6d378882d8b9c6435e3f1d65a476aa6e7df86c92a9c",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/RE-USD/2026-10.sqlite",
+      "sha256": "ac7d6fc097f79499d9f94386a350bf46e12496e23670791d6f6d0aee0726cb5c",
+      "bytes": 61440
+    },
+    {
+      "path": "candles/RED-USD/2025-10.sqlite",
+      "sha256": "305669b2f993e4b429acf735bf0d6cd37e4fa4dccad299333758e2de614f90a6",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/RED-USD/2025-11.sqlite",
+      "sha256": "7cba2056d71e89efe8004acde59ead4629e37a36d815b3fcf44bb0fb624788df",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/RED-USD/2025-12.sqlite",
+      "sha256": "fc21860be2032a9e411ff20d4884d57b90f354acf772e631247c645823a1365c",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/RED-USD/2026-01.sqlite",
+      "sha256": "9933cb6558f7dfe28f832e0e089e4250b1986655ab205d6fd0c7284d2ed61112",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/RED-USD/2026-02.sqlite",
+      "sha256": "d1774a596cf8ffbb72f9955909ab3631099c79311fd977aa72f3fe148ab93530",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/RED-USD/2026-03.sqlite",
+      "sha256": "aae4c5beed502bf6ef1c927dac291e343baf8291125d3c2581443b4ce7408277",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/RED-USD/2026-04.sqlite",
+      "sha256": "bd4d0dcd84c54c1df066670ac138cfabc14592461fdc63f086d1da0244c83a70",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/RED-USD/2026-05.sqlite",
+      "sha256": "7e0fb15c9d1046dccc6da82181f90299d3b853d2c48b6e4af535e650017892b8",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/RED-USD/2026-06.sqlite",
+      "sha256": "24b064acde442b37058795823f6062f6fc11c9309988dc3ad4b0ee8841fc5909",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/RED-USD/2026-07.sqlite",
+      "sha256": "e0761dbd88dc0b7a14fcdbb8a63ba39b2e5b55f50e490d6a8602f513f7843698",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/RED-USD/2026-08.sqlite",
+      "sha256": "ae524262bbe550048d89be07b2d6259c5790c4aa0d8ea1cb8c69103d70fcb73d",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/RED-USD/2026-09.sqlite",
+      "sha256": "1fd92c8a82494b272e3db604ce6ad6c396b660de4dda81fea1d61054cff5a702",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/RED-USD/2026-10.sqlite",
+      "sha256": "3fea251fd9fc8b0b5103c6e5cfff1aaa792ad8c768244e76922b9228eee5c797",
+      "bytes": 53248
+    },
+    {
+      "path": "candles/RENDER-USD/2025-10.sqlite",
+      "sha256": "d500503aa428d5120f06776c63264af6a5b9ba0c3016e416c606724ba55be82c",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/RENDER-USD/2025-11.sqlite",
+      "sha256": "91c35a3493186b58507a1a19d5e9f39f47bb91d219e396caafcb099dfb244f30",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/RENDER-USD/2025-12.sqlite",
+      "sha256": "08d231ff605e9a0e49a831ff1688ab6d0eab494194b5b5c99abf618cf88162b2",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/RENDER-USD/2026-01.sqlite",
+      "sha256": "ca2e31eea83987be21aef7f98549ec6a8c77562ed46fbe693138e64be5224590",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/RENDER-USD/2026-02.sqlite",
+      "sha256": "5c94c1053f1843222d0d5a794b728d3573befd9821cbce697475a03769fde47f",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/RENDER-USD/2026-03.sqlite",
+      "sha256": "5fb66506a4e5e00a493934a369e431251460866f06ebac45fad79729b67875ff",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/RENDER-USD/2026-04.sqlite",
+      "sha256": "433c888eefe359bf0a8e15fdf343483e0951da97942adc145b2546fbb7216dfd",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/RENDER-USD/2026-05.sqlite",
+      "sha256": "dfa5e8cdc4cdf6906ab17d6fdf7550ca18e1808b56e44108c29413d8e79b7f2f",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/RENDER-USD/2026-06.sqlite",
+      "sha256": "bf6a6fb90e95f5af8dc72d0a400f59214128387a1a510af76df0912f9049ed43",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/RENDER-USD/2026-07.sqlite",
+      "sha256": "6a7424e9fee9d68bcf66a45215fdd2bd8a651b6ff68961537a010f8cb7691c4a",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/RENDER-USD/2026-08.sqlite",
+      "sha256": "228cf8f22c397935c04a4261eb8bed5d6497ce793a9d1b24abee235a2b57ae47",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/RENDER-USD/2026-09.sqlite",
+      "sha256": "7c111367db8910b9433f771e6df128244ba873e223ee85da9ecc6a31b51bb1a6",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/RENDER-USD/2026-10.sqlite",
+      "sha256": "55a1c8f168cb949f680356658538b39ee8bd2dbf379229152dd37139cc8f573c",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/REZ-USD/2025-10.sqlite",
+      "sha256": "b2ab898772f366cd2015c18bbf28984ef1291b11d905935d6639544406933387",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/REZ-USD/2025-11.sqlite",
+      "sha256": "3d35ad3a105e445673bc9a2f07d09f0e0a7ae003ee2e6b7767171231f252c7cc",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/REZ-USD/2025-12.sqlite",
+      "sha256": "8d61bb3d35f1204455aeaf0323476894ee32ddf23837971784eb3d5360109ee2",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/REZ-USD/2026-01.sqlite",
+      "sha256": "7d3088b360f3b08d415b7fd70185f6648590b3909d70839d6984999e8fb06a5b",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/REZ-USD/2026-02.sqlite",
+      "sha256": "d340ab65c66f8bb7bc68d155e0c7a9db8554d01caadf551147ef3b1f958bd291",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/REZ-USD/2026-03.sqlite",
+      "sha256": "15db661fe1d3fbee2a24bfce7bb4f8c56293026c46da066f44c0c6f125b3a3ca",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/REZ-USD/2026-04.sqlite",
+      "sha256": "317d7fb5a50988f1d66f7bd39855d40945855c6a83235b5c13f693bff8c9c64b",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/REZ-USD/2026-05.sqlite",
+      "sha256": "962fdf5f48a312002846ac3894c92f066bca241893fe1002104a0c78a8fd65d6",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/REZ-USD/2026-06.sqlite",
+      "sha256": "a6fb0b869904ff4e6706380b9d4a4123a51377e5c5d0b3cba6bab823c883e1bd",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/REZ-USD/2026-07.sqlite",
+      "sha256": "25ef1dc4a44fb6e05dbf24c2dc6f18ad6636fe25bb89cb0bda3f260309b4acf7",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/REZ-USD/2026-08.sqlite",
+      "sha256": "260fdc19526d0008b13a63797c88b0dbff21efca9f91f0d65996ee68f8890122",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/REZ-USD/2026-09.sqlite",
+      "sha256": "26320d528da5c983a44f72dc190a545d3b348bfdc993f36e2c60e97ff1dc109b",
+      "bytes": 184320
+    },
+    {
+      "path": "candles/REZ-USD/2026-10.sqlite",
+      "sha256": "463d47e1d9074306057c94eb899336218dbecec73fb673974aa6856f002f4394",
+      "bytes": 69632
+    },
+    {
+      "path": "candles/RLC-USD/2025-10.sqlite",
+      "sha256": "9bbf8d249626ec3dc5b96b6ce251e11f5f5bbf34197fa6cc81d9a5d1c8c882c0",
+      "bytes": 94208
+    },
+    {
+      "path": "candles/RLC-USD/2025-11.sqlite",
+      "sha256": "8b3c1ed4321685f0fd3275a15c20052d8e0c181dda1809f4707b8da8ed4a107e",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/RLC-USD/2025-12.sqlite",
+      "sha256": "e320bde420963b6794c93d63f3ca1e82610ef2eaf80db02de7d061857ce79a6f",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/RLC-USD/2026-01.sqlite",
+      "sha256": "04ba5a73ee706b58c968e029bc04b50304f14b37c6d5c866c741ea07ad47039d",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RLC-USD/2026-02.sqlite",
+      "sha256": "9f9fb3a362c23958bc9c6b7861b8045a4df1fc9b36cef6aac03e0ac35e0d6897",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/RLC-USD/2026-03.sqlite",
+      "sha256": "2fae735ad8a5fa8c8a95f4b8550b1b5003b09d351eca8990fc9bc6b781460fe5",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/RLC-USD/2026-04.sqlite",
+      "sha256": "c5041cac638795bd2a8e99674919a08ebe8c2b9cdf82da3a1bfe9de7ce521d52",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/RLC-USD/2026-05.sqlite",
+      "sha256": "fd18760bac48e82beeec2131c4731a5057cc3cb1b636e894c4bb5f3d35183be4",
+      "bytes": 98304
+    },
+    {
+      "path": "candles/RLC-USD/2026-06.sqlite",
+      "sha256": "ae7f4c911248478af29ff99aee12aa9ee30fd6cf49b9ac0fc91e37aa392d033c",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/RLC-USD/2026-07.sqlite",
+      "sha256": "adf6560b7a22aa5cd846ed69f920f78bc64934f9032374708915210e61fc59e0",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/RLC-USD/2026-08.sqlite",
+      "sha256": "6cacf2f106a11985e51598de41a228732936e0989935fb5da132c7ad904ddcfd",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/RLC-USD/2026-09.sqlite",
+      "sha256": "b3bb8c09ba245f1868bfe925667690cd4e483c57576878d929f54a82b908e2b5",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/RLC-USD/2026-10.sqlite",
+      "sha256": "3fdd3ca0601bda5cdb5480c9df3cb2897cf87f2a56fc1b3b708775edbca64bdb",
+      "bytes": 53248
+    },
+    {
+      "path": "candles/RLS-USD/2025-10.sqlite",
+      "sha256": "b3c6fd2625d39ab6ff885f55fda9cefff798926cf1358f055dedbf9134ef3b0f",
+      "bytes": 49152
+    },
+    {
+      "path": "candles/RLS-USD/2025-11.sqlite",
+      "sha256": "c9936f9c8bb18387ecb4736cd5ee62f57f7509eb4a93661445554f1bea0b01bc",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RLS-USD/2025-12.sqlite",
+      "sha256": "f05fb87994a0a75d96e589e11ee68efd349da165e8d6e50c140783ecad60e9eb",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/RLS-USD/2026-01.sqlite",
+      "sha256": "71d5d0bf9e49e252c8894af015c7f1faeea93977c7289afc606346f1019a2069",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/RLS-USD/2026-02.sqlite",
+      "sha256": "32e575a2f7c800cc67a7566e28943d9c6c74244b271e1de9b608c8bb99c963aa",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/RLS-USD/2026-03.sqlite",
+      "sha256": "9ff322ee6e4f9662369f73cae49957d45eaa21c11554deedbf1df82222fe34e5",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/RLS-USD/2026-04.sqlite",
+      "sha256": "ee5a19e88b26708f426dad0c780224168ee85ad91f9ae0e5a06778a9f463199e",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/RLS-USD/2026-05.sqlite",
+      "sha256": "ab06dcc0f69c584ef88430e9b15b18df5a074f439cc6f3df328b0a8af07a9db0",
+      "bytes": 176128
+    },
+    {
+      "path": "candles/RLS-USD/2026-06.sqlite",
+      "sha256": "52f736340df10cbaebb99ff843bdf3d6adbaea241d38505c0b64d49b9e0989bb",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/RLS-USD/2026-07.sqlite",
+      "sha256": "38c7f18cfc62fbaaaeac7806388f0cfa1b2f5287219f4280a651d4128a6e7236",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/RLS-USD/2026-08.sqlite",
+      "sha256": "4fa0775cf4432456ee5a59ab91d368446716f197dafe782a1f4d55373f9ef3b6",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/RLS-USD/2026-09.sqlite",
+      "sha256": "ba52be690d491bc945a4514e38fb4c5045eca872513e05f13775b5fe690e0382",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/RLS-USD/2026-10.sqlite",
+      "sha256": "1a23ba849f3c3501952618c5ba8c2c2e0687f66837b6c217bc346bc949ade861",
+      "bytes": 57344
+    },
+    {
+      "path": "candles/ROBO-USD/2025-10.sqlite",
+      "sha256": "708cebcfe80af0223e3b8afe76a9c2938ffba8aa5d13426756d2b12874d90a12",
+      "bytes": 49152
+    },
+    {
+      "path": "candles/ROBO-USD/2025-11.sqlite",
+      "sha256": "6549890001c30995c982c4268490c1ef1c76ef6b3336bc04251fddf82cf36d47",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/ROBO-USD/2025-12.sqlite",
+      "sha256": "d8d6f929a95dc7922304cabbe9c09b91b3b5ef94e023585531d43296d1dc3bb2",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/ROBO-USD/2026-01.sqlite",
+      "sha256": "ac53c66ac901a555f505265e78f54a352a11dd9effa495e0568f6981dcb9be21",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/ROBO-USD/2026-02.sqlite",
+      "sha256": "cb2b3813812e4c12f3f52907d3b9a1df88182202426d17a5c2f8572c27d2c4a9",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/ROBO-USD/2026-03.sqlite",
+      "sha256": "ea74f731e4bfc5c326939da4fc77e282cc96eeffb2b09b727a2c9d012d293035",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/ROBO-USD/2026-04.sqlite",
+      "sha256": "973f203d7f5797bd71e8054ed3d61326c4975ffbaa61a77070de1bce9cc04ca6",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/ROBO-USD/2026-05.sqlite",
+      "sha256": "179ed72f197f8e5655d3ff55f6e3fe03b92abcb6ee6a959510723cd512cd5021",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/ROBO-USD/2026-06.sqlite",
+      "sha256": "a8ba31368f8a15d5d9e55bd0975d69459937da56bc6ed062b94253ca95f009db",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/ROBO-USD/2026-07.sqlite",
+      "sha256": "f716d5243f12c33bb8a43e975d817adb3f251446dd6e2ff513be91b648b85f8e",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/ROBO-USD/2026-08.sqlite",
+      "sha256": "efff08c7e5c81a17d584668391786b8909b75c6b1dd4ca976d9eaa025e03544f",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/ROBO-USD/2026-09.sqlite",
+      "sha256": "8df41ed39eeab159d63a96c5aa9a793f22e6fc1ded776d9f6c32b1e0f1720258",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/ROBO-USD/2026-10.sqlite",
+      "sha256": "f197977a21f5cb62ec75e1dfe7a71dc8888bd397126e887c48e8cfe131a4df5d",
+      "bytes": 53248
+    },
+    {
+      "path": "candles/ROSE-USD/2025-10.sqlite",
+      "sha256": "39fc1d578c55038c4d91f4683a306217c439eab256d90b714033186dbbdadadf",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/ROSE-USD/2025-11.sqlite",
+      "sha256": "1cceae4cda20af725797bf78e91a4064bbf072b55eb0d9d20128f793ac4c5536",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/ROSE-USD/2025-12.sqlite",
+      "sha256": "9164af43fc6d7930c7e6212947848b7eb5fb2c2ed13b391259bc7434d1d2236a",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/ROSE-USD/2026-01.sqlite",
+      "sha256": "db96624f10e1e04853ba334157cccc6ffde839b9138cfb424e263d307d68ba6f",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/ROSE-USD/2026-02.sqlite",
+      "sha256": "9284c87de0b6d87b80cfc690394e58d263600192758ee177223c4c48ce1fe8ca",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/ROSE-USD/2026-03.sqlite",
+      "sha256": "3f5db24efac6b7263d466f716bdaf517970127523ecdcfb1edb1089d5f6acd2d",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/ROSE-USD/2026-04.sqlite",
+      "sha256": "f4f1ed5f7e9f2a640b0a54a2f8ce8656065b5207386d0a111320e5183dbe038a",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/ROSE-USD/2026-05.sqlite",
+      "sha256": "cb52babf7e830c2ac9271cc4fe4ca42c243cf15279f4a70c57d3e43662b472dd",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/ROSE-USD/2026-06.sqlite",
+      "sha256": "6591659f2395065c9afd4280bffc1e9e26321e1e499ebae24e1496d93e2e54b8",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/ROSE-USD/2026-07.sqlite",
+      "sha256": "1fc5ab21a9b6f99840a289eb970ebad5776900dffab78616172c5ca0454ebcb5",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/ROSE-USD/2026-08.sqlite",
+      "sha256": "47b2afff28b9287e11e5688af2a33fde7b81d28187413eee2113e881fe3f6d51",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/ROSE-USD/2026-09.sqlite",
+      "sha256": "7309f991ef5e92a3f88448a851c5c91188bbd81148c6b75baa802218134d7e78",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/ROSE-USD/2026-10.sqlite",
+      "sha256": "e8818fd4de85b00ca3553d27dc2cff80d20cb98086485fdbe813308a8ba6bafd",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/RSR-USD/2025-10.sqlite",
+      "sha256": "d5025594eaadd683c3689d296ba30d8bfd93587ce8dd0c6914916ee6a04c50e1",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/RSR-USD/2025-11.sqlite",
+      "sha256": "fd18fcadac087e770fb6ee5f1a64e3e90ab1e7e6a26471ec3a1e26a7746c3295",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/RSR-USD/2025-12.sqlite",
+      "sha256": "dd236a7ef9a3e232b4425cbd328c3c42aa481bf8eff47b051c6d5342dd3165ab",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/RSR-USD/2026-01.sqlite",
+      "sha256": "314bea76d79173fb14db0a44e9d51d6d1c0e1c09959d8a812a88a581b349606e",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/RSR-USD/2026-02.sqlite",
+      "sha256": "97e373b0ad6261abe49bbbb86867027defa8f6a9ec566832e3028ebf4b0a19fb",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/RSR-USD/2026-03.sqlite",
+      "sha256": "16fbf799942bdf0d985e3f6fab6df0ee03302a48aa0d6d034bb9cca76ffe8ba5",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/RSR-USD/2026-04.sqlite",
+      "sha256": "5b58bdc3c9ed637b97bfa4071376755f0f0b80949d06cdda316571d4bbde549f",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/RSR-USD/2026-05.sqlite",
+      "sha256": "89a5b017102590006ac108572032f7d1addfa75df705b4857bf45c3a002c5993",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/RSR-USD/2026-06.sqlite",
+      "sha256": "3d59879a83bf61abb547932e518bdb2863af26425ed7f53ff87b3b6bd26c9e71",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/RSR-USD/2026-07.sqlite",
+      "sha256": "03b8790417109eaf25101f84a9378989998124930699edc0f1b37b8243ca1637",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/RSR-USD/2026-08.sqlite",
+      "sha256": "fb5e0964c8aa3e0d287575dbf81820e55598c1ff3ca5fc584d3735b330207454",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/RSR-USD/2026-09.sqlite",
+      "sha256": "789f740428ebc3d2e73df25754f4a2f0a1e802c087ffd7b68f459901f61ad3d1",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/RSR-USD/2026-10.sqlite",
+      "sha256": "93cdfe6deac9cb501a7991b5de61271c7d0ef0e1d7d61a45a439947b5fdc195d",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/S-USD/2025-10.sqlite",
+      "sha256": "d625551acfbabf4dec64d1e531b3c5b6aa36c738250baf31b9ea8737fe36a781",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/S-USD/2025-11.sqlite",
+      "sha256": "cf7666bf7c2982f878e5768e6e68397a2f71ff365616c6a1e5356f04ec8b40ac",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/S-USD/2025-12.sqlite",
+      "sha256": "5e07aaba2da22e95dfc91814b063eb3ca50b12a5073a2623ad54ca8d09c14d5f",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/S-USD/2026-01.sqlite",
+      "sha256": "44fb84ba4938725e6009981a620b69728410b931589251475ef418b91391e955",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/S-USD/2026-02.sqlite",
+      "sha256": "a4cebdd518a27003124cece554fd1a8bed0379d91ca02c5d5920e1093ff4fbc6",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/S-USD/2026-03.sqlite",
+      "sha256": "8e40607034b6161e0647c0dfcb5ae14e6ad57c5dcdfa4fa4906a9e72debd58ac",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/S-USD/2026-04.sqlite",
+      "sha256": "a0e38bbf353080a1ff65db495c53ca0bfad64ab499893b9ddf67bd5efbaf5395",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/S-USD/2026-05.sqlite",
+      "sha256": "cc8423ab719664310fe97710927a23a13b5a110599d1e27c835bcea20753fdf8",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/S-USD/2026-06.sqlite",
+      "sha256": "3aefbc2dc7988787e2c45a843067b5406763e076a4fc7c2badcd22ca2d991a1a",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/S-USD/2026-07.sqlite",
+      "sha256": "02b66f015e20ae0572cc6d78bcfcbecfc5b304cb39275c08fa89f53d4171cceb",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/S-USD/2026-08.sqlite",
+      "sha256": "151a85321a45073efd9610189e4f00cf2deb84e716e9c2edab12689b6770fba3",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/S-USD/2026-09.sqlite",
+      "sha256": "cf03ee07930ec7b1af199ab551f432f305bd4f4480e8885ae9b48809982127ba",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/S-USD/2026-10.sqlite",
+      "sha256": "02d83413033be8a3d1a78e1df9d36acfe84274e5fa50d2c9a01172ea7ab5c2d5",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SAFE-USD/2025-10.sqlite",
+      "sha256": "5caf0d27b652e93e44777fe154b6bdde6e335062197672f9d83e7517a7e65db5",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/SAFE-USD/2025-11.sqlite",
+      "sha256": "370a0febbc5c9a264c75700cb1c9a05a9df8d7cfe4f14cce04edd9ada5a34cde",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SAFE-USD/2025-12.sqlite",
+      "sha256": "940efc512b80db1459c6594f7bb1f8f83e5f5a455fbc3a6676fd26a805e39cbd",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SAFE-USD/2026-01.sqlite",
+      "sha256": "65f9aa12d0460f0620a5520371daba118fc8c274e144a5b58990e273b2ea0b5e",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SAFE-USD/2026-02.sqlite",
+      "sha256": "b082009de45039b4d62217b7f22b38ff290cb1bb460ebacc5ef116ed62f6c152",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/SAFE-USD/2026-03.sqlite",
+      "sha256": "e96e81f9340dd11f991e4387023b0f045705e360aeb526e483f63a11c7e21718",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/SAFE-USD/2026-04.sqlite",
+      "sha256": "641c2ca71968a57662d6211f786b0dc8a2983922b392fdebe83d1cf97a83f0c2",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SAFE-USD/2026-05.sqlite",
+      "sha256": "75aa53b6c5e9d0bc51bc5075394ef45397f96735325cbfe06ff8121c021b3cc1",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SAFE-USD/2026-06.sqlite",
+      "sha256": "8d43cdf1ea5b43c6c874420d0063b63f440009c1d6e04a23eb281ce370b0caa6",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SAFE-USD/2026-07.sqlite",
+      "sha256": "1137893f6d1f619a081d3818a99f3fcbc5973a2ebe2bb69e098abc5b121de231",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SAFE-USD/2026-08.sqlite",
+      "sha256": "edda0458be58f3aac349d90be8589be08fdbdbbdf596287a375eb647cdca349c",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SAFE-USD/2026-09.sqlite",
+      "sha256": "9841cd342825e42a33f41b0bfd7c5a0e2eb35a61322e210aa243eca6bccdba9a",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SAFE-USD/2026-10.sqlite",
+      "sha256": "9c4b9a955198a75cd94f42490bfb913064ec3dd57adc6d9eb6bf4ecb595f75bd",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SAND-USD/2025-10.sqlite",
+      "sha256": "cc462d4c427bcd201878d6f33a43845c662729d22839667c9529b3a62df3d4bb",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/SAND-USD/2025-11.sqlite",
+      "sha256": "7cadd25d3d67501e6db3e71e0cf00f0d3927319c79e53f32035b4fc392a44119",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SAND-USD/2025-12.sqlite",
+      "sha256": "48e742da3e0acfcbcab928ea2a56d023ae5b1107d53cde7be986bbe96fcbefd3",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SAND-USD/2026-01.sqlite",
+      "sha256": "83d8fc89448c1d0e43579490a3d6c864d56048cdc7574ce87fa9d70ec1977a3e",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SAND-USD/2026-02.sqlite",
+      "sha256": "e8ab5f197f113e3d0a5e6e415e63b6dde4a2f0a807b1e5b1a976900b7cbb53b7",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SAND-USD/2026-03.sqlite",
+      "sha256": "c5c1726bf6a5b3d02c266dcf464f2699ba93399b5b1a2d1c247a52791eeefb19",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SAND-USD/2026-04.sqlite",
+      "sha256": "32ad05fb02da498c7b3c19c7c4f51139d0b27e5800b72cd8307bf080368d10d2",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SAND-USD/2026-05.sqlite",
+      "sha256": "2a48e9984a8be7c431029c10d4f2c11676a69e80581cd9c8286bce68eb3847bc",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/SAND-USD/2026-06.sqlite",
+      "sha256": "26958583f8d7136a7d47649393593ace387a51799392dd350ce69c45f6e9c3e2",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/SAND-USD/2026-07.sqlite",
+      "sha256": "8a11ee792d6296e615d111174152e89bd88cb07d71180c2dfe0a3ed67715f2a6",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SAND-USD/2026-08.sqlite",
+      "sha256": "499ba314eb3438c72154b85debf3dd1bf39b4fd6c20903fe76cee58781f19b9e",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/SAND-USD/2026-09.sqlite",
+      "sha256": "44d19377dc5c5f659c81336bb617346d5712f8503c73a7b29f68415263dc7a1f",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/SAND-USD/2026-10.sqlite",
+      "sha256": "84cfa6bfbe13aaa66ac9e26faceebfc356db7c6dc37bcda0a0d8fec5d45b95c7",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SEI-USD/2025-10.sqlite",
+      "sha256": "27df71d960c18d3171a8f73c034d2a73e1a5455b31d39f3a10016182b164f1fb",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SEI-USD/2025-11.sqlite",
+      "sha256": "69b768541564b04ef3cf2d0d25dae7d3450d825b5a719d6206a8eef2123369aa",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SEI-USD/2025-12.sqlite",
+      "sha256": "8bee304b4e45f49da8c0e5a8fbb660c637e745e98ca26a50609ea349d3bf8b1c",
+      "bytes": 172032
+    },
+    {
+      "path": "candles/SEI-USD/2026-01.sqlite",
+      "sha256": "18ec68a9ac2b6c29fe0d46d5f3ee54e0fea9c1518135f517cac8c793fdbcb9a1",
+      "bytes": 172032
+    },
+    {
+      "path": "candles/SEI-USD/2026-02.sqlite",
+      "sha256": "ec67bcd11f77dfcaa84dce86196626bb5e65ccbc2e3d8012dbd884e09a28cf21",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SEI-USD/2026-03.sqlite",
+      "sha256": "28b5dcb0c8096b92e2c6ac4b643f755c688805c30d5dd7719b23d5933f8fc1ce",
+      "bytes": 172032
+    },
+    {
+      "path": "candles/SEI-USD/2026-04.sqlite",
+      "sha256": "509a58566580639640cbe682d352dc6eb3805082f1062d5024b3941aaa58a3bf",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SEI-USD/2026-05.sqlite",
+      "sha256": "2d1f9083a55547fefbeace31b7b6b39f5d6e666085e62725ca97d6c59a8ee577",
+      "bytes": 172032
+    },
+    {
+      "path": "candles/SEI-USD/2026-06.sqlite",
+      "sha256": "9a6e1cc5090fb699f7c2cc3add064baa02bc0afcc7a016849d1bad5b16a50c1e",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SEI-USD/2026-07.sqlite",
+      "sha256": "dff7ce736685d38f1202d95c260e1e0dddea3978d318887148fdd8727fcfdcb4",
+      "bytes": 172032
+    },
+    {
+      "path": "candles/SEI-USD/2026-08.sqlite",
+      "sha256": "608a7f4b8e98adeb78e3fdc7c8338c0ce446014c32eef80dd8fcefa2f64dca2f",
+      "bytes": 172032
+    },
+    {
+      "path": "candles/SEI-USD/2026-09.sqlite",
+      "sha256": "99c81e1cdc70c6b72b6cbfde120c8fab8285e767261df424aae6a4cd3fe96a26",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SEI-USD/2026-10.sqlite",
+      "sha256": "0efee8a538b6b7e63dd65fad518aeb461900679cb3f0f13cfd5b41c7ffa7caba",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SENT-USD/2025-10.sqlite",
+      "sha256": "8061e114a10de7d7ef443aebca239a8e50d137b31e3a5fd396ed572a5ecabd1e",
+      "bytes": 49152
+    },
+    {
+      "path": "candles/SENT-USD/2025-11.sqlite",
+      "sha256": "0ad227e455f4ebd27de07bae379276f882856341181cdc621ab987c286db32fc",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SENT-USD/2025-12.sqlite",
+      "sha256": "50350707b905cdf8596efefbf57feec4fe8ad2a74e05bc981fa3c9b9c0c12a91",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SENT-USD/2026-01.sqlite",
+      "sha256": "95e17fe9e13ed56aaa84af0103dea4a513c2bff8bc796bdd5e359a50f3b31aac",
+      "bytes": 98304
+    },
+    {
+      "path": "candles/SENT-USD/2026-02.sqlite",
+      "sha256": "605052eb73288a9f033d3cc4ccae68eab70494439cf80f82fd023a366bea4bb4",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SENT-USD/2026-03.sqlite",
+      "sha256": "168591e2190d9a9e43382486d6fcaf8cf58019f15d0b832c109f2584c5a8b4e5",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SENT-USD/2026-04.sqlite",
+      "sha256": "dcd90d7800c35e8f1ac825b48a33914a7fc25048f71318e8d97bc47499411bb9",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SENT-USD/2026-05.sqlite",
+      "sha256": "b8cfd8fecab72cb01ba3540e32a53e0d04cc531450bc9315b8de91ca277a2323",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/SENT-USD/2026-06.sqlite",
+      "sha256": "7ba367172e835a3bb3cc2d14f49e731e4f81c913eab20bb538e946d1a77e3204",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SENT-USD/2026-07.sqlite",
+      "sha256": "3ce8348ac2e38165e9307ae70706e44c90aefd30202d6b1c627ffd03d296922d",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SENT-USD/2026-08.sqlite",
+      "sha256": "7c9a10dd68b46bb2863278395153e6e8d139be5757fd50c4e86effc2da9a7221",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/SENT-USD/2026-09.sqlite",
+      "sha256": "48a55084afab7c451f1d377593b863d617049b2e2717cc4c5d9277e81f50ab6c",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SENT-USD/2026-10.sqlite",
+      "sha256": "c0c38e69c780de8894fd788861b0f910a74188d636ad708f3cd446d1cb51161b",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SHDW-USD/2025-10.sqlite",
+      "sha256": "9bf99c76c6c25cb9d8a9c272de6e1d7feed72970653876d0e09728bee08227f9",
+      "bytes": 73728
+    },
+    {
+      "path": "candles/SHDW-USD/2025-11.sqlite",
+      "sha256": "d8dbc52778da1a57a826d80cf7faede1c3a739a3fb60667702e6bddea8609e77",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/SHDW-USD/2025-12.sqlite",
+      "sha256": "5ee2b7d51add328b18b9ab3fd073b3849d34ef30d2690fd051cbea12f206ef9a",
+      "bytes": 94208
+    },
+    {
+      "path": "candles/SHDW-USD/2026-01.sqlite",
+      "sha256": "89abd9266ddeab221b8fb3c1e76dd9a7f9a8970adbd1e110c1d420d98e5996b8",
+      "bytes": 94208
+    },
+    {
+      "path": "candles/SHDW-USD/2026-02.sqlite",
+      "sha256": "610f2345c85af52d480b8b41525e675b58e28ec622156c0b0a313e4659f38e9f",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/SHDW-USD/2026-03.sqlite",
+      "sha256": "73f52e076d45db61c3b8ef944554b0448dc6422fd66c9f87ef939523a17d85c5",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/SHDW-USD/2026-04.sqlite",
+      "sha256": "776cb178f1796967a1ba32d978a3bac3fe86daaf90f1d87af2be3c53d9d4393a",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/SHDW-USD/2026-05.sqlite",
+      "sha256": "7a0b244011ba399d7661de2e3ba5a47fb5ea2b1c57a27654ec61b0a0209cc30e",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/SHDW-USD/2026-06.sqlite",
+      "sha256": "0b2d5fb8bc51bcbc972647b12d062206fd8a25561fc8ec50f8a1c4509f865772",
+      "bytes": 94208
+    },
+    {
+      "path": "candles/SHDW-USD/2026-07.sqlite",
+      "sha256": "9aa2debdda6509186676d4e8c88e2d00be2a2d19fd17c6d281442e444a8ca9e9",
+      "bytes": 94208
+    },
+    {
+      "path": "candles/SHDW-USD/2026-08.sqlite",
+      "sha256": "11c7aa532c59881f18ecb67935ed1cb9babaeb08fd31ab203ec2f28b864518c3",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/SHDW-USD/2026-09.sqlite",
+      "sha256": "f9e4382f2730ba0cddcb93188ac664630dea69673e0b6ca68b8d4d9a19748537",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/SHDW-USD/2026-10.sqlite",
+      "sha256": "a53935dc18da3bc70ed539b609a98542cd841b9d2c6bca293285000a1e951388",
+      "bytes": 57344
+    },
+    {
+      "path": "candles/SHIB-USD/2025-10.sqlite",
+      "sha256": "d5c50b79c80586b601105081dd4a96a8d21a6be1988070ed622db60ece01e0f0",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SHIB-USD/2025-11.sqlite",
+      "sha256": "d2b65faa02022d8292793a2537bad1e6bfebd0ca97401fd5689684b18c3b16ba",
+      "bytes": 208896
+    },
+    {
+      "path": "candles/SHIB-USD/2025-12.sqlite",
+      "sha256": "1d15ae6ac79c6e4b29c9dc01d7cc96671672993b00e0bb9d38bd20baa4ff3325",
+      "bytes": 212992
+    },
+    {
+      "path": "candles/SHIB-USD/2026-01.sqlite",
+      "sha256": "6efe33425080b5ea16f5dcc88f37379edf6a393c923890d00540dd34adc188b1",
+      "bytes": 212992
+    },
+    {
+      "path": "candles/SHIB-USD/2026-02.sqlite",
+      "sha256": "71506da9728a125f44c851eb45fc3288b233945b5cd9419292205b9493938e7b",
+      "bytes": 196608
+    },
+    {
+      "path": "candles/SHIB-USD/2026-03.sqlite",
+      "sha256": "bf62ff0864c91e3fe9af7dddb6e66b7e53acfe17236f788e5738a1c7cd009b77",
+      "bytes": 212992
+    },
+    {
+      "path": "candles/SHIB-USD/2026-04.sqlite",
+      "sha256": "b9ff27b47bca2115b867b87cf3445ac228cb6fc322c81ad1396d6102e62cb7e8",
+      "bytes": 204800
+    },
+    {
+      "path": "candles/SHIB-USD/2026-05.sqlite",
+      "sha256": "aa8d75085f951bcaf5f5eadb355523042665431f783d8a987e65d165fb4ea484",
+      "bytes": 208896
+    },
+    {
+      "path": "candles/SHIB-USD/2026-06.sqlite",
+      "sha256": "5d5f52b17ee8af1aa41dc3ecc8f6582cd764eb2f41d4585d7680d4a4fe9baeb0",
+      "bytes": 204800
+    },
+    {
+      "path": "candles/SHIB-USD/2026-07.sqlite",
+      "sha256": "4713aaad41227009be3299e887bae69c96a1b25f803ce4921ec17691192418f4",
+      "bytes": 208896
+    },
+    {
+      "path": "candles/SHIB-USD/2026-08.sqlite",
+      "sha256": "bb909b77cb132af4176a9eb2315205e48abb083a0a190de06af1c237645cdf3a",
+      "bytes": 212992
+    },
+    {
+      "path": "candles/SHIB-USD/2026-09.sqlite",
+      "sha256": "ef504e7cb9e4e42f8d910cae28201c5995117e65692f12bdc9aaa8f6566dbef0",
+      "bytes": 208896
+    },
+    {
+      "path": "candles/SHIB-USD/2026-10.sqlite",
+      "sha256": "aae23ceffa856f41412267bb575ca7f49ac160cd071a8110ee2ce015b9011f2d",
+      "bytes": 81920
+    },
+    {
+      "path": "candles/SKL-USD/2025-10.sqlite",
+      "sha256": "300223153328094acbaa05eb7d9c3f61e9c5616eb4a03097f5cb9268f21a5f1d",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/SKL-USD/2025-11.sqlite",
+      "sha256": "392e2c87e6153672705b9381b7e4307d99b6c58efdd993d455de7138cac85509",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SKL-USD/2025-12.sqlite",
+      "sha256": "f0f96de556c0633efdb58a211ec759aaeb5fc9cbcb7b0d3eb9aeb82c6111af48",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SKL-USD/2026-01.sqlite",
+      "sha256": "c66cbbf578227cc3925ee00991da4356e8ec4412000ed38ae9cd9d0fe313d7d4",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SKL-USD/2026-02.sqlite",
+      "sha256": "c72de5bb6b4297aba7553959a392d25f1b829861e37fbb00141f1dbe5bdc5d0e",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/SKL-USD/2026-03.sqlite",
+      "sha256": "28613e9583f77172f56f1adf2b14f55ff4759a7b1eee258d0e1010c67d0d5f95",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/SKL-USD/2026-04.sqlite",
+      "sha256": "d4653ddf30e0d497b0437cd6042fc88a8ac922a6e9f403bd071b613acadd154b",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/SKL-USD/2026-05.sqlite",
+      "sha256": "26c45ce9cfa476deae012e7478fd6cfe5679451ae467f43fe0aa918c57b7a82b",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/SKL-USD/2026-06.sqlite",
+      "sha256": "e5cebb8372e0ab49b3e45479f49ad7545ab345dc55f27e13c6166029513623f9",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/SKL-USD/2026-07.sqlite",
+      "sha256": "772c7866b7b531d58dce9eb1bd110535e3baa62fed4913248d8bb3486e2667f4",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/SKL-USD/2026-08.sqlite",
+      "sha256": "2cfe5603708b9ad294fb8d0c59609200d0af77daaf5202279344da4290dfe0d6",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SKL-USD/2026-09.sqlite",
+      "sha256": "e58f05a1cfadb478aed6ef32a2767e3c8acc933dc42e6ff5f6decde232d9c553",
+      "bytes": 176128
+    },
+    {
+      "path": "candles/SKL-USD/2026-10.sqlite",
+      "sha256": "68b4a6e30ce417461019374faaecce7e0bbacfd42323e82f93a9042ccd2a9899",
+      "bytes": 69632
+    },
+    {
+      "path": "candles/SKR-USD/2025-10.sqlite",
+      "sha256": "b265aa990993af3bc85b79e7a816faf2b7450170649ef7e8df26c4d86e80d2a8",
+      "bytes": 49152
+    },
+    {
+      "path": "candles/SKR-USD/2025-11.sqlite",
+      "sha256": "49ea60072201d0ed371977ad15df5cb9ddf36c0d03238b484b13b021074f1efb",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SKR-USD/2025-12.sqlite",
+      "sha256": "f24329001db7ca87c1196a363311fbc70d370323cab13803b4bf0be55dc6223a",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SKR-USD/2026-01.sqlite",
+      "sha256": "3c875fa2b296fd030de1fbe3d2ae615b06c2b1ed26387b0078f35ac84fddcb4a",
+      "bytes": 98304
+    },
+    {
+      "path": "candles/SKR-USD/2026-02.sqlite",
+      "sha256": "df2a843d9e9eea1b04f58b596546f9d27f191ee5d4df0366a7970c9370749f34",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SKR-USD/2026-03.sqlite",
+      "sha256": "bd455734fb5adad0db655cde95952c6f1dccb8f661c996ff7d16656046dd92f9",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SKR-USD/2026-04.sqlite",
+      "sha256": "5320afe0178ad960c35d81533d836c7819ee37e2ffb18d6df2870a92b69463f9",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SKR-USD/2026-05.sqlite",
+      "sha256": "2411db5cf983626c56b0776ded9d5accdeeb2519bf8e2fd0379f3c442601e619",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SKR-USD/2026-06.sqlite",
+      "sha256": "dcbef436414747b1a5e968f3fbdce297f8481212e1b1fab605fb93b573b681fc",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SKR-USD/2026-07.sqlite",
+      "sha256": "1cdd04c9f3ecd3a7ef9e112330aca59b7d698dd51d16642514bdb5385c7f98bb",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SKR-USD/2026-08.sqlite",
+      "sha256": "2014decf3bd990906de818a23411937ba38a4880548c241212f0ddb16fc545d0",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SKR-USD/2026-09.sqlite",
+      "sha256": "851662089a0ddc4889cc0357c0d926fcc0fc066c2d75053b5fb384190410c3e1",
+      "bytes": 172032
+    },
+    {
+      "path": "candles/SKR-USD/2026-10.sqlite",
+      "sha256": "f20f2e8879b7048bf1cc01d8ed79d153f34ddbff658f0898a3bb020d152c8114",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SKY-USD/2025-10.sqlite",
+      "sha256": "2260da1be61cb9d664836b366f9cb2946d86b77604a52bb183f42a2da0813ba3",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/SKY-USD/2025-11.sqlite",
+      "sha256": "3773b766cadd362d14fb9a0ccd8cd0f50970284aa94e7f49bfde41b18e684018",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SKY-USD/2025-12.sqlite",
+      "sha256": "77e10eaea5c07289f56ca0540105fc898eb621095db5ced40af8f65f99d5b6f0",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SKY-USD/2026-01.sqlite",
+      "sha256": "71efd08ac65953b7ba5401abecb1d835b163c4f709a2b2b06aac3ddcd8ac7104",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SKY-USD/2026-02.sqlite",
+      "sha256": "9c9e0b6cb56700f04a8f63fc5959f8565f71c0c7daf5c93a17f3cdea39240938",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SKY-USD/2026-03.sqlite",
+      "sha256": "5582c3df9c10305b04f8924315f371b28ba197530214de24d09c807687420823",
+      "bytes": 172032
+    },
+    {
+      "path": "candles/SKY-USD/2026-04.sqlite",
+      "sha256": "583efb27589d9463ae89199b2e6d3fd9abef6d1efb05913a4ab092c10e5c6c59",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SKY-USD/2026-05.sqlite",
+      "sha256": "e4e59ad4eea315e36f0aa6359191125111cea5b148c1bb8ef0fbffc503d2bac1",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SKY-USD/2026-06.sqlite",
+      "sha256": "83c2d3d0e6f709e124913d306d0b4040b3cd00e58d6887828ab5e1b35f9cf940",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SKY-USD/2026-07.sqlite",
+      "sha256": "f8b2098a168741923e58c27979a49f822b18bfac08b92bdbf8eb230aeb00c3dd",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SKY-USD/2026-08.sqlite",
+      "sha256": "fde3570964adba0368aedfea76828ca47aca8af7e7ff51af4e34068d5b04f763",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SKY-USD/2026-09.sqlite",
+      "sha256": "55efaeff4d62c2cbacd8c3d3405ac350c6684e964d67a9f5b3d8d92766236837",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SKY-USD/2026-10.sqlite",
+      "sha256": "2023c6d38fd97bd3bbead6172fc20220b6b8fa472dcb6f15f674ba651dea9cf3",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SNX-USD/2025-10.sqlite",
+      "sha256": "409db0b2bf61e414953515b2364def2c9765cd1b0b581cbc823f44ad1be535e4",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/SNX-USD/2025-11.sqlite",
+      "sha256": "12d9c59283a4481bcae39f46f4a5209c3226c41eaaa1684b53d4e8116ebabb02",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SNX-USD/2025-12.sqlite",
+      "sha256": "819dc63c60068068a4f1d20f25d51ed407c65a4f1f56b8b0a88adc8ced8d7bdf",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SNX-USD/2026-01.sqlite",
+      "sha256": "4594889cb0c84e7148fbd3f784e7d0cc52e7bbb2f0dfd12ffc3ef69a6dc635f5",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SNX-USD/2026-02.sqlite",
+      "sha256": "e8b46b2df66e1146430377e57e3d017aa44706a868baba5b00ea1e80ceb29f1b",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/SNX-USD/2026-03.sqlite",
+      "sha256": "21f9616ef4a674f279989324ab42e90f055c9ef03489b5dbe17ff7b1e9a08218",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/SNX-USD/2026-04.sqlite",
+      "sha256": "5e8302662f6f3dc96aa8fb2793a82e256ad8439e78423955c07820387a65f486",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/SNX-USD/2026-05.sqlite",
+      "sha256": "682f155664f8e9e1466ae537228427e62078fe60718f855d1b7d58b4057bd165",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/SNX-USD/2026-06.sqlite",
+      "sha256": "ffe6cc5cfccb2032e19684617e55bacb15c26e37def8e30d57e6cf5e3653f9c2",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SNX-USD/2026-07.sqlite",
+      "sha256": "244f7b35cb4bfc22b056a03f9482bdbdb1649a980d8bd0c206898b173c1202c4",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SNX-USD/2026-08.sqlite",
+      "sha256": "d29e95d16d9c1121b4920dc43f82ca16f31c98d27051b645c4399aa71f5e7084",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/SNX-USD/2026-09.sqlite",
+      "sha256": "8ea8ffbd5f58977b871bda4e6742b3926ace0ad922fabffc6c294d7d81e876a1",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SNX-USD/2026-10.sqlite",
+      "sha256": "58317112b8d780497188e0f15258ff0885880bb7f909fb7d41b511b331875e72",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SOL-USD/2025-10.sqlite",
+      "sha256": "b4a13687a027cc9a422454627dc6a76066b14f7e5a4f878f357bf0a054654036",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SOL-USD/2025-11.sqlite",
+      "sha256": "50e031f607ed13d064a84989fc6a3deea8f7fdb9a144fc1bc8ae0a749c98f723",
+      "bytes": 172032
+    },
+    {
+      "path": "candles/SOL-USD/2025-12.sqlite",
+      "sha256": "38e92c11321feab2133a2d89eefdc847185c2c5594a04bfa30c428c47e9a5316",
+      "bytes": 176128
+    },
+    {
+      "path": "candles/SOL-USD/2026-01.sqlite",
+      "sha256": "354c2c874af2c14131bf0f70b94a95935ef22cf8d08ada0d512919dfb269d1d6",
+      "bytes": 176128
+    },
+    {
+      "path": "candles/SOL-USD/2026-02.sqlite",
+      "sha256": "f908596c9da4b11dfcaf7ed96c84bcfbc100407eaa0633b63292f5340da6312a",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SOL-USD/2026-03.sqlite",
+      "sha256": "209a0ebd8995bea431daae2d3b1945140e840cd9a3e173a5d9fb3897c6d25adc",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SOL-USD/2026-04.sqlite",
+      "sha256": "d60fc395c94a69e8748cc32e62a97c7c8d60b87c21f87320e729bb314743640c",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SOL-USD/2026-05.sqlite",
+      "sha256": "a0871201b89300df0d9c426671badd51021cf6b64704491047e67c67abdd5aff",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SOL-USD/2026-06.sqlite",
+      "sha256": "d30c6dd2af964e414aa25801173b0b4143041ac51160be8b02408a38711ea49b",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SOL-USD/2026-07.sqlite",
+      "sha256": "f58ed96f985724d43d16cb6c75278dc6ecea18dd7e9293018ef4b8c7ec9f8700",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SOL-USD/2026-08.sqlite",
+      "sha256": "82dadeb87b4d2489fa99ad09b63816e7e1df33ca7d03048af6d5d9899d60c9bf",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SOL-USD/2026-09.sqlite",
+      "sha256": "eedb3f3cfceb1c40eecd71717056d8ef796b7f4f2bfa9ca6b8e16fc74aad1e39",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SOL-USD/2026-10.sqlite",
+      "sha256": "b05f2ecf8a43ba3430d6aa25a150a73d0fdea33fdbb34df6cd12ff0f3ffa4aac",
+      "bytes": 69632
+    },
+    {
+      "path": "candles/SPA-USD/2025-10.sqlite",
+      "sha256": "bc978b72bc50c95d9714b5ef493cc1c8c3aae3a90be2b5d605347f59ba21c211",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/SPA-USD/2025-11.sqlite",
+      "sha256": "3bbb43a58e7ea5b93569f8d48db5e0dd565a3babd0fe3027fa2f568f6924b4a0",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SPA-USD/2025-12.sqlite",
+      "sha256": "c0cbe8da9ea9e4178755c6a213d42cab4ba4773a273677bb09b5f78a6e488af2",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/SPA-USD/2026-01.sqlite",
+      "sha256": "ff35f78668a4040517afd7d63495d510c1bc13b1e06f56afff0defe107a36c05",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/SPA-USD/2026-02.sqlite",
+      "sha256": "ec7881ce75f5b724684154e0a5683a33909ff565b83ad9fbb425e67d99e9198b",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/SPA-USD/2026-03.sqlite",
+      "sha256": "db38f2c6e8ac6f1be67659e89a798edc45073ba64db2ee42ddc9a8efafd74bd2",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/SPA-USD/2026-04.sqlite",
+      "sha256": "c630eeef980749c6788c95f5ae76c9cd0e2a95a4ca089c3330132f3788aa008f",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/SPA-USD/2026-05.sqlite",
+      "sha256": "0b1a71dff4ff60f8c98879da2b0fa355834ccecb6c5b2ff1706aeaac5de57b8e",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/SPA-USD/2026-06.sqlite",
+      "sha256": "deade2cb69e5b61649c7d39a4647af669c2ecf3a0b738ecf847c3b2f95d6af23",
+      "bytes": 98304
+    },
+    {
+      "path": "candles/SPA-USD/2026-07.sqlite",
+      "sha256": "a0e5e02c71c347bf21b32bc4e1ecb75cb506362c5c26ddbd0f5ffa7bcf58766a",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/SPA-USD/2026-08.sqlite",
+      "sha256": "54e69d6d82d486df7c0e4224aaa21b3e2f459116153c07b643ae716c30afeeae",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/SPA-USD/2026-09.sqlite",
+      "sha256": "e427c142c0f679dbae9fd54461a95c114b35136d012c82bca6b03b2371de2c2c",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SPA-USD/2026-10.sqlite",
+      "sha256": "b797aa43a8f1e0d91c9f8dd8233c7e57258e39c188fadf40828e28ff568fac0b",
+      "bytes": 57344
+    },
+    {
+      "path": "candles/SPELL-USD/2025-10.sqlite",
+      "sha256": "a9ff3736ab9480ab1b817e4b3ffa7fefc936ddf30440738a2b8ee1e48cb06769",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SPELL-USD/2025-11.sqlite",
+      "sha256": "28f5602745452dd26994e6045250a86997576e8e32851862afa8cf8818fff71d",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SPELL-USD/2025-12.sqlite",
+      "sha256": "ab6306ec899a9b42e086fe720ea13527c63a14fd067021205b0779051a08bfcf",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SPELL-USD/2026-01.sqlite",
+      "sha256": "9690108f69da412cac8e1246ff2d63d256ffe6efc79439f7a2f41ed024b396ef",
+      "bytes": 176128
+    },
+    {
+      "path": "candles/SPELL-USD/2026-02.sqlite",
+      "sha256": "911d1dd00dec284e2b9e10a8db191d586c60cae1947081620ea995fb47a82133",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SPELL-USD/2026-03.sqlite",
+      "sha256": "793a7a5e7ea47694d34425655b9c130fcd5d9b1b0dea7d771d7cebbc2c084037",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SPELL-USD/2026-04.sqlite",
+      "sha256": "f67698e10df26dbf6ca89ffba5cb929b8024e19594f189813adf510a55200bd2",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SPELL-USD/2026-05.sqlite",
+      "sha256": "7752147313c6c568e236691a6b9f602c261b71cd48e67b035f09c6c79520eb40",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SPELL-USD/2026-06.sqlite",
+      "sha256": "4a433326c49fbf5e393c68d1d353c2ac9602e3984f0de3f59bbe5e2ed350435c",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SPELL-USD/2026-07.sqlite",
+      "sha256": "49eec1ae4be890e3b69fdc2fcc7a8b4c6a322e0ecbab3dc9531bcd7b5685a274",
+      "bytes": 176128
+    },
+    {
+      "path": "candles/SPELL-USD/2026-08.sqlite",
+      "sha256": "68fc8b42a4585840df995faed4ee69049be42cb26b3a6dd389b2a39c097c7748",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SPELL-USD/2026-09.sqlite",
+      "sha256": "9ecea278343085e902357da1d2643d2c91ca46c1a82865b65ccc9aa28a3a6607",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SPELL-USD/2026-10.sqlite",
+      "sha256": "e8d48dac8c7b8d2bc19d89906faff4baadd34fd950ca9dd5b7e7e1c10b36a4a3",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SPK-USD/2025-10.sqlite",
+      "sha256": "b3fff2c7492a1eeea5ad34422e358307b8ca8a0faf70678c0850b1e654133924",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SPK-USD/2025-11.sqlite",
+      "sha256": "ee84df78e7247d192843e7990ee2d51e6689cef48414abfaec84ff90a28f434d",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SPK-USD/2025-12.sqlite",
+      "sha256": "856775ecdea06ae90cf911e81e0ffb743e02b528d75431b7f9b0ad36044c940b",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SPK-USD/2026-01.sqlite",
+      "sha256": "5c0a5d7ea0566de896a90537350ec9dbab4524c79e4b0ebf562dd3ecdd1b553b",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SPK-USD/2026-02.sqlite",
+      "sha256": "e2124920c9b902881a7b2606292dc5c1dad38afcc9d053b89662e0d77a64918e",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SPK-USD/2026-03.sqlite",
+      "sha256": "5e13b552309707b88230e65a39a0af5f732cc88a24b0d24e53245abfc33831df",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SPK-USD/2026-04.sqlite",
+      "sha256": "cc50a07fece4e189a6d2a08939cdce59de725cfbbae55af073858a3fa140f80c",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SPK-USD/2026-05.sqlite",
+      "sha256": "685292b2b3d4fdb4c749371846ca818bea7cd8a25488244899f789eeac5ca2d9",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SPK-USD/2026-06.sqlite",
+      "sha256": "3713c780ec33cc69fcef6980572441c62bedc649436a99f9c18c55352ddac65c",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SPK-USD/2026-07.sqlite",
+      "sha256": "9d775407f7989c705258d5a561b2d72ba035069c03136c8f3975a75ee5b94c07",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SPK-USD/2026-08.sqlite",
+      "sha256": "ca812d5cd9dd812e1c7811f7a2c5f277996d9a60990d586065dde855af459db2",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SPK-USD/2026-09.sqlite",
+      "sha256": "ad08c868d3ad5811160f3e898f36b96452b7655015826fe1f2ebaafd0c6997c1",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SPK-USD/2026-10.sqlite",
+      "sha256": "32621bf414facac787e045cef9b124461ac4bd09ced0463633ad3fb7a13ecb63",
+      "bytes": 61440
+    },
+    {
+      "path": "candles/SPX-USD/2025-10.sqlite",
+      "sha256": "a3df838d19f39bef0be7268602c92437790933d2b8b8b2b6944555828fe143cd",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/SPX-USD/2025-11.sqlite",
+      "sha256": "8f47c112e37d00b55fbee6c7b0267f3e327d860d949899812380f33adf21de53",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SPX-USD/2025-12.sqlite",
+      "sha256": "ef8b3bdbbe2642ed453ec1bb394dd1e3ffe6cbda6705e8c8b5d70c6896ae89d1",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SPX-USD/2026-01.sqlite",
+      "sha256": "ffc5d82d35fc560ecb1bd13907dca222f4994ae40a47171fe114b0da0d990672",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SPX-USD/2026-02.sqlite",
+      "sha256": "9dca7d0c6e43f99a7a67435582b750fe9ded5dc4280476d752eca41031b944ff",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SPX-USD/2026-03.sqlite",
+      "sha256": "df48a0aa3323e0cc27f325f2f20352ab94fdf3115a06f3f2ae9242cdfd221b02",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SPX-USD/2026-04.sqlite",
+      "sha256": "b58e9fc42124cc2ae692b97e27fa705419790cd3663c75200dd0426892908a77",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SPX-USD/2026-05.sqlite",
+      "sha256": "918d4e5dcd81defba21f5992a1f30d5f270c62b847702013ddc9969e46fb64e1",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SPX-USD/2026-06.sqlite",
+      "sha256": "988ba97fa78e01afd96155f41ff5e1ccdf4cc8740fc21ad9637e521f7575ef82",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SPX-USD/2026-07.sqlite",
+      "sha256": "79f396e3397939771d33f5670e4f4fe70901ace2ebd49eac1442b172b3d19611",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SPX-USD/2026-08.sqlite",
+      "sha256": "b4ef086b40239303234a1c56714c2e0e07a241f5ba5dba0a54e0ed58a40029e2",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SPX-USD/2026-09.sqlite",
+      "sha256": "6ef35724eeb239239cdc323a544c49b104fb15fa22d7d51e0dbc5baf245fd03a",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SPX-USD/2026-10.sqlite",
+      "sha256": "119d145383bbc8ed090137005456bc35f2130702a916c09c8ae775464cc6123b",
+      "bytes": 61440
+    },
+    {
+      "path": "candles/SQD-USD/2025-10.sqlite",
+      "sha256": "ba5065562b507487812e410831960aa86e223534ce16f92f16f3af0172a7c77c",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/SQD-USD/2025-11.sqlite",
+      "sha256": "40cd23d0151956ef485a0ed8a7efff9c1c2f69c6263a66a575f51882106006f1",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SQD-USD/2025-12.sqlite",
+      "sha256": "1bd44cf060ecc287d856ce3879f566a1486865ff40e8b47614e92eb06ed4ee3c",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SQD-USD/2026-01.sqlite",
+      "sha256": "57d51a10037b9705f0f3795dcf8cd128e9ed6aec5258eeb0054ffc00a3495b60",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SQD-USD/2026-02.sqlite",
+      "sha256": "9840934bffb41373640a9f9fa9f7f0069f7307155eae71d8048f701f2040a8ef",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/SQD-USD/2026-03.sqlite",
+      "sha256": "005718bbdaffb4ac7b9e75fb9e7d180f93cd42b0930f7ffb87d4ef753e47c149",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/SQD-USD/2026-04.sqlite",
+      "sha256": "6290c97d3ce343c507ed8bf7fe82f2b39407a53cf2803bd4b305ecb291205cdc",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/SQD-USD/2026-05.sqlite",
+      "sha256": "e98ac502bbe4b66b3505d7f16c4a8fb98b8602d9443db37ff0631807f50ee944",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SQD-USD/2026-06.sqlite",
+      "sha256": "ec89f06894f94b4ef439c97832720b9ce6f7f75f6ed1b28264c37d4d08c8da00",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SQD-USD/2026-07.sqlite",
+      "sha256": "e624070d099bd11c11f202fbf111d3f33dda100ecedec9898c2e9e6b9a29fe57",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/SQD-USD/2026-08.sqlite",
+      "sha256": "5f5247e9d67e9f5ce60c768a65251c14c95c88f2da7dbe0ebf8cb0a6dc15b82c",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SQD-USD/2026-09.sqlite",
+      "sha256": "3d696779defc9b54777a27cf361d772d7d079f6ddd01a12457080a5a31728f17",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SQD-USD/2026-10.sqlite",
+      "sha256": "8aca0424e70909cc372f8011d1649165b72edbbfc7a6eb764d556ad6ea354a7d",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/STG-USD/2025-10.sqlite",
+      "sha256": "c3ccf2acdd8b05eb7f8a3ebef35f1385ea2ae8e47b63e6489e0ec4248e64c1dc",
+      "bytes": 69632
+    },
+    {
+      "path": "candles/STG-USD/2025-11.sqlite",
+      "sha256": "e2794c3464319cea4a73992b6e507efee82a50368e8852d7190cc5144266edee",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/STG-USD/2025-12.sqlite",
+      "sha256": "ab5cd8425b8642d5f6ae90ddaacb9e7bae5cdd8c9a856a4c9d9e3d8005516990",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/STG-USD/2026-01.sqlite",
+      "sha256": "10bd1664cd899054f6afdd9fce5795ea463c1db56835a36150d52ac6d498c349",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/STG-USD/2026-02.sqlite",
+      "sha256": "39fd5e17741bb5c4cd0294f11493d615bfc0bb7bf652c009b283b9c01934d60f",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/STG-USD/2026-03.sqlite",
+      "sha256": "159522b58d042935eddca139d158dd595f57e1f1504d9c2d7870a301a523dd28",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/STG-USD/2026-04.sqlite",
+      "sha256": "2ffac481799b15262d1bed7fef0eaa8b92e9535ad40047967f2c7c4458a4d0cb",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/STG-USD/2026-05.sqlite",
+      "sha256": "bdd872d2d52529a451c92060fdbfa440eb2657e48b4ee9825f8df4f0a3b03b44",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/STG-USD/2026-06.sqlite",
+      "sha256": "3743b2f579d72c57a98e9a2ed37155c0a190814bb01ac798cb7befa58d977e6c",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/STG-USD/2026-07.sqlite",
+      "sha256": "98fd9d701be374302bb98ca8eb46c4a8223a5e734337eae891d284f0e33e9ca3",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/STG-USD/2026-08.sqlite",
+      "sha256": "348e6bed46bdaaecbd93953f6fbc404f8d9fd36f8ff74ae004e687b8f20a0029",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/STG-USD/2026-09.sqlite",
+      "sha256": "9229cb1f37690c95ecb0bc7b1665367d40d2221d276a586c9e18130ba8b79261",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/STG-USD/2026-10.sqlite",
+      "sha256": "c8d9463256cc21442ba7ed0af8124337c529b6b8b47399317e10d446c78670c9",
+      "bytes": 57344
+    },
+    {
+      "path": "candles/STRK-USD/2025-10.sqlite",
+      "sha256": "f1cd12207f92d289f2f200e5552ac95daf0438b382f0571ce994507a04c95203",
+      "bytes": 94208
+    },
+    {
+      "path": "candles/STRK-USD/2025-11.sqlite",
+      "sha256": "e31e87714795eba309c8f2422af0c67e9792e9a5eb7a0cbc042c7a7ac0dc2f97",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/STRK-USD/2025-12.sqlite",
+      "sha256": "51dfa9a0724182b6f98646e5ff7a709ac7c85a3d8764177c5e26c80418c6d697",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/STRK-USD/2026-01.sqlite",
+      "sha256": "20d1ad6deac4bb4e5cdebff5ecb94dc32a789dbc05e060b52b7f702626e5477f",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/STRK-USD/2026-02.sqlite",
+      "sha256": "e55289127bbf88f540cff0a6c6ebf9995399c2196d56e10cbe6856636fc55aa8",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/STRK-USD/2026-03.sqlite",
+      "sha256": "ec7fbaebddf9f9f094817beeda29ff30781e46e0998a2934026638d3d245d299",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/STRK-USD/2026-04.sqlite",
+      "sha256": "01a1a9bf420a5656e59db02673caa1c7a478db4ded08f3e6379d20394fbf9aa4",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/STRK-USD/2026-05.sqlite",
+      "sha256": "467afd0a48f79bdf820d88f989b48678f5ae7e7bc2c340895ce0ef57978c3aa2",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/STRK-USD/2026-06.sqlite",
+      "sha256": "9d870a78c57cb6b795816c412c593c650bf86e96b5bc2dcc94234037ed206ea2",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/STRK-USD/2026-07.sqlite",
+      "sha256": "1d5ec9219d778a68fba9a2ea3dd7938e3ea73e34737e5ba5da77afc69276c61c",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/STRK-USD/2026-08.sqlite",
+      "sha256": "ae346dac8acf896cd0c520e7cd8aff30cc854eb931454f7724685136acf0a652",
+      "bytes": 172032
+    },
+    {
+      "path": "candles/STRK-USD/2026-09.sqlite",
+      "sha256": "f42126541be83b7b3e80e3b68869caff503313a2d62d3251fbbe89d27839c692",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/STRK-USD/2026-10.sqlite",
+      "sha256": "345ad5a1d10750bd7576e9db46e99bb2ccbab9afb6939ea1e003d2ab69ad8307",
+      "bytes": 69632
+    },
+    {
+      "path": "candles/STX-USD/2025-10.sqlite",
+      "sha256": "321be066a5d77c1d907ca5ee86ec4c499907cecfff3c6c652c3b31367d16d7b9",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/STX-USD/2025-11.sqlite",
+      "sha256": "509c1e236e81e9a60bff0808c08e4a5e8dd33e978170454708f36907c54bc3ad",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/STX-USD/2025-12.sqlite",
+      "sha256": "751afd7c4be4b6a22f5420e43aea3d0072cff707a57d164cfee20c39cb3d4fe8",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/STX-USD/2026-01.sqlite",
+      "sha256": "fed36b36c833ad67b6e305338118f0ad300f8e593abec14406334d338c0e179b",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/STX-USD/2026-02.sqlite",
+      "sha256": "e8c120673f80e4a0b69faaf3c56ee5d70a8df77480f7edba7a0ecb19618fe166",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/STX-USD/2026-03.sqlite",
+      "sha256": "59ee8205899a9a069789416affe6d21a15c59814cebefedec923dc4357aea6ca",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/STX-USD/2026-04.sqlite",
+      "sha256": "218537ce5f2cdb5abc191739556d328e11dee069068e6d56302dfdb596cd08bf",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/STX-USD/2026-05.sqlite",
+      "sha256": "c1aa292c84bb3cf88a9b968ce51b32dad92c13fb4acd931f79e11689056a29ae",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/STX-USD/2026-06.sqlite",
+      "sha256": "5464f20076937722c84af65f5d504e4d66cb95ff6241f7bfa54a4625c3a11818",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/STX-USD/2026-07.sqlite",
+      "sha256": "ca2331bb60edb350380faf09c47c7ad59f43b4b4b40b1a5b055b2fdd20f2a638",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/STX-USD/2026-08.sqlite",
+      "sha256": "80d72fe2ad8d6948bf5a85905bd67fb2afa1e0e6095f3b0c528395045e7398ef",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/STX-USD/2026-09.sqlite",
+      "sha256": "7efff9e5604357c05bcee9c7b41001378aa66dd11bbc91f0c7938c09cf064239",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/STX-USD/2026-10.sqlite",
+      "sha256": "9b9389e792420903edd35f6d9619fe921b92b6c527bbae3d678d6875b13c330e",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SUI-USD/2025-10.sqlite",
+      "sha256": "a824202dffadee75fd214cf4f3e63b4bd32a3f62df5f67cb68bed6a826534e18",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/SUI-USD/2025-11.sqlite",
+      "sha256": "d8ed749f725ac6067151b2ff701f36ed609c9b7393bb036a17be75c184728732",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SUI-USD/2025-12.sqlite",
+      "sha256": "c04a89de054e4652da0e2616f657619618bef361f5c9cd79ec8e9236ad5a2406",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SUI-USD/2026-01.sqlite",
+      "sha256": "d3c2d7c36d718fe0dbfeb7c7a232d60da83bbafc91350ce3a083bfd0fef1ea29",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SUI-USD/2026-02.sqlite",
+      "sha256": "4e51e1ce30ec1618e5b2875e36cb5b4790f442d3a81175f8bb88797dbc336b3c",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SUI-USD/2026-03.sqlite",
+      "sha256": "38fcb063012a5c4b7d9e0d2c80cca5527f821df47481c834cf05982df589ea4c",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SUI-USD/2026-04.sqlite",
+      "sha256": "3afefc26934bf6e4e018c344d8a014dba788666e5934760d48fb30d210f9022c",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SUI-USD/2026-05.sqlite",
+      "sha256": "84023112c05ddc7b5be337610761541cba9ef166c9fc8d711ae8c870610f6d1d",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SUI-USD/2026-06.sqlite",
+      "sha256": "c21a16905b225f0e357097be6be4bc5b93c4c3474d00b4d356aa1738ef11ba86",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SUI-USD/2026-07.sqlite",
+      "sha256": "b74a1c6ee610cca698d94b4eb8638c1cdac75ed2deadbacb162e57e541fa1735",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SUI-USD/2026-08.sqlite",
+      "sha256": "ee1ed928c41db3a454cff8ee5c67f0bd3fbc6b64ea72575a3cb7e332780dfcc0",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SUI-USD/2026-09.sqlite",
+      "sha256": "99bfd7b047b322877547f53f25a45b2545727f7816b8976b26fc4f4a9448d503",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SUI-USD/2026-10.sqlite",
+      "sha256": "34577f689f4ae7c9e798869110f71655e9915bde66759b04544018c53c3be86d",
+      "bytes": 65536
+    },
+    {
+      "path": "candles/SUPER-USD/2025-10.sqlite",
+      "sha256": "37cc4efcf05250b92ac521bf0b3114fac871329cf172fc12e0f6a9ca8f18eade",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/SUPER-USD/2025-11.sqlite",
+      "sha256": "c91dd8eeb0bbd6943aa36f6d7e0a070fbf60f7c52e5780041fa5e8e2e9eabbed",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SUPER-USD/2025-12.sqlite",
+      "sha256": "e875556d255708529179f4a8464d5e189b7b3461b6c7f79043a62e65c437c82f",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SUPER-USD/2026-01.sqlite",
+      "sha256": "91c2795f63b7b329aa005821d255457f822be70bc97fe824e61b5170de623dcc",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SUPER-USD/2026-02.sqlite",
+      "sha256": "9c86555cef256e7d55dc417dbc09301ebf96b65dc1142f28d2f51ce5e47bb12a",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SUPER-USD/2026-03.sqlite",
+      "sha256": "1860fe3aa940d54f122f81cb1a8e2ecf0c86f5f8a022b3e5976d100d65b0dbaa",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SUPER-USD/2026-04.sqlite",
+      "sha256": "be7e2b93e50826adcf892360d0a585690e612a1189cd09b99b7a15c1d05f1b63",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SUPER-USD/2026-05.sqlite",
+      "sha256": "251ede18f4df4c427f56e7368694d829aa4d05ce11c0279f798b00973b325b32",
+      "bytes": 167936
+    },
+    {
+      "path": "candles/SUPER-USD/2026-06.sqlite",
+      "sha256": "c013440ee6c9dc435b33828e7dab63e04f27c1364c4852919ec48cfb238a370b",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SUPER-USD/2026-07.sqlite",
+      "sha256": "8a448038915327318f9bcd2c9e10fe9a214515ae9d6eadd233411a80f5de9552",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/SUPER-USD/2026-08.sqlite",
+      "sha256": "584d123d6bad8dbf398efed5b07ff6d57b45e4469147085e381a80a086dc276f",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/SUPER-USD/2026-09.sqlite",
+      "sha256": "baf5c6ccf68cd8bf35a95f23ed03cec6c50a987b278abb926d78cfd874daff48",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SUPER-USD/2026-10.sqlite",
+      "sha256": "056591fd7cb062f952c30497a34d77399466bbe778336ed47fb0166ee4150886",
+      "bytes": 69632
+    },
+    {
+      "path": "candles/SUSHI-USD/2025-10.sqlite",
+      "sha256": "cd53ebe45547f6d2b346427790b0e057bbf52fec7013190570cb341db0390bae",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/SUSHI-USD/2025-11.sqlite",
+      "sha256": "511c59b8395b33128b91ba2f97d11f56eae7fa039aa2f8085f8041cbc1818e7c",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SUSHI-USD/2025-12.sqlite",
+      "sha256": "3e56dfc56262a5d09861a56670b553a3dfa464b829fdcf2fa46703d09dae93eb",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SUSHI-USD/2026-01.sqlite",
+      "sha256": "3d006ce8e8bfb5df9e28690f720f4727ed0171fd5e1457ec820ebff37de7904a",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SUSHI-USD/2026-02.sqlite",
+      "sha256": "8da599a4ea68871d3b4fb2f883c75b94a6c25e664e9c5f053b7dccc0a0cd460e",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/SUSHI-USD/2026-03.sqlite",
+      "sha256": "1b64ad54e923021c192ae6fe41bc1992efc59b8f20b7b2a949a88e8c1a6e2bdf",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/SUSHI-USD/2026-04.sqlite",
+      "sha256": "c2a25bf8a80087896c057133cf1b1053b8da07683db742c713a32e40b0ecc108",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/SUSHI-USD/2026-05.sqlite",
+      "sha256": "08e6ace9113d19818f89853de6abe6ba2d53e35159917395976c629022afd6df",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SUSHI-USD/2026-06.sqlite",
+      "sha256": "821dc5c8460aeaf58b216f94482733cc24b5cd82ed94c2efec34219041d3c1b0",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SUSHI-USD/2026-07.sqlite",
+      "sha256": "7e21d806c4c32fc8eda19040f52d5b901491b75b1abf85d7e1ceca53ea21f847",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SUSHI-USD/2026-08.sqlite",
+      "sha256": "ca93f24f509bec4490dcd75d1609ca9ae3fffbf7ba7dc895f6845b701bcb4b8a",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SUSHI-USD/2026-09.sqlite",
+      "sha256": "92d67d0f798a41968fb53e98e0d03e83300d659270089c7e6a72ce719157d7c4",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SUSHI-USD/2026-10.sqlite",
+      "sha256": "b61801a3da55a92e5142ca5e6a969a1a9ef5b0064c7bd1742e868c9baa277037",
+      "bytes": 61440
+    },
+    {
+      "path": "candles/SWELL-USD/2025-10.sqlite",
+      "sha256": "f35cff15c09e06ae85edc45bec02094b78ba77f7ddd127569530cfd7173f418f",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/SWELL-USD/2025-11.sqlite",
+      "sha256": "ddbf9c33b44308b139067fe5a996d0b373dcce35d44e705822b26f04f8b96e55",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SWELL-USD/2025-12.sqlite",
+      "sha256": "d4fbd7cddb70b52140dfc0446141a573fb36221424d086e0042a9cf8c1de901f",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/SWELL-USD/2026-01.sqlite",
+      "sha256": "33330003530e58b73a77b5adc2d061278ccb5750c17f164bdb9541bcf2f41e97",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/SWELL-USD/2026-02.sqlite",
+      "sha256": "29686aa7eb16a18e3a7fa66a6912b5ad9ab5f846375da109ba792e97c8414215",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SWELL-USD/2026-03.sqlite",
+      "sha256": "23cfed43a6a5302fb8057ebe48f8feaaafa2c27c8b2d9ffab687a5bdff345493",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/SWELL-USD/2026-04.sqlite",
+      "sha256": "1a218544bd6569f317f167af8ccd412d26f97694f9041d9d41b8a4b4b41008cc",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/SWELL-USD/2026-05.sqlite",
+      "sha256": "b8d1263e8694edc32910826c7be849d01a72ada7a7f260a676316763c3dce379",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/SWELL-USD/2026-06.sqlite",
+      "sha256": "b8e8f40c4684d0cc1f91491ed5c108f36f6381cfbfc0dc82b49352b20638fe24",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/SWELL-USD/2026-07.sqlite",
+      "sha256": "b3b3a4a3f6aba3c38998082b75f8c207b525d9e0dd4c261f4fcac9cf3350e5d3",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/SWELL-USD/2026-08.sqlite",
+      "sha256": "c14eae7ae04abb02a9f38d2ea07ba361e6d285e02cb08c249b7585abf230d52c",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/SWELL-USD/2026-09.sqlite",
+      "sha256": "cc20a4a5a35b8d1a52d6690254a7eb082d8b5326c3663baf2ad2a9dfd431d091",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SWELL-USD/2026-10.sqlite",
+      "sha256": "fb46857b239e9497b10810c31896cfcbfb91431b5aa34732e6fb8917d9a0bca2",
+      "bytes": 61440
+    },
+    {
+      "path": "candles/SWFTC-USD/2025-10.sqlite",
+      "sha256": "bd9adc03ead953a6dec98b9b2fcf7079d5ea97a07ee329c4f145edec5127a7e0",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/SWFTC-USD/2025-11.sqlite",
+      "sha256": "a6bdda85d636fd988b111460b4e23b3395515d16c7cee90d93788d93cf239bf8",
+      "bytes": 163840
+    },
+    {
+      "path": "candles/SWFTC-USD/2025-12.sqlite",
+      "sha256": "105dbf3d81663a205c7c701ab3660fb16251e6902fb1d305a689490c04e176e6",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/SWFTC-USD/2026-01.sqlite",
+      "sha256": "946f1e25151fb7d2e4156f3bed784b103b6e80090a0843f22830cf55f30a667b",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SWFTC-USD/2026-02.sqlite",
+      "sha256": "b79af01d614146e8d1ce8f22c62bd1973c0e788b236d919b9b5bbf6226453a20",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SWFTC-USD/2026-03.sqlite",
+      "sha256": "358991980f088c0f63e7b36fe38ac6ad0f698d6674f0591cbb9f373e3bca46f6",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/SWFTC-USD/2026-04.sqlite",
+      "sha256": "4cfbd8c326cd62228ddd509dbc579ee73f90e4ddfd8455d0bc51e5cffe651682",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SWFTC-USD/2026-05.sqlite",
+      "sha256": "f965c69d07ee5d901f41b6e4653ca89e1f636bdc547319f47e44b1a1413bfbee",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/SWFTC-USD/2026-06.sqlite",
+      "sha256": "5c88bc30bc2556e60ca0eeedfc8805b6ad134e74b2fb25ba4daaaea55a00e421",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/SWFTC-USD/2026-07.sqlite",
+      "sha256": "cb7ff649f7680fe6c5f4415cc154567206b7dd5010d603e2893e7a26131ee4d0",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/SWFTC-USD/2026-08.sqlite",
+      "sha256": "4f596a900bae6b1ae812fb24e91fc0211832ab9a4d8fbd6a06960cb1dbe1cbb3",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/SWFTC-USD/2026-09.sqlite",
+      "sha256": "64ac6efca89c0657f8a36bc2bb8e31b8ba00917adbe79a9a878e657d1c8e18e6",
+      "bytes": 131072
+    },
+    {
+      "path": "candles/SWFTC-USD/2026-10.sqlite",
+      "sha256": "b7ad142aa2ba5a0a428c4eb3add0f01407a484be7d9432ae26e4783f62cf6f74",
+      "bytes": 61440
+    },
+    {
+      "path": "candles/SXT-USD/2025-10.sqlite",
+      "sha256": "86db80d0c0bd09a77e4575603b3683e653e536dc16c9cf28cf309523ce0ade10",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/SXT-USD/2025-11.sqlite",
+      "sha256": "ffa4ce03098eee70c727e16e1b1f2f491185537b5ea915527a3447f3d65aea06",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SXT-USD/2025-12.sqlite",
+      "sha256": "a8d1651c7157fab95e17bb5a97873dec6df0acebead8d99a2dbbe02df1cd9b79",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SXT-USD/2026-01.sqlite",
+      "sha256": "23397ce695ed0d7ce52175648c0d83d7d519b264010e43d1d2de652d9d19cfd5",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/SXT-USD/2026-02.sqlite",
+      "sha256": "6321d59557651f174836f0aeee16ac95be193ca9e3386c1333923392c97422eb",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/SXT-USD/2026-03.sqlite",
+      "sha256": "257ab1911cc3a7d6284ebdd1ead49fb022a300229962092d6e21b83960c97fba",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/SXT-USD/2026-04.sqlite",
+      "sha256": "9d2e277125a60386a868463ebe7fa1120f09be7b722d0ae10da4f1afcf52b73b",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/SXT-USD/2026-05.sqlite",
+      "sha256": "a226595a0ccf65b7d8521085743650e61ba8593642409f5d0a9a66e4d8a1ee3b",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/SXT-USD/2026-06.sqlite",
+      "sha256": "5ce889a7f8a3e56ae8c8e23896e895ff6ee80a894afb182110e1c9b6a393214a",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/SXT-USD/2026-07.sqlite",
+      "sha256": "87943ee6aa45f0d04e05855a4585281d4a98d74e18e2b1e0ca411830793b22bf",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/SXT-USD/2026-08.sqlite",
+      "sha256": "398f0676a8c6805a6cad033387fee9411fede3199111dfc26b9ae49c4701344c",
+      "bytes": 122880
+    },
+    {
+      "path": "candles/SXT-USD/2026-09.sqlite",
+      "sha256": "bfac54ddbe38544f25d8890bc1811cbaddc237811926d74e475cfc699f0d9e62",
+      "bytes": 172032
+    },
+    {
+      "path": "candles/SXT-USD/2026-10.sqlite",
+      "sha256": "83037e94dc0076f1bc96a0082fbda35a825bd45b4e5157744d72053f2575ddd1",
+      "bytes": 69632
+    },
+    {
+      "path": "candles/SYRUP-USD/2025-10.sqlite",
+      "sha256": "5daa8db40623243e657c33ada5d4e4aa2322ebcc0e0afca1fc3d6c0881ab069c",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/SYRUP-USD/2025-11.sqlite",
+      "sha256": "23fbd95adc2c9e05cfaf1dd08c549de9f970b370030434d5f19836a364de9527",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SYRUP-USD/2025-12.sqlite",
+      "sha256": "4e22fe6f5a1f3b4723bed5b5728b31ece0cd9e6fa82671d23e120a6507b84d75",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SYRUP-USD/2026-01.sqlite",
+      "sha256": "9230a2e040183bb781089967d132200f9dafbb35ed31933528af950f58758d8d",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SYRUP-USD/2026-02.sqlite",
+      "sha256": "a832cf0b33559de42c8246972803129a7b08d225a65b5867f371b6611944a4ba",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/SYRUP-USD/2026-03.sqlite",
+      "sha256": "fe2afac46098e87ca9f0e0b44a3b4a504fdfc7710eeb0b4a3ddd8ecd6f046039",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SYRUP-USD/2026-04.sqlite",
+      "sha256": "e20badccc17da271acb340239f19310f29dbdcbe1355d349006d71655cd5dbcc",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SYRUP-USD/2026-05.sqlite",
+      "sha256": "61399397c7951978c77ffc8ba57b70e6cca5a2f13fa46a4b03b55d37c8d4f937",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SYRUP-USD/2026-06.sqlite",
+      "sha256": "0b4117d5ad5ed4d32646c75077960c09dc8206ce2724d15003995ccbd626916e",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SYRUP-USD/2026-07.sqlite",
+      "sha256": "a7477a00ba26ce67214e9888daa8e56352f61d71114b538f5033d62cc44fffd6",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/SYRUP-USD/2026-08.sqlite",
+      "sha256": "dc4a66f7b6e78a1da8871a983532e799cc012b7bc1286af5118c74ed7e8581f2",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/SYRUP-USD/2026-09.sqlite",
+      "sha256": "6c0653ce04f5754c2e89467239cdf249f55d9570e020bae63160afaf355e546e",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/SYRUP-USD/2026-10.sqlite",
+      "sha256": "8eeee76056ec363973588e420c65a332f33fe3b32359037865ef61bd86ebbeb9",
+      "bytes": 61440
+    },
+    {
+      "path": "candles/T-USD/2025-10.sqlite",
+      "sha256": "c99841a687e08a7da13acdc247a63f30398e261f5b99be6dff568280eeb5247e",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/T-USD/2025-11.sqlite",
+      "sha256": "28d5293bcfc79f107554640d6479381fec5fdb76cd53cae5e0f2ee4cbfd11a04",
+      "bytes": 94208
+    },
+    {
+      "path": "candles/T-USD/2025-12.sqlite",
+      "sha256": "984d34498072c11e67537f9bc5a53cb86b0db7909fe953ee2f750240e653111e",
+      "bytes": 98304
+    },
+    {
+      "path": "candles/T-USD/2026-01.sqlite",
+      "sha256": "7ea8d82bf29f0a72d391a64d0c90271273a550714edb7f6e51dd8ff1d231c912",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/T-USD/2026-02.sqlite",
+      "sha256": "9a88207efa33a33eaf12dd769322dcf050ef6760b76e035f8046f5e81d87fecc",
+      "bytes": 94208
+    },
+    {
+      "path": "candles/T-USD/2026-03.sqlite",
+      "sha256": "939671e2f2d5eac72b92f3bae146484e3ec2123a4855d304928c32216154c454",
+      "bytes": 94208
+    },
+    {
+      "path": "candles/T-USD/2026-04.sqlite",
+      "sha256": "a3873dfb97b494649193b54d16ff6d179f15918a2da0837efc601e2caba6ea39",
+      "bytes": 86016
+    },
+    {
+      "path": "candles/T-USD/2026-05.sqlite",
+      "sha256": "378e02e759cac852fc14fe8fbbc734070a7c02a27e1706e6cd109e1d9b75cc33",
+      "bytes": 81920
+    },
+    {
+      "path": "candles/T-USD/2026-06.sqlite",
+      "sha256": "9a1262b597c06c7a9031767a65ea4b4ac924625691ecc48f66e9d539643c8973",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/T-USD/2026-07.sqlite",
+      "sha256": "625db0bf85e443f2f90e6e36540ca8b827156ed077669dd22a2d49268c7a9d6e",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/T-USD/2026-08.sqlite",
+      "sha256": "5513ead6b7e9d7022935f5d2818065bb4e34f3b50fa653f4cfc0ef5294294a02",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/T-USD/2026-09.sqlite",
+      "sha256": "7bb0c7bf211bfdc429e7383d7a0e2d26f94672382c27f1b9dcc3752dcdd7a70d",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/T-USD/2026-10.sqlite",
+      "sha256": "ebf225c4ca7372fd47b1d024b2d9c4fcdd93282733f12f9c83e054a11d4dc531",
+      "bytes": 45056
+    },
+    {
+      "path": "candles/TAO-USD/2025-10.sqlite",
+      "sha256": "1fecc1eefd64eba167f5d7100c24cde01ab6ab29e7ebd90a0ba1de5925b19ba3",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/TAO-USD/2025-11.sqlite",
+      "sha256": "6d43bc6cc7c0a839cdbc15b83e17bf939e15985d968c229a480dc5cda7dfce44",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/TAO-USD/2025-12.sqlite",
+      "sha256": "78e2a5400bef977a5631fac0c9e96c290d4e88968b222a6f248fa79c9900b7a6",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/TAO-USD/2026-01.sqlite",
+      "sha256": "df3e3cfe6f6cd29e30a374c6ca6e8389f46143fffc4537466261e224c1ac423a",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/TAO-USD/2026-02.sqlite",
+      "sha256": "2b64915dcca389852a9982f4ca4da3ea6b1de7bf4eb805257934a64150d25137",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/TAO-USD/2026-03.sqlite",
+      "sha256": "9b1a4ab91909bb862d91ce822b45ffcbd0c4de0fae60f915dbc4f3bb7ed5e62d",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/TAO-USD/2026-04.sqlite",
+      "sha256": "0a2beff64048a748183903f2a1986fd3870b0206c0e2be85f09f1f22eac5ef7a",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/TAO-USD/2026-05.sqlite",
+      "sha256": "a13ca06ca6de6d867d96811ac33368af2c1a4a23ade3a632c8848cd3c7212446",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/TAO-USD/2026-06.sqlite",
+      "sha256": "1f7aaca39b10cc5b5e983dcda439d9ad6fc456c84bac1c39878a8a1216b0b484",
+      "bytes": 151552
+    },
+    {
+      "path": "candles/TAO-USD/2026-07.sqlite",
+      "sha256": "dbb570492c18776f63fcad3e234d3c1e5fecc38aa3b7ca5d5012dad568c3b12b",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/TAO-USD/2026-08.sqlite",
+      "sha256": "d110a9ecc6affa28adce6c6f3fa821acd77c24dced461d7c35c3eac08e27b8b9",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/TIA-USD/2025-10.sqlite",
+      "sha256": "ad61843259d92d961c08cc2639461990cf677106f627693936b179b4057d893d",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/TIA-USD/2025-11.sqlite",
+      "sha256": "8089da597bfbe9d5612cb7fc7a438ca3d0ec096b59547c2e18bf39af3fe4f724",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/TIA-USD/2025-12.sqlite",
+      "sha256": "baea46164622a255b8e01707914bb0efc5b6fb0fb98a6bad7aaef6b98c8b6bb6",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/TIA-USD/2026-01.sqlite",
+      "sha256": "b0a5e630d799a50bee9ff2a125fca56299cc798406cb09d2f3682444abec1745",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/TIA-USD/2026-02.sqlite",
+      "sha256": "6f8ca31829eff830ed87b291d00656378f81094ed2dc8d41d45c7ed35ad72041",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/TIA-USD/2026-03.sqlite",
+      "sha256": "c72ec606ec67d71ba022d0dd5f38f5108f74e14066ab78fbb170353920433676",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/TIA-USD/2026-04.sqlite",
+      "sha256": "3b4b44b93c8378e5194beb80a3400efa6847c0bc647adb15588d8d2f0ff97151",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/TIA-USD/2026-05.sqlite",
+      "sha256": "64ba0c16b364f6fcc8261e32e1cac8506fa00429be6c4c701eb58b15df379ac0",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/TIA-USD/2026-06.sqlite",
+      "sha256": "00f43ad3d88682cb563d62c7dd3a0e874ecdebb33e790f7bbc754e964780d1c6",
+      "bytes": 155648
+    },
+    {
+      "path": "candles/TIA-USD/2026-07.sqlite",
+      "sha256": "15b70718a3c05e96fc219d4c562d2d9386acc8146fc8eb7d08c02aed6ef6d3ed",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/TIA-USD/2026-08.sqlite",
+      "sha256": "71f662dc86c30d161960a7bd3d3b75cb8244c4c0246baea73ea8686dfbc206c6",
+      "bytes": 159744
+    },
+    {
+      "path": "candles/TON-USD/2025-10.sqlite",
+      "sha256": "be93e4e1c15f4c8fde90ba3489842abe87326b6b4cc6936492c5bebb2da6d1f9",
+      "bytes": 49152
+    },
+    {
+      "path": "candles/TON-USD/2025-11.sqlite",
+      "sha256": "849174d1534e186f538720546017854cd83a80504087dd26e2f87fdd4addda0c",
+      "bytes": 94208
+    },
+    {
+      "path": "candles/TON-USD/2025-12.sqlite",
+      "sha256": "de3619fb887d913115d4a03a59f0a9b669ec07e5a73853a4bafa014f62361914",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/TON-USD/2026-01.sqlite",
+      "sha256": "0ec492d9c661cf571562092d474263da0fc7e445e0d095cd2b5e4a1bda4aed15",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/TON-USD/2026-02.sqlite",
+      "sha256": "28ecb6c89809f38401b08a2b2eeec5ff5592d323a93443222f35a98973474d14",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/TON-USD/2026-03.sqlite",
+      "sha256": "f207b3b0fc86c63a73b72738705b96501b2565fa7d4acfeb7e332c1809f94cfa",
+      "bytes": 143360
+    },
+    {
+      "path": "candles/TON-USD/2026-04.sqlite",
+      "sha256": "0e2916a4f047cd12bb7fc90817113a93aabaaa42856b7941ada7e921e9b330d2",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/TON-USD/2026-05.sqlite",
+      "sha256": "49835dc368d8d5782b984a1784dfac2e4d605aa8d83852ef304e6757efe14e73",
+      "bytes": 147456
+    },
+    {
+      "path": "candles/TOSHI-USD/2025-10.sqlite",
+      "sha256": "8d4e2da76a43bfe259c1d08287698dceef2ba53590581beb3332a118a7515fc4",
+      "bytes": 139264
+    },
+    {
+      "path": "candles/TOSHI-USD/2025-11.sqlite",
+      "sha256": "f4e44b069f415be2a07de7e3f1330091bcf076ea4b5e301a60d1190378b60eca",
+      "bytes": 192512
+    },
+    {
+      "path": "candles/TOSHI-USD/2025-12.sqlite",
+      "sha256": "5aaf44b9a0e18caacdc5ba6b3ff6969da0fcff08ba5ed5a6ea9b0c83822c9435",
+      "bytes": 196608
+    },
+    {
+      "path": "candles/TOSHI-USD/2026-01.sqlite",
+      "sha256": "a2d4326f2f8a340f4b3a953e007ddc9b4e260b868df79b99171b79f5e6152d05",
+      "bytes": 196608
+    },
+    {
+      "path": "candles/TOSHI-USD/2026-02.sqlite",
+      "sha256": "38f0146107dcdb4b8765a495caff89eea1a69ce81f6e7711b6c7ab8e7dcc8563",
+      "bytes": 180224
+    },
+    {
+      "path": "candles/TOSHI-USD/2026-03.sqlite",
+      "sha256": "98af2c32cddbc9f0bf9bcff257abbc632893f2c97bfb5b6a38cc44dfbe3fad2a",
+      "bytes": 196608
+    },
+    {
+      "path": "candles/TOSHI-USD/2026-04.sqlite",
+      "sha256": "b3958041cfb29e58742fba8179351fdc6583d7e41704d68a469b79eca18528c1",
+      "bytes": 188416
+    },
+    {
+      "path": "candles/TOSHI-USD/2026-05.sqlite",
+      "sha256": "88abe5060aa68be7938f4e42a5839b62d1ec450195a0e076ca8f184c24f2358f",
+      "bytes": 192512
+    },
+    {
+      "path": "candles/TOWNS-USD/2025-10.sqlite",
+      "sha256": "9d74a497d45551f1f851e9defe8a78f3cdda2a781bcb46f6fc742c138249f067",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/TOWNS-USD/2025-11.sqlite",
+      "sha256": "684a5679f67689de0b826cb822607bdbe075502486c05efd78345d81878ba36b",
+      "bytes": 118784
+    },
+    {
+      "path": "candles/TOWNS-USD/2025-12.sqlite",
+      "sha256": "5f583eda1a66dbf49c9bf378b23be0e711c84f3ef82f36a4dc0b0223a2e4fd78",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/TOWNS-USD/2026-01.sqlite",
+      "sha256": "967d9e0c05565aa81d0b4658661718342f0b7c661963de94d20b49b0002b3619",
+      "bytes": 102400
+    },
+    {
+      "path": "candles/TOWNS-USD/2026-02.sqlite",
+      "sha256": "1659e1674d3507d306a8cea62f088f5b7fece3e1862f76cad3f8a6c7f0ae1792",
+      "bytes": 90112
+    },
+    {
+      "path": "candles/TOWNS-USD/2026-03.sqlite",
+      "sha256": "35cc6c2ee8d5deea058ace365e9c6d84ed62ea6f11ac546c4d2db573f51b2875",
+      "bytes": 114688
+    },
+    {
+      "path": "candles/TOWNS-USD/2026-04.sqlite",
+      "sha256": "c460274f6dc558d2962596d2ab33393882e9875b5c20c1ccd92eaa7ed8d3a6cc",
+      "bytes": 126976
+    },
+    {
+      "path": "candles/TOWNS-USD/2026-05.sqlite",
+      "sha256": "c09fc364929a38b9a91989d559ecb06065281fca40767c57339b265693eadecd",
+      "bytes": 135168
+    },
+    {
+      "path": "candles/TRAC-USD/2025-10.sqlite",
+      "sha256": "9665c78b42f2d010934d5bbd0149d374eb29fe4eb0ef761a552a7cd6cc905de8",
+      "bytes": 106496
+    },
+    {
+      "path": "candles/TRB-USD/2025-10.sqlite",
+      "sha256": "9599bcdae455914862fc375f87f6e7d5c05bb0e096f20f8e4a842bbe3a09464e",
+      "bytes": 98304
+    },
+    {
+      "path": "candles/TREE-USD/2025-10.sqlite",
+      "sha256": "623b106b30338ecb13cd8ef900ca47e79929e2fb52117fe077f88009f9e82ee5",
+      "bytes": 110592
+    },
+    {
+      "path": "candles/TRIA-USD/2025-10.sqlite",
+      "sha256": "90046375a0ab5809336bd298f088616bf3737fc9568ffdf3a11302317a5f513b",
+      "bytes": 49152
+    },
+    {
+      "path": "candles/TROLL-USD/2025-10.sqlite",
+      "sha256": "e547e6947324ba9f7dafd4b6c2627f4143a4d84faf82d2e32f25b90ca42f1c39",
+      "bytes": 106496
     }
   ]
 }
