@@ -4,8 +4,16 @@ import type { ArtifactStamp } from "../manifest";
 import { rootHash, type HashedFile } from "./hash";
 import { sha256File } from "./store";
 
+/**
+ * Derived JSON files embed the artifact stamp, so derivedRootHash is not a
+ * pure function of the candle bytes. The stamp stays in the files.
+ */
+export const DERIVED_STAMP_NOTE =
+  "Each derived JSON file embeds commitSha, dataRootHash, createdAt, and phaseId. derivedRootHash hashes those files, so it is not a pure function of the candle bytes.";
+
 export interface DerivedManifest extends ArtifactStamp {
   derivedRootHash: string;
+  stampEmbeddedNote: string;
   files: HashedFile[];
 }
 
@@ -38,6 +46,7 @@ export function buildDerivedManifest(opts: { stamp: ArtifactStamp; dataDir: stri
     createdAt: opts.stamp.createdAt,
     phaseId: opts.stamp.phaseId,
     derivedRootHash: rootHash(files),
+    stampEmbeddedNote: DERIVED_STAMP_NOTE,
     files,
   };
 }

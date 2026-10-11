@@ -1,4 +1,9 @@
 {
+  "commitSha": "7fd9c2b10b5381ddbc83ecedf1bc3359aa0e5299",
+  "dataRootHash": "e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968",
+  "createdAt": "2026-10-11T01:30:01.000Z",
+  "phaseId": "P1",
+  "stampNote": "commitSha and createdAt are the commit that wrote this envelope. dataRootHash is the frozen 15m root this file is published with. The stats were not computed from candles. fetchedAt remains the capture time.",
   "fetchedAt": "2026-10-11T00:08:06.000Z",
   "fetchedAtNote": "Converted losslessly from the bare array committed in a54ba663654d70f5663c9326d73d666f72288cbf. That array had no fetch timestamp and no raw response bodies. fetchedAt is that commit's time. Product objects keep the parsed fields; wire bytes were not stored, so they were not reconstructed.",
   "endpoint": "https://api.exchange.coinbase.com/products/{productId}/stats",

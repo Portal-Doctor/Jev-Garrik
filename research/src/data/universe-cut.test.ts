@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { assertNoBannedKeys, findBannedKeys } from "./banned";
 import { sha256Text } from "./hash";
 import { parseProductStats } from "./product-stats";
-import { applyUniverseCut, READDED_BELOW_RANK_CUTOFF } from "./universe-cut";
+import { applyUniverseCut, GRANULARITY_DECIDED_AT, READDED_BELOW_RANK_CUTOFF } from "./universe-cut";
 
 test("24h OHLC keys are allowed on stats and a forward field is not", () => {
   const ohlc = { open: "1", high: "1.1", low: "0.9", last: "1", volume_30day: "10" };
@@ -19,6 +19,9 @@ test("the cut on the committed stats snapshot keeps 360 and drops 132", () => {
   const decision = applyUniverseCut(stats);
   const cut = decision.entries[2];
   expect(cut.owner).toBe("Brian");
+  expect(decision.entries[0].decidedAt).toBe(GRANULARITY_DECIDED_AT);
+  expect(decision.entries[0].decidedAt > "2026-10-10T23:45:34.000Z").toBe(true);
+  expect(decision.entries[1].decidedAt).toBe("2026-10-10T23:38:00.000Z");
   expect(decision.entries.map((entry) => entry.owner)).toEqual(["Brian", "Brian", "Brian", "Brian"]);
   expect(cut.kept).toHaveLength(360);
   expect(cut.dropped).toHaveLength(132);

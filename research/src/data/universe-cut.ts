@@ -8,6 +8,13 @@ import { assertNoBannedKeys } from "./banned";
 import { addDecimal, compareDecimal, formatDecimal, parseDecimal, type Decimal } from "./decimal";
 import { OHLC_NOTE, type ProductStatsFile, type ProductStatRow } from "./product-stats";
 
+/**
+ * Commit time of 48881445, which recorded the 15-minute choice.
+ * That is after the 5-minute attempt at 2026-10-10T23:45:34Z.
+ * 2026-10-10T23:38:00Z was the earlier time box, before the attempt the note cites.
+ */
+export const GRANULARITY_DECIDED_AT = "2026-10-10T23:47:41.000Z";
+
 export const NEGLIGIBLE_QUOTE_VOLUME_30D = "1000000";
 export const FLAT_RANGE_24H_BELOW = "0.005";
 export const ERRATIC_RANGE_24H_ABOVE = "0.5";
@@ -83,6 +90,10 @@ export interface CutRow {
 }
 
 export interface OwnerDecisionFile {
+  commitSha?: string;
+  dataRootHash?: string | null;
+  createdAt?: string;
+  phaseId?: string;
   entries: [
     {
       id: "granularity";
@@ -162,9 +173,9 @@ export function applyUniverseCut(stats: ProductStatsFile): OwnerDecisionFile {
       {
         id: "granularity",
         owner: "Brian",
-        decidedAt: "2026-10-10T23:38:00.000Z",
+        decidedAt: GRANULARITY_DECIDED_AT,
         granularitySec: 900,
-        note: "Brian chose fifteen-minute candles. The 5-minute download started at 2026-10-10T23:45:34Z. A 60-second sample from chunk 200 to chunk 800 ran at 9.997 requests/second. 174168 five-minute requests project to 17422 seconds (4.84 hours), past two hours. 59040 fifteen-minute requests at that rate project to 5906 seconds (1.64 hours). The fifteen-minute download then sustained about 7.5 requests/second over its first 16 minutes (7250 chunks). The kept 304-name download ran from 2026-10-11T00:08:14Z to 2026-10-11T01:00:46.608Z at 9.997 requests/second (31515 requests, 3952 pair-month files).",
+        note: "Brian chose fifteen-minute candles. The 5-minute download started at 2026-10-10T23:45:34Z. A 60-second sample from chunk 200 to chunk 800 ran at 9.997 requests/second. 174168 five-minute requests project to 17422 seconds (4.84 hours), past two hours. 59040 fifteen-minute requests at that rate project to 5906 seconds (1.64 hours). The fifteen-minute download then sustained about 7.5 requests/second over its first 16 minutes (7250 chunks). The kept 304-name download ran from 2026-10-11T00:08:14Z to 2026-10-11T01:00:46.608Z at 9.997 requests/second (31515 requests, 3952 pair-month files). decidedAt is 2026-10-10T23:47:41Z, the commit time of that recorded choice, after the cited attempt.",
       },
       {
         id: "window",

@@ -38,6 +38,10 @@ export interface ProductStatRow {
 }
 
 export interface ProductStatsFile {
+  commitSha?: string;
+  dataRootHash?: string | null;
+  createdAt?: string;
+  phaseId?: string;
   fetchedAt: string;
   fetchedAtNote: string;
   endpoint: string;

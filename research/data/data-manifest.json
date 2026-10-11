@@ -1,8 +1,12 @@
 {
-  "commitSha": "c306b3a0afa632ef65cb9007d22e78fd94cf5383",
+  "commitSha": "7fd9c2b10b5381ddbc83ecedf1bc3359aa0e5299",
   "dataRootHash": "e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968",
   "createdAt": "2026-10-10T23:47:55.410Z",
   "updatedAt": "2026-10-11T01:41:21.759Z",
+  "lastRefreshed": {
+    "commit": "c306b3a0afa632ef65cb9007d22e78fd94cf5383",
+    "at": "2026-10-11T01:42:36.815Z"
+  },
   "phaseId": "P1",
   "hashAlgorithm": "sha256",
   "rootHashInput": "sorted lines of relativePath TAB sha256 LF, UTF-8",
@@ -11,7 +15,7 @@
   "barSec": 900,
   "snapshotLift": {
     "liftedAt": "2026-10-11T01:30:08.821Z",
-    "reason": "Owner decision (Brian, 2026-10-11 20:19 CT): add back the 56 below-rank-cutoff names on the same 900-second window (2025-10-11T00:00:00.000Z inclusive through 2026-10-11T00:00:00.000Z exclusive). RESEARCH_LIFT_COMPLETED_FREEZE=1 is the guard change that allows this resume. Other cuts stay. Stats were not re-fetched.",
+    "reason": "Owner decision (Brian, 2026-10-10 20:19 CT (01:19Z)): add back the 56 below-rank-cutoff names on the same 900-second window (2025-10-11T00:00:00.000Z inclusive through 2026-10-11T00:00:00.000Z exclusive). RESEARCH_LIFT_COMPLETED_FREEZE=1 is the guard change that allows this resume. Other cuts stay. Stats were not re-fetched.",
     "supersededDataRootHash": "a222f69716094e26b90c10ab4fe145d342ff6728f6c0b589ed08bb255711c282",
     "supersededFrozenAt": "2026-10-11T01:00:46.624Z",
     "supersededFileCount": 3952,
@@ -23441,7 +23445,7 @@
   },
   "derivedManifest": {
     "path": "derived-manifest.json",
-    "sha256": "1aea2b7288443ba1daae3c11b7957a49e4c5ca6f48130eaa3df48beba345e4af",
+    "sha256": "7a8bb563856553d50dbfeee451790ad05e28577cf4fee27c37d9ffaf28d6e4a7",
     "derivedRootHash": "1e509c1bd5b760703b4f52cc53a1e0ccab512f3e75e5f5b9fe1c00e4e0eefe7b",
     "fileCount": 14040,
     "bytes": 781057638

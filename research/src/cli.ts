@@ -21,11 +21,11 @@ import { boot } from "./index";
 import { stampFromGit, type ArtifactStamp } from "./manifest";
 import { createPacer, downloadUsdSpot } from "./data/download";
 import { derivePairMonthFile } from "./data/derive-store";
-import { buildDerivedManifest } from "./data/derived-manifest";
 import { sha256Bytes } from "./data/hash";
 import { writeBytes, writeJson } from "./data/io";
 import { buildCoverage, type CoverageReport } from "./data/coverage";
-import { liftCompletedFreeze, scanCandleFiles, sealFrozenSnapshot, type DataManifest, type SnapshotLift } from "./data/manifest-file";
+import { BELOW_RANK_CUTOFF_LIFT_REASON, liftCompletedFreeze, scanCandleFiles, sealFrozenSnapshot, type DataManifest, type SnapshotLift } from "./data/manifest-file";
+import { assertFrozenRoots, withLastRefreshed } from "./data/refresh";
 import { convertBareProductStats, fetchProductStats, parseProductStats } from "./data/product-stats";
 import { sha256File } from "./data/store";
 import { applyUniverseCut, droppedProductIds, type OwnerDecisionFile } from "./data/universe-cut";
@@ -191,7 +191,7 @@ async function download(): Promise<void> {
       const lifted = liftCompletedFreeze(
         existing,
         new Date(),
-        "Owner decision (Brian, 2026-10-11 20:19 CT): add back the 56 below-rank-cutoff names on the same 900-second window (2025-10-11T00:00:00.000Z inclusive through 2026-10-11T00:00:00.000Z exclusive). RESEARCH_LIFT_COMPLETED_FREEZE=1 is the guard change that allows this resume. Other cuts stay. Stats were not re-fetched.",
+        BELOW_RANK_CUTOFF_LIFT_REASON,
       );
       snapshotLift = lifted.snapshotLift ?? snapshotLift;
       manifestCreatedAt = existing.createdAt;
@@ -351,6 +351,7 @@ function universeCut(): void {
 }
 
 function refreshReports(): void {
+  const checked = assertFrozenRoots(paths.root);
   const artifact = stamp("P1");
   const raw = readFileSync(paths.productsRaw);
   const products = usdSpotFromExchange(new TextDecoder().decode(raw));
@@ -363,10 +364,6 @@ function refreshReports(): void {
     products,
   });
   writeJson(paths.ticks, tickReport(products, artifact));
-  if (existsSync(paths.probe)) {
-    const probe = JSON.parse(readFileSync(paths.probe, "utf8")) as DelistedProbeReport;
-    writeJson(paths.probe, { ...probe, ...artifact });
-  }
   const probes = existsSync(paths.probe)
     ? (JSON.parse(readFileSync(paths.probe, "utf8")) as { products: { productId: string; status: UsdSpotProduct["status"]; statusRaw: string; candlesServed: boolean | null; windows: [] }[] }).products
     : [];
@@ -379,21 +376,13 @@ function refreshReports(): void {
       stamp: artifact,
     }),
   );
-  const files = scanCandleFiles(paths.root);
-  let derivedCount = 0;
-  for (const file of files) {
-    derivedCount += derivePairMonthFile({
-      sqlitePath: join(paths.root, file.path),
-      outDir: paths.derived,
-      stamp: artifact,
-    }).length;
-  }
-  const derived = buildDerivedManifest({ stamp: artifact, dataDir: paths.root });
   const derivedPath = join(paths.root, "derived-manifest.json");
-  writeJson(derivedPath, derived);
-  const manifest = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
+  const derived = JSON.parse(readFileSync(derivedPath, "utf8")) as { derivedRootHash: string; files: { bytes: number }[] };
+  const manifest = withLastRefreshed(checked.manifest, { commit: artifact.commitSha, at: artifact.createdAt });
   if (manifest.dataRootHash !== artifact.dataRootHash) throw new Error("candle root hash changed during refresh");
-  manifest.commitSha = artifact.commitSha;
+  if (manifest.dataRootHash !== checked.manifest.dataRootHash) throw new Error("refresh changed the frozen candle root");
+  if (manifest.snapshot?.frozenAt !== checked.manifest.snapshot?.frozenAt) throw new Error("refresh changed frozenAt");
+  if (manifest.commitSha !== checked.manifest.commitSha) throw new Error("refresh changed the frozen commit");
   manifest.derivedManifest = {
     path: "derived-manifest.json",
     sha256: sha256File(derivedPath),
@@ -418,6 +407,6 @@ function refreshReports(): void {
     }),
   );
   console.log(
-    `refresh derived ${derivedCount} files derivedRoot ${derived.derivedRootHash} candleRoot ${manifest.dataRootHash}`,
+    `refresh lastRefreshed ${manifest.lastRefreshed?.commit} derivedRoot ${derived.derivedRootHash} candleRoot ${manifest.dataRootHash}`,
   );
 }

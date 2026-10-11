@@ -14,7 +14,7 @@
   },
   "snapshotLift": {
     "liftedAt": "2026-10-11T01:30:08.821Z",
-    "reason": "Owner decision (Brian, 2026-10-11 20:19 CT): add back the 56 below-rank-cutoff names on the same 900-second window (2025-10-11T00:00:00.000Z inclusive through 2026-10-11T00:00:00.000Z exclusive). RESEARCH_LIFT_COMPLETED_FREEZE=1 is the guard change that allows this resume. Other cuts stay. Stats were not re-fetched.",
+    "reason": "Owner decision (Brian, 2026-10-10 20:19 CT (01:19Z)): add back the 56 below-rank-cutoff names on the same 900-second window (2025-10-11T00:00:00.000Z inclusive through 2026-10-11T00:00:00.000Z exclusive). RESEARCH_LIFT_COMPLETED_FREEZE=1 is the guard change that allows this resume. Other cuts stay. Stats were not re-fetched.",
     "supersededDataRootHash": "a222f69716094e26b90c10ab4fe145d342ff6728f6c0b589ed08bb255711c282",
     "supersededFrozenAt": "2026-10-11T01:00:46.624Z",
     "supersededFileCount": 3952,
@@ -6031,11 +6031,11 @@
   "ownerDecision": {
     "entries": [
       {
-        "id": "granularity",
-        "owner": "Brian",
-        "decidedAt": "2026-10-10T23:38:00.000Z",
+      "id": "granularity",
+      "owner": "Brian",
+      "decidedAt": "2026-10-10T23:47:41.000Z",
         "granularitySec": 900,
-        "note": "Brian chose fifteen-minute candles. The 5-minute download started at 2026-10-10T23:45:34Z. A 60-second sample from chunk 200 to chunk 800 ran at 9.997 requests/second. 174168 five-minute requests project to 17422 seconds (4.84 hours), past two hours. 59040 fifteen-minute requests at that rate project to 5906 seconds (1.64 hours). The fifteen-minute download then sustained about 7.5 requests/second over its first 16 minutes (7250 chunks). The kept 304-name download ran from 2026-10-11T00:08:14Z to 2026-10-11T01:00:46.608Z at 9.997 requests/second (31515 requests, 3952 pair-month files)."
+        "note": "Brian chose fifteen-minute candles. The 5-minute download started at 2026-10-10T23:45:34Z. A 60-second sample from chunk 200 to chunk 800 ran at 9.997 requests/second. 174168 five-minute requests project to 17422 seconds (4.84 hours), past two hours. 59040 fifteen-minute requests at that rate project to 5906 seconds (1.64 hours). The fifteen-minute download then sustained about 7.5 requests/second over its first 16 minutes (7250 chunks). The kept 304-name download ran from 2026-10-11T00:08:14Z to 2026-10-11T01:00:46.608Z at 9.997 requests/second (31515 requests, 3952 pair-month files). decidedAt is 2026-10-10T23:47:41Z, the commit time of that recorded choice, after the cited attempt."
       },
       {
         "id": "window",
@@ -7565,7 +7565,7 @@
   },
   "derivedManifest": {
     "path": "derived-manifest.json",
-    "sha256": "1aea2b7288443ba1daae3c11b7957a49e4c5ca6f48130eaa3df48beba345e4af",
+    "sha256": "7a8bb563856553d50dbfeee451790ad05e28577cf4fee27c37d9ffaf28d6e4a7",
     "derivedRootHash": "1e509c1bd5b760703b4f52cc53a1e0ccab512f3e75e5f5b9fe1c00e4e0eefe7b",
     "fileCount": 14040,
     "bytes": 781057638

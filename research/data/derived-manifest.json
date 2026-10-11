@@ -4,6 +4,7 @@
   "createdAt": "2026-10-11T01:42:36.815Z",
   "phaseId": "P1",
   "derivedRootHash": "1e509c1bd5b760703b4f52cc53a1e0ccab512f3e75e5f5b9fe1c00e4e0eefe7b",
+  "stampEmbeddedNote": "Each derived JSON file embeds commitSha, dataRootHash, createdAt, and phaseId. derivedRootHash hashes those files, so it is not a pure function of the candle bytes.",
   "files": [
     {
       "path": "derived/1INCH-USD/2025-10-1d.json",

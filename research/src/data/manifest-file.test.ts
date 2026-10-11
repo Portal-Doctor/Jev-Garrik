@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { liftCompletedFreeze, liftInProgressFreeze, sealFrozenSnapshot, type DataManifest } from "./manifest-file";
+import { BELOW_RANK_CUTOFF_LIFT_REASON, liftCompletedFreeze, liftInProgressFreeze, sealFrozenSnapshot, type DataManifest } from "./manifest-file";
 
 test("sealing a snapshot keeps the root hash and records the owner freeze", () => {
   const manifest: DataManifest = {
@@ -72,4 +72,9 @@ test("an in-progress freeze can be lifted and a completed universe cannot", () =
   expect(again.snapshot).toBeUndefined();
   expect(again.snapshotLift?.supersededDataRootHash).toBe(superseded);
   expect(again.snapshotLift?.priorSnapshotLift?.supersededDataRootHash).toBe(superseded);
+});
+
+test("the rank-cutoff lift reason uses 2026-10-10 20:19 CT (01:19Z)", () => {
+  expect(BELOW_RANK_CUTOFF_LIFT_REASON).toContain("2026-10-10 20:19 CT (01:19Z)");
+  expect(BELOW_RANK_CUTOFF_LIFT_REASON.includes("2026-10-11 20:19")).toBe(false);
 });
