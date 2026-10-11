@@ -1,0 +1,16 @@
+{
+  "commitSha": "2627db047acdb0ae2da16ec8e63534ee030c34e7",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-11T12:16:19.876Z",
+  "phaseId": "P3",
+  "dailyRootHash": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
+  "openItems": [
+    "Exclusion list is the agreed 23. confirmed stays false until the registration hash.",
+    "Fee tier is unconfirmed. Coinbase maker and taker bps stay null until Brian pastes the logged-in tier.",
+    "Brian has not approved the registration. The registration file is not hashed.",
+    "Class E has no historical row. Counts are geometry only.",
+    "Whether a non-positive Kelly bound trades at the $20 paper minimum is Brian's choice. The hook adds no size.",
+    "Purge, embargo, and Holm are not built.",
+    "Class E target is the nearer of a 50% retrace of the 6h high to the event low, or 2.5R, from the design text. It is applied to the fee floor."
+  ]
+}

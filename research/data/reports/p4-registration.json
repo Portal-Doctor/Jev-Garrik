@@ -1,0 +1,996 @@
+{
+  "document": "p4-registration",
+  "approved": false,
+  "hashed": true,
+  "note": "Final registration. approved stays false. Brian's approval is a separate record and is not in this file, so this hash stays fixed. The sha256 is in p4-registration.sha256 and the commit message. The stamp names the clean parent commit.",
+  "commitSha": "7cd968a0e35251ed6be7b6aa0dec0eda5ad11978",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-11T18:56:09.178Z",
+  "phaseId": "P4",
+  "dailyRootHash": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
+  "scanStampCommit": "2627db047acdb0ae2da16ec8e63534ee030c34e7",
+  "scanCreatedAt": "2026-10-11T12:16:19.876Z",
+  "implementationCommits": [
+    "6097fbfdfdf9cad7ef3de293c4fd011a5959e4c0",
+    "2627db047acdb0ae2da16ec8e63534ee030c34e7",
+    "c5ee11de33b7d67e819a1c37320fdd374c74694d",
+    "7cd968a0e35251ed6be7b6aa0dec0eda5ad11978"
+  ],
+  "identity": {
+    "designTexts": {
+      "tradingDesignFinalSha256": "a945e5960b48d01a97fe0cf1c36c4c907acfd759c85d2991be82266d0f10699f",
+      "addendumSha256": "a3281f6dbd6f69a1478cdcff17797d99e82d07cd4072269bd6ab21d353f2f962",
+      "addendumPreviousReviewSha256": "19602b306799e4dc9bb52d5f2074c3bd5ea504ee009d2d30e4b0bbf7c0b07b69",
+      "addendumNote": "Recomputed from the supplied trading-design-15m-addendum file. The review draft cited the previous hash. The file is not in this checkout.",
+      "filesInCheckout": false
+    },
+    "codeCommitAtHash": "7cd968a0e35251ed6be7b6aa0dec0eda5ad11978",
+    "data": {
+      "fifteenRoot": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+      "dailyRoot": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
+      "derivedRoot": "bd6dc35cc0b7212c0e4a95bfba6a6aafe1bb19dcdf3091196ce47953498a1eb5",
+      "dailyFrozenAt": "2026-10-11T02:35:46.619Z",
+      "dailyFreezeCommit": "a30b246a95951faa4f99882bf9ddba0a2fad24d1"
+    },
+    "artifactSha256": {
+      "exclusionProposal": "7d20bf0031823d53b2e86cdeaa8164a70e807fd5efa77e1ad7975e69011f7d1f",
+      "universeMembership": "ffccf47ef9ae0a596ae20d5a4880f93855d95f8bfa90cb7714deeccd747881f5",
+      "overlapCheck": "b6b0fcb94b4ea16702b58fcfc765c18eead201fecca9d1d76fc4f00c04f57887",
+      "geometryScan": "7c8901dbd891e7343aa0713ac3724a907480cf9e51da344f295050b3b52dbd44",
+      "blackoutCalendarFile": "421d3ac025b4f908acf5e8bb6d988cc1b0b337e8e07fe8bcc39fb7d201e62e55",
+      "blackoutEvents": "c91d4b46f46d167d2bb20ed6cf1482ef0d29bb4df4da5978b7a3dd16ffef2ea1"
+    }
+  },
+  "feeTier": {
+    "status": "confirmed",
+    "owner": "Brian",
+    "venue": "Coinbase Advanced Trade",
+    "tier": "Intro",
+    "makerBps": 50,
+    "takerBps": 90,
+    "profileId": "coinbase-advanced-trade-intro",
+    "source": "Brian pasted the logged-in fee page on 2026-10-11.",
+    "confirmedAt": "2026-10-11T18:48:00.000Z",
+    "confirmedAtLocal": "2026-10-11 13:48 America/Chicago"
+  },
+  "universe": {
+    "legs": "99/97 percent nonempty 15m, 10000/6000 dollar median 15m quote, CS15m at most 20 bps and exit above 25",
+    "tier": "3M/2M",
+    "cap": 40,
+    "recompute": "Monthly, on the first UTC day of each month from 2025-11-01 through 2026-10-01, and again at each fold start.",
+    "foldStarts": [
+      "2025-11-10",
+      "2026-02-10",
+      "2026-03-10",
+      "2026-04-10",
+      "2026-05-10",
+      "2026-06-10",
+      "2026-07-10",
+      "2026-08-10",
+      "2026-09-10"
+    ],
+    "listingProxy": "Price-group pass: first D1 candle. Boundary-saved: first D1 close. Otherwise the first in-window 15m candle.",
+    "btcAdmittedBy": "the same rule as any other name"
+  },
+  "classes": {
+    "A": "Design section 3. Six configs. Historical. Only these six are chosen in-sample.",
+    "B": "Top 20 percent of the eligible universe, score above 0, at most 4 names. Historical.",
+    "C": "Forward-only. The class C gate is not met, so there is no historical row. Kills still apply.",
+    "D": "87b35d0 geometry, target multiple 4 explicit. Forward-only, 20 dollar risk, 12-month end state is not testable. No historical row.",
+    "E": "Forward-only. No historical row. Kills still apply.",
+    "tieOrder": [
+      "A",
+      "C",
+      "B",
+      "D",
+      "E"
+    ],
+    "onePerPair": true,
+    "noReentryHours": 24,
+    "slots": {
+      "A": 3,
+      "B": 4,
+      "C": 2,
+      "D": 1,
+      "E": 1
+    }
+  },
+  "classCGate": {
+    "rule": "at least 30 OOS entries on at least 15 distinct UTC days, before slots",
+    "oosEntries": 12,
+    "distinctUtcDays": 9,
+    "meetsRule": false,
+    "historicalRow": false,
+    "trigger": "A 4h trigger is the first 4h close above the event-low candle high after the 00:00 UTC daily close that defines the event. The 48h window starts at that daily close."
+  },
+  "classCounts": {
+    "before": {
+      "commit": "2845b83",
+      "A20": {
+        "signals": 203,
+        "oosSignals": 187
+      },
+      "A55": {
+        "signals": 172,
+        "oosSignals": 160
+      },
+      "B": {
+        "signals": 171,
+        "oosSignals": 124
+      },
+      "C": {
+        "signals": 13,
+        "oosSignals": 9,
+        "distinctUtcDays": 7
+      },
+      "D": {
+        "signals": 14,
+        "oosSignals": 14
+      },
+      "E": {
+        "signals": 1,
+        "oosSignals": 1
+      }
+    },
+    "after": {
+      "commit": "c5ee11de33b7d67e819a1c37320fdd374c74694d",
+      "A20": {
+        "signals": 203,
+        "oosSignals": 187
+      },
+      "A55": {
+        "signals": 173,
+        "oosSignals": 160
+      },
+      "B": {
+        "signals": 171,
+        "oosSignals": 124
+      },
+      "C": {
+        "signals": 16,
+        "oosSignals": 12
+      },
+      "D": {
+        "signals": 14,
+        "oosSignals": 14
+      },
+      "E": {
+        "signals": 1,
+        "oosSignals": 1
+      },
+      "Cdays": 9
+    }
+  },
+  "validation": {
+    "label": "1-year, 15m, short-history, EXPLORATORY",
+    "isStart": "2025-11-10",
+    "isEnd": "2026-02-09",
+    "oosStart": "2026-02-10",
+    "oosEnd": "2026-10-09",
+    "oosMonths": 8,
+    "nLabel": "before slots",
+    "historicalFamily": [
+      "A",
+      "B"
+    ],
+    "inSampleChoice": "Only A's 6 configs are chosen in-sample.",
+    "maxOfN": 7,
+    "paperFamilyStreams": 5,
+    "nCum": 135,
+    "nCumSensitivity": 154,
+    "purge": "A trade belongs to its entry fold. IS trades open at the OOS boundary are dropped from both and counted. OOS trades are scored to their real exit. A trade open at the window end is marked to the last 15m close and flagged. Embargo is 0.",
+    "embargoDays": 0,
+    "killScreen": "n below 30 is insufficient. Kill when mean gross bps is below 0 and the upper 80 percent bound is below the hurdle. Otherwise keep. Holm is described for the historical streams and is not built."
+  },
+  "execution": {
+    "historicalEntry": "X1",
+    "selectable": "X1 only",
+    "stopModel": "stop minus the larger of s_bt and 0.1 times 1h ATR, on 15m bars",
+    "intrabar": "stop first; trails and the class E break-even move on completed 15m bars",
+    "gapFill": "A bar that opens beyond the stop fills at the open.",
+    "sBt": {
+      "formula": "max(5, 0.5 times the CS15m 30-day median), capped at 15 bps per taker leg",
+      "capBps": 15,
+      "stress": "2 times the capped value, so 10 to 30 bps",
+      "csMedianBps": 6.829227760250422,
+      "baseBps": 5,
+      "stressBps": 10
+    },
+    "makerLegsPay": 0,
+    "feeProfiles": [
+      "0/0",
+      "10/10",
+      "25/40",
+      "Kraken 40/80",
+      "Coinbase Advanced Trade Intro 50/90"
+    ],
+    "liveSpread": "s_live from the L2 snapshot",
+    "tradeThrough": "A public-feed trade at least one tick through the limit fills half the displayed volume.",
+    "indeterminateOnGap": "X2 and X3 are excluded and counted. A share above 10 percent is flagged. Class D takes no fill.",
+    "feeProfilesNote": "The first four rows are declared sensitivity profiles. The scan did not apply them. The Coinbase row is the confirmed Intro tier, maker 50 and taker 90."
+  },
+  "risk": {
+    "riskUsd": 60,
+    "classDRiskUsd": 20,
+    "notionalCapUsd": 1500,
+    "openRiskCapUsd": 480,
+    "bookNotionalCapUsd": 6000,
+    "clusterMaxOpen": 2,
+    "clusterRule": "At most two open positions in one correlation cluster. A boundary-saved name is its own cluster until 60 in-window days of correlation exist.",
+    "betaWeightedNotionalCapUsd": 6000,
+    "haltsUsd": {
+      "daily": 240,
+      "weekly": 480,
+      "book": -1600
+    },
+    "backstopsUsd": {
+      "daily": 900,
+      "pair": 500,
+      "book": 8000
+    },
+    "kelly": "half of E/Var on the lower 80 percent bound, capped at 0.75 percent; a non-positive bound adds no size",
+    "kellyPaperMinimumUsd": null,
+    "classKills": "The kill screen above, plus the design section 8 and addendum kills on the paper path."
+  },
+  "filters": {
+    "btcVeto": "primary for A, B, and D",
+    "oldClause": "non-selectable row",
+    "caution": "non-selectable row",
+    "utcDays": 365,
+    "vetoDayShare": 0.0547945205479452,
+    "oldClauseDayShare": 0.3506849315068493,
+    "cautionDayShare": 0.5068493150684932,
+    "vetoedShareA20": 0.019704433497536946,
+    "vetoedShareA55": 0.023121387283236993,
+    "vetoedShareB": 0.04678362573099415,
+    "blackout": "30 minutes before through 60 minutes after CPI, NFP, and FOMC"
+  },
+  "exclusion": {
+    "confirmed": true,
+    "count": 23,
+    "productIds": [
+      "BUSD-USD",
+      "CBETH-USD",
+      "DAI-USD",
+      "EURC-USD",
+      "GUSD-USD",
+      "GYEN-USD",
+      "JITOSOL-USD",
+      "LSETH-USD",
+      "MSOL-USD",
+      "MUSD-USD",
+      "PAX-USD",
+      "PAXG-USD",
+      "PYUSD-USD",
+      "USD1-USD",
+      "USDS-USD",
+      "USDT-USD",
+      "UST-USD",
+      "WAMPL-USD",
+      "WAXL-USD",
+      "WBTC-USD",
+      "WCFG-USD",
+      "WLUNA-USD",
+      "WRON-USD"
+    ],
+    "confirmedBy": "Brian",
+    "confirmedOn": "2026-10-11",
+    "priorFileSha256": "95be6b8288f092236025539d3da4e26508d029fba654b27ff3e32e75e7f632a3",
+    "fileSha256": "7d20bf0031823d53b2e86cdeaa8164a70e807fd5efa77e1ad7975e69011f7d1f",
+    "membershipFileSha256": "ffccf47ef9ae0a596ae20d5a4880f93855d95f8bfa90cb7714deeccd747881f5",
+    "membershipUnchanged": true,
+    "note": "Brian confirmed these 23 names on 2026-10-11. The names are identical to the scan list, so universe membership is unchanged."
+  },
+  "overlap": {
+    "applied": {
+      "price": "max(1 tick, 10 bps)",
+      "volume": "max(2 percent, 1000 dollars of notional)",
+      "boundary": "median 00:00 UTC gap at or under 10 bps keeps pre-window closes"
+    },
+    "legacyRecordedBeforeScan": "price 10 bps and volume 1 percent, confirmed false, recorded at 2026-10-11T02:00:00.000Z",
+    "memberNames": 51,
+    "overlapDays": 18353,
+    "missingSlotDays": 0,
+    "priceFailDays": 67,
+    "volumeFailDays": 23,
+    "openFailDays": 47,
+    "highFailDays": 4,
+    "lowFailDays": 4,
+    "closeFailDays": 63,
+    "priceGroupFailNames": [
+      "AVNT-USD",
+      "FIL-USD",
+      "IP-USD",
+      "LIGHTER-USD",
+      "TRUMP-USD",
+      "VVV-USD",
+      "WIF-USD"
+    ],
+    "volumeGroupFailNames": [
+      "LIGHTER-USD",
+      "WIF-USD"
+    ],
+    "boundaryBestSide": "before-00:00",
+    "boundarySavesCloses": [
+      "AVNT-USD",
+      "FIL-USD",
+      "IP-USD",
+      "LIGHTER-USD",
+      "TRUMP-USD",
+      "VVV-USD",
+      "WIF-USD"
+    ],
+    "prewindowBadNames": [],
+    "wifLostDates": [
+      "2025-11-10",
+      "2025-12-01"
+    ],
+    "decemberCapAdmitted": "INJ-USD"
+  },
+  "barAccess": {
+    "rule": "In-window daily bars are 15m-derived. Price-group passes may use pre-window D1 OHLC, and D1 volume only when the volume group passes. The seven boundary-saved names use pre-window D1 closes only, for EMA50/200 and the listing proxy. D swing history starts at the first D1 candle, or at 2025-10-11 for names that fail the price group.",
+    "inWindow": "Daily bars from 2025-10-11 onward come from 15m only. D1 is never read in-window.",
+    "priceGroup": "Pre-window D1 OHLC may feed every daily lookback. D1 volume is used only when the volume group also passes. Listing proxy is the first D1 candle.",
+    "boundarySaved": "Pre-window D1 closes only, for EMA50/200 and the listing proxy. ATR, closing highs, the 10-day low, 28-day scores, C's z-score and volume average, D's swing-high scan, and 60-day correlation stay in-window and are undefined until enough bars exist.",
+    "dHistory": "D's swing-high history starts at that name's first D1 candle in root 76c41956, or at 2025-10-11 when the price group does not pass. The paper load uses the same start. The vendored 87b35d0 function is unchanged.",
+    "dStartSummary": [
+      {
+        "date": "2023-10-11",
+        "count": 28
+      },
+      {
+        "date": "2025-10-11",
+        "count": 7
+      },
+      {
+        "date": "2023-12-14",
+        "count": 1
+      },
+      {
+        "date": "2024-01-22",
+        "count": 1
+      },
+      {
+        "date": "2024-02-06",
+        "count": 1
+      },
+      {
+        "date": "2024-02-15",
+        "count": 1
+      },
+      {
+        "date": "2024-11-13",
+        "count": 1
+      },
+      {
+        "date": "2025-01-23",
+        "count": 1
+      },
+      {
+        "date": "2025-02-13",
+        "count": 1
+      },
+      {
+        "date": "2025-02-20",
+        "count": 1
+      },
+      {
+        "date": "2025-04-24",
+        "count": 1
+      },
+      {
+        "date": "2025-06-05",
+        "count": 1
+      },
+      {
+        "date": "2025-06-12",
+        "count": 1
+      },
+      {
+        "date": "2025-07-15",
+        "count": 1
+      },
+      {
+        "date": "2025-08-20",
+        "count": 1
+      },
+      {
+        "date": "2025-09-01",
+        "count": 1
+      },
+      {
+        "date": "2025-11-24",
+        "count": 1
+      },
+      {
+        "date": "2026-02-05",
+        "count": 1
+      }
+    ],
+    "names": [
+      {
+        "productId": "AAVE-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "ADA-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "AERO-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2024-02-06",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2024-02-06"
+      },
+      {
+        "productId": "APT-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "ARB-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "AVAX-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "AVNT-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": true,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2025-09-09"
+      },
+      {
+        "productId": "BCH-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "BONK-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-12-14",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-12-14"
+      },
+      {
+        "productId": "BTC-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "CRO-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "CRV-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "DASH-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "DOGE-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "DOT-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "ENA-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-06-05",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-06-05"
+      },
+      {
+        "productId": "ETH-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "FARTCOIN-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-06-12",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-06-12"
+      },
+      {
+        "productId": "FET-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "FIL-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": true,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "HBAR-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "HYPE-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2026-02-05",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2026-02-05"
+      },
+      {
+        "productId": "ICP-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "INJ-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "IP-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": true,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2025-02-13"
+      },
+      {
+        "productId": "LIGHTER-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": false,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2026-01-15"
+      },
+      {
+        "productId": "LINK-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "LTC-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "MON-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-11-24",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-11-24"
+      },
+      {
+        "productId": "NEAR-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "ONDO-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2024-01-22",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2024-01-22"
+      },
+      {
+        "productId": "PENGU-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-02-13",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-02-13"
+      },
+      {
+        "productId": "PEPE-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2024-11-13",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2024-11-13"
+      },
+      {
+        "productId": "PUMP-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-07-15",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-07-15"
+      },
+      {
+        "productId": "RENDER-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2024-02-15",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2024-02-15"
+      },
+      {
+        "productId": "SEI-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "SHIB-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "SOL-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "SUI-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "TAO-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-02-20",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-02-20"
+      },
+      {
+        "productId": "TOSHI-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-01-23",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-01-23"
+      },
+      {
+        "productId": "TRUMP-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": true,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2025-01-21"
+      },
+      {
+        "productId": "UNI-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "USELESS-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-08-20",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-08-20"
+      },
+      {
+        "productId": "VVV-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": true,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2025-01-28"
+      },
+      {
+        "productId": "WIF-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": false,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2024-11-13"
+      },
+      {
+        "productId": "WLFI-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-09-01",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-09-01"
+      },
+      {
+        "productId": "XLM-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "XRP-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "ZEC-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "ZORA-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-04-24",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-04-24"
+      }
+    ]
+  },
+  "dParity": {
+    "harness": "87b35d0 runSwing4h, geometry only, 1.5 times ATR, on the same aggregated bars as classDCandidates.",
+    "targetR4": {
+      "matched": 179,
+      "reference": 179,
+      "label": "synthetic-bar self-consistency check"
+    },
+    "targetR3": {
+      "referenceRows": 179,
+      "fullMatchesAgainst4R": 0,
+      "label": "synthetic-bar self-consistency check"
+    },
+    "note": "NEAR-USD and SUI-USD can differ from PR #29. That run loaded a longer D1 history. This scan pins D to each name's first D1 candle in root 76c41956, or to 2025-10-11 for the seven boundary-saved names. That difference is expected and is not a parity failure.",
+    "realCandle": {
+      "label": "the real-candle parity that counts",
+      "source": "QA on PR #29, 1m candles, against 87b35d0 runSwing4h",
+      "matched": 21,
+      "reference": 21,
+      "control": "3R mismatches"
+    }
+  },
+  "paperPath": {
+    "days": "at least 90",
+    "nPerClass": 30,
+    "promote": "mean net R above 0, lower 80 percent above 0, Holm over 5 class streams",
+    "kills": "section 8 and the addendum",
+    "parityDays": 7,
+    "jevShadow": "every candidate from bar 1"
+  },
+  "jev": {
+    "endpoint": "jev-latest direct",
+    "responseModel": "logged on every call",
+    "versionSegmentation": "results segmented at any version change",
+    "packet": "gap 18",
+    "fallback": "B",
+    "fallbackNote": "Fallback B unless TypeSafe confirms daily inputs before the hash. Fallback A is not selected.",
+    "v2": "V2, V2-AND, and select rules are paper-only",
+    "placeboAndPower": "minimums apply"
+  },
+  "openItems": [
+    "Brian's approval is a separate record and is not in this file.",
+    "A non-positive Kelly bound trading at 20 dollars is Brian's choice and is not applied.",
+    "Open is reported beside high, low, and close. It is not part of the price-group pass.",
+    "Purge and Holm are described and not built.",
+    "TypeSafe has not answered, so Jev stays on Fallback B.",
+    "The design-text files are not in this checkout. The addendum hash was recomputed from the supplied file.",
+    "NEAR-USD and SUI-USD can differ from PR 29 because that run loaded a longer D1 history. Both are pinned here to 2023-10-11. That difference is expected and is not a parity failure."
+  ],
+  "feeAudit": {
+    "consistent": true,
+    "items": [
+      {
+        "item": "MAKER_FEE_BPS",
+        "value": 50,
+        "usedBy": "vendor config; entry and resting-target legs"
+      },
+      {
+        "item": "TAKER_FEE_BPS",
+        "value": 90,
+        "usedBy": "vendor config; stop and market-exit legs"
+      },
+      {
+        "item": "F_WIN_BPS",
+        "value": 100,
+        "usedBy": "perTradeFloor; maker plus maker"
+      },
+      {
+        "item": "F_LOSS_BPS",
+        "value": 140,
+        "usedBy": "perTradeFloor; maker plus taker"
+      },
+      {
+        "item": "perTradeFloor",
+        "value": "(T - 100) >= 1.5 * (S + 140)",
+        "usedBy": "class C, class E, and the class D swing floor"
+      },
+      {
+        "item": "belowFeeFloor",
+        "value": "not perTradeFloor.pass",
+        "usedBy": "class D"
+      },
+      {
+        "item": "swingFloor",
+        "value": "perTradeFloor",
+        "usedBy": "class D"
+      },
+      {
+        "item": "classEAtStop250",
+        "value": "target at least 685 bps",
+        "usedBy": "classEFloorPasses"
+      },
+      {
+        "item": "section1CostBps",
+        "value": "50 + q*50 + (1-q)*(90 + s)",
+        "usedBy": "declared section 1 formula; not applied to scan counts"
+      },
+      {
+        "item": "sBt.baseBps",
+        "value": 5,
+        "usedBy": "scan spread, not an exchange fee"
+      },
+      {
+        "item": "sBt.stressBps",
+        "value": 10,
+        "usedBy": "scan spread, not an exchange fee"
+      },
+      {
+        "item": "sBt.csMedianBps",
+        "value": 6.829227760250422,
+        "usedBy": "scan spread input"
+      },
+      {
+        "item": "makerLegsPay",
+        "value": 0,
+        "usedBy": "spread on maker legs"
+      }
+    ],
+    "declaredNotApplied": [
+      "0/0",
+      "10/10",
+      "25/40",
+      "Kraken 40/80"
+    ]
+  }
+}

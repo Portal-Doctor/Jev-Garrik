@@ -1,0 +1,36 @@
+name: research
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: bun test research
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: fetch class D source commit
+        run: git fetch --depth=1 origin 87b35d093710e3683d5910ee81bf7b1a46276bbc
+      - name: install
+        run: bun install --frozen-lockfile
+      - name: test
+        run: bun test research
+      - name: typecheck
+        run: bunx tsc --noEmit -p research/tsconfig.json
+
+  cb-guard:
+    name: cb unchanged vs main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: fail if cb differs from main
+        run: |
+          git fetch origin main
+          git branch -f main FETCH_HEAD
+          git diff --exit-code main -- cb/

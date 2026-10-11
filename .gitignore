@@ -2,6 +2,13 @@ node_modules
 .env
 data/
 
+# `data/` matches every directory of that name. Source and the research data records stay visible.
+# Candle bytes and derived bars are ignored from research/.gitignore.
+!research/src/data/
+!research/src/data/**
+!research/data/
+!research/data/**
+
 # cb runtime logs (redirected stdout/stderr from `bun run cb`)
 cb_run.out
 cb_run.err
