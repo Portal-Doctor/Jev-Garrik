@@ -1,7 +1,7 @@
 {
-  "commitSha": "722719b16c5d290749b13650ea159acaf1139ba3",
+  "commitSha": "2627db047acdb0ae2da16ec8e63534ee030c34e7",
   "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
-  "createdAt": "2026-10-11T03:56:30.320Z",
+  "createdAt": "2026-10-11T12:16:19.876Z",
   "phaseId": "P3",
   "dailyRootHash": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
   "label": "1-year, 15m, short-history, EXPLORATORY",
@@ -11,7 +11,7 @@
       "oosSignals": 187
     },
     "A55": {
-      "signals": 172,
+      "signals": 173,
       "oosSignals": 160
     },
     "B": {
@@ -19,8 +19,8 @@
       "oosSignals": 124
     },
     "C": {
-      "signals": 13,
-      "oosSignals": 9
+      "signals": 16,
+      "oosSignals": 12
     },
     "D": {
       "signals": 14,
@@ -38,13 +38,13 @@
       "A20": 187,
       "A55": 160,
       "B": 124,
-      "C": 9,
+      "C": 12,
       "D": 14,
       "E": 1
     },
     "classC": {
-      "oosEntries": 9,
-      "distinctUtcDays": 7,
+      "oosEntries": 12,
+      "distinctUtcDays": 9,
       "meetsRule": false
     }
   },
@@ -68,38 +68,38 @@
   "stopWidths": {
     "A20_k2": {
       "p10": 1040.1823934611034,
-      "p50": 1427.3804572358792,
+      "p50": 1427.3804572344332,
       "p90": 1892.7226209365797
     },
     "A20_k2_5": {
       "p10": 1300.2279918263794,
-      "p50": 1784.225571544849,
+      "p50": 1784.2255715430417,
       "p90": 2365.9032761707244
     },
     "A20_k3": {
       "p10": 1560.2735901916549,
-      "p50": 2141.0706858538188,
+      "p50": 2141.0706858516496,
       "p90": 2839.08393140487
     },
     "A55_k2": {
       "p10": 1040.1823934611034,
       "p50": 1413.835852320046,
-      "p90": 1890.5732980234254
+      "p90": 1890.5732980229798
     },
     "A55_k2_5": {
       "p10": 1300.2279918263794,
       "p50": 1767.294815400057,
-      "p90": 2363.2166225292817
+      "p90": 2363.2166225287247
     },
     "A55_k3": {
       "p10": 1560.2735901916549,
       "p50": 2120.753778480069,
-      "p90": 2835.8599470351382
+      "p90": 2835.8599470344693
     },
     "C": {
       "p10": 566.7588384611241,
-      "p50": 696.7364845265657,
-      "p90": 1126.1756629662425
+      "p50": 789.760163318403,
+      "p90": 1335.310740156756
     },
     "D": {
       "p10": 244.72573839662374,
@@ -118,7 +118,7 @@
     "oldClauseDayShare": 0.3506849315068493,
     "cautionDayShare": 0.5068493150684932,
     "vetoedShareA20": 0.019704433497536946,
-    "vetoedShareA55": 0.023255813953488372,
+    "vetoedShareA55": 0.023121387283236993,
     "vetoedShareB": 0.04678362573099415
   },
   "csDistribution": {
@@ -143,7 +143,7 @@
     "A55": 937,
     "B": 37,
     "C": 0,
-    "D": 609,
+    "D": 756,
     "E": 0
   },
   "pairMonth": [
@@ -241,7 +241,7 @@
       "className": "A55",
       "productId": "BCH-USD",
       "month": "2025-12",
-      "count": 2
+      "count": 3
     },
     {
       "className": "A55",
@@ -737,6 +737,12 @@
     },
     {
       "className": "C",
+      "productId": "UNI-USD",
+      "month": "2026-02",
+      "count": 1
+    },
+    {
+      "className": "C",
       "productId": "HBAR-USD",
       "month": "2026-05",
       "count": 1
@@ -767,6 +773,18 @@
     },
     {
       "className": "C",
+      "productId": "AAVE-USD",
+      "month": "2026-06",
+      "count": 1
+    },
+    {
+      "className": "C",
+      "productId": "FARTCOIN-USD",
+      "month": "2026-06",
+      "count": 1
+    },
+    {
+      "className": "C",
       "productId": "VVV-USD",
       "month": "2026-08",
       "count": 1
@@ -791,13 +809,7 @@
     },
     {
       "className": "B",
-      "productId": "TAO-USD",
-      "month": "2025-11",
-      "count": 1
-    },
-    {
-      "className": "B",
-      "productId": "NEAR-USD",
+      "productId": "UNI-USD",
       "month": "2025-11",
       "count": 2
     },
@@ -809,7 +821,7 @@
     },
     {
       "className": "B",
-      "productId": "UNI-USD",
+      "productId": "NEAR-USD",
       "month": "2025-11",
       "count": 2
     },
@@ -1298,6 +1310,12 @@
       "productId": "SUI-USD",
       "month": "2026-10",
       "count": 1
+    },
+    {
+      "className": "B",
+      "productId": "TAO-USD",
+      "month": "2025-11",
+      "count": 1
     }
   ],
   "classGate": {
@@ -1525,5 +1543,470 @@
     "names": 492,
     "fifteenFiles": 6396,
     "dailyFiles": 18204
-  }
+  },
+  "barAccess": {
+    "rule": "In-window daily bars are 15m-derived. Price-group passes may use pre-window D1 OHLC, and D1 volume only when the volume group passes. The seven boundary-saved names use pre-window D1 closes only, for EMA50/200 and the listing proxy. D swing history starts at the first D1 candle, or at 2025-10-11 for names that fail the price group.",
+    "names": [
+      {
+        "productId": "AAVE-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "ADA-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "AERO-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2024-02-06",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2024-02-06"
+      },
+      {
+        "productId": "APT-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "ARB-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "AVAX-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "AVNT-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": true,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2025-09-09"
+      },
+      {
+        "productId": "BCH-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "BONK-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-12-14",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-12-14"
+      },
+      {
+        "productId": "BTC-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "CRO-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "CRV-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "DASH-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "DOGE-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "DOT-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "ENA-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-06-05",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-06-05"
+      },
+      {
+        "productId": "ETH-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "FARTCOIN-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-06-12",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-06-12"
+      },
+      {
+        "productId": "FET-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "FIL-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": true,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "HBAR-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "HYPE-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2026-02-05",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2026-02-05"
+      },
+      {
+        "productId": "ICP-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "INJ-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "IP-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": true,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2025-02-13"
+      },
+      {
+        "productId": "LIGHTER-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": false,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2026-01-15"
+      },
+      {
+        "productId": "LINK-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "LTC-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "MON-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-11-24",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-11-24"
+      },
+      {
+        "productId": "NEAR-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "ONDO-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2024-01-22",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2024-01-22"
+      },
+      {
+        "productId": "PENGU-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-02-13",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-02-13"
+      },
+      {
+        "productId": "PEPE-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2024-11-13",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2024-11-13"
+      },
+      {
+        "productId": "PUMP-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-07-15",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-07-15"
+      },
+      {
+        "productId": "RENDER-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2024-02-15",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2024-02-15"
+      },
+      {
+        "productId": "SEI-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "SHIB-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "SOL-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "SUI-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "TAO-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-02-20",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-02-20"
+      },
+      {
+        "productId": "TOSHI-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-01-23",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-01-23"
+      },
+      {
+        "productId": "TRUMP-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": true,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2025-01-21"
+      },
+      {
+        "productId": "UNI-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "USELESS-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-08-20",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-08-20"
+      },
+      {
+        "productId": "VVV-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": true,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2025-01-28"
+      },
+      {
+        "productId": "WIF-USD",
+        "priceGroupPasses": false,
+        "volumeGroupPasses": false,
+        "boundarySaved": true,
+        "dHistoryStart": "2025-10-11",
+        "listingProxySource": "first-d1-close",
+        "listingProxyDate": "2024-11-13"
+      },
+      {
+        "productId": "WLFI-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-09-01",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-09-01"
+      },
+      {
+        "productId": "XLM-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "XRP-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "ZEC-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2023-10-11",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2023-10-11"
+      },
+      {
+        "productId": "ZORA-USD",
+        "priceGroupPasses": true,
+        "volumeGroupPasses": true,
+        "boundarySaved": false,
+        "dHistoryStart": "2025-04-24",
+        "listingProxySource": "first-d1-candle",
+        "listingProxyDate": "2025-04-24"
+      }
+    ]
+  },
+  "dParityNote": "NEAR-USD and SUI-USD can differ from PR #29. That run loaded a longer D1 history. This scan pins D to each name's first D1 candle in root 76c41956, or to 2025-10-11 for the seven boundary-saved names. That difference is expected and is not a parity failure."
 }
