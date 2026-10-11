@@ -49,6 +49,16 @@ export interface PairFacts {
   four: BarOHLC[];
   overlapFlags: number;
   overlapDays: number;
+  overlapDetail: OverlapFlag[];
+}
+
+export interface OverlapFlag {
+  productId: string;
+  date: string;
+  closeRel: number;
+  highRel: number;
+  lowRel: number;
+  volumeRel: number;
 }
 
 export interface QuarterSlot {
@@ -116,12 +126,22 @@ export function loadPair(productId: string, dailyDir: string, candleDir: string)
   }
   let overlapDays = 0;
   let overlapFlags = 0;
+  const overlapDetail: OverlapFlag[] = [];
   for (const row of inside) {
     if (row.empty) continue;
     const other = byDate.get(row.date);
     if (!other || other.empty) continue;
     overlapDays += 1;
-    if (ohlcvDiffers(row, other)) overlapFlags += 1;
+    if (!ohlcvDiffers(row, other)) continue;
+    overlapFlags += 1;
+    overlapDetail.push({
+      productId,
+      date: row.date,
+      closeRel: relDiff(row.close, other.close),
+      highRel: relDiff(row.high, other.high),
+      lowRel: relDiff(row.low, other.low),
+      volumeRel: relDiff(row.volume, other.volume),
+    });
   }
   const days = [...early, ...inside].filter((row, index, all) => all.findIndex((item) => item.date === row.date) === index);
   days.sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -159,11 +179,16 @@ export function loadPair(productId: string, dailyDir: string, candleDir: string)
     four,
     overlapFlags,
     overlapDays,
+    overlapDetail,
   };
 }
 
+function relDiff(left: number, right: number): number {
+  return Math.abs(left - right) / Math.max(Math.abs(right), 1e-12);
+}
+
 export function ohlcvDiffers(left: { high: number; low: number; close: number; volume: number }, right: { high: number; low: number; close: number; volume: number }): boolean {
-  const priceOff = (a: number, b: number) => Math.abs(a - b) / Math.max(Math.abs(b), 1e-12) > OVERLAP_TOLERANCE.priceRelative;
+  const priceOff = (a: number, b: number) => relDiff(a, b) > OVERLAP_TOLERANCE.priceRelative;
   const volOff = Math.abs(left.volume - right.volume) / Math.max(right.volume, 1e-12) > OVERLAP_TOLERANCE.volumeRelative;
   return priceOff(left.high, right.high) || priceOff(left.low, right.low) || priceOff(left.close, right.close) || volOff;
 }
@@ -253,7 +278,7 @@ export interface GeometryResult {
   };
   stopWidths: Record<string, { p10: number | null; p50: number | null; p90: number | null }>;
   btcFilterShares: { veto: number; oldClause: number; caution: number };
-  overlap: { days: number; flagged: number; tolerance: typeof OVERLAP_TOLERANCE };
+  overlap: { days: number; flagged: number; tolerance: typeof OVERLAP_TOLERANCE; flaggedDays: OverlapFlag[] };
   warmup: { names: number; ema200ReadyByFirstUniverse: number; leftCensored: number };
   warmupRows: WarmupRow[];
   firstUniverseDate: "2025-11-10";
@@ -310,47 +335,59 @@ function below4hByDate(four: readonly BarOHLC[]): Map<string, boolean> {
   return out;
 }
 
-export function scanFacts(pairs: readonly PairFacts[], excluded: ReadonlySet<string>): GeometryResult {
+function rememberBtc(pair: PairFacts, btcByDate: Map<string, BtcDay>): void {
+  if (pair.productId !== "BTC-USD") return;
+  const filled = pair.days.filter((row) => !row.empty);
+  const closes = filled.map((row) => row.close);
+  const ema50 = ema(closes, 50);
+  const fourBelow = below4hByDate(pair.four);
+  filled.forEach((row, index) => {
+    const prev = filled[index - 1];
+    btcByDate.set(row.date, {
+      date: row.date,
+      close: row.close,
+      ema50: ema50[index] ?? null,
+      dailyMove: prev && prev.close > 0 ? (row.close - prev.close) / prev.close : null,
+      below4hEma: fourBelow.get(row.date) ?? false,
+    });
+  });
+}
+
+function sampleOf(pair: PairFacts, date: string): NameDateSample {
+  const listed = pair.listedDate == null ? 0 : Math.floor((Date.parse(`${date}T00:00:00.000Z`) - Date.parse(`${pair.listedDate}T00:00:00.000Z`)) / (DAY * 1000));
+  return {
+    productId: pair.productId,
+    volumeUsd: quoteAt(pair.days, date),
+    listedDays: listed,
+    liquidity: liquidityAt(pair.quarterSlots, date),
+  };
+}
+
+/** Loads each pair twice so the bar arrays can be released between passes. */
+export function scanTwoPass(load: () => Iterable<PairFacts>, excluded: ReadonlySet<string>): GeometryResult {
   const dates = membershipDates();
   const monthly = new Set(monthlyRebalanceDates());
-  const priced = pairs.map((pair) => {
-    const closes = pair.days.filter((row) => !row.empty).map((row) => row.close);
-    const ema50 = ema(closes, 50);
-    return { pair, closes, ema50 };
-  });
-  const btc = priced.find((row) => row.pair.productId === "BTC-USD");
-  const btcByDate = new Map<string, BtcDay>();
-  if (btc) {
-    const filled = btc.pair.days.filter((row) => !row.empty);
-    const fourBelow = below4hByDate(btc.pair.four);
-    filled.forEach((row, index) => {
-      const prev = filled[index - 1];
-      btcByDate.set(row.date, {
-        date: row.date,
-        close: row.close,
-        ema50: btc.ema50[index] ?? null,
-        dailyMove: prev && prev.close > 0 ? (row.close - prev.close) / prev.close : null,
-        below4hEma: fourBelow.get(row.date) ?? false,
-      });
-    });
-  }
   const sampleCache = new Map<string, NameDateSample[]>();
-  const samplesFor = (date: string): NameDateSample[] => {
-    const hit = sampleCache.get(date);
-    if (hit) return hit;
-    const rows = pairs.map((pair) => {
-      const listed = pair.listedDate == null ? 0 : Math.floor((Date.parse(`${date}T00:00:00.000Z`) - Date.parse(`${pair.listedDate}T00:00:00.000Z`)) / (DAY * 1000));
-      return {
-        productId: pair.productId,
-        volumeUsd: quoteAt(pair.days, date),
-        listedDays: listed,
-        liquidity: liquidityAt(pair.quarterSlots, date),
-      };
-    });
-    sampleCache.set(date, rows);
-    return rows;
-  };
-  const built = buildMembership({ dates, monthlyDates: monthly, excluded, samplesFor });
+  for (const date of dates) sampleCache.set(date, []);
+  const btcByDate = new Map<string, BtcDay>();
+  const warmupRows: WarmupRow[] = [];
+  let overlapDays = 0;
+  let overlapFlagged = 0;
+  const flaggedDays: OverlapFlag[] = [];
+  for (const pair of load()) {
+    warmupRows.push(warmupFor(pair));
+    overlapDays += pair.overlapDays;
+    overlapFlagged += pair.overlapFlags;
+    flaggedDays.push(...pair.overlapDetail);
+    rememberBtc(pair, btcByDate);
+    for (const date of dates) sampleCache.get(date)!.push(sampleOf(pair, date));
+  }
+  const built = buildMembership({
+    dates,
+    monthlyDates: monthly,
+    excluded,
+    samplesFor: (date) => sampleCache.get(date) ?? [],
+  });
   const { passCounts, members } = built;
   const tier = built.volumeTier;
   const universeSize = dates.map((date) => ({ date, names: members.get(date)?.size ?? 0 }));
@@ -372,7 +409,7 @@ export function scanFacts(pairs: readonly PairFacts[], excluded: ReadonlySet<str
     L20: { 2: [], 2.5: [], 3: [] },
     L55: { 2: [], 2.5: [], 3: [] },
   };
-  for (const pair of pairs) {
+  for (const pair of load()) {
     const filled = pair.days.filter((row) => !row.empty);
     const bars: DailyBar[] = filled.map((row) => ({ date: row.date, high: row.high, low: row.low, close: row.close, volume: row.volume }));
     const atr = wilderAtr(bars.map((b) => b.high), bars.map((b) => b.low), bars.map((b) => b.close), 14);
@@ -415,7 +452,6 @@ export function scanFacts(pairs: readonly PairFacts[], excluded: ReadonlySet<str
   const share = (n: number) => (vetoBase === 0 ? 0 : n / vetoBase);
   const signalCounts = Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, { signals: value.signals, oosSignals: value.oosSignals }]));
   const projected = Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, value.oosSignals]));
-  const warmupRows = pairs.map(warmupFor);
   return {
     volumeTier: tier,
     above5m: built.above5m,
@@ -448,12 +484,13 @@ export function scanFacts(pairs: readonly PairFacts[], excluded: ReadonlySet<str
       caution: share((totals.A20?.caution ?? 0) + (totals.A55?.caution ?? 0) + (totals.B?.caution ?? 0) + (totals.D?.caution ?? 0)),
     },
     overlap: {
-      days: pairs.reduce((sum, pair) => sum + pair.overlapDays, 0),
-      flagged: pairs.reduce((sum, pair) => sum + pair.overlapFlags, 0),
+      days: overlapDays,
+      flagged: overlapFlagged,
       tolerance: OVERLAP_TOLERANCE,
+      flaggedDays,
     },
     warmup: {
-      names: pairs.length,
+      names: warmupRows.length,
       ema200ReadyByFirstUniverse: warmupRows.filter((row) => {
         const ema200 = row.indicators.find((item) => item.indicator === "ema200");
         return ema200?.readyOn != null && ema200.readyOn < "2025-11-10";
@@ -463,4 +500,8 @@ export function scanFacts(pairs: readonly PairFacts[], excluded: ReadonlySet<str
     warmupRows,
     firstUniverseDate: "2025-11-10",
   };
+}
+
+export function scanFacts(pairs: readonly PairFacts[], excluded: ReadonlySet<string>): GeometryResult {
+  return scanTwoPass(() => pairs, excluded);
 }

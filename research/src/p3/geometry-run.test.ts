@@ -42,6 +42,7 @@ test("warmup names the source that completed each indicator", () => {
     four: [],
     overlapFlags: 0,
     overlapDays: 0,
+    overlapDetail: [],
   };
   const row = warmupFor(pair);
   expect(row.indicators.find((item) => item.indicator === "ema200")?.source).toBe("D1");

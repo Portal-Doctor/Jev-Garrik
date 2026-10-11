@@ -38,7 +38,8 @@ import { buildP1Report } from "./data/p1-report";
 import { tickReport, type TickReport } from "./data/tick";
 import { assertNoBannedKeys } from "./data/banned";
 import { proposeExclusions } from "./p2/exclusion";
-import { loadPair, scanFacts } from "./p3/geometry-run";
+import { buildDerivedManifest } from "./data/derived-manifest";
+import { loadPair, scanTwoPass } from "./p3/geometry-run";
 import { jevSmoke } from "./p3/jev";
 import { assertScanSchema } from "./p3/scan-schema";
 import { survivorshipReport } from "./p3/survivorship";
@@ -83,6 +84,9 @@ async function main(): Promise<void> {
     case "derive":
       derive();
       return;
+    case "derive-new":
+      deriveNew();
+      return;
     case "ticks":
       ticks();
       return;
@@ -119,7 +123,7 @@ async function main(): Promise<void> {
       return;
     default:
       throw new Error(
-        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | jev-smoke",
+        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | jev-smoke",
       );
   }
 }
@@ -447,6 +451,39 @@ function derive(): void {
   console.log(`derived ${written.length} files`);
 }
 
+/** Derives pair-months that do not already have a daily JSON file. Existing derived bytes stay put. */
+function deriveNew(): void {
+  const priorPath = join(paths.root, "derived-manifest.json");
+  const prior = existsSync(priorPath) ? ((JSON.parse(readFileSync(priorPath, "utf8")) as { derivedRootHash?: string }).derivedRootHash ?? null) : null;
+  const artifact = stamp("P1");
+  const files = scanCandleFiles(paths.root);
+  let months = 0;
+  for (const file of files) {
+    const parts = file.path.split("/");
+    const pair = parts[1];
+    const month = parts[2]?.replace(/\.sqlite$/, "");
+    if (!pair || !month) continue;
+    if (existsSync(join(paths.derived, pair, `${month}-1d.json`))) continue;
+    derivePairMonthFile({
+      sqlitePath: join(paths.root, file.path),
+      outDir: paths.derived,
+      stamp: artifact,
+    });
+    months += 1;
+    if (months % 25 === 0) writeSync(1, `derive-new ${months} ${pair} ${month}\n`);
+  }
+  const manifest = buildDerivedManifest({ stamp: artifact, dataDir: paths.root });
+  writeJson(priorPath, manifest);
+  writeJson(join(paths.reports, "derived-roots.json"), {
+    ...artifact,
+    priorDerivedRootHash: prior,
+    derivedRootHash: manifest.derivedRootHash,
+    newMonths: months,
+    note: "New pair-months were derived. Existing derived files were not rewritten, so their embedded stamps stay in the new root.",
+  });
+  console.log(`derive-new months ${months} prior ${prior} root ${manifest.derivedRootHash}`);
+}
+
 function coverage(): void {
   const probes = existsSync(paths.probe)
     ? (JSON.parse(readFileSync(paths.probe, "utf8")) as { products: { productId: string; status: UsdSpotProduct["status"]; statusRaw: string; candlesServed: boolean | null; windows: [] }[] }).products
@@ -597,10 +634,20 @@ function writeGeometry(): void {
   if (fifteen.snapshotLift?.reason !== D2_LIFT_REASON) throw new Error("15m snapshot is not the D2 lift");
   const artifact = stamp("P3");
   const ids = [...new Set([...pairDirs(paths.candles), ...pairDirs(join(dailyDir(), "candles"))])].sort();
-  const pairs = ids.map((id) => loadPair(id, join(dailyDir(), "candles"), paths.candles)).filter((pair) => pair != null);
+  const dailyCandles = join(dailyDir(), "candles");
+  let loaded = 0;
+  const load = function* () {
+    for (const id of ids) {
+      const pair = loadPair(id, dailyCandles, paths.candles);
+      if (!pair) continue;
+      loaded += 1;
+      if (loaded % 20 === 0) writeSync(1, `geometry load ${loaded} ${id}\n`);
+      yield pair;
+    }
+  };
   const exclusion = proposeExclusions(loadProducts().map((product) => product.productId));
   const excluded = new Set(exclusion.productIds);
-  const scan = scanFacts(pairs, excluded);
+  const scan = scanTwoPass(() => load(), excluded);
   const decision = existsSync(decisionPath()) ? (JSON.parse(readFileSync(decisionPath(), "utf8")) as OwnerDecisionFile) : null;
   const reasons = new Map<string, string>();
   const cut = decision?.entries.find((entry) => entry.id === "universe-cut");
@@ -632,7 +679,7 @@ function writeGeometry(): void {
     overlap: scan.overlap,
     warmup: scan.warmup,
     firstUniverseDate: scan.firstUniverseDate,
-    coverage: { names: pairs.length, fifteenFiles: fifteen.files.length, dailyFiles: daily.files.length },
+    coverage: { names: scan.warmup.names, fifteenFiles: fifteen.files.length, dailyFiles: daily.files.length },
   };
   assertScanSchema(scanDoc);
   if (Date.parse(scan.overlap.tolerance.recordedAt) >= Date.parse(artifact.createdAt)) {
@@ -663,7 +710,7 @@ function writeGeometry(): void {
     assertNoBannedKeys(body, name);
     writeJson(join(paths.reports, name), body);
   }
-  console.log(`geometry names ${pairs.length} fifteen ${fifteen.dataRootHash} daily ${daily.dataRootHash}`);
+  console.log(`geometry names ${scan.warmup.names} fifteen ${fifteen.dataRootHash} daily ${daily.dataRootHash}`);
 }
 
 async function writeJevSmoke(): Promise<void> {
