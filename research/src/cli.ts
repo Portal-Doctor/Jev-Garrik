@@ -44,6 +44,7 @@ import { loadPair, scanTwoPass } from "./p3/geometry-run";
 import { jevSmoke } from "./p3/jev";
 import { assertScanSchema } from "./p3/scan-schema";
 import { survivorshipReport } from "./p3/survivorship";
+import { buildP5Report } from "./p5/run";
 
 const started = boot();
 if (!started.ok) {
@@ -115,6 +116,9 @@ async function main(): Promise<void> {
     case "geometry":
       writeGeometry();
       return;
+    case "p5":
+      p5();
+      return;
     case "jev-smoke":
       await writeJevSmoke();
       return;
@@ -124,7 +128,7 @@ async function main(): Promise<void> {
       return;
     default:
       throw new Error(
-        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | jev-smoke",
+        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | p5 | jev-smoke",
       );
   }
 }
@@ -577,6 +581,13 @@ function writeGeometry(): void {
     writeJson(join(paths.reports, name), body);
   }
   console.log(`geometry names ${scan.warmup.names} fifteen ${fifteen.dataRootHash} daily ${daily.dataRootHash}`);
+}
+
+function p5(): void {
+  const artifact = stamp("P5");
+  const report = buildP5Report(artifact, realDataDir());
+  writeJson(join(paths.reports, "p5-historical.json"), report);
+  console.log(`p5 results ${String(report.resultsHash)}`);
 }
 
 async function writeJevSmoke(): Promise<void> {
