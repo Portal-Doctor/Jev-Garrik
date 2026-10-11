@@ -1,0 +1,22 @@
+{
+  "commitSha": "e806e0242631575020ff60299c5c64af8cc48204",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-11T03:08:09.177Z",
+  "phaseId": "P3",
+  "dailyRootHash": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
+  "confirmed": false,
+  "note": "Proposed from metadata by base-asset name. Edge cases are not decided. Quant/Trader confirm before the hash.",
+  "productIds": [
+    "CBETH-USD",
+    "DAI-USD",
+    "GUSD-USD",
+    "JITOSOL-USD",
+    "MSOL-USD",
+    "PAXG-USD",
+    "PYUSD-USD",
+    "USD1-USD",
+    "USDS-USD",
+    "USDT-USD",
+    "WBTC-USD"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "commitSha": "e806e0242631575020ff60299c5c64af8cc48204",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-11T03:08:09.177Z",
+  "phaseId": "P3",
+  "dailyRootHash": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
+  "openItems": [
+    "Exclusion proposal is unconfirmed.",
+    "Overlap tolerance is unconfirmed.",
+    "Fee tier is unconfirmed.",
+    "Class E blackout calendar is not applied.",
+    "Class D full-engine parity on the earlier candle set is not run. Numeric swing geometry is tested. The v3 target multiple is 4. The 87b35d0 omitted-argument default is 3.",
+    "The class C book-wide cap of 3 entries per UTC day is not applied to geometry counts.",
+    "Purge, embargo, and Holm are registration work and are not built."
+  ]
+}

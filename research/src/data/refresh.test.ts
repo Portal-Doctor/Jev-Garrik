@@ -68,5 +68,11 @@ test("the derived manifest notes that its root includes file stamps", () => {
   const text = readFileSync(join(import.meta.dir, "..", "..", "data", "derived-manifest.json"), "utf8");
   const body = JSON.parse(text) as { stampEmbeddedNote: string; derivedRootHash: string };
   expect(body.stampEmbeddedNote).toBe(DERIVED_STAMP_NOTE);
-  expect(body.derivedRootHash).toBe("1e509c1bd5b760703b4f52cc53a1e0ccab512f3e75e5f5b9fe1c00e4e0eefe7b");
+  expect(body.derivedRootHash).toBe("bd6dc35cc0b7212c0e4a95bfba6a6aafe1bb19dcdf3091196ce47953498a1eb5");
+  const roots = JSON.parse(readFileSync(join(import.meta.dir, "..", "..", "data", "reports", "derived-roots.json"), "utf8")) as {
+    priorDerivedRootHash: string;
+    derivedRootHash: string;
+  };
+  expect(roots.priorDerivedRootHash).toBe("1e509c1bd5b760703b4f52cc53a1e0ccab512f3e75e5f5b9fe1c00e4e0eefe7b");
+  expect(roots.derivedRootHash).toBe(body.derivedRootHash);
 });
