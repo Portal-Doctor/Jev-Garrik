@@ -9,6 +9,11 @@ export const HISTORY_DAYS = 365;
 export const HOUR_SEC = 3600;
 export const FOUR_HOUR_SEC = 4 * 3600;
 export const DAY_SEC = 86400;
+/** D1 daily supplement. Three calendar years ending at the 15m window's exclusive end. */
+export const DAILY_WINDOW_START_ISO = "2023-10-11T00:00:00.000Z";
+export const DAILY_WINDOW_END_ISO = "2026-10-11T00:00:00.000Z";
+export const FIFTEEN_WINDOW_START_ISO = "2025-10-11T00:00:00.000Z";
+export const FIFTEEN_WINDOW_END_ISO = "2026-10-11T00:00:00.000Z";
 /** Inclusive candle requests stay at or under the exchange 300-aggregation cap. */
 export const CHUNK_BARS = 299;
 

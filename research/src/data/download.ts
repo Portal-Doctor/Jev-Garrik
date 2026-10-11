@@ -53,11 +53,16 @@ export async function downloadUsdSpot(opts: {
   requestTimeoutMs?: number;
   deadlineMs?: number;
   snapshotLift?: DataManifest["snapshotLift"];
+  /** Bar size in seconds. Defaults to the frozen 15m size. */
+  barSec?: number;
+  /** When set, every product uses this window instead of the trailing year. */
+  fixedWindow?: { startSec: number; endSec: number };
 }): Promise<DownloadSummary> {
   const fetchImpl: FetchLike = opts.fetchImpl ?? fetch;
   const sleep = opts.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const nowMs = opts.nowMs ?? Date.now;
   const intervalMs = opts.intervalMs ?? 100;
+  const barSec = opts.barSec ?? BAR_SEC;
   const pace = createPacer(intervalMs, nowMs, sleep);
   const log = opts.log ?? ((message) => console.log(message));
   const listingSec = opts.listingSec ?? (() => null);
@@ -73,7 +78,7 @@ export async function downloadUsdSpot(opts: {
   const files = new Map<string, HashedFile>();
   for (const file of scanCandleFiles(opts.dataDir)) files.set(file.path, file);
   const products = opts.products.slice().sort((a, b) => (a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0));
-  const remainingChunks = countRemainingChunks(products, opts, listingSec);
+  const remainingChunks = countRemainingChunks(products, opts, listingSec, barSec);
   log(`resume products ${products.length} intervalMs ${intervalMs} concurrency ${concurrency} remainingChunks ${remainingChunks}`);
 
   await runPool(products, concurrency, async (product) => {
@@ -85,7 +90,7 @@ export async function downloadUsdSpot(opts: {
     const blocked = join(opts.dataDir, unavailableFile(product.productId));
     if (existsSync(blocked)) return;
     if (opts.only && ![...opts.only].some((key) => key.startsWith(`${product.productId}/`))) return;
-    const window = windowForProduct(opts.now, listingSec(product));
+    const window = opts.fixedWindow ?? windowForProduct(opts.now, listingSec(product));
     let leavePair = false;
     for (const month of monthWindows(window.startSec, window.endSec)) {
       if (state.stop) return;
@@ -99,7 +104,7 @@ export async function downloadUsdSpot(opts: {
       const rel = candleFile(product.productId, month.month);
       const abs = join(opts.dataDir, rel);
       const partialPath = join(opts.dataDir, partialFile(product.productId, month.month));
-      if (canonicalComplete(abs, bounds.startSec, bounds.endSec)) {
+      if (canonicalComplete(abs, bounds.startSec, bounds.endSec, barSec)) {
         rmSync(partialPath, { force: true });
         continue;
       }
@@ -107,7 +112,7 @@ export async function downloadUsdSpot(opts: {
       let finalized: MinuteRow[] | null = null;
       let stop: DownloadSummary["stopped"] | null = null;
       try {
-        const chunks = chunksForWindow(bounds.startSec, bounds.endSec);
+        const chunks = chunksForWindow(bounds.startSec, bounds.endSec, barSec);
         for (const chunk of chunks) {
           if (partialHasChunk(db, chunk.index)) continue;
           if (state.stop) {
@@ -131,7 +136,7 @@ export async function downloadUsdSpot(opts: {
           }
           state.fetchedChunks += 1;
           const chunkNo = state.fetchedChunks;
-          const result = await fetchChunk(product.productId, chunk, fetchImpl, pace, sleep, log, timeoutMs);
+          const result = await fetchChunk(product.productId, chunk, fetchImpl, pace, sleep, log, timeoutMs, barSec);
           state.requests += result.attempts;
           if (result.status === 404) {
             writeJson(blocked, {
@@ -149,7 +154,7 @@ export async function downloadUsdSpot(opts: {
         }
         if (!leavePair && !stop && chunks.every((chunk) => partialHasChunk(db, chunk.index))) {
           const rows = readPartialMinutes(db);
-          const expected = (bounds.endSec - bounds.startSec) / BAR_SEC;
+          const expected = (bounds.endSec - bounds.startSec) / barSec;
           if (rows.length !== expected) throw new Error(`${rel} has ${rows.length} minutes, expected ${expected}`);
           finalized = rows;
         }
@@ -167,7 +172,7 @@ export async function downloadUsdSpot(opts: {
         month: month.month,
         windowStart: isoFromSec(bounds.startSec),
         windowEnd: isoFromSec(bounds.endSec),
-        granularitySec: String(BAR_SEC),
+        granularitySec: String(barSec),
         emptyPolicy: "recorded-not-filled",
         writerVersion: WRITER_VERSION,
       };
@@ -179,7 +184,7 @@ export async function downloadUsdSpot(opts: {
         stamp: { ...opts.stamp, createdAt: new Date(nowMs()).toISOString() },
         files: [...files.values()],
         createdAt: state.manifestCreatedAt,
-        barSec: BAR_SEC,
+        barSec,
         snapshotLift: opts.snapshotLift,
       });
       state.manifestCreatedAt = written.createdAt;
@@ -188,6 +193,17 @@ export async function downloadUsdSpot(opts: {
       log(`stored ${rel} ${hashed.sha256} root ${written.dataRootHash}`);
     }
   });
+  const scanned = scanCandleFiles(opts.dataDir);
+  if (scanned.length > 0) {
+    const written = buildDataManifest({
+      stamp: opts.stamp,
+      files: scanned,
+      createdAt: state.manifestCreatedAt,
+      barSec,
+      snapshotLift: opts.snapshotLift,
+    });
+    writeDataManifest(opts.dataDir, written);
+  }
   return { completedMonths: state.completedMonths, requests: state.requests, stopped: state.stop ?? "finished" };
 }
 
@@ -224,21 +240,23 @@ function countRemainingChunks(
     now: Date;
     only?: ReadonlySet<string>;
     ranges?: ReadonlyMap<string, { startSec: number; endSec: number }>;
+    fixedWindow?: { startSec: number; endSec: number };
   },
   listingSec: (product: UsdSpotProduct) => number | null,
+  barSec: number,
 ): number {
   let remaining = 0;
   for (const product of products) {
     if (existsSync(join(opts.dataDir, unavailableFile(product.productId)))) continue;
     if (opts.only && ![...opts.only].some((key) => key.startsWith(`${product.productId}/`))) continue;
-    const window = windowForProduct(opts.now, listingSec(product));
+    const window = opts.fixedWindow ?? windowForProduct(opts.now, listingSec(product));
     for (const month of monthWindows(window.startSec, window.endSec)) {
       const key = `${product.productId}/${month.month}`;
       if (opts.only && !opts.only.has(key)) continue;
       const bounds = opts.ranges?.get(key) ?? { startSec: month.startSec, endSec: month.endSec };
       const abs = join(opts.dataDir, candleFile(product.productId, month.month));
-      if (canonicalComplete(abs, bounds.startSec, bounds.endSec)) continue;
-      remaining += chunksForWindow(bounds.startSec, bounds.endSec).length;
+      if (canonicalComplete(abs, bounds.startSec, bounds.endSec, barSec)) continue;
+      remaining += chunksForWindow(bounds.startSec, bounds.endSec, barSec).length;
     }
   }
   return remaining;
@@ -252,9 +270,10 @@ async function fetchChunk(
   sleep: (ms: number) => Promise<void>,
   log: (message: string) => void,
   timeoutMs: number,
+  barSec: number = BAR_SEC,
 ): Promise<{ status: number; rows: MinuteRow[]; attempts: number }> {
-  const apiEnd = chunk.endSec - BAR_SEC;
-  const url = candlesUrl(pair, chunk.startSec, apiEnd);
+  const apiEnd = chunk.endSec - barSec;
+  const url = candlesUrl(pair, chunk.startSec, apiEnd, barSec);
   let attempts = 0;
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     await pace();
@@ -277,7 +296,7 @@ async function fetchChunk(
       }
       if (!res.ok) throw new Error(`candles ${res.status}`);
       const candles = parseCandlePayload(await res.text());
-      return { status: 200, rows: minutesForChunk(chunk.startSec, chunk.endSec, candles), attempts };
+      return { status: 200, rows: minutesForChunk(chunk.startSec, chunk.endSec, candles, barSec), attempts };
     } catch (err) {
       if (attempt === ATTEMPTS - 1) throw err;
       const wait = 500 * 2 ** attempt;
@@ -289,10 +308,10 @@ async function fetchChunk(
   throw new Error(`candles failed ${pair} ${isoFromSec(chunk.startSec)}`);
 }
 
-function canonicalComplete(path: string, startSec: number, endSec: number): boolean {
+function canonicalComplete(path: string, startSec: number, endSec: number, barSec: number = BAR_SEC): boolean {
   if (!existsSync(path)) return false;
   try {
-    return minuteCount(path) === (endSec - startSec) / BAR_SEC;
+    return minuteCount(path) === (endSec - startSec) / barSec;
   } catch {
     rmSync(path, { force: true });
     return false;

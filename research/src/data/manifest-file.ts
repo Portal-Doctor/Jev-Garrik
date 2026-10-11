@@ -16,6 +16,10 @@ export const SNAPSHOT_LIFT_REASON =
   "Owner correction (Brian, 2026-10-10): the earlier freeze only dropped the 24h revision check. It did not make the partial download final. Resume continues through the USD snapshot. The revision check stays dropped and is not an open item for the hash.";
 
 /** Brian, 2026-10-10 20:19 CT, which is 2026-10-11 01:19Z. */
+/** Brian approved D1-D5 at 8:50 PM CT on 2026-10-10, which is 01:50Z on 2026-10-11. */
+export const D2_LIFT_REASON =
+  "Owner decision (Brian, 2026-10-10 20:50 CT (01:50Z)): D2 downloads the same 15m window (2025-10-11T00:00:00.000Z inclusive through 2026-10-11T00:00:00.000Z exclusive) for delisted products whose probe served candles and for names the owner cut dropped. Chained to the prior frozen root. The owner cut is not the trading universe.";
+
 export const BELOW_RANK_CUTOFF_LIFT_REASON =
   "Owner decision (Brian, 2026-10-10 20:19 CT (01:19Z)): add back the 56 below-rank-cutoff names on the same 900-second window (2025-10-11T00:00:00.000Z inclusive through 2026-10-11T00:00:00.000Z exclusive). RESEARCH_LIFT_COMPLETED_FREEZE=1 is the guard change that allows this resume. Other cuts stay. Stats were not re-fetched.";
 

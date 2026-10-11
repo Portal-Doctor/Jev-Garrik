@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { BAR_SEC, CHUNK_BARS, chunksForWindow, DAY_SEC, HISTORY_DAYS, latestCompletedDayEndSec, monthWindows, windowForProduct } from "./time";
+import { BAR_SEC, CHUNK_BARS, chunksForWindow, DAILY_WINDOW_END_ISO, DAILY_WINDOW_START_ISO, DAY_SEC, HISTORY_DAYS, latestCompletedDayEndSec, monthWindows, windowForProduct } from "./time";
 
 test("latest completed UTC day ends at 00:00 of the current day", () => {
   expect(latestCompletedDayEndSec(new Date("2026-10-10T22:29:45.000Z"))).toBe(Date.parse("2026-10-10T00:00:00.000Z") / 1000);
@@ -39,4 +39,15 @@ test("chunks stay within 299 bars", () => {
   expect(first.endSec - first.startSec).toBe(CHUNK_BARS * BAR_SEC);
   expect(last.endSec).toBe(end);
   expect(last.endSec - last.startSec).toBe(10 * BAR_SEC);
+});
+
+test("the daily supplement is three years of 86400-second bars ending with the 15m window", () => {
+  const start = Date.parse(DAILY_WINDOW_START_ISO) / 1000;
+  const end = Date.parse(DAILY_WINDOW_END_ISO) / 1000;
+  expect(end - start).toBe(1096 * DAY_SEC);
+  const chunks = chunksForWindow(start, end, DAY_SEC);
+  expect(chunks.length).toBe(4);
+  expect(chunks.every((chunk) => chunk.endSec - chunk.startSec <= 299 * DAY_SEC)).toBe(true);
+  expect(chunks[0]?.startSec).toBe(start);
+  expect(chunks[chunks.length - 1]?.endSec).toBe(end);
 });

@@ -48,16 +48,21 @@ export function parseCandlePayload(text: string): CandleLexeme[] {
 }
 
 /** Every bar in [startSec, endSec) is present. Missing bars are empty, not filled. */
-export function minutesForChunk(startSec: number, endSec: number, candles: readonly CandleLexeme[]): MinuteRow[] {
+export function minutesForChunk(
+  startSec: number,
+  endSec: number,
+  candles: readonly CandleLexeme[],
+  barSec: number = BAR_SEC,
+): MinuteRow[] {
   const byMinute = new Map<number, CandleLexeme>();
   for (const candle of candles) {
     if (candle.minuteSec < startSec || candle.minuteSec >= endSec) continue;
-    if (candle.minuteSec % BAR_SEC !== 0) throw new Error(`off-grid candle ${candle.minuteSec}`);
+    if (candle.minuteSec % barSec !== 0) throw new Error(`off-grid candle ${candle.minuteSec}`);
     if (byMinute.has(candle.minuteSec)) throw new Error(`duplicate candle ${candle.minuteSec}`);
     byMinute.set(candle.minuteSec, candle);
   }
   const rows: MinuteRow[] = [];
-  for (let minuteSec = startSec; minuteSec < endSec; minuteSec += BAR_SEC) {
+  for (let minuteSec = startSec; minuteSec < endSec; minuteSec += barSec) {
     const candle = byMinute.get(minuteSec);
     if (!candle) {
       rows.push({ minuteSec, empty: true, open: null, high: null, low: null, close: null, volume: null });

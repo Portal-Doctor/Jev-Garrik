@@ -15,7 +15,7 @@
  *   bun run research/src/cli.ts refresh-reports
  */
 
-import { existsSync, readFileSync, rmSync, writeSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { boot } from "./index";
 import { stampFromGit, type ArtifactStamp } from "./manifest";
@@ -24,12 +24,12 @@ import { derivePairMonthFile } from "./data/derive-store";
 import { sha256Bytes } from "./data/hash";
 import { writeBytes, writeJson } from "./data/io";
 import { buildCoverage, type CoverageReport } from "./data/coverage";
-import { BELOW_RANK_CUTOFF_LIFT_REASON, liftCompletedFreeze, scanCandleFiles, sealFrozenSnapshot, type DataManifest, type SnapshotLift } from "./data/manifest-file";
+import { BELOW_RANK_CUTOFF_LIFT_REASON, D2_LIFT_REASON, liftCompletedFreeze, scanCandleFiles, sealFrozenSnapshot, type DataManifest, type SnapshotLift } from "./data/manifest-file";
 import { assertFrozenRoots, withLastRefreshed } from "./data/refresh";
 import { convertBareProductStats, fetchProductStats, parseProductStats } from "./data/product-stats";
 import { sha256File } from "./data/store";
 import { applyUniverseCut, droppedProductIds, type OwnerDecisionFile } from "./data/universe-cut";
-import { BAR_SEC } from "./data/time";
+import { BAR_SEC, DAILY_WINDOW_END_ISO, DAILY_WINDOW_START_ISO, DAY_SEC, FIFTEEN_WINDOW_END_ISO, FIFTEEN_WINDOW_START_ISO } from "./data/time";
 import { dataPaths } from "./data/paths";
 import { probeDelisted, type DelistedProbeReport } from "./data/probe";
 import { usdSpotFromExchange, type UsdSpotProduct } from "./data/products";
@@ -61,6 +61,15 @@ async function main(): Promise<void> {
       return;
     case "download":
       await download();
+      return;
+    case "download-daily":
+      await downloadDaily(stamp("P1"));
+      return;
+    case "lift-d2":
+      await liftD2(stamp("P1"));
+      return;
+    case "part-a":
+      await partA();
       return;
     case "probe":
       await probe();
@@ -98,7 +107,7 @@ async function main(): Promise<void> {
       return;
     default:
       throw new Error(
-        "usage: snapshot | download | probe | derive | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports",
+        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports",
       );
   }
 }
@@ -239,6 +248,148 @@ async function download(): Promise<void> {
     sealed.downloadRun = summary;
     writeJson(paths.manifest, sealed);
     writeSync(1, `frozen ${sealed.snapshot?.frozenAt} root ${sealed.dataRootHash}\n`);
+  }
+}
+
+function dailyDir(): string {
+  return join(realDataDir(), "daily");
+}
+
+async function partA(): Promise<void> {
+  const artifact = stamp("P1");
+  await downloadDaily(artifact);
+  await liftD2(artifact);
+}
+
+async function downloadDaily(artifact: ArtifactStamp): Promise<void> {
+  const dataDir = dailyDir();
+  mkdirSync(dataDir, { recursive: true });
+  const dailyPaths = dataPaths(dataDir);
+  let manifestCreatedAt: string | undefined;
+  if (existsSync(dailyPaths.manifest)) {
+    const existing = JSON.parse(readFileSync(dailyPaths.manifest, "utf8")) as DataManifest;
+    if (existing.snapshot?.universeComplete && existing.barSec === DAY_SEC) {
+      console.log(`daily snapshot already frozen ${existing.snapshot.frozenAt} root ${existing.dataRootHash}`);
+      return;
+    }
+    if (existing.barSec === DAY_SEC) manifestCreatedAt = existing.createdAt;
+  }
+  const startSec = Date.parse(DAILY_WINDOW_START_ISO) / 1000;
+  const endSec = Date.parse(DAILY_WINDOW_END_ISO) / 1000;
+  const intervalMs = Number(process.env.RESEARCH_REQUEST_INTERVAL_MS ?? "100");
+  const concurrency = Number(process.env.RESEARCH_DOWNLOAD_CONCURRENCY ?? "10");
+  const summary = await downloadUsdSpot({
+    products: loadProducts(),
+    dataDir,
+    now: new Date("2026-10-11T12:00:00.000Z"),
+    stamp: artifact,
+    intervalMs,
+    concurrency,
+    stopFile: dailyPaths.stopFile,
+    manifestCreatedAt,
+    fixedWindow: { startSec, endSec },
+    barSec: DAY_SEC,
+    log: (message) => writeSync(1, `${message}\n`),
+  });
+  writeSync(1, `${JSON.stringify(summary)}\n`);
+  if (summary.stopped === "finished") {
+    const manifest = JSON.parse(readFileSync(dailyPaths.manifest, "utf8")) as DataManifest;
+    manifest.snapshot = {
+      status: "frozen",
+      reason:
+        "D1 daily supplement frozen. Three years or since listing, ending 2026-10-11T00:00:00.000Z. Used only for warmup and listing dates before 2025-10-11. Not part of the 15m candle root.",
+      downloadStartedAt: manifest.createdAt,
+      downloadUpdatedAt: manifest.updatedAt,
+      frozenAt: new Date().toISOString(),
+      universeComplete: true,
+    };
+    manifest.downloadRun = summary;
+    writeJson(dailyPaths.manifest, manifest);
+    writeSync(1, `daily frozen ${manifest.snapshot.frozenAt} root ${manifest.dataRootHash} files ${manifest.files.length}\n`);
+  }
+}
+
+function d2Ids(): { servedDelisted: string[]; cutDropped: string[]; union: string[] } {
+  const decision = JSON.parse(readFileSync(decisionPath(), "utf8")) as OwnerDecisionFile;
+  const cutDropped = droppedProductIds(decision);
+  const probe = JSON.parse(readFileSync(paths.probe, "utf8")) as DelistedProbeReport;
+  const servedDelisted = probe.products.filter((product) => product.candlesServed === true).map((product) => product.productId);
+  const union = [...new Set([...servedDelisted, ...cutDropped])].sort();
+  return { servedDelisted: servedDelisted.slice().sort(), cutDropped: cutDropped.slice().sort(), union };
+}
+
+async function liftD2(artifact: ArtifactStamp): Promise<void> {
+  if (!existsSync(paths.manifest)) throw new Error("15m manifest is missing");
+  const names = d2Ids();
+  const catalog = new Set(loadProducts().map((product) => product.productId));
+  const decision = JSON.parse(readFileSync(decisionPath(), "utf8")) as OwnerDecisionFile;
+  const cut = decision.entries.find((entry) => entry.id === "universe-cut");
+  const keptIds = cut?.id === "universe-cut" ? new Set(cut.kept) : new Set<string>();
+  const overlapKept = names.union.filter((id) => keptIds.has(id));
+  writeJson(join(paths.reports, "d2-names.json"), {
+    ...artifact,
+    windowStart: FIFTEEN_WINDOW_START_ISO,
+    windowEnd: FIFTEEN_WINDOW_END_ISO,
+    servedDelisted: names.servedDelisted,
+    cutDropped: names.cutDropped,
+    union: names.union,
+    servedDelistedCount: names.servedDelisted.length,
+    cutDroppedCount: names.cutDropped.length,
+    unionCount: names.union.length,
+    alreadyKeptCount: overlapKept.length,
+    note: "D2 downloads this union on the same 15m window. The owner cut is not universe membership. Names that 404 stay out of the candle root.",
+  });
+  let existing = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
+  if (existing.snapshot?.universeComplete && existing.snapshotLift?.reason === D2_LIFT_REASON) {
+    console.log(`D2 lift already frozen ${existing.snapshot.frozenAt} root ${existing.dataRootHash}`);
+    return;
+  }
+  if (existing.dataRootHash !== "e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968" && existing.snapshotLift?.supersededDataRootHash !== "e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968" && existing.snapshotLift?.priorSnapshotLift?.supersededDataRootHash !== "e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968") {
+    throw new Error(`refusing to lift a manifest that is not chained to e79fb4b2, root ${existing.dataRootHash}`);
+  }
+  let snapshotLift = existing.snapshotLift;
+  let manifestCreatedAt = existing.createdAt;
+  if (existing.snapshot?.universeComplete) {
+    if (existing.barSec !== BAR_SEC) throw new Error(`refusing to lift a freeze whose bar size is not ${BAR_SEC}`);
+    const lifted = liftCompletedFreeze(existing, new Date(), D2_LIFT_REASON);
+    delete lifted.lastRefreshed;
+    snapshotLift = lifted.snapshotLift;
+    writeJson(paths.manifest, lifted);
+    existing = lifted;
+    writeSync(1, `lifted completed freeze ${snapshotLift?.supersededDataRootHash} files ${snapshotLift?.supersededFileCount}\n`);
+  } else if (existing.snapshotLift?.reason !== D2_LIFT_REASON) {
+    throw new Error("15m manifest is not a completed freeze and is not a D2 resume");
+  }
+  const want = new Set(names.union);
+  const products = loadProducts().filter((product) => want.has(product.productId));
+  if (products.length !== names.union.length) {
+    const missing = names.union.filter((id) => !catalog.has(id));
+    throw new Error(`D2 names missing from the product snapshot: ${missing.join(",")}`);
+  }
+  const intervalMs = Number(process.env.RESEARCH_REQUEST_INTERVAL_MS ?? "100");
+  const concurrency = Number(process.env.RESEARCH_DOWNLOAD_CONCURRENCY ?? "10");
+  const summary = await downloadUsdSpot({
+    products,
+    dataDir: paths.root,
+    now: new Date("2026-10-11T12:00:00.000Z"),
+    stamp: artifact,
+    intervalMs,
+    concurrency,
+    stopFile: paths.stopFile,
+    manifestCreatedAt,
+    snapshotLift,
+    log: (message) => writeSync(1, `${message}\n`),
+  });
+  writeSync(1, `${JSON.stringify(summary)}\n`);
+  if (summary.stopped === "finished") {
+    const manifest = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
+    const sealed = sealFrozenSnapshot(manifest, new Date(), {
+      universeComplete: true,
+      supersededDataRootHash: manifest.snapshotLift?.supersededDataRootHash ?? null,
+    });
+    sealed.downloadRun = summary;
+    writeJson(paths.manifest, sealed);
+    writeSync(1, `D2 frozen ${sealed.snapshot?.frozenAt} root ${sealed.dataRootHash} files ${sealed.files.length}\n`);
   }
 }
 
