@@ -102,13 +102,14 @@ test("the registered capped run keeps its results hash", () => {
 
 test("the v3.1 registration is unapproved and cites the frozen bases", () => {
   const path = join(reports, "p5-v31-registration.json");
-  expect(sha256(path)).toBe("2c8368559a838e8e8a71da678fe6480bbbba557f9ccf22af81d8b78f1644b91a");
+  expect(sha256(path)).toBe("02e2ee8fdf2410dd2a960c9c622ce1e3cd099f125977d791eebfd5538d1680da");
   expect(readFileSync(join(reports, "p5-v31-registration.sha256"), "utf8")).toBe(
-    "2c8368559a838e8e8a71da678fe6480bbbba557f9ccf22af81d8b78f1644b91a  research/data/reports/p5-v31-registration.json\n",
+    "02e2ee8fdf2410dd2a960c9c622ce1e3cd099f125977d791eebfd5538d1680da  research/data/reports/p5-v31-registration.json\n",
   );
   const doc = JSON.parse(readFileSync(path, "utf8")) as {
     approved: boolean;
     approval?: unknown;
+    supersedesSha256: string;
     baseRegistrationSha256: string;
     amendmentSha256: string;
     baseRegistrationEdited: boolean;
@@ -118,9 +119,18 @@ test("the v3.1 registration is unapproved and cites the frozen bases", () => {
     momentumConditionDates: string[];
     clusters: { monthCount: number; monthsAbove60: number; flag: boolean };
     maxOpen: number | null;
+    sources: { path: string; sha256: string }[];
   };
   expect(doc.approved).toBe(false);
   expect("approval" in doc).toBe(false);
+  expect(doc.supersedesSha256).toBe("2c8368559a838e8e8a71da678fe6480bbbba557f9ccf22af81d8b78f1644b91a");
+  expect(doc.sources).toEqual([
+    { path: "design/v3.1-bear-guards.md", sha256: "7dbf08776ebd7a3e7601b4bd0506080e74ea4da43e82eec4005174ebd67e42d9" },
+    { path: "architect/p5-gap-rulings.md", sha256: "65b64dab138b848a30c9471bf75b4b0006d1c240b22e7e75378c8c0d5acaafaa" },
+    { path: "architect/p5-capped-rulings.md", sha256: "e212f68fef714d08c2dd7188fb78ef387b12dcbb89018c43ae6c292bc51c7255" },
+    { path: "architect/p6-guards-feasibility.md", sha256: "002d04227b1017b753be4686f1322998e648dae4e20a874a290b0cb4237a2611" },
+    { path: "qa-pr31-notes.md", sha256: "8a51c3c4c40f74274f0cea9c81eb47df2d00ed37d13271694a06be35d59d77fa" },
+  ]);
   expect(doc.baseRegistrationSha256).toBe("49bc506092114e2dec3e3ec73faa1adad4afdf04b0941d4c7b01bd22cd2317f3");
   expect(doc.amendmentSha256).toBe("e0948e26f2bbe2ec7c113d23db8b4dbb9daed70a9d2cef0e3f0a0c49f70d7760");
   expect(doc.baseRegistrationEdited).toBe(false);
