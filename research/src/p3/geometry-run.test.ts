@@ -65,6 +65,8 @@ test("an empty book still records D3 comparisons and a tolerance that predates t
   expect(result.d3.a.available).toBe(false);
   expect(result.d3.c.historicalOosN).toBe(0);
   expect(result.d3.b.label).toContain("EXPLORATORY");
+  expect(result.barAccess.names).toEqual([]);
+  expect(result.dParityNote).toContain("NEAR-USD");
   expect(result.passCountFlag.flagged).toBe(true);
   const createdAt = "2026-10-11T03:00:00.000Z";
   expect(Date.parse(result.overlap.tolerance.recordedAt)).toBeLessThan(Date.parse(createdAt));

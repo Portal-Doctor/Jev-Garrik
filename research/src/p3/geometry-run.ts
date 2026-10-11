@@ -517,7 +517,7 @@ export function scanTwoPass(
   for (const pair of load()) {
     const flags: GroupFlags = groupFlagsOf(f5ByPair.get(pair.productId));
     const inputs = classBarInputs(flags, pair.days, pair.listedDate ?? WINDOW_START);
-    barAccess.push({
+    if (scope.has(pair.productId)) barAccess.push({
       productId: pair.productId,
       priceGroupPasses: flags.priceGroupPasses,
       volumeGroupPasses: flags.volumeGroupPasses,

@@ -543,6 +543,8 @@ function writeGeometry(): void {
     warmup: scan.warmup,
     firstUniverseDate: scan.firstUniverseDate,
     coverage: { names: scan.warmup.names, fifteenFiles: fifteen.files.length, dailyFiles: daily.files.length },
+    barAccess: scan.barAccess,
+    dParityNote: scan.dParityNote,
   };
   assertScanSchema(scanDoc);
   if (Date.parse(scan.overlap.tolerance.recordedAt) >= Date.parse(artifact.createdAt)) {
