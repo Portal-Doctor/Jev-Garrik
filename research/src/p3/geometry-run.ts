@@ -8,13 +8,16 @@ import { join } from "node:path";
 import { deriveBars } from "../data/derive";
 import type { MinuteRow } from "../data/candles";
 import { readPairMonth } from "../data/store";
+import { spreadCost } from "../p2/costs";
 import { ema, wilderAtr } from "../p2/indicators";
 import { csMedianBps, corwinSchultzBps, medianUsdWithGaps } from "../p2/liquidity";
 import { passCountFlag, type VolumeTierDecision } from "../p2/universe";
 import { classBScore, type DailyBar } from "./classes";
+import { classBSelected, classCDayCap } from "./design-rules";
 import { buildMembership, type NameDateSample } from "./membership-build";
 import { classDCandidates } from "./d-geometry";
-import { btcCaution, btcOldClause, btcVeto, countClassA, countClassB, countClassC, countClassE, emptyCounts, CLASS_A_STOP_K, type BtcDay, type ClassCounts } from "./signals";
+import { summarizeOverlap, WINDOW_START, type F5NameSummary } from "./f5";
+import { btcCaution, btcOldClause, btcVeto, classCSetups, countClassA, countClassB, countClassE, emptyCounts, CLASS_A_STOP_K, type BtcDay, type ClassCounts, type ClassCSetup } from "./signals";
 import { membershipDates, monthlyRebalanceDates, OVERLAP_TOLERANCE } from "./schedule";
 import type { BarOHLC } from "./signals";
 
@@ -29,6 +32,7 @@ export function supplementApplies(date: string): boolean {
 interface DayRow {
   date: string;
   ts: number;
+  open: number;
   high: number;
   low: number;
   close: number;
@@ -51,6 +55,7 @@ export interface PairFacts {
   overlapFlags: number;
   overlapDays: number;
   overlapDetail: OverlapFlag[];
+  f5: F5NameSummary;
 }
 
 export interface OverlapFlag {
@@ -91,13 +96,13 @@ function rowsOf(dir: string, pair: string): MinuteRow[] {
   return rows;
 }
 
-function dayFrom(ts: number, high: number, low: number, close: number, volume: number, empty: boolean): DayRow {
+function dayFrom(ts: number, open: number, high: number, low: number, close: number, volume: number, empty: boolean): DayRow {
   const date = new Date(ts * 1000).toISOString().slice(0, 10);
   const quote = empty ? 0 : volume * close;
-  return { date, ts, high, low, close, volume, quote, empty };
+  return { date, ts, open, high, low, close, volume, quote, empty };
 }
 
-export function loadPair(productId: string, dailyDir: string, candleDir: string): PairFacts | null {
+export function loadPair(productId: string, dailyDir: string, candleDir: string, tick = 0): PairFacts | null {
   const dailyRows = rowsOf(dailyDir, productId);
   const fifteen = rowsOf(candleDir, productId);
   if (dailyRows.length === 0 && fifteen.length === 0) return null;
@@ -106,24 +111,24 @@ export function loadPair(productId: string, dailyDir: string, candleDir: string)
     const date = new Date(row.minuteSec * 1000).toISOString().slice(0, 10);
     if (!supplementApplies(date)) continue;
     if (row.empty || row.close == null || row.high == null || row.low == null) {
-      early.push(dayFrom(row.minuteSec, 0, 0, 0, 0, true));
+      early.push(dayFrom(row.minuteSec, 0, 0, 0, 0, 0, true));
       continue;
     }
-    early.push(dayFrom(row.minuteSec, num(row.high) ?? 0, num(row.low) ?? 0, num(row.close) ?? 0, num(row.volume) ?? 0, false));
+    early.push(dayFrom(row.minuteSec, num(row.open) ?? 0, num(row.high) ?? 0, num(row.low) ?? 0, num(row.close) ?? 0, num(row.volume) ?? 0, false));
   }
   const start = Date.parse(`${SUPPLEMENT_BEFORE}T00:00:00.000Z`) / 1000;
   const end = Date.parse("2026-10-11T00:00:00.000Z") / 1000;
   const derived = fifteen.length > 0 ? deriveBars(fifteen, "1d", start, end) : [];
   const inside: DayRow[] = derived.map((bar) => {
-    if (bar.empty || bar.close == null || bar.high == null || bar.low == null) return dayFrom(bar.openTs, 0, 0, 0, 0, true);
-    return dayFrom(bar.openTs, num(bar.high) ?? 0, num(bar.low) ?? 0, num(bar.close) ?? 0, num(bar.volume) ?? 0, false);
+    if (bar.empty || bar.close == null || bar.high == null || bar.low == null) return dayFrom(bar.openTs, 0, 0, 0, 0, 0, true);
+    return dayFrom(bar.openTs, num(bar.open) ?? 0, num(bar.high) ?? 0, num(bar.low) ?? 0, num(bar.close) ?? 0, num(bar.volume) ?? 0, false);
   });
   const byDate = new Map<string, DayRow>();
   for (const row of dailyRows) {
     const date = new Date(row.minuteSec * 1000).toISOString().slice(0, 10);
     if (supplementApplies(date)) continue;
     if (row.empty || row.close == null) continue;
-    byDate.set(date, dayFrom(row.minuteSec, num(row.high) ?? 0, num(row.low) ?? 0, num(row.close) ?? 0, num(row.volume) ?? 0, false));
+    byDate.set(date, dayFrom(row.minuteSec, num(row.open) ?? 0, num(row.high) ?? 0, num(row.low) ?? 0, num(row.close) ?? 0, num(row.volume) ?? 0, false));
   }
   let overlapDays = 0;
   let overlapFlags = 0;
@@ -169,6 +174,21 @@ export function loadPair(productId: string, dailyDir: string, candleDir: string)
   const quarter = quarterSlots
     .filter((row) => !row.empty)
     .map((row) => ({ ts: row.ts, open: row.close, high: row.high, low: row.low, close: row.close, volume: row.volume }));
+  const f5 = summarizeOverlap({
+    productId,
+    tick,
+    derived: inside,
+    daily: [...early, ...byDate.values()],
+    slots: fifteen.map((row) => ({
+      ts: row.minuteSec,
+      empty: row.empty || row.close == null,
+      open: num(row.open) ?? 0,
+      high: num(row.high) ?? 0,
+      low: num(row.low) ?? 0,
+      close: num(row.close) ?? 0,
+      volume: num(row.volume) ?? 0,
+    })),
+  });
   return {
     productId,
     days,
@@ -181,6 +201,7 @@ export function loadPair(productId: string, dailyDir: string, candleDir: string)
     overlapFlags,
     overlapDays,
     overlapDetail,
+    f5,
   };
 }
 
@@ -230,6 +251,7 @@ export function liquidityAt(quarter: readonly QuarterSlot[], date: string): { no
 function addCounts(into: ClassCounts, extra: ClassCounts): void {
   into.signals += extra.signals;
   into.oosSignals += extra.oosSignals;
+  into.dates.push(...extra.dates);
   into.stops.push(...extra.stops);
   into.vetoed += extra.vetoed;
   into.oldClause += extra.oldClause;
@@ -265,15 +287,49 @@ export interface GeometryResult {
   universeSize: { date: string; names: number }[];
   universeMembers: { date: string; names: string[] }[];
   signalCounts: Record<string, { signals: number; oosSignals: number }>;
-  projectedOos: { layout: string; n: Record<string, number> };
+  projectedOos: {
+    layout: string;
+    nLabel: "before slots";
+    n: Record<string, number>;
+    classC: { oosEntries: number; distinctUtcDays: number; meetsRule: boolean };
+  };
   d3: {
     a: { available: false; reason: string };
     b: { label: string; isStart: string; isEnd: string; oosStart: string; oosEnd: string };
     c: { historicalOosN: 0; note: string };
   };
   stopWidths: Record<string, { p10: number | null; p50: number | null; p90: number | null }>;
-  btcFilterShares: { veto: number; oldClause: number; caution: number };
+  btcFilterShares: {
+    utcDays: number;
+    vetoDayShare: number;
+    oldClauseDayShare: number;
+    cautionDayShare: number;
+    vetoedShareA20: number;
+    vetoedShareA55: number;
+    vetoedShareB: number;
+  };
   overlap: { days: number; flagged: number; tolerance: typeof OVERLAP_TOLERANCE; flaggedDays: OverlapFlag[] };
+  f5: {
+    memberNames: number;
+    overlapDays: number;
+    missingSlotDays: number;
+    priceFailDays: number;
+    volumeFailDays: number;
+    openFailDays: number;
+    highFailDays: number;
+    lowFailDays: number;
+    closeFailDays: number;
+    priceGroupFailNames: string[];
+    volumeGroupFailNames: string[];
+    boundarySavedNames: string[];
+    names: F5NameSummary[];
+  };
+  csDistribution: { n: number; p10: number | null; p50: number | null; p90: number | null };
+  nonemptyShare: { n: number; p10: number | null; p50: number | null; p90: number | null };
+  sBt: { csMedianBps: number | null; baseBps: number | null; stressBps: number | null };
+  pairMonth: { className: string; productId: string; month: string; count: number }[];
+  warmupLostDays: Record<string, number>;
+  classGate: { E: "geometry-only"; C: "historical" | "geometry-only" };
   warmup: { names: number; ema200ReadyByFirstUniverse: number; leftCensored: number };
   warmupRows: WarmupRow[];
   firstUniverseDate: "2025-11-10";
@@ -362,21 +418,52 @@ export function scanTwoPass(
   const warmupRows: WarmupRow[] = [];
   let overlapDays = 0;
   let overlapFlagged = 0;
-  const flaggedDays: OverlapFlag[] = [];
+  const f5ByPair = new Map<string, F5NameSummary>();
+  const inWindowVolume = new Map<string, Map<string, number | null>>();
+  const listedInWindow = new Map<string, string | null>();
   for (const pair of load()) {
     warmupRows.push(warmupFor(pair));
     overlapDays += pair.overlapDays;
     overlapFlagged += pair.overlapFlags;
-    flaggedDays.push(...pair.overlapDetail);
+    f5ByPair.set(pair.productId, pair.f5);
+    const windowDays = pair.days.filter((row) => row.date >= WINDOW_START);
+    listedInWindow.set(pair.productId, windowDays.find((row) => !row.empty)?.date ?? null);
+    const volumes = new Map<string, number | null>();
+    for (const date of dates) volumes.set(date, quoteAt(windowDays, date));
+    inWindowVolume.set(pair.productId, volumes);
     rememberBtc(pair, btcByDate);
     for (const date of dates) sampleCache.get(date)!.push(sampleOf(pair, date));
   }
-  const built = buildMembership({
+  const membershipInput = {
     dates,
     monthlyDates: monthly,
     excluded,
-    samplesFor: (date) => sampleCache.get(date) ?? [],
-  });
+    samplesFor: (date: string) => sampleCache.get(date) ?? [],
+  };
+  let built = buildMembership(membershipInput);
+  const scope = new Set<string>();
+  for (const names of built.members.values()) for (const id of names) scope.add(id);
+  let adjusted = false;
+  for (const id of scope) {
+    const row = f5ByPair.get(id);
+    if (!row?.dropPrewindowVolume && !(row?.dropPrewindowPrices && row?.dropPrewindowVolume)) continue;
+    for (const date of dates) {
+      const sample = sampleCache.get(date)?.find((item) => item.productId === id);
+      if (!sample || !row) continue;
+      if (row.dropPrewindowVolume) {
+        sample.volumeUsd = inWindowVolume.get(id)?.get(date) ?? null;
+        adjusted = true;
+      }
+      if (row.dropPrewindowPrices && row.dropPrewindowVolume) {
+        const listed = listedInWindow.get(id);
+        sample.listedDays = listed == null ? 0 : Math.floor((Date.parse(`${date}T00:00:00.000Z`) - Date.parse(`${listed}T00:00:00.000Z`)) / (DAY * 1000));
+        adjusted = true;
+      }
+    }
+  }
+  if (adjusted) built = buildMembership(membershipInput);
+  const dropPrices = new Set<string>();
+  for (const id of scope) if (f5ByPair.get(id)?.dropPrewindowPrices) dropPrices.add(id);
   const { passCounts, members } = built;
   const tier = built.volumeTier;
   const universeMembers = dates.map((date) => ({ date, names: [...(members.get(date) ?? [])].sort() }));
@@ -394,22 +481,45 @@ export function scanTwoPass(
     D: emptyCounts(),
     E: emptyCounts(),
   };
-  const bScores: { date: string; score: number; member: boolean }[] = [];
+  const bScores: { id: string; date: string; score: number; member: boolean }[] = [];
+  const cSetups: ClassCSetup[] = [];
+  const pairMonth = new Map<string, number>();
+  const warmupLostDays: Record<string, number> = { A20: 0, A55: 0, B: 0, C: 0, D: 0, E: 0 };
   const aStops: Record<"L20" | "L55", Record<(typeof CLASS_A_STOP_K)[number], number[]>> = {
     L20: { 2: [], 2.5: [], 3: [] },
     L55: { 2: [], 2.5: [], 3: [] },
   };
+  const bumpMonth = (className: string, productId: string, date: string) => {
+    const key = `${className}|${productId}|${date.slice(0, 7)}`;
+    pairMonth.set(key, (pairMonth.get(key) ?? 0) + 1);
+  };
   for (const pair of load()) {
-    const filled = pair.days.filter((row) => !row.empty);
+    const sourceDays = dropPrices.has(pair.productId) ? pair.days.filter((row) => row.date >= WINDOW_START) : pair.days;
+    const filled = sourceDays.filter((row) => !row.empty);
     const bars: DailyBar[] = filled.map((row) => ({ date: row.date, high: row.high, low: row.low, close: row.close, volume: row.volume }));
     const atr = wilderAtr(bars.map((b) => b.high), bars.map((b) => b.low), bars.map((b) => b.close), 14);
     const young = pair.listedDate != null && pair.days.filter((row) => !row.empty && row.date < "2025-11-10").length < 200;
-    const a = countClassA(bars, (date) => memberOn(pair.productId, date), atr, btcByDate, young);
+    const eReady = pair.hour.length >= 20 ? new Date(pair.hour[19]!.ts * 1000).toISOString().slice(0, 10) : null;
+    const a = countClassA(bars, (date) => memberOn(pair.productId, date), atr, btcByDate, young, WINDOW_START);
     addCounts(totals.A20!, a.L20);
     addCounts(totals.A55!, a.L55);
     for (const k of CLASS_A_STOP_K) {
       aStops.L20[k].push(...a.stopBpsByK.L20[k]);
       aStops.L55[k].push(...a.stopBpsByK.L55[k]);
+    }
+    let inWindowPrior = 0;
+    for (let i = 0; i < bars.length; i += 1) {
+      const bar = bars[i]!;
+      const inWindow = bar.date >= WINDOW_START;
+      if (inWindow && memberOn(pair.productId, bar.date)) {
+        if (inWindowPrior < 20) warmupLostDays.A20 = (warmupLostDays.A20 ?? 0) + 1;
+        if (inWindowPrior < 55) warmupLostDays.A55 = (warmupLostDays.A55 ?? 0) + 1;
+        if (inWindowPrior < 31 && new Date(`${bar.date}T00:00:00.000Z`).getUTCDay() === 1) warmupLostDays.B = (warmupLostDays.B ?? 0) + 1;
+        if (inWindowPrior < 15) warmupLostDays.C = (warmupLostDays.C ?? 0) + 1;
+        if (i < 199) warmupLostDays.D = (warmupLostDays.D ?? 0) + 1;
+        if (eReady == null || bar.date < eReady) warmupLostDays.E = (warmupLostDays.E ?? 0) + 1;
+      }
+      if (inWindow) inWindowPrior += 1;
     }
     const closes = bars.map((bar) => bar.close);
     for (let i = 0; i < bars.length; i += 1) {
@@ -417,10 +527,14 @@ export function scanTwoPass(
       if (new Date(`${bar.date}T00:00:00.000Z`).getUTCDay() !== 1) continue;
       const score = classBScore(closes, i);
       if (score == null) continue;
-      bScores.push({ date: bar.date, score, member: memberOn(pair.productId, bar.date) });
+      bScores.push({ id: pair.productId, date: bar.date, score, member: memberOn(pair.productId, bar.date) });
     }
-    addCounts(totals.C!, countClassC(bars, (date) => memberOn(pair.productId, date), atr));
-    addCounts(totals.E!, countClassE(pair.hour, pair.quarter, (date) => memberOn(pair.productId, date), blackout));
+    for (const date of a.L20.dates) bumpMonth("A20", pair.productId, date);
+    for (const date of a.L55.dates) bumpMonth("A55", pair.productId, date);
+    cSetups.push(...classCSetups(pair.productId, bars, pair.four, (date) => memberOn(pair.productId, date), atr));
+    const eCounts = countClassE(pair.hour, pair.quarter, (date) => memberOn(pair.productId, date), blackout);
+    addCounts(totals.E!, eCounts);
+    for (const date of eCounts.dates) bumpMonth("E", pair.productId, date);
     const h4 = pair.four.map((bar) => ({ ts: bar.ts * 1000, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume }));
     const d1 = pair.days.filter((row) => !row.empty).map((row) => ({ ts: row.ts * 1000, open: row.close, high: row.high, low: row.low, close: row.close, volume: row.volume }));
     for (const signal of classDCandidates(pair.productId, h4, d1)) {
@@ -434,20 +548,55 @@ export function scanTwoPass(
       if (btcVeto(btc)) counts.vetoed += 1;
       if (btcOldClause(btc)) counts.oldClause += 1;
       if (btcCaution(btc)) counts.caution += 1;
+      counts.dates.push(date);
       addCounts(totals.D!, counts);
+      bumpMonth("D", pair.productId, date);
     }
   }
-  addCounts(totals.B!, countClassB(bScores, btcByDate));
+  const keptC = classCDayCap(cSetups.map((row) => ({ ...row, classId: "C" as const })));
+  for (const row of keptC) {
+    const counts = emptyCounts();
+    counts.signals = 1;
+    counts.dates.push(row.date);
+    if (row.date >= "2026-02-10" && row.date <= "2026-10-09") counts.oosSignals = 1;
+    counts.stops.push({ bps: row.stopBps, atrMultiple: 1.5 });
+    addCounts(totals.C!, counts);
+    bumpMonth("C", row.pair, row.date);
+  }
+  const bCounts = countClassB(bScores, btcByDate);
+  addCounts(totals.B!, bCounts);
+  for (const date of [...new Set(bScores.map((row) => row.date))]) {
+    const selected = bScores.filter((row) => row.date === date);
+    for (const row of classBSelected(selected)) bumpMonth("B", row.id, date);
+  }
   const widths = (values: readonly number[]) => ({
     p10: percentile(values, 10),
     p50: percentile(values, 50),
     p90: percentile(values, 90),
   });
   const kKey = (k: number) => (k === 2.5 ? "k2_5" : `k${k}`);
-  const vetoBase = (totals.A20?.signals ?? 0) + (totals.A55?.signals ?? 0) + (totals.B?.signals ?? 0) + (totals.D?.signals ?? 0);
-  const share = (n: number) => (vetoBase === 0 ? 0 : n / vetoBase);
+  const ratio = (part: number, whole: number) => (whole === 0 ? 0 : part / whole);
   const signalCounts = Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, { signals: value.signals, oosSignals: value.oosSignals }]));
   const projected = Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, value.oosSignals]));
+  const cDays = new Set(keptC.filter((row) => row.date >= "2026-02-10" && row.date <= "2026-10-09").map((row) => row.date));
+  const cOos = keptC.filter((row) => row.date >= "2026-02-10" && row.date <= "2026-10-09").length;
+  const classCGate = { oosEntries: cOos, distinctUtcDays: cDays.size, meetsRule: cOos >= 30 && cDays.size >= 15 };
+  const btcDays = [...btcByDate.values()].filter((row) => row.date >= WINDOW_START && row.date < "2026-10-11");
+  const f5Names = [...scope].sort().map((id) => f5ByPair.get(id)).filter((row): row is F5NameSummary => row != null);
+  const sumBy = (pick: (row: F5NameSummary) => number) => f5Names.reduce((sum, row) => sum + pick(row), 0);
+  const csValues: number[] = [];
+  const nonemptyValues: number[] = [];
+  for (const date of dates) {
+    const names = members.get(date);
+    if (!names) continue;
+    for (const sample of sampleCache.get(date) ?? []) {
+      if (!names.has(sample.productId) || !sample.liquidity) continue;
+      csValues.push(sample.liquidity.csMedianBps);
+      nonemptyValues.push(sample.liquidity.nonemptyShare);
+    }
+  }
+  const csMid = csValues.length === 0 ? null : median(csValues);
+  const sBt = csMid == null ? { csMedianBps: null, baseBps: null, stressBps: null } : { csMedianBps: csMid, ...spreadCost(csMid) };
   return {
     volumeTier: tier,
     above5m: built.above5m,
@@ -456,7 +605,7 @@ export function scanTwoPass(
     universeSize,
     universeMembers,
     signalCounts,
-    projectedOos: { layout: "D3b", n: projected },
+    projectedOos: { layout: "D3b", nLabel: "before slots", n: projected, classC: classCGate },
     d3: {
       a: { available: false, reason: "Three-year 15m history was not downloaded." },
       b: {
@@ -476,16 +625,44 @@ export function scanTwoPass(
       E: widths(totals.E!.stops.map((stop) => stop.bps)),
     },
     btcFilterShares: {
-      veto: share((totals.A20?.vetoed ?? 0) + (totals.A55?.vetoed ?? 0) + (totals.B?.vetoed ?? 0) + (totals.D?.vetoed ?? 0)),
-      oldClause: share((totals.A20?.oldClause ?? 0) + (totals.A55?.oldClause ?? 0) + (totals.B?.oldClause ?? 0) + (totals.D?.oldClause ?? 0)),
-      caution: share((totals.A20?.caution ?? 0) + (totals.A55?.caution ?? 0) + (totals.B?.caution ?? 0) + (totals.D?.caution ?? 0)),
+      utcDays: btcDays.length,
+      vetoDayShare: ratio(btcDays.filter((row) => btcVeto(row)).length, btcDays.length),
+      oldClauseDayShare: ratio(btcDays.filter((row) => btcOldClause(row)).length, btcDays.length),
+      cautionDayShare: ratio(btcDays.filter((row) => btcCaution(row)).length, btcDays.length),
+      vetoedShareA20: ratio(totals.A20?.vetoed ?? 0, totals.A20?.signals ?? 0),
+      vetoedShareA55: ratio(totals.A55?.vetoed ?? 0, totals.A55?.signals ?? 0),
+      vetoedShareB: ratio(totals.B?.vetoed ?? 0, totals.B?.signals ?? 0),
     },
     overlap: {
       days: overlapDays,
       flagged: overlapFlagged,
       tolerance: OVERLAP_TOLERANCE,
-      flaggedDays,
+      flaggedDays: [],
     },
+    f5: {
+      memberNames: f5Names.length,
+      overlapDays: sumBy((row) => row.overlapDays),
+      missingSlotDays: sumBy((row) => row.missingSlotDays),
+      priceFailDays: sumBy((row) => row.priceFailDays),
+      volumeFailDays: sumBy((row) => row.volumeFailDays),
+      openFailDays: sumBy((row) => row.openFailDays),
+      highFailDays: sumBy((row) => row.highFailDays),
+      lowFailDays: sumBy((row) => row.lowFailDays),
+      closeFailDays: sumBy((row) => row.closeFailDays),
+      priceGroupFailNames: f5Names.filter((row) => !row.priceGroupPasses).map((row) => row.productId),
+      volumeGroupFailNames: f5Names.filter((row) => !row.volumeGroupPasses).map((row) => row.productId),
+      boundarySavedNames: f5Names.filter((row) => !row.priceGroupPasses && row.boundarySavesCloses).map((row) => row.productId),
+      names: f5Names,
+    },
+    csDistribution: { n: csValues.length, p10: percentile(csValues, 10), p50: percentile(csValues, 50), p90: percentile(csValues, 90) },
+    nonemptyShare: { n: nonemptyValues.length, p10: percentile(nonemptyValues, 10), p50: percentile(nonemptyValues, 50), p90: percentile(nonemptyValues, 90) },
+    sBt,
+    pairMonth: [...pairMonth.entries()].map(([key, count]) => {
+      const [className, productId, month] = key.split("|");
+      return { className: className ?? "", productId: productId ?? "", month: month ?? "", count };
+    }),
+    warmupLostDays,
+    classGate: { E: "geometry-only", C: classCGate.meetsRule ? "historical" : "geometry-only" },
     warmup: {
       names: warmupRows.length,
       ema200ReadyByFirstUniverse: warmupRows.filter((row) => {

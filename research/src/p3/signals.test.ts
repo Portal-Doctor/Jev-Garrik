@@ -3,29 +3,31 @@ import { wilderAtr } from "../p2/indicators";
 import type { DailyBar } from "./classes";
 import { countClassA, countClassB, countClassE, type BarOHLC } from "./signals";
 
-test("class B keeps the top fifth of positive scores and counts an OOS date", () => {
-  const rows = [1, 2, 3, 4, 5].map((score) => ({ date: "2026-03-02", score, member: true }));
+test("class B keeps the top fifth of the universe, then at most four names, and counts an OOS date", () => {
+  const rows = [1, 2, 3, 4, 5].map((score) => ({ id: String(score), date: "2026-03-02", score, member: true }));
   const counts = countClassB(rows, new Map());
   expect(counts.signals).toBe(1);
   expect(counts.oosSignals).toBe(1);
+  const wide = Array.from({ length: 25 }, (_, i) => ({ id: `n${i}`, date: "2026-03-02", score: 25 - i, member: true }));
+  expect(countClassB(wide, new Map()).signals).toBe(4);
 });
 
 test("class E counts a 15m close above VWAP and a swing high", () => {
   const hour: BarOHLC[] = Array.from({ length: 30 }, (_, i) => ({
     ts: i * 3600,
-    open: 10,
-    high: 10.2,
-    low: 9.8,
-    close: 10,
+    open: 100,
+    high: 100.2,
+    low: 99.8,
+    close: 100,
     volume: 1,
   }));
   const event = 25;
-  hour[event] = { ts: event * 3600, open: 10, high: 20, low: 8, close: 9, volume: 100 };
+  hour[event] = { ts: event * 3600, open: 100, high: 130, low: 96, close: 97, volume: 100 };
   const base = hour[event]!.ts;
   const inside: BarOHLC[] = [
-    { ts: base, open: 9, high: 12, low: 8, close: 11, volume: 5 },
-    { ts: base + 900, open: 11, high: 11.5, low: 8, close: 9, volume: 5 },
-    { ts: base + 1800, open: 9, high: 14, low: 9, close: 13, volume: 5 },
+    { ts: base, open: 97, high: 101, low: 96, close: 100, volume: 5 },
+    { ts: base + 900, open: 100, high: 100.5, low: 96, close: 99, volume: 5 },
+    { ts: base + 1800, open: 99, high: 104, low: 99, close: 103, volume: 5 },
   ];
   expect(countClassE(hour, inside, () => true).signals).toBe(0);
   const quarter: BarOHLC[] = inside.map((bar) => ({ ...bar, ts: bar.ts + 3600 }));

@@ -9,12 +9,20 @@ export interface DailyBar {
 }
 
 /** Class A at one daily close. L is 20 or 55. No signal before EMA200 exists unless the short-history fallback is allowed. */
-export function classATrigger(bars: readonly DailyBar[], index: number, lookback: 20 | 55, shortHistoryFallback: boolean): boolean {
+export function classATrigger(
+  bars: readonly DailyBar[],
+  index: number,
+  lookback: 20 | 55,
+  shortHistoryFallback: boolean,
+  signalCloseFrom?: string,
+): boolean {
   const bar = bars[index];
   if (!bar || index < lookback) return false;
   const closes = bars.map((row) => row.close);
   const ema50 = ema(closes, 50);
   const ema200 = ema(closes, 200);
+  const window = bars.slice(index - lookback, index);
+  if (signalCloseFrom && window.some((row) => row.date < signalCloseFrom)) return false;
   const priorHigh = Math.max(...closes.slice(index - lookback, index));
   if (!(bar.close > priorHigh)) return false;
   const e50 = ema50[index];

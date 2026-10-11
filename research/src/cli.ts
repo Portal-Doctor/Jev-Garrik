@@ -490,11 +490,12 @@ function writeGeometry(): void {
   const blackout = loadBlackoutCalendar(join(paths.reports, "blackout-calendar.json"));
   const artifact = stamp("P3");
   const ids = [...new Set([...pairDirs(paths.candles), ...pairDirs(join(dailyDir(), "candles"))])].sort();
+  const ticks = new Map(loadProducts().map((product) => [product.productId, Number(product.tickSize ?? 0)]));
   const dailyCandles = join(dailyDir(), "candles");
   let loaded = 0;
   const load = function* () {
     for (const id of ids) {
-      const pair = loadPair(id, dailyCandles, paths.candles);
+      const pair = loadPair(id, dailyCandles, paths.candles, ticks.get(id) ?? 0);
       if (!pair) continue;
       loaded += 1;
       if (loaded % 20 === 0) writeSync(1, `geometry load ${loaded} ${id}\n`);
@@ -527,6 +528,12 @@ function writeGeometry(): void {
     d3: scan.d3,
     stopWidths: scan.stopWidths,
     btcFilterShares: scan.btcFilterShares,
+    csDistribution: scan.csDistribution,
+    nonemptyShare: scan.nonemptyShare,
+    sBt: scan.sBt,
+    warmupLostDays: scan.warmupLostDays,
+    pairMonth: scan.pairMonth,
+    classGate: scan.classGate,
     universeSize: scan.universeSize,
     passCounts: scan.passCounts,
     passCountFlag: scan.passCountFlag,
@@ -545,13 +552,13 @@ function writeGeometry(): void {
     ...artifact,
     ...roots,
     openItems: [
-      "Exclusion proposal is unconfirmed.",
-      "Overlap tolerance is unconfirmed.",
-      "Fee tier is unconfirmed.",
-      "Class E blackout calendar is not applied.",
-      "Class D full-engine parity on the earlier candle set is not run. Numeric swing geometry is tested. The v3 target multiple is 4. The 87b35d0 omitted-argument default is 3.",
-      "The class C book-wide cap of 3 entries per UTC day is not applied to geometry counts.",
-      "Purge, embargo, and Holm are registration work and are not built.",
+      "Exclusion list is the agreed 23. confirmed stays false until the registration hash.",
+      "Fee tier is unconfirmed. Coinbase maker and taker bps stay null until Brian pastes the logged-in tier.",
+      "Brian has not approved the registration. The registration file is not hashed.",
+      "Class E has no historical row. Counts are geometry only.",
+      "Whether a non-positive Kelly bound trades at the $20 paper minimum is Brian's choice. The hook adds no size.",
+      "Purge, embargo, and Holm are not built.",
+      "Class E target is the nearer of a 50% retrace of the 6h high to the event low, or 2.5R, from the design text. It is applied to the fee floor.",
     ],
   };
   const files: [string, unknown][] = [
@@ -559,7 +566,7 @@ function writeGeometry(): void {
     ["warmup-ledger.json", { ...artifact, ...roots, firstUniverseDate: scan.firstUniverseDate, rows: scan.warmupRows }],
     ["survivorship.json", { ...artifact, ...roots, ...survival }],
     ["universe-membership.json", { ...artifact, ...roots, firstUniverseDate: scan.firstUniverseDate, members: scan.universeMembers }],
-    ["overlap-check.json", { ...artifact, ...roots, ...scan.overlap }],
+    ["overlap-check.json", { ...artifact, ...roots, legacy: scan.overlap, f5: scan.f5 }],
     ["geometry-scan.json", scanDoc],
     ["p3-handoff.json", handoff],
   ];

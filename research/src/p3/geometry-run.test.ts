@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { summarizeOverlap } from "./f5";
 import { liquidityAt, ohlcvDiffers, scanFacts, warmupFor, type PairFacts, type QuarterSlot } from "./geometry-run";
 import { assertScanSchema } from "./scan-schema";
 
@@ -29,7 +30,7 @@ test("warmup names the source that completed each indicator", () => {
   const days = Array.from({ length: 210 }, (_, i) => {
     const ts = Date.parse("2024-01-01T00:00:00.000Z") / 1000 + i * 86400;
     const date = new Date(ts * 1000).toISOString().slice(0, 10);
-    return { date, ts, high: 2, low: 1, close: 1, volume: 1, quote: 1, empty: false };
+    return { date, ts, open: 1, high: 2, low: 1, close: 1, volume: 1, quote: 1, empty: false };
   });
   const pair: PairFacts = {
     productId: "AAA-USD",
@@ -43,6 +44,7 @@ test("warmup names the source that completed each indicator", () => {
     overlapFlags: 0,
     overlapDays: 0,
     overlapDetail: [],
+    f5: summarizeOverlap({ productId: "AAA-USD", tick: 0.01, derived: [], daily: [], slots: [] }),
   };
   const row = warmupFor(pair);
   expect(row.indicators.find((item) => item.indicator === "ema200")?.source).toBe("D1");
