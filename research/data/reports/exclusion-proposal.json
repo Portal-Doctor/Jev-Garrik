@@ -4,8 +4,10 @@
   "createdAt": "2026-10-11T12:16:19.876Z",
   "phaseId": "P3",
   "dailyRootHash": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
-  "confirmed": false,
-  "note": "Quant and Trader accepted these names. confirmed stays false until the registration hash. Native W, WAL, WCT, WELL, WET, WHUF, WIF, WLD, WLFI, and WMTX stay in.",
+  "confirmed": true,
+  "confirmedBy": "Brian",
+  "confirmedOn": "2026-10-11",
+  "note": "Brian confirmed these 23 names on 2026-10-11. The names are unchanged. Native W, WAL, WCT, WELL, WET, WHUF, WIF, WLD, WLFI, and WMTX stay in.",
   "productIds": [
     "BUSD-USD",
     "CBETH-USD",

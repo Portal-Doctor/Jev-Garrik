@@ -1,11 +1,11 @@
 {
   "document": "p4-registration",
   "approved": false,
-  "hashed": false,
-  "note": "Draft. This file has no content hash and is not approved. Brian's fee tier and approval are placeholders. The stamp names the clean commit that produced the scan artifacts.",
-  "commitSha": "c5ee11de33b7d67e819a1c37320fdd374c74694d",
+  "hashed": true,
+  "note": "Final registration. approved stays false. Brian's approval is a separate record and is not in this file, so this hash stays fixed. The sha256 is in p4-registration.sha256 and the commit message. The stamp names the clean parent commit.",
+  "commitSha": "7cd968a0e35251ed6be7b6aa0dec0eda5ad11978",
   "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
-  "createdAt": "2026-10-11T12:22:00.931Z",
+  "createdAt": "2026-10-11T18:56:09.178Z",
   "phaseId": "P4",
   "dailyRootHash": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
   "scanStampCommit": "2627db047acdb0ae2da16ec8e63534ee030c34e7",
@@ -13,7 +13,8 @@
   "implementationCommits": [
     "6097fbfdfdf9cad7ef3de293c4fd011a5959e4c0",
     "2627db047acdb0ae2da16ec8e63534ee030c34e7",
-    "c5ee11de33b7d67e819a1c37320fdd374c74694d"
+    "c5ee11de33b7d67e819a1c37320fdd374c74694d",
+    "7cd968a0e35251ed6be7b6aa0dec0eda5ad11978"
   ],
   "identity": {
     "designTexts": {
@@ -23,7 +24,7 @@
       "addendumNote": "Recomputed from the supplied trading-design-15m-addendum file. The review draft cited the previous hash. The file is not in this checkout.",
       "filesInCheckout": false
     },
-    "codeCommitAtHash": null,
+    "codeCommitAtHash": "7cd968a0e35251ed6be7b6aa0dec0eda5ad11978",
     "data": {
       "fifteenRoot": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
       "dailyRoot": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
@@ -32,7 +33,7 @@
       "dailyFreezeCommit": "a30b246a95951faa4f99882bf9ddba0a2fad24d1"
     },
     "artifactSha256": {
-      "exclusionProposal": "95be6b8288f092236025539d3da4e26508d029fba654b27ff3e32e75e7f632a3",
+      "exclusionProposal": "7d20bf0031823d53b2e86cdeaa8164a70e807fd5efa77e1ad7975e69011f7d1f",
       "universeMembership": "ffccf47ef9ae0a596ae20d5a4880f93855d95f8bfa90cb7714deeccd747881f5",
       "overlapCheck": "b6b0fcb94b4ea16702b58fcfc765c18eead201fecca9d1d76fc4f00c04f57887",
       "geometryScan": "7c8901dbd891e7343aa0713ac3724a907480cf9e51da344f295050b3b52dbd44",
@@ -41,17 +42,16 @@
     }
   },
   "feeTier": {
-    "status": "placeholder",
+    "status": "confirmed",
     "owner": "Brian",
-    "makerBps": null,
-    "takerBps": null,
-    "profileId": "coinbase-at-brian-tier",
-    "source": "The logged-in Coinbase fee page has not been pasted."
-  },
-  "approval": {
-    "approved": false,
-    "approver": "Brian",
-    "approvedAt": null
+    "venue": "Coinbase Advanced Trade",
+    "tier": "Intro",
+    "makerBps": 50,
+    "takerBps": 90,
+    "profileId": "coinbase-advanced-trade-intro",
+    "source": "Brian pasted the logged-in fee page on 2026-10-11.",
+    "confirmedAt": "2026-10-11T18:48:00.000Z",
+    "confirmedAtLocal": "2026-10-11 13:48 America/Chicago"
   },
   "universe": {
     "legs": "99/97 percent nonempty 15m, 10000/6000 dollar median 15m quote, CS15m at most 20 bps and exit above 25",
@@ -202,11 +202,12 @@
       "10/10",
       "25/40",
       "Kraken 40/80",
-      "Coinbase AT_BRIAN_TIER"
+      "Coinbase Advanced Trade Intro 50/90"
     ],
     "liveSpread": "s_live from the L2 snapshot",
     "tradeThrough": "A public-feed trade at least one tick through the limit fills half the displayed volume.",
-    "indeterminateOnGap": "X2 and X3 are excluded and counted. A share above 10 percent is flagged. Class D takes no fill."
+    "indeterminateOnGap": "X2 and X3 are excluded and counted. A share above 10 percent is flagged. Class D takes no fill.",
+    "feeProfilesNote": "The first four rows are declared sensitivity profiles. The scan did not apply them. The Coinbase row is the confirmed Intro tier, maker 50 and taker 90."
   },
   "risk": {
     "riskUsd": 60,
@@ -245,7 +246,7 @@
     "blackout": "30 minutes before through 60 minutes after CPI, NFP, and FOMC"
   },
   "exclusion": {
-    "confirmed": false,
+    "confirmed": true,
     "count": 23,
     "productIds": [
       "BUSD-USD",
@@ -271,7 +272,14 @@
       "WCFG-USD",
       "WLUNA-USD",
       "WRON-USD"
-    ]
+    ],
+    "confirmedBy": "Brian",
+    "confirmedOn": "2026-10-11",
+    "priorFileSha256": "95be6b8288f092236025539d3da4e26508d029fba654b27ff3e32e75e7f632a3",
+    "fileSha256": "7d20bf0031823d53b2e86cdeaa8164a70e807fd5efa77e1ad7975e69011f7d1f",
+    "membershipFileSha256": "ffccf47ef9ae0a596ae20d5a4880f93855d95f8bfa90cb7714deeccd747881f5",
+    "membershipUnchanged": true,
+    "note": "Brian confirmed these 23 names on 2026-10-11. The names are identical to the scan list, so universe membership is unchanged."
   },
   "overlap": {
     "applied": {
@@ -865,13 +873,22 @@
     "harness": "87b35d0 runSwing4h, geometry only, 1.5 times ATR, on the same aggregated bars as classDCandidates.",
     "targetR4": {
       "matched": 179,
-      "reference": 179
+      "reference": 179,
+      "label": "synthetic-bar self-consistency check"
     },
     "targetR3": {
       "referenceRows": 179,
-      "fullMatchesAgainst4R": 0
+      "fullMatchesAgainst4R": 0,
+      "label": "synthetic-bar self-consistency check"
     },
-    "note": "NEAR-USD and SUI-USD can differ from PR #29. That run loaded a longer D1 history. This scan pins D to each name's first D1 candle in root 76c41956, or to 2025-10-11 for the seven boundary-saved names. That difference is expected and is not a parity failure."
+    "note": "NEAR-USD and SUI-USD can differ from PR #29. That run loaded a longer D1 history. This scan pins D to each name's first D1 candle in root 76c41956, or to 2025-10-11 for the seven boundary-saved names. That difference is expected and is not a parity failure.",
+    "realCandle": {
+      "label": "the real-candle parity that counts",
+      "source": "QA on PR #29, 1m candles, against 87b35d0 runSwing4h",
+      "matched": 21,
+      "reference": 21,
+      "control": "3R mismatches"
+    }
   },
   "paperPath": {
     "days": "at least 90",
@@ -892,14 +909,88 @@
     "placeboAndPower": "minimums apply"
   },
   "openItems": [
-    "Brian's Coinbase fee tier is not pasted.",
-    "Brian has not approved this file, and it is not hashed.",
-    "The exclusion list is agreed and still unconfirmed for the hash.",
+    "Brian's approval is a separate record and is not in this file.",
     "A non-positive Kelly bound trading at 20 dollars is Brian's choice and is not applied.",
     "Open is reported beside high, low, and close. It is not part of the price-group pass.",
     "Purge and Holm are described and not built.",
     "TypeSafe has not answered, so Jev stays on Fallback B.",
     "The design-text files are not in this checkout. The addendum hash was recomputed from the supplied file.",
     "NEAR-USD and SUI-USD can differ from PR 29 because that run loaded a longer D1 history. Both are pinned here to 2023-10-11. That difference is expected and is not a parity failure."
-  ]
+  ],
+  "feeAudit": {
+    "consistent": true,
+    "items": [
+      {
+        "item": "MAKER_FEE_BPS",
+        "value": 50,
+        "usedBy": "vendor config; entry and resting-target legs"
+      },
+      {
+        "item": "TAKER_FEE_BPS",
+        "value": 90,
+        "usedBy": "vendor config; stop and market-exit legs"
+      },
+      {
+        "item": "F_WIN_BPS",
+        "value": 100,
+        "usedBy": "perTradeFloor; maker plus maker"
+      },
+      {
+        "item": "F_LOSS_BPS",
+        "value": 140,
+        "usedBy": "perTradeFloor; maker plus taker"
+      },
+      {
+        "item": "perTradeFloor",
+        "value": "(T - 100) >= 1.5 * (S + 140)",
+        "usedBy": "class C, class E, and the class D swing floor"
+      },
+      {
+        "item": "belowFeeFloor",
+        "value": "not perTradeFloor.pass",
+        "usedBy": "class D"
+      },
+      {
+        "item": "swingFloor",
+        "value": "perTradeFloor",
+        "usedBy": "class D"
+      },
+      {
+        "item": "classEAtStop250",
+        "value": "target at least 685 bps",
+        "usedBy": "classEFloorPasses"
+      },
+      {
+        "item": "section1CostBps",
+        "value": "50 + q*50 + (1-q)*(90 + s)",
+        "usedBy": "declared section 1 formula; not applied to scan counts"
+      },
+      {
+        "item": "sBt.baseBps",
+        "value": 5,
+        "usedBy": "scan spread, not an exchange fee"
+      },
+      {
+        "item": "sBt.stressBps",
+        "value": 10,
+        "usedBy": "scan spread, not an exchange fee"
+      },
+      {
+        "item": "sBt.csMedianBps",
+        "value": 6.829227760250422,
+        "usedBy": "scan spread input"
+      },
+      {
+        "item": "makerLegsPay",
+        "value": 0,
+        "usedBy": "spread on maker legs"
+      }
+    ],
+    "declaredNotApplied": [
+      "0/0",
+      "10/10",
+      "25/40",
+      "Kraken 40/80"
+    ]
+  }
 }
