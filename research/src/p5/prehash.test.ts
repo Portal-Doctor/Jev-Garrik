@@ -12,6 +12,7 @@ test("the pre-hash geometry has no banned fields and was not tuned", () => {
     maxOpen: null;
     maxOpenNote: string;
     commitSha: string;
+    dataRootHash: string;
     createdAt: string;
   };
   expect(findBannedKeys(doc)).toEqual([]);
@@ -28,6 +29,7 @@ test("the pre-hash geometry has no banned fields and was not tuned", () => {
   expect(doc.clusters.months.find((row) => row.month === "2026-03-01")?.largestAbove60).toBe(true);
   expect(doc.maxOpen).toBeNull();
   expect(doc.maxOpenNote).toBe("G2 concurrency measured in the post-hash rerun");
-  expect(doc.commitSha).toBe("c48580363bcb4600512c4f7ac1564c482f8e52db");
+  expect(doc.commitSha).toBe("71b91890e692c2aea594da0e090faa20ce9efa72");
+  expect(doc.dataRootHash).toBe("1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8");
   expect(doc.createdAt.endsWith("Z")).toBe(true);
 });

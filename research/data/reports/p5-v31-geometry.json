@@ -336,6 +336,7 @@
   "maxOpen": null,
   "maxOpenNote": "G2 concurrency measured in the post-hash rerun",
   "skipped": [],
-  "commitSha": "c48580363bcb4600512c4f7ac1564c482f8e52db",
-  "createdAt": "2026-10-11T21:30:55.471Z"
+  "commitSha": "71b91890e692c2aea594da0e090faa20ce9efa72",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-11T21:44:00.683Z"
 }
