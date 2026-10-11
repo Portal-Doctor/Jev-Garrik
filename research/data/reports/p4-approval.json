@@ -1,0 +1,10 @@
+{
+  "commitSha": "54d10d4632b72059dbd6a2ba1ec69f13168368ed",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-11T19:28:50.350Z",
+  "phaseId": "P5",
+  "registrationSha256": "49bc506092114e2dec3e3ec73faa1adad4afdf04b0941d4c7b01bd22cd2317f3",
+  "approvedBy": "Brian",
+  "approvedAt": "2026-10-11T19:20:00Z",
+  "commit": "54d10d4632b72059dbd6a2ba1ec69f13168368ed"
+}
