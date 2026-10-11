@@ -18,14 +18,14 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { boot } from "./index";
-import { stampFromGit, type ArtifactStamp } from "./manifest";
+import { assertCleanWorkTree, stampFromGit, type ArtifactStamp } from "./manifest";
 import { createPacer, downloadUsdSpot } from "./data/download";
 import { derivePairMonthFile } from "./data/derive-store";
 import { sha256Bytes } from "./data/hash";
 import { writeBytes, writeJson } from "./data/io";
 import { buildCoverage, type CoverageReport } from "./data/coverage";
 import { BELOW_RANK_CUTOFF_LIFT_REASON, D1_FREEZE_REASON, D2_LIFT_REASON, liftCompletedFreeze, scanCandleFiles, sealFrozenSnapshot, type DataManifest, type SnapshotLift } from "./data/manifest-file";
-import { assertFrozenRoots, withLastRefreshed } from "./data/refresh";
+import { assertCandleRoot, assertFrozenRoots, withLastRefreshed } from "./data/refresh";
 import { convertBareProductStats, fetchProductStats, parseProductStats } from "./data/product-stats";
 import { sha256File } from "./data/store";
 import { applyUniverseCut, droppedProductIds, type OwnerDecisionFile } from "./data/universe-cut";
@@ -172,20 +172,12 @@ function stamp(phaseId: string): ArtifactStamp {
 }
 
 async function snapshot(): Promise<void> {
-  const res = await fetch(productsUrl(), { headers: publicHeaders() });
-  if (!res.ok) throw new Error(`products ${res.status}`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  writeBytes(paths.productsRaw, bytes);
-  const products = usdSpotFromExchange(new TextDecoder().decode(bytes));
-  writeJson(paths.usdSpot, {
-    ...stamp("P1"),
-    source: productsUrl(),
-    rawSha256: sha256Bytes(bytes),
-    rawBytes: bytes.byteLength,
-    listingDateNote: "listing date is not in the exchange products payload",
-    products,
-  });
-  console.log(`snapshot ${products.length} USD products raw ${sha256Bytes(bytes)}`);
+  requireFrozenWrites();
+  if (existsSync(paths.usdSpot)) {
+    console.log("product snapshot already recorded");
+    return;
+  }
+  throw new Error("refusing to write: product snapshot is missing");
 }
 
 function oneMinuteSuperseded(now: Date): SnapshotLift {
@@ -200,6 +192,7 @@ function oneMinuteSuperseded(now: Date): SnapshotLift {
 }
 
 async function download(): Promise<void> {
+  requireFrozenWrites();
   let manifestCreatedAt: string | undefined;
   let snapshotLift = oneMinuteSuperseded(new Date());
   let now = new Date();
@@ -278,61 +271,22 @@ async function partA(): Promise<void> {
   await liftD2(artifact);
 }
 
-async function downloadDaily(artifact: ArtifactStamp): Promise<void> {
+function requireFrozenWrites(): void {
+  assertCleanWorkTree();
+  assertFrozenRoots(paths.root);
+}
+
+async function downloadDaily(_artifact: ArtifactStamp): Promise<void> {
+  assertCleanWorkTree();
   const dataDir = dailyDir();
-  mkdirSync(dataDir, { recursive: true });
-  const dailyPaths = dataPaths(dataDir);
-  let manifestCreatedAt: string | undefined;
-  if (existsSync(dailyPaths.manifest)) {
-    const existing = JSON.parse(readFileSync(dailyPaths.manifest, "utf8")) as DataManifest;
-    if (existing.snapshot?.universeComplete && existing.barSec === DAY_SEC) {
-      if (existing.snapshot.reason !== D1_FREEZE_REASON) {
-        const artifact = stamp("P1");
-        existing.snapshot.reason = D1_FREEZE_REASON;
-        existing.commitSha = artifact.commitSha;
-        existing.createdAt = artifact.createdAt;
-        existing.phaseId = artifact.phaseId;
-        writeJson(dailyPaths.manifest, existing);
-        console.log(`daily freeze restamped ${artifact.commitSha} root ${existing.dataRootHash}`);
-        return;
-      }
-      console.log(`daily snapshot already frozen ${existing.snapshot.frozenAt} root ${existing.dataRootHash}`);
-      return;
-    }
-    if (existing.barSec === DAY_SEC) manifestCreatedAt = existing.createdAt;
+  if (!existsSync(dataDir)) throw new Error("refusing to write: daily candle manifest is missing");
+  const manifest = assertCandleRoot(dataDir);
+  const started = Date.parse(manifest.snapshot?.downloadStartedAt ?? "");
+  const updated = Date.parse(manifest.snapshot?.downloadUpdatedAt ?? "");
+  if (Number.isFinite(started) && Number.isFinite(updated) && updated < started) {
+    throw new Error("refusing to write: daily downloadUpdatedAt is before downloadStartedAt");
   }
-  const startSec = Date.parse(DAILY_WINDOW_START_ISO) / 1000;
-  const endSec = Date.parse(DAILY_WINDOW_END_ISO) / 1000;
-  const intervalMs = Number(process.env.RESEARCH_REQUEST_INTERVAL_MS ?? "100");
-  const concurrency = Number(process.env.RESEARCH_DOWNLOAD_CONCURRENCY ?? "10");
-  const summary = await downloadUsdSpot({
-    products: loadProducts(),
-    dataDir,
-    now: new Date("2026-10-11T12:00:00.000Z"),
-    stamp: artifact,
-    intervalMs,
-    concurrency,
-    stopFile: dailyPaths.stopFile,
-    manifestCreatedAt,
-    fixedWindow: { startSec, endSec },
-    barSec: DAY_SEC,
-    log: (message) => writeSync(1, `${message}\n`),
-  });
-  writeSync(1, `${JSON.stringify(summary)}\n`);
-  if (summary.stopped === "finished") {
-    const manifest = JSON.parse(readFileSync(dailyPaths.manifest, "utf8")) as DataManifest;
-    manifest.snapshot = {
-      status: "frozen",
-      reason: D1_FREEZE_REASON,
-      downloadStartedAt: manifest.createdAt,
-      downloadUpdatedAt: manifest.updatedAt,
-      frozenAt: new Date().toISOString(),
-      universeComplete: true,
-    };
-    manifest.downloadRun = summary;
-    writeJson(dailyPaths.manifest, manifest);
-    writeSync(1, `daily frozen ${manifest.snapshot.frozenAt} root ${manifest.dataRootHash} files ${manifest.files.length}\n`);
-  }
+  console.log(`daily snapshot already frozen ${manifest.snapshot?.frozenAt} root ${manifest.dataRootHash} commit ${manifest.commitSha}`);
 }
 
 function d2Ids(): { servedDelisted: string[]; cutDropped: string[]; union: string[] } {
@@ -344,148 +298,41 @@ function d2Ids(): { servedDelisted: string[]; cutDropped: string[]; union: strin
   return { servedDelisted: servedDelisted.slice().sort(), cutDropped: cutDropped.slice().sort(), union };
 }
 
-async function liftD2(artifact: ArtifactStamp): Promise<void> {
+async function liftD2(_artifact: ArtifactStamp): Promise<void> {
+  requireFrozenWrites();
   if (!existsSync(paths.manifest)) throw new Error("15m manifest is missing");
-  const names = d2Ids();
-  const catalog = new Set(loadProducts().map((product) => product.productId));
-  const decision = JSON.parse(readFileSync(decisionPath(), "utf8")) as OwnerDecisionFile;
-  const cut = decision.entries.find((entry) => entry.id === "universe-cut");
-  const keptIds = cut?.id === "universe-cut" ? new Set(cut.kept) : new Set<string>();
-  const overlapKept = names.union.filter((id) => keptIds.has(id));
-  writeJson(join(paths.reports, "d2-names.json"), {
-    ...artifact,
-    windowStart: FIFTEEN_WINDOW_START_ISO,
-    windowEnd: FIFTEEN_WINDOW_END_ISO,
-    servedDelisted: names.servedDelisted,
-    cutDropped: names.cutDropped,
-    union: names.union,
-    servedDelistedCount: names.servedDelisted.length,
-    cutDroppedCount: names.cutDropped.length,
-    unionCount: names.union.length,
-    alreadyKeptCount: overlapKept.length,
-    note: "D2 downloads this union on the same 15m window. The owner cut is not universe membership. Names that 404 stay out of the candle root.",
-  });
-  let existing = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
-  if (existing.snapshot?.universeComplete && existing.snapshotLift?.reason === D2_LIFT_REASON) {
-    console.log(`D2 lift already frozen ${existing.snapshot.frozenAt} root ${existing.dataRootHash}`);
+  const existingFrozen = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
+  if (existingFrozen.snapshot?.universeComplete && existingFrozen.snapshotLift?.reason === D2_LIFT_REASON) {
+    console.log(`D2 lift already frozen ${existingFrozen.snapshot.frozenAt} root ${existingFrozen.dataRootHash}`);
     return;
   }
-  if (existing.dataRootHash !== "e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968" && existing.snapshotLift?.supersededDataRootHash !== "e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968" && existing.snapshotLift?.priorSnapshotLift?.supersededDataRootHash !== "e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968") {
-    throw new Error(`refusing to lift a manifest that is not chained to e79fb4b2, root ${existing.dataRootHash}`);
-  }
-  let snapshotLift = existing.snapshotLift;
-  let manifestCreatedAt = existing.createdAt;
-  if (existing.snapshot?.universeComplete) {
-    if (existing.barSec !== BAR_SEC) throw new Error(`refusing to lift a freeze whose bar size is not ${BAR_SEC}`);
-    const lifted = liftCompletedFreeze(existing, new Date(), D2_LIFT_REASON);
-    delete lifted.lastRefreshed;
-    snapshotLift = lifted.snapshotLift;
-    writeJson(paths.manifest, lifted);
-    existing = lifted;
-    writeSync(1, `lifted completed freeze ${snapshotLift?.supersededDataRootHash} files ${snapshotLift?.supersededFileCount}\n`);
-  } else if (existing.snapshotLift?.reason !== D2_LIFT_REASON) {
-    throw new Error("15m manifest is not a completed freeze and is not a D2 resume");
-  }
-  const want = new Set(names.union);
-  const products = loadProducts().filter((product) => want.has(product.productId));
-  if (products.length !== names.union.length) {
-    const missing = names.union.filter((id) => !catalog.has(id));
-    throw new Error(`D2 names missing from the product snapshot: ${missing.join(",")}`);
-  }
-  const intervalMs = Number(process.env.RESEARCH_REQUEST_INTERVAL_MS ?? "100");
-  const concurrency = Number(process.env.RESEARCH_DOWNLOAD_CONCURRENCY ?? "10");
-  const summary = await downloadUsdSpot({
-    products,
-    dataDir: paths.root,
-    now: new Date("2026-10-11T12:00:00.000Z"),
-    stamp: artifact,
-    intervalMs,
-    concurrency,
-    stopFile: paths.stopFile,
-    manifestCreatedAt,
-    snapshotLift,
-    log: (message) => writeSync(1, `${message}\n`),
-  });
-  writeSync(1, `${JSON.stringify(summary)}\n`);
-  if (summary.stopped === "finished") {
-    const manifest = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
-    const sealed = sealFrozenSnapshot(manifest, new Date(), {
-      universeComplete: true,
-      supersededDataRootHash: manifest.snapshotLift?.supersededDataRootHash ?? null,
-    });
-    sealed.downloadRun = summary;
-    writeJson(paths.manifest, sealed);
-    writeSync(1, `D2 frozen ${sealed.snapshot?.frozenAt} root ${sealed.dataRootHash} files ${sealed.files.length}\n`);
-  }
+  throw new Error("refusing to write: the 15m snapshot is not the completed D2 lift");
 }
-
 async function probe(): Promise<void> {
-  const intervalMs = Number(process.env.RESEARCH_REQUEST_INTERVAL_MS ?? "100");
-  const report = await probeDelisted({
-    products: loadProducts(),
-    now: new Date(),
-    stamp: stamp("P1"),
-    pace: createPacer(intervalMs, Date.now, (ms) => new Promise((resolve) => setTimeout(resolve, ms))),
-  });
-  writeJson(paths.probe, report);
-  const served = report.products.filter((product) => product.candlesServed === true).length;
-  console.log(`probe ${report.products.length} products, candles served for ${served}`);
+  requireFrozenWrites();
+  if (!existsSync(paths.probe)) throw new Error("refusing to write: delisted probe is missing");
+  console.log("delisted probe already recorded");
 }
 
 function ticks(): void {
+  requireFrozenWrites();
   writeJson(paths.ticks, tickReport(loadProducts(), stamp("P1")));
   console.log(`tick flags ${loadProducts().length}`);
 }
 
 function derive(): void {
-  const files = scanCandleFiles(paths.root);
-  const written: string[] = [];
-  for (const file of files) {
-    written.push(
-      ...derivePairMonthFile({
-        sqlitePath: join(paths.root, file.path),
-        outDir: paths.derived,
-        stamp: stamp("P1"),
-      }),
-    );
-  }
-  console.log(`derived ${written.length} files`);
+  requireFrozenWrites();
+  console.log("derived files already match the frozen root");
 }
 
-/** Derives pair-months that do not already have a daily JSON file. Existing derived bytes stay put. */
+/** Refuses unless the frozen candle and derived roots already match. It does not restamp them. */
 function deriveNew(): void {
-  const priorPath = join(paths.root, "derived-manifest.json");
-  const prior = existsSync(priorPath) ? ((JSON.parse(readFileSync(priorPath, "utf8")) as { derivedRootHash?: string }).derivedRootHash ?? null) : null;
-  const artifact = stamp("P1");
-  const files = scanCandleFiles(paths.root);
-  let months = 0;
-  for (const file of files) {
-    const parts = file.path.split("/");
-    const pair = parts[1];
-    const month = parts[2]?.replace(/\.sqlite$/, "");
-    if (!pair || !month) continue;
-    if (existsSync(join(paths.derived, pair, `${month}-1d.json`))) continue;
-    derivePairMonthFile({
-      sqlitePath: join(paths.root, file.path),
-      outDir: paths.derived,
-      stamp: artifact,
-    });
-    months += 1;
-    if (months % 25 === 0) writeSync(1, `derive-new ${months} ${pair} ${month}\n`);
-  }
-  const manifest = buildDerivedManifest({ stamp: artifact, dataDir: paths.root });
-  writeJson(priorPath, manifest);
-  writeJson(join(paths.reports, "derived-roots.json"), {
-    ...artifact,
-    priorDerivedRootHash: prior,
-    derivedRootHash: manifest.derivedRootHash,
-    newMonths: months,
-    note: "New pair-months were derived. Existing derived files were not rewritten, so their embedded stamps stay in the new root.",
-  });
-  console.log(`derive-new months ${months} prior ${prior} root ${manifest.derivedRootHash}`);
+  requireFrozenWrites();
+  console.log("derived files already match the frozen root");
 }
 
 function coverage(): void {
+  requireFrozenWrites();
   const probes = existsSync(paths.probe)
     ? (JSON.parse(readFileSync(paths.probe, "utf8")) as { products: { productId: string; status: UsdSpotProduct["status"]; statusRaw: string; candlesServed: boolean | null; windows: [] }[] }).products
     : [];
@@ -500,6 +347,7 @@ function coverage(): void {
 }
 
 function sealSnapshot(): void {
+  requireFrozenWrites();
   const manifest = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
   if (manifest.snapshot?.universeComplete) {
     console.log(`already frozen ${manifest.snapshot.frozenAt} root ${manifest.dataRootHash}`);
@@ -514,6 +362,7 @@ function sealSnapshot(): void {
 }
 
 function p1Report(): void {
+  requireFrozenWrites();
   const manifest = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
   const coverageReport = JSON.parse(readFileSync(paths.coverage, "utf8")) as CoverageReport;
   const probe = JSON.parse(readFileSync(paths.probe, "utf8")) as DelistedProbeReport;
@@ -533,6 +382,7 @@ function p1Report(): void {
 }
 
 async function statsFetch(): Promise<void> {
+  requireFrozenWrites();
   if (existsSync(statsPath()) && process.env.RESEARCH_STATS_REFETCH !== "1") {
     throw new Error("product-stats.json already exists. This freeze does not re-fetch. Set RESEARCH_STATS_REFETCH=1 to replace it.");
   }
@@ -542,6 +392,7 @@ async function statsFetch(): Promise<void> {
 }
 
 function statsConvert(): void {
+  requireFrozenWrites();
   const text = readFileSync(statsPath(), "utf8");
   const parsed: unknown = JSON.parse(text);
   if (!Array.isArray(parsed)) {
@@ -553,6 +404,7 @@ function statsConvert(): void {
 }
 
 function universeCut(): void {
+  requireFrozenWrites();
   const stats = parseProductStats(readFileSync(statsPath(), "utf8"));
   const decision = applyUniverseCut(stats);
   writeJson(decisionPath(), decision);
@@ -627,6 +479,8 @@ function pairDirs(dir: string): string[] {
 }
 
 function writeGeometry(): void {
+  requireFrozenWrites();
+  assertCandleRoot(dailyDir());
   const fifteen = existsSync(paths.manifest) ? (JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest) : null;
   const dailyPath = join(dailyDir(), "data-manifest.json");
   const daily = existsSync(dailyPath) ? (JSON.parse(readFileSync(dailyPath, "utf8")) as DataManifest) : null;
@@ -717,6 +571,7 @@ function writeGeometry(): void {
 }
 
 async function writeJevSmoke(): Promise<void> {
+  requireFrozenWrites();
   const artifact = stamp("P3");
   if (!process.env.TYPESAFE_AI_API_KEY) {
     const body = { ...artifact, ran: false, synthetic: true, reason: "TYPESAFE_AI_API_KEY is not set" };

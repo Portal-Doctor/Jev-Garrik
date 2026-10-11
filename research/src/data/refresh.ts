@@ -36,6 +36,24 @@ export function assertFrozenRoots(dataDir: string): { manifest: DataManifest; de
   return { manifest, derivedRootHash: derived.derivedRootHash };
 }
 
+/**
+ * Candle files must exist and match the frozen root. Does not check derived files.
+ * A completed freeze is left unread by callers that must not restamp it.
+ */
+export function assertCandleRoot(dataDir: string): DataManifest {
+  const paths = dataPaths(dataDir);
+  if (!existsSync(paths.manifest)) throw new Error("refusing to write: candle manifest is missing");
+  const manifest = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
+  if (!manifest.dataRootHash || manifest.snapshot?.status !== "frozen" || !manifest.snapshot.universeComplete) {
+    throw new Error("refusing to write: snapshot is not a completed freeze");
+  }
+  const candles = scanCandleFiles(dataDir);
+  if (candles.length === 0 || rootHash(candles) !== manifest.dataRootHash) {
+    throw new Error("refusing to write: candle files are missing or do not match the frozen root");
+  }
+  return manifest;
+}
+
 /** Records a refresh without changing the freeze commit or frozenAt. */
 export function withLastRefreshed(manifest: DataManifest, refresh: RefreshStamp): DataManifest {
   const commitSha = manifest.commitSha;

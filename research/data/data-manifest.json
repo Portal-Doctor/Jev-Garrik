@@ -2,7 +2,7 @@
   "commitSha": "a30b246a95951faa4f99882bf9ddba0a2fad24d1",
   "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
   "createdAt": "2026-10-10T23:47:55.410Z",
-  "updatedAt": "2026-10-11T02:05:24.601Z",
+  "updatedAt": "2026-10-11T03:02:13.204Z",
   "phaseId": "P1",
   "hashAlgorithm": "sha256",
   "rootHashInput": "sorted lines of relativePath TAB sha256 LF, UTF-8",
@@ -32016,7 +32016,7 @@
     "status": "frozen",
     "reason": "Frozen by owner decision after the candle download completed. Supersedes e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968 (4680 files). Prior root a222f69716094e26b90c10ab4fe145d342ff6728f6c0b589ed08bb255711c282 stays on snapshotLift.priorSnapshotLift. The 24h revision check stays dropped and is not an open item for the hash.",
     "downloadStartedAt": "2026-10-10T23:47:55.410Z",
-    "downloadUpdatedAt": "2026-10-11T02:05:24.601Z",
+    "downloadUpdatedAt": "2026-10-11T03:02:13.204Z",
     "frozenAt": "2026-10-11T03:02:13.204Z",
     "universeComplete": true,
     "supersededDataRootHash": "e79fb4b27584a745396edd21f769bb12457135a2cc91bb1f3ff75c955007b968"

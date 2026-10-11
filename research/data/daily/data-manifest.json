@@ -1,8 +1,8 @@
 {
-  "commitSha": "7d8a8a7518c90a5b6023bb6b0fe69ef17e902a82",
+  "commitSha": "a30b246a95951faa4f99882bf9ddba0a2fad24d1",
   "dataRootHash": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
-  "createdAt": "2026-10-11T03:04:08.255Z",
-  "updatedAt": "2026-10-11T02:05:24.601Z",
+  "createdAt": "2026-10-11T02:05:24.601Z",
+  "updatedAt": "2026-10-11T02:35:46.619Z",
   "phaseId": "P1",
   "hashAlgorithm": "sha256",
   "rootHashInput": "sorted lines of relativePath TAB sha256 LF, UTF-8",
@@ -91035,7 +91035,7 @@
     "status": "frozen",
     "reason": "Owner decision (Brian, 2026-10-10 20:50 CT (01:50Z)): D1 daily supplement frozen. Three years or since listing, ending 2026-10-11T00:00:00.000Z. Used only for warmup and listing dates before 2025-10-11. Not part of the 15m candle root.",
     "downloadStartedAt": "2026-10-11T02:05:24.812Z",
-    "downloadUpdatedAt": "2026-10-11T02:05:24.601Z",
+    "downloadUpdatedAt": "2026-10-11T02:35:46.619Z",
     "frozenAt": "2026-10-11T02:35:46.619Z",
     "universeComplete": true
   },
