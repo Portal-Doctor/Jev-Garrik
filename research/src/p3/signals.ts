@@ -1,6 +1,5 @@
 import { wilderAtr } from "../p2/indicators";
 import { classATrigger, classBScore, type DailyBar } from "./classes";
-import { dCandidate } from "./d-geometry";
 import { isOosDate } from "./schedule";
 
 export interface StopSample {
@@ -182,14 +181,6 @@ export function countClassE(hour: readonly BarOHLC[], quarter: readonly BarOHLC[
     if (!triggered) continue;
     note(counts, date, undefined, { bps: stopBps, atrMultiple: 0.2 }, false);
   }
-  return counts;
-}
-
-export function countClassD(entry: number, swingLow: number | null, atr: number, nextHigh: number | null, date: string, btc: BtcDay | undefined): ClassCounts {
-  const counts = emptyCounts();
-  const candidate = dCandidate(entry, swingLow, atr, nextHigh);
-  if (!candidate) return counts;
-  note(counts, date, btc, { bps: candidate.stopBps, atrMultiple: 1.5 }, true);
   return counts;
 }
 

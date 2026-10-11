@@ -13,7 +13,8 @@ import { csMedianBps, corwinSchultzBps, medianUsdWithGaps } from "../p2/liquidit
 import { passCountFlag, type VolumeTierDecision } from "../p2/universe";
 import { classBScore, type DailyBar } from "./classes";
 import { buildMembership, type NameDateSample } from "./membership-build";
-import { countClassA, countClassB, countClassC, countClassD, countClassE, emptyCounts, CLASS_A_STOP_K, type BtcDay, type ClassCounts } from "./signals";
+import { classDCandidates } from "./d-geometry";
+import { btcCaution, btcOldClause, btcVeto, countClassA, countClassB, countClassC, countClassE, emptyCounts, CLASS_A_STOP_K, type BtcDay, type ClassCounts } from "./signals";
 import { membershipDates, monthlyRebalanceDates, OVERLAP_TOLERANCE } from "./schedule";
 import type { BarOHLC } from "./signals";
 
@@ -226,13 +227,6 @@ export function liquidityAt(quarter: readonly QuarterSlot[], date: string): { no
   return { nonemptyShare: nonempty / expected, medianUsd: medianUsdWithGaps(usd, expected), csMedianBps: cs };
 }
 
-function swingLow(bars: readonly BarOHLC[], index: number): number | null {
-  if (index < 2) return null;
-  const mid = bars[index - 1]!;
-  if (mid.low < bars[index - 2]!.low && mid.low < bars[index]!.low) return mid.low;
-  return null;
-}
-
 function addCounts(into: ClassCounts, extra: ClassCounts): void {
   into.signals += extra.signals;
   into.oosSignals += extra.oosSignals;
@@ -313,16 +307,6 @@ export function warmupFor(pair: PairFacts): WarmupRow {
       { indicator: "cs15m", source: "15m", readyOn: csReady },
     ],
   };
-}
-
-export function nextDailySwingHigh(days: readonly { date: string; high: number; empty: boolean }[], afterDate: string): number | null {
-  const filled = days.filter((row) => !row.empty);
-  for (let i = 1; i < filled.length - 1; i += 1) {
-    const mid = filled[i]!;
-    if (mid.date <= afterDate) continue;
-    if (mid.high > filled[i - 1]!.high && mid.high > filled[i + 1]!.high && mid.high > 0) return mid.high;
-  }
-  return null;
 }
 
 function below4hByDate(four: readonly BarOHLC[]): Map<string, boolean> {
@@ -433,14 +417,20 @@ export function scanTwoPass(load: () => Iterable<PairFacts>, excluded: ReadonlyS
     }
     addCounts(totals.C!, countClassC(bars, (date) => memberOn(pair.productId, date), atr));
     addCounts(totals.E!, countClassE(pair.hour, pair.quarter, (date) => memberOn(pair.productId, date)));
-    const fourAtr = wilderAtr(pair.four.map((b) => b.high), pair.four.map((b) => b.low), pair.four.map((b) => b.close), 14);
-    for (let i = 0; i < pair.four.length; i += 1) {
-      const bar = pair.four[i]!;
-      const date = new Date(bar.ts * 1000).toISOString().slice(0, 10);
+    const h4 = pair.four.map((bar) => ({ ts: bar.ts * 1000, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume }));
+    const d1 = pair.days.filter((row) => !row.empty).map((row) => ({ ts: row.ts * 1000, open: row.close, high: row.high, low: row.low, close: row.close, volume: row.volume }));
+    for (const signal of classDCandidates(pair.productId, h4, d1)) {
+      const date = new Date(signal.barTs).toISOString().slice(0, 10);
       if (!memberOn(pair.productId, date)) continue;
-      const atr4 = fourAtr[i];
-      if (atr4 == null) continue;
-      addCounts(totals.D!, countClassD(bar.close, swingLow(pair.four, i), atr4, nextDailySwingHigh(pair.days, date), date, btcByDate.get(date)));
+      const counts = emptyCounts();
+      counts.signals = 1;
+      if (date >= "2026-02-10" && date <= "2026-10-09") counts.oosSignals = 1;
+      counts.stops.push({ bps: signal.stopBps, atrMultiple: 1.5 });
+      const btc = btcByDate.get(date);
+      if (btcVeto(btc)) counts.vetoed += 1;
+      if (btcOldClause(btc)) counts.oldClause += 1;
+      if (btcCaution(btc)) counts.caution += 1;
+      addCounts(totals.D!, counts);
     }
   }
   addCounts(totals.B!, countClassB(bScores, btcByDate));

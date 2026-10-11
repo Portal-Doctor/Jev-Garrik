@@ -4,7 +4,20 @@ import { readFileSync } from "node:fs";
 import { repoRoot } from "../manifest";
 
 const COMMIT = "87b35d093710e3683d5910ee81bf7b1a46276bbc";
-const FILES = ["swing.ts", "swing4h.ts", "position.ts", "fill.ts"] as const;
+const FILES = [
+  "swing.ts",
+  "swing4h.ts",
+  "position.ts",
+  "fill.ts",
+  "indicators.ts",
+  "rules.ts",
+  "expectancy.ts",
+  "fees.ts",
+  "bias.ts",
+  "clock.ts",
+  "config.ts",
+  "jev.ts",
+] as const;
 
 test("vendored class D sources match the 87b35d0 blobs", () => {
   const cwd = repoRoot();

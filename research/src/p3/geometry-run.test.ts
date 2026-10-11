@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { liquidityAt, nextDailySwingHigh, ohlcvDiffers, scanFacts, warmupFor, type PairFacts, type QuarterSlot } from "./geometry-run";
+import { liquidityAt, ohlcvDiffers, scanFacts, warmupFor, type PairFacts, type QuarterSlot } from "./geometry-run";
 import { assertScanSchema } from "./scan-schema";
 
 test("overlap flags a 2 bp price gap and ignores a 0.5 bp gap", () => {
@@ -50,15 +50,10 @@ test("warmup names the source that completed each indicator", () => {
   expect(row.indicators.find((item) => item.indicator === "cs15m")?.source).toBe("15m");
 });
 
-test("the next daily swing high is the first confirmed fractal after the signal", () => {
-  const days = [
-    { date: "2026-01-01", high: 5, empty: false },
-    { date: "2026-01-02", high: 9, empty: false },
-    { date: "2026-01-03", high: 7, empty: false },
-    { date: "2026-01-04", high: 12, empty: false },
-    { date: "2026-01-05", high: 8, empty: false },
-  ];
-  expect(nextDailySwingHigh(days, "2026-01-01")).toBe(9);
+test("class D does not take a swing high that is not confirmed yet", () => {
+  const source = readFileSync(new URL("./geometry-run.ts", import.meta.url), "utf8");
+  expect(source.includes("nextDailySwingHigh")).toBe(false);
+  expect(source.includes("classDCandidates")).toBe(true);
 });
 
 test("an empty book still records D3 comparisons and a tolerance that predates the scan", () => {
