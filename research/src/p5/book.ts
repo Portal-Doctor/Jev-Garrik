@@ -3,11 +3,11 @@
  * A's trail is the highest completed daily close minus 3 times that day's Wilder ATR14.
  * The trail is moved only after the 15m bar that completes the UTC day.
  * The 1h ATR is used only in the stop-fill deduction.
- * The beta-weighted notional cap is not applied: the registration names the dollar cap and not the beta.
+ * Halts use equity. The 20R kill is on the class net-R curve. Pauses and Jev guards are not applied.
  */
 
 import { TAKER_FEE_BPS } from "../../vendor/87b35d0/config.ts";
-import { clusterKey, CLUSTER_CORR_DAYS, type GroupFlags } from "../p3/bar-access";
+import { CLUSTER_CORR_DAYS, type GroupFlags } from "../p3/bar-access";
 import {
   BACKSTOP_BOOK_USD,
   BACKSTOP_DAILY_USD,
@@ -15,6 +15,7 @@ import {
   BOOK_HALT_USD,
   DAILY_HALT_USD,
   WEEKLY_HALT_USD,
+  betaAllows,
   onePerPairAllows,
   openRiskAllows,
   grossNotionalAllows,
@@ -24,15 +25,13 @@ import {
   x1FillPrice,
 } from "../p3/design-rules";
 import { intrabarFill } from "../p3/fills";
-import { WINDOW_START } from "../p3/f5";
 import { MAX_POSITIONS, SLOT_CAPS, notionalUsd, tieRank } from "../p3/portfolio";
 import { weekKey } from "./stats";
+import { averageLinkage, classKillTripped, entryOpenRiskUsd, openRiskAfterMove, sizingCostBps } from "./risk";
 import { grossBps, netBps } from "./walk";
 
 const DAY = 86_400;
 const BAR = 900;
-/** Two taker legs. The spread stays in the fill price. */
-export const SIZING_COST_BPS = TAKER_FEE_BPS * 2;
 /** Chandelier multiple. Daily ATR, not a 15m ATR. */
 export const TRAIL_ATR = 3;
 
@@ -99,6 +98,8 @@ export interface GateHits {
   dailyBackstop: number;
   pairBackstop: number;
   bookBackstop: number;
+  beta: number;
+  classRKill: number;
 }
 
 export interface BookResult {
@@ -110,7 +111,8 @@ export interface BookResult {
   /** Every failed gate on a rejected attempt. A trade can add to more than one. */
   hits: GateHits;
   hitsByClass: { A: GateHits; B: GateHits };
-  betaApplied: false;
+  betaApplied: boolean;
+  betaUnresolved: number;
 }
 
 interface Position {
@@ -129,6 +131,9 @@ interface Position {
   cluster: string;
   lastBar: BookBar;
   spreadBps: number;
+  entryRiskUsd: number;
+  beta: number | null;
+  stopMoved: boolean;
 }
 
 function emptyHits(): GateHits {
@@ -147,6 +152,8 @@ function emptyHits(): GateHits {
     dailyBackstop: 0,
     pairBackstop: 0,
     bookBackstop: 0,
+    beta: 0,
+    classRKill: 0,
   };
 }
 
@@ -158,8 +165,14 @@ export function isDayCloseBar(ts: number): boolean {
   return ts % DAY === DAY - BAR;
 }
 
-function positionRisk(pos: Position): number {
-  return pos.units * Math.max(0, pos.fillEntry - pos.stop);
+function liveRisk(pos: Position, sBtBps: number): number {
+  if (!pos.stopMoved) return pos.entryRiskUsd;
+  return openRiskAfterMove(pos.units, pos.fillEntry, pos.stop, pos.lastBar.close, sBtBps);
+}
+
+function markUsd(pos: Position, sBtBps: number): number {
+  const exitFill = x1FillPrice(pos.lastBar.close, "sell", sBtBps);
+  return (netBps(pos.fillEntry, exitFill, TAKER_FEE_BPS, TAKER_FEE_BPS) / 10_000) * pos.units * pos.fillEntry;
 }
 
 function closeTrade(pos: Position, reason: ClosedTrade["reason"], exitTs: number, rawExit: number, fillExit: number, windowMark: boolean): ClosedTrade {
@@ -204,9 +217,10 @@ export function runBook(opts: {
   sBtBps: number;
   endTs: number;
   costBps?: number;
+  betaOf?: (productId: string, entryDate: string) => number | null;
 }): BookResult {
   const pairs = new Map(opts.pairs.map((pair) => [pair.productId, pair]));
-  const costBps = opts.costBps ?? SIZING_COST_BPS;
+  const costBps = opts.costBps ?? sizingCostBps(opts.sBtBps);
   const byTs = new Map<number, BookCandidate[]>();
   let start = opts.endTs;
   for (const candidate of opts.candidates) {
@@ -223,40 +237,63 @@ export function runBook(opts: {
   const trades: ClosedTrade[] = [];
   const open: Position[] = [];
   const lastExit = new Map<string, number>();
-  let bookPnl = 0;
-  let peak = 0;
-  const dailyPnl = new Map<string, number>();
-  const weeklyPnl = new Map<string, number>();
+  let realized = 0;
+  let peakEquity = 0;
   const pairPnl = new Map<string, number>();
+  const classR = { A: 0, B: 0 };
+  const classPeak = { A: 0, B: 0 };
+  const classUsd = { A: 0, B: 0 };
   let attempts = 0;
   let taken = 0;
   let noBar = 0;
   let invalidStop = 0;
+  let betaUnresolved = 0;
+  let dayKey = "";
+  let dayStart = 0;
+  let weekStartKey = "";
+  let weekStart = 0;
 
-  const realize = (trade: ClosedTrade) => {
+  const equity = () => realized + open.reduce((sum, pos) => sum + markUsd(pos, opts.sBtBps), 0);
+  const bumpPeak = () => {
+    peakEquity = Math.max(peakEquity, equity());
+  };
+
+  const realize = (trade: ClosedTrade, entryRiskUsd: number) => {
     trades.push(trade);
-    bookPnl += trade.netUsd;
-    if (bookPnl > peak) peak = bookPnl;
-    const date = dateOfTs(trade.exitTs);
-    dailyPnl.set(date, (dailyPnl.get(date) ?? 0) + trade.netUsd);
-    const week = weekKey(date);
-    weeklyPnl.set(week, (weeklyPnl.get(week) ?? 0) + trade.netUsd);
+    realized += trade.netUsd;
     pairPnl.set(trade.productId, (pairPnl.get(trade.productId) ?? 0) + trade.netUsd);
+    const r = entryRiskUsd > 0 ? trade.netUsd / entryRiskUsd : 0;
+    classUsd[trade.classId] += trade.netUsd;
+    classR[trade.classId] += r;
+    classPeak[trade.classId] = Math.max(classPeak[trade.classId], classR[trade.classId]);
     lastExit.set(trade.productId, trade.exitTs);
+    bumpPeak();
   };
 
   const drop = (pos: Position, reason: ClosedTrade["reason"], rawExit: number, fillExit: number, windowMark: boolean) => {
     const index = open.indexOf(pos);
     if (index >= 0) open.splice(index, 1);
-    realize(closeTrade(pos, reason, pos.lastBar.ts, rawExit, fillExit, windowMark));
+    realize(closeTrade(pos, reason, pos.lastBar.ts, rawExit, fillExit, windowMark), pos.entryRiskUsd);
   };
 
   for (let ts = start; ts < opts.endTs; ts += BAR) {
+    const date = dateOfTs(ts);
+    const week = weekKey(date);
+    if (date !== dayKey) {
+      dayStart = equity();
+      dayKey = date;
+    }
+    if (week !== weekStartKey) {
+      weekStart = equity();
+      weekStartKey = week;
+    }
     for (const pos of open.slice()) {
       const bar = pairs.get(pos.productId)?.bars.get(ts);
       if (!bar) continue;
-      pos.lastBar = bar;
-      if (bar.open <= pos.stop) drop(pos, "gap", bar.open, bar.open, false);
+      if (bar.open <= pos.stop) {
+        pos.lastBar = bar;
+        drop(pos, "gap", bar.open, bar.open, false);
+      }
     }
     const due = byTs.get(ts) ?? [];
     for (const candidate of due) {
@@ -277,15 +314,18 @@ export function runBook(opts: {
       const notional = notionalUsd(stopBps, costBps);
       const fillEntry = x1FillPrice(rawEntry, "buy", opts.sBtBps);
       const units = notional / fillEntry;
-      const addRisk = units * (fillEntry - initialStop);
+      const addRisk = entryOpenRiskUsd(notional, stopBps, costBps);
       const entryDate = dateOfTs(ts);
       const cluster = pair.clusterOf(entryDate);
-      const openRisk = open.reduce((sum, pos) => sum + positionRisk(pos), 0);
+      const openRisk = open.reduce((sum, pos) => sum + liveRisk(pos, opts.sBtBps), 0);
       const gross = open.reduce((sum, pos) => sum + pos.notionalUsd, 0);
-      const dailyLoss = Math.max(0, -(dailyPnl.get(entryDate) ?? 0));
-      const weeklyLoss = Math.max(0, -(weeklyPnl.get(weekKey(entryDate)) ?? 0));
-      const pairLoss = Math.max(0, -(pairPnl.get(candidate.productId) ?? 0));
-      const drawdown = peak - bookPnl;
+      const now = equity();
+      const dailyLoss = Math.max(0, dayStart - now);
+      const weeklyLoss = Math.max(0, weekStart - now);
+      const pairMark = open.filter((pos) => pos.productId === candidate.productId).reduce((sum, pos) => sum + markUsd(pos, opts.sBtBps), 0);
+      const pairLoss = Math.max(0, -((pairPnl.get(candidate.productId) ?? 0) + pairMark));
+      const drawdown = Math.max(0, peakEquity - now);
+      const beta = opts.betaOf ? opts.betaOf(candidate.productId, entryDate) : null;
       const failed: (keyof GateHits)[] = [];
       if (!reentryAllowed(lastExit.has(candidate.productId) ? lastExit.get(candidate.productId)! * 1000 : null, ts * 1000)) failed.push("reentry");
       if (!onePerPairAllows(open.map((pos) => pos.productId), candidate.productId)) failed.push("onePerPair");
@@ -296,12 +336,20 @@ export function runBook(opts: {
       if (!clusterAllows(open.filter((pos) => pos.cluster === cluster).length)) failed.push("cluster");
       if (!openRiskAllows(openRisk, addRisk)) failed.push("openRisk");
       if (!grossNotionalAllows(gross, notional)) failed.push("grossNotional");
+      if (opts.betaOf) {
+        if (beta == null) betaUnresolved += 1;
+        else {
+          const weighted = open.reduce((sum, pos) => sum + (pos.beta == null ? 0 : pos.notionalUsd * pos.beta), 0) + notional * beta;
+          if (!betaAllows(weighted)) failed.push("beta");
+        }
+      }
       if (dailyLoss >= DAILY_HALT_USD) failed.push("dailyHalt");
       if (weeklyLoss >= WEEKLY_HALT_USD) failed.push("weeklyHalt");
-      if (bookPnl <= BOOK_HALT_USD) failed.push("bookHalt");
+      if (drawdown >= -BOOK_HALT_USD) failed.push("bookHalt");
       if (dailyLoss >= BACKSTOP_DAILY_USD) failed.push("dailyBackstop");
       if (pairLoss >= BACKSTOP_PAIR_USD) failed.push("pairBackstop");
       if (drawdown >= BACKSTOP_BOOK_USD) failed.push("bookBackstop");
+      if (classKillTripped(classPeak[candidate.classId], classR[candidate.classId], classUsd[candidate.classId])) failed.push("classRKill");
       if (failed.length > 0) {
         for (const gate of failed) {
           hits[gate] += 1;
@@ -327,6 +375,9 @@ export function runBook(opts: {
         cluster,
         lastBar: bar,
         spreadBps: opts.sBtBps,
+        entryRiskUsd: addRisk,
+        beta,
+        stopMoved: false,
       });
     }
     for (const pos of open.slice()) {
@@ -351,16 +402,19 @@ export function runBook(opts: {
         const daily = pairs.get(pos.productId)?.daily.get(dateOfTs(bar.ts));
         if (daily && daily.close > 0 && daily.atr > 0) {
           pos.highestClose = Math.max(pos.highestClose, daily.close);
-          pos.stop = Math.max(pos.stop, pos.highestClose - TRAIL_ATR * daily.atr);
+          const next = Math.max(pos.stop, pos.highestClose - TRAIL_ATR * daily.atr);
+          if (next > pos.stop) pos.stopMoved = true;
+          pos.stop = next;
         }
       }
     }
+    bumpPeak();
   }
   for (const pos of open.slice()) {
     drop(pos, "window", pos.lastBar.close, x1FillPrice(pos.lastBar.close, "sell", opts.sBtBps), true);
   }
   trades.sort((a, b) => a.entryTs - b.entryTs || (a.productId < b.productId ? -1 : 1) || (a.classId < b.classId ? -1 : 1));
-  return { trades, attempts, taken, noBar, invalidStop, hits, hitsByClass, betaApplied: false };
+  return { trades, attempts, taken, noBar, invalidStop, hits, hitsByClass, betaApplied: opts.betaOf != null, betaUnresolved };
 }
 
 export interface ClosePoint {
@@ -374,9 +428,9 @@ export interface ClusterName {
   days: readonly ClosePoint[];
 }
 
-/** Last 60 simple returns before `asOf`, using that name's own in-window closes. */
+/** Last 60 simple returns before `asOf`. The caller decides which closes are allowed. */
 export function trailingReturns(days: readonly ClosePoint[], asOf: string): Map<string, number> {
-  const prior = days.filter((row) => row.date >= WINDOW_START && row.date < asOf && row.close > 0);
+  const prior = days.filter((row) => row.date < asOf && row.close > 0);
   const last = prior.slice(-CLUSTER_CORR_DAYS - 1);
   const out = new Map<string, number>();
   for (let i = 1; i < last.length; i += 1) {
@@ -434,33 +488,33 @@ export function singleLinkage(ids: readonly string[], linked: readonly [string, 
 }
 
 /**
- * Clusters as of each month start, using returns strictly before that day.
- * A boundary-saved name with fewer than 60 in-window days stays in its own cluster.
- * A pair is linked only when 60 shared return dates have rho >= 0.8.
+ * Average linkage as of each date, using returns strictly before that day.
+ * A name with fewer than 60 returns stays in its own cluster.
+ * `memberOn`, when set, keeps the clustering to members on that date.
  */
-export function monthlyClusters(names: readonly ClusterName[], months: readonly string[]): Map<string, Map<string, string>> {
+export function monthlyClusters(
+  names: readonly ClusterName[],
+  months: readonly string[],
+  memberOn?: (productId: string, date: string) => boolean,
+): Map<string, Map<string, string>> {
   const out = new Map<string, Map<string, string>>();
   for (const month of months) {
-    const returns = new Map(names.map((name) => [name.productId, trailingReturns(name.days, month)]));
-    const linked: [string, string][] = [];
-    for (let i = 0; i < names.length; i += 1) {
-      for (let j = i + 1; j < names.length; j += 1) {
-        const left = names[i]!;
-        const right = names[j]!;
-        const a = returns.get(left.productId)!;
-        const b = returns.get(right.productId)!;
-        const dates = [...a.keys()].filter((date) => b.has(date)).sort();
-        if (dates.length < CLUSTER_CORR_DAYS) continue;
-        const used = dates.slice(-CLUSTER_CORR_DAYS);
-        const rho = pearson(used.map((date) => a.get(date)!), used.map((date) => b.get(date)!));
-        if (rho != null && rho >= 0.8) linked.push([left.productId, right.productId]);
-      }
-    }
-    const assigned = singleLinkage(names.map((name) => name.productId), linked);
+    const active = names.filter((name) => memberOn == null || memberOn(name.productId, month));
+    const returns = new Map(active.map((name) => [name.productId, trailingReturns(name.days, month)]));
+    const eligible = active.filter((name) => (returns.get(name.productId)?.size ?? 0) >= CLUSTER_CORR_DAYS).map((name) => name.productId);
+    const rhoOf = (left: string, right: string): number | null => {
+      const a = returns.get(left);
+      const b = returns.get(right);
+      if (!a || !b) return null;
+      const dates = [...a.keys()].filter((date) => b.has(date)).sort().slice(-CLUSTER_CORR_DAYS);
+      if (dates.length < CLUSTER_CORR_DAYS) return null;
+      return pearson(dates.map((date) => a.get(date)!), dates.map((date) => b.get(date)!));
+    };
+    const assigned = averageLinkage(eligible, rhoOf);
     const clusters = new Map<string, string>();
-    for (const name of names) {
-      const inWindowDays = name.days.filter((row) => row.date >= WINDOW_START && row.date < month).length;
-      clusters.set(name.productId, clusterKey(name.flags, inWindowDays, name.productId, assigned.get(name.productId) ?? name.productId));
+    for (const name of active) {
+      const own = (returns.get(name.productId)?.size ?? 0) < CLUSTER_CORR_DAYS;
+      clusters.set(name.productId, own ? name.productId : assigned.get(name.productId) ?? name.productId);
     }
     out.set(month, clusters);
   }

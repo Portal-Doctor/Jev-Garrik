@@ -2,7 +2,7 @@
  * Registered historical book for classes A and B.
  * One A config is chosen in sample by the lower 80 percent bound of mean net dollars per month.
  * C, D, and E stay forward-only. No Jev call is made.
- * The beta cap is not applied. The registration names its dollar limit and not a beta.
+ * Beta, equity halts, and the 20R kill are in the book. Pauses and Jev guards are not.
  */
 
 import { createHash } from "node:crypto";
@@ -24,6 +24,7 @@ import {
 import { classBarInputs, type ClassBarInputs, type GroupFlags } from "../p3/bar-access";
 import { registeredFlags } from "./flags";
 import { WINDOW_START } from "../p3/f5";
+import { foldStartDates } from "../p3/schedule";
 import { loadPair, type PairFacts } from "../p3/geometry-run";
 import { btcVeto, type BtcDay } from "../p3/signals";
 import {
@@ -59,17 +60,19 @@ import {
 } from "./stats";
 import type { PxBar } from "./walk";
 import {
-  SIZING_COST_BPS,
   concentration,
   dateOfTs,
-  monthKey,
   monthlyClusters,
   runBook,
+  trailingReturns,
   type BookCandidate,
   type BookPair,
   type BookResult,
   type ClosedTrade,
+  type ClosePoint,
 } from "./book";
+import { OPEN_QUESTIONS } from "./questions";
+import { alignedBeta, assignBetas, sizingCostBps } from "./risk";
 
 const REGISTRATION_SHA = "49bc506092114e2dec3e3ec73faa1adad4afdf04b0941d4c7b01bd22cd2317f3";
 const SCAN_SHA = "7c8901dbd891e7343aa0713ac3724a907480cf9e51da344f295050b3b52dbd44";
@@ -110,6 +113,7 @@ interface PairState {
   hourAtr: { ts: number; atr: number | null }[];
   aSignals: ASignal[];
   flags: GroupFlags;
+  closes: ClosePoint[];
   bars: PxBar[];
 }
 
@@ -423,6 +427,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
   const dailyDir = join(dataDir, "daily", "candles");
   const states = new Map<string, PairState>();
   const bScores: { id: string; date: string; score: number; member: boolean }[] = [];
+  let btcCloses: ClosePoint[] = [];
   let veto = (_date: string) => false;
   for (const id of ids) {
     log(`p5 load ${id}`);
@@ -431,6 +436,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
     if (id === "BTC-USD") {
       const days = btcDaysOf(pair);
       veto = (date) => btcVeto(days.get(date));
+      btcCloses = pair.days.filter((row) => !row.empty && row.close > 0).map((row) => ({ date: row.date, close: row.close }));
     }
     if (!membership.members.some((row) => row.names.includes(id))) continue;
     const flags = flagBook.byId.get(id);
@@ -461,6 +467,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       hourAtr: pair.hour.map((bar, index) => ({ ts: bar.ts, atr: hourAtrSeries[index] ?? null })),
       aSignals: collectA(id, inputs, atrByDate, pair.hour, (date) => isMember(id, date), young, veto),
       flags,
+      closes: inputs.ema.filter((row) => Number.isFinite(row.close) && row.close > 0).map((row) => ({ date: row.date, close: row.close })),
       bars: [],
     });
   }
@@ -494,18 +501,46 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       year += 1;
     }
   }
-  const clusterMaps = monthlyClusters(ordered.map((state) => ({
-    productId: state.productId,
-    flags: state.flags,
-    days: state.ohlc.filter((row) => row.date >= WINDOW_START && row.close > 0).map((row) => ({ date: row.date, close: row.close })),
-  })), months);
-  const clusterOf = (productId: string, entryDate: string) => clusterMaps.get(monthKey(entryDate))?.get(productId) ?? productId;
+  const clusterDates = [...new Set([...months, ...foldStartDates()])].sort();
+  const clusterNames = ordered.map((state) => ({ productId: state.productId, flags: state.flags, days: state.closes }));
+  const clusterMaps = monthlyClusters(clusterNames, clusterDates, (productId, date) => isMember(productId, date));
+  const clusterAsOf = (productId: string, entryDate: string) => {
+    let chosen = productId;
+    let asOf = "";
+    for (const [date, map] of clusterMaps) {
+      if (date <= entryDate && date >= asOf) {
+        asOf = date;
+        chosen = map.get(productId) ?? productId;
+      }
+    }
+    return chosen;
+  };
+  const betaMaps = new Map<string, Map<string, number | null>>();
+  for (const date of clusterDates) {
+    const rows = ordered
+      .filter((state) => isMember(state.productId, date))
+      .map((state) => ({ id: state.productId, beta: alignedBeta(state.closes, btcCloses, date, trailingReturns) }));
+    betaMaps.set(date, assignBetas(rows));
+  }
+  const betaOf = (productId: string, entryDate: string) => {
+    let chosen: number | null = null;
+    let asOf = "";
+    let found = false;
+    for (const [date, map] of betaMaps) {
+      if (date <= entryDate && date >= asOf && map.has(productId)) {
+        asOf = date;
+        chosen = map.get(productId) ?? null;
+        found = true;
+      }
+    }
+    return found ? chosen : null;
+  };
   const bookPairs: BookPair[] = ordered.map((state) => ({
     productId: state.productId,
     bars: new Map(state.bars.map((bar) => [bar.ts, bar])),
     daily: state.daily,
     atr1h: (ts) => atrAt(state.hourAtr, ts),
-    clusterOf: (entryDate) => clusterOf(state.productId, entryDate),
+    clusterOf: (entryDate) => clusterAsOf(state.productId, entryDate),
   }));
   const classB = ordered.flatMap((state) => bCandidates(state, weeks, veto));
   const ran = new Map<string, { result: BookResult; trades: TradeRow[] }>();
@@ -519,6 +554,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
         ruleExitTs: (candidate, rawEntry, initialStop) => ruleExitTs(states.get(candidate.productId)!, weeks, candidate, rawEntry, initialStop),
         sBtBps: path === "base" ? 5 : 10,
         endTs: WINDOW_END_TS,
+        betaOf,
       });
       ran.set(`${config.id}|${path}`, { result, trades: result.trades.map((trade) => tagTrade(path, config.id, trade)) });
     }
@@ -607,7 +643,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
     hurdleBps: KILL_HURDLE_BPS,
     sBt: { baseBps: 5, stressBps: 10 },
     feeBps: { entry: 90, exit: 90, note: "X1 and the rule, stop, or window-end exit are taker legs. Dollar net uses the same bps, charged on entry notional." },
-    sizing: { riskUsd: 60, notionalCapUsd: 1500, costBps: SIZING_COST_BPS, costNote: "Two taker legs. The spread stays in the fill." },
+    sizing: { riskUsd: 60, notionalCapUsd: 1500, costBps: { base: sizingCostBps(5), stress: sizingCostBps(10) }, costNote: "C is 2 times (90 + s_bt). The spread stays in the fill." },
     intrabar: "stop first; A's daily chandelier moves after the 15m bar that completes the UTC day",
     trail: "highest daily close since entry minus 3 times that day's Wilder ATR14",
     stops: "A's initial stop and B's disaster stop use daily Wilder ATR14. The 1h Wilder ATR14 is only the stop-fill deduction.",
@@ -662,7 +698,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       B: { is: concentration(keptOfficial(bBase, "IS")), oos: concentration(keptOfficial(bBase, "OOS")) },
     },
     blocked: {
-      note: "A rejected attempt increments every gate that failed. The beta cap was not applied.",
+      note: "A rejected attempt increments every gate that failed. Beta uses signed OLS. A missing beta does not block that name.",
       officialBase: { attempts: officialBase.result.attempts, taken: officialBase.result.taken, noBar: officialBase.result.noBar, invalidStop: officialBase.result.invalidStop, hits: officialBase.result.hits, byClass: officialBase.result.hitsByClass },
       officialStress: { attempts: officialStress.result.attempts, taken: officialStress.result.taken, noBar: officialStress.result.noBar, invalidStop: officialStress.result.invalidStop, hits: officialStress.result.hits, byClass: officialStress.result.hitsByClass },
     },
@@ -694,15 +730,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       missing: flagBook.missing,
       conflicts: flagBook.conflicts,
     },
-    questions: [
-      "The registration caps BTC-beta-weighted notional at $6,000 and does not define beta. The beta cap was not applied.",
-      "Halt and backstop dollars are checked on realized net dollars. Open trades are not marked, and a trip blocks new entries without flattening. The registration does not say otherwise.",
-      "The historical Holm family is [A, B], so its first critical value is 0.05/2 = 0.025. Pass or fail is adjusted p below 0.05. The first step 0.01 is the forward family's alpha/5, and that comparison is reported separately.",
-      "A is chosen once, on the single registered IS window. The registration does not give each OOS month its own IS window.",
-      "Open risk is units times the distance from the entry fill to the current stop. Gross notional is the entry notional. Sizing cost is 180 bps, two taker legs.",
-      "Clusters are recomputed at 00:00 UTC on the first day of each month from in-window daily returns before that day. A pair links at rho >= 0.8 on 60 shared return dates, by single linkage. A boundary-saved name with fewer than 60 in-window days stays alone.",
-      "The pair backstop uses that pair's cumulative realized loss. The weekly halt uses Monday 00:00 UTC weeks. The daily halt is checked before the daily backstop, so a day that has already halted does not also increment the backstop as the only reason; both counters increment when both are true.",
-    ],
+    questions: [...OPEN_QUESTIONS],
     trades,
   };
   return {

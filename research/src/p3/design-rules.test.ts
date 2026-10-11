@@ -133,21 +133,21 @@ test("section 1 costs, one name, 24h, and the dollar caps", () => {
 });
 
 test("clusters, beta, halts, backstops, Kelly, and class kills", () => {
-  expect(clusterAllows(1)).toBe(true);
-  expect(clusterAllows(2)).toBe(false);
+  expect(clusterAllows(2)).toBe(true);
+  expect(clusterAllows(3)).toBe(false);
   expect(betaAllows(6_000)).toBe(true);
   expect(betaAllows(6_001)).toBe(false);
   expect(haltTripped(240, 0, 0)).toBe(true);
   expect(haltTripped(0, 480, 0)).toBe(true);
-  expect(haltTripped(0, 0, -1_600)).toBe(true);
-  expect(haltTripped(239, 479, -1_599)).toBe(false);
+  expect(haltTripped(0, 0, 1_600)).toBe(true);
+  expect(haltTripped(239, 479, 1_599)).toBe(false);
   expect(backstopTripped(900, 0, 0)).toBe(true);
   expect(backstopTripped(0, 500, 0)).toBe(true);
   expect(backstopTripped(0, 0, 8_000)).toBe(true);
   expect(kellyFraction(0.2, 1)).toBeCloseTo(0.0075, 8);
   expect(kellyFraction(0.01, 1)).toBeCloseTo(0.005, 8);
   expect(kellyFraction(0, 1)).toBeNull();
-  expect(kellyRiskUsd(60, null, 10_000)).toBe(0);
+  expect(kellyRiskUsd(60, null, 10_000)).toBe(20);
   expect(kellyRiskUsd(60, 0.005, 1_000)).toBe(5);
   expect(classKill({ n: 10, meanGrossBps: -1, upper80Bps: -1, hurdleBps: 1 })).toBe("insufficient");
   expect(classKill({ n: 30, meanGrossBps: -1, upper80Bps: 0, hurdleBps: 1 })).toBe("kill");

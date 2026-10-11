@@ -1,7 +1,7 @@
 /**
  * Design rules that the geometry scan and the registration both need.
  * Numbers come from trading-design §1, §3 and §6, the addendum, and the P3 review.
- * The $20 paper minimum when the Kelly bound is non-positive is Brian's choice and is not applied here.
+ * A non-positive Kelly bound trades at the $20 paper minimum.
  */
 
 import { perTradeFloor } from "../../vendor/87b35d0/fees.ts";
@@ -24,8 +24,10 @@ export const NO_REENTRY_MS = 24 * 3_600_000;
 export const CLASS_B_MAX_NAMES = 4;
 /** Disaster stop is entry minus 3 × daily ATR. k = 4 is the name cap, not this multiple. */
 export const CLASS_B_DISASTER_ATR = 3;
-/** At most two open positions in one correlation cluster. */
-export const CLUSTER_MAX_OPEN = 2;
+/** At most three open positions in one correlation cluster. */
+export const CLUSTER_MAX_OPEN = 3;
+/** A non-positive Kelly bound uses this paper size. */
+export const PAPER_MINIMUM_USD = 20;
 /** BTC-beta-weighted notional cap, in dollars. */
 export const BETA_WEIGHTED_NOTIONAL_CAP_USD = 6_000;
 /** Risk fraction ceiling: min(0.75%, half Kelly). */
@@ -245,8 +247,9 @@ export function betaAllows(betaWeightedNotionalUsd: number): boolean {
   return betaWeightedNotionalUsd <= BETA_WEIGHTED_NOTIONAL_CAP_USD;
 }
 
-export function haltTripped(dailyLossUsd: number, weeklyLossUsd: number, bookPnlUsd: number): boolean {
-  return dailyLossUsd >= DAILY_HALT_USD || weeklyLossUsd >= WEEKLY_HALT_USD || bookPnlUsd <= BOOK_HALT_USD;
+/** The book argument is drawdown from peak equity, in dollars. */
+export function haltTripped(dailyLossUsd: number, weeklyLossUsd: number, bookDrawdownUsd: number): boolean {
+  return dailyLossUsd >= DAILY_HALT_USD || weeklyLossUsd >= WEEKLY_HALT_USD || bookDrawdownUsd >= -BOOK_HALT_USD;
 }
 
 export function backstopTripped(dailyLossUsd: number, pairLossUsd: number, bookDrawdownUsd: number): boolean {
@@ -255,8 +258,8 @@ export function backstopTripped(dailyLossUsd: number, pairLossUsd: number, bookD
 
 /**
  * Kelly = E/Var on the lower 80% bound of realized net R, then half of that, capped at 0.75%.
- * A non-positive bound or a non-positive variance returns null, so the hook adds no size.
- * Whether a non-positive bound trades at the $20 paper minimum is open (Brian's choice).
+ * A non-positive bound or a non-positive variance returns null.
+ * kellyRiskUsd turns that null into the $20 paper minimum.
  */
 export function kellyFraction(meanNetR: number, variance: number): number | null {
   if (!(meanNetR > 0) || !(variance > 0)) return null;
@@ -266,7 +269,7 @@ export function kellyFraction(meanNetR: number, variance: number): number | null
 }
 
 export function kellyRiskUsd(riskUsd: number, fraction: number | null, bankrollUsd: number): number {
-  if (fraction == null || !(bankrollUsd > 0)) return 0;
+  if (fraction == null || !(bankrollUsd > 0)) return PAPER_MINIMUM_USD;
   return Math.min(riskUsd, fraction * bankrollUsd);
 }
 

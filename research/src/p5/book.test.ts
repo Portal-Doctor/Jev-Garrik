@@ -29,16 +29,16 @@ test("the fourth class A entry is blocked by the slot cap", () => {
   expect(result.betaApplied).toBe(false);
 });
 
-test("a third name in one cluster is blocked", () => {
+test("a fourth name in one cluster is blocked", () => {
   const quiet = new Map([[0, bar(0, 100, 99, 100)]]);
   const result = runBook({
-    pairs: ["A", "B", "C"].map((id) => pair(id, quiet, "same")),
-    candidates: ["A", "B", "C"].map((id) => ({ classId: "A" as const, productId: id, signalDate: "1970-01-01", entryTs: 0, stopDistance: 10 })),
+    pairs: ["A", "B", "C", "D"].map((id) => pair(id, quiet, "same")),
+    candidates: ["A", "B", "C", "D"].map((id) => ({ classId: "B" as const, productId: id, signalDate: "1970-01-01", entryTs: 0, stopDistance: 10 })),
     ruleExitTs: () => null,
     sBtBps: 5,
     endTs: 900,
   });
-  expect(result.taken).toBe(2);
+  expect(result.taken).toBe(3);
   expect(result.hits.cluster).toBe(1);
 });
 
