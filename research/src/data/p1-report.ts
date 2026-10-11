@@ -72,6 +72,15 @@ export interface OwnerDecision {
     kept: number;
     dropped: { productId: string; reason: string; quoteVolume30d: string | null; range24h: string | null }[];
   } | null;
+  keptSetDownload?: {
+    processStartedAt: string;
+    downloadUpdatedAt: string;
+    requests: number;
+    elapsedSec: number;
+    measuredRequestsPerSec: number;
+    pairMonthFiles: number;
+    note: string;
+  } | null;
 }
 
 /** Parts of the design or plan that assumed 1m bars or more than one year. Not redesigned. */
@@ -182,7 +191,7 @@ export function buildP1Report(opts: {
       {
         id: "listing-date",
         question:
-          "The exchange products payload has no listing timestamp. Advanced Trade new_at is 2023-01-01T00:00:00Z for names listed years earlier, so it was not used. Every downloaded window starts at 2023-10-01T00:00:00.000Z.",
+          "The exchange products payload has no listing timestamp. Advanced Trade new_at is 2023-01-01T00:00:00Z for names listed years earlier, so it was not used. This snapshot's candle window is the 365 days ending at the latest completed UTC day, which is not a listing date.",
       },
       {
         id: "effective-listing",

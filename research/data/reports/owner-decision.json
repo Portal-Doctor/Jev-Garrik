@@ -1,15 +1,15 @@
 {
   "granularitySec": 900,
   "windowDays": 365,
-  "windowStart": "2025-10-10T00:00:00.000Z",
-  "windowEnd": "2026-10-10T00:00:00.000Z",
+  "windowStart": "2025-10-11T00:00:00.000Z",
+  "windowEnd": "2026-10-11T00:00:00.000Z",
   "measuredRequestsPerSec": 9.997,
   "sampleSeconds": 60,
   "fiveMinuteChunkCount": 174168,
   "fiveMinuteProjectedSec": 17422,
   "fifteenMinuteChunkCount": 59040,
   "fifteenMinuteProjectedSec": 5906,
-  "choice": "Fifteen-minute candles, with a mechanical universe cut. The 5-minute download started at 2026-10-10T23:45:34Z. A 60-second sample from chunk 200 to chunk 800 ran at 9.997 requests/second. 174168 five-minute requests project to 17422 seconds (4.84 hours), past two hours. 59040 fifteen-minute requests at that rate project to 5906 seconds (1.64 hours). The fifteen-minute download started at 2026-10-10T23:47:48Z and then sustained about 7.5 requests/second over the first 16 minutes (7250 chunks), which projects the full 492-name set past two hours and past the 01:40 UTC hard stop. The cut below keeps the download inside that clock. The revision check stays dropped.",
+  "choice": "Fifteen-minute candles, with a mechanical universe cut. The 5-minute download started at 2026-10-10T23:45:34Z. A 60-second sample from chunk 200 to chunk 800 ran at 9.997 requests/second. 174168 five-minute requests project to 17422 seconds (4.84 hours), past two hours. 59040 fifteen-minute requests at that rate project to 5906 seconds (1.64 hours). The fifteen-minute download started at 2026-10-10T23:47:48Z and then sustained about 7.5 requests/second over the first 16 minutes (7250 chunks), which projects the full 492-name set past two hours and past the 01:40 UTC hard stop. The cut below keeps the download inside that clock. The revision check stays dropped. The kept 304-name download then ran from 2026-10-11T00:08:14Z to 2026-10-11T01:00:46.608Z at 9.997 requests/second (31515 requests, 3952 pair-month files). The kept download started after 00:00 UTC on 2026-10-11, so the latest completed UTC day is 2026-10-10. The stored window is 2025-10-11T00:00:00.000Z inclusive through 2026-10-11T00:00:00.000Z exclusive (365 days).",
   "universeCut": {
     "rule": "Public GET /products/{id}/stats. quote_volume_30d = volume_30day \u00d7 last. range_24h = (high \u2212 low) / last. Drop HTTP responses that are not 200 (no-30-day-stats). Drop quote_volume_30d < 1000000 (negligible-volume). Drop last = 0 or range_24h < 0.005 (flat-price). Drop range_24h > 0.5 (erratic-price). Rank the rest by quote_volume_30d descending and keep the longest prefix whose remaining 15-minute chunks fit before 2026-10-11T01:22:00Z at 7.0 requests/second (below-rank-cutoff). Names are not hand-picked.",
     "thresholds": {
@@ -1150,5 +1150,14 @@
         "range24h": "0.03859435303676619947186674792"
       }
     ]
+  },
+  "keptSetDownload": {
+    "processStartedAt": "2026-10-11T00:08:14Z",
+    "downloadUpdatedAt": "2026-10-11T01:00:46.608Z",
+    "requests": 31515,
+    "elapsedSec": 3152.608,
+    "measuredRequestsPerSec": 9.997,
+    "pairMonthFiles": 3952,
+    "note": "Rate of the kept 304-name fifteen-minute download after the cut, from process start to the manifest update. 31515 requests in 3152.608 seconds. This rate did not drive the cut. The cut used the earlier 7.5 requests/second sustained rate of the full 492-name attempt."
   }
 }

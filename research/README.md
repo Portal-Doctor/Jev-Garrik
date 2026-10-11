@@ -83,12 +83,12 @@ That checks the files on disk against the frozen manifest. It does not re-downlo
 
 ## Window
 
-Candles use `BAR_SEC` in `research/src/data/time.ts` (300 for five-minute, 900 for fifteen-minute). The window is 365 days ending at 00:00 UTC of the day the download started. Empty bars at that spacing are stored as empty. The exchange product payload has no listing timestamp. `effectiveListing` is the first nonempty bar inside the window and is not a listing-date decision.
+Candles use `BAR_SEC` in `research/src/data/time.ts`. This snapshot is fifteen-minute bars (`900`). The window is 365 days ending at 00:00 UTC of the latest completed day. Empty bars at that spacing are stored as empty. The exchange product payload has no listing timestamp. `effectiveListing` is the first nonempty bar inside the window and is not a listing-date decision.
 
-The download covers every USD product in the snapshot, including delisted products that return candles, unless an owner decision recorded in `reports/owner-decision.json` cuts the universe. A 404 does not invent empty bars; that product is marked unavailable and the rest of its months are skipped.
+The download covers every USD product in the snapshot, including delisted products that return candles, unless an owner decision recorded in `reports/owner-decision.json` cuts the universe. A 404 does not invent empty bars; that product is marked unavailable and the rest of its months are skipped. Coverage `expectedMinutes` and `storedMinutes` count bars at the file's `granularity_sec`, and `pctNonempty` is the share of those bars that have a price.
 
 Coverage leaves `listingDate` null. When a product has a nonempty candle, `effectiveListing` is `first available candle`. That flag is not a listing-date decision. The listing-date questions stay open.
 
 ## Snapshot
 
-An earlier freeze of the partial 58-file download was lifted. Its root `67b8963191a52383657fff6bd6bc505327aa540fe4009de6d264e2c4cd2799d8` is the superseded hash recorded on `snapshotLift` until a completed download replaces it. Download start stays `createdAt` on the manifest. When every product has been processed, download seals `snapshot.status` as `frozen` with `universeComplete: true`, the final root hash, the download start, the last update, and the freeze timestamp. The same block is copied into `research/data/reports/p1-report.json`.
+An earlier freeze of the partial 58-file 1-minute download was lifted. Its root `67b8963191a52383657fff6bd6bc505327aa540fe4009de6d264e2c4cd2799d8` stays on `snapshotLift` as the superseded hash. The frozen snapshot is one year of fifteen-minute candles for the USD names kept by the owner rule in `reports/owner-decision.json`. Download start stays `createdAt` on the manifest. The seal sets `snapshot.status` to `frozen` with `universeComplete: true`, the final root hash, the download start, the last update, and the freeze timestamp. The same block is copied into `research/data/reports/p1-report.json`.

@@ -61,6 +61,8 @@ test("coverage lists every snapshot product, including delisted, with the probe 
   const btc = report.products[0];
   const lrc = report.products[1];
   expect(btc?.probe).toEqual({ sampled: false, candlesServed: null });
+  expect(btc?.months[0]?.complete).toBe(true);
+  expect(btc?.months[0]?.expectedMinutes).toBe(2);
   expect(btc?.months[0]?.pctNonempty).toBe("50.0000");
   expect(btc?.firstNonemptyBar).toBe("2023-10-01T00:00:00.000Z");
   expect(btc?.effectiveListing).toBe("first available candle");

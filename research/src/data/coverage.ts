@@ -121,7 +121,9 @@ function readStored(dataDir: string, pair: string): { months: CoverageMonth[]; n
     if (existsSync(canonical)) {
       const stored = readPairMonth(canonical);
       rows = stored.rows;
-      expected = (Date.parse(stored.meta.windowEnd) - Date.parse(stored.meta.windowStart)) / 60_000;
+      const barSec = Number(stored.meta.granularitySec);
+      const spanSec = (Date.parse(stored.meta.windowEnd) - Date.parse(stored.meta.windowStart)) / 1000;
+      expected = barSec > 0 && spanSec % barSec === 0 ? spanSec / barSec : null;
     } else if (existsSync(partial)) {
       const db = openPartial(partial);
       try {

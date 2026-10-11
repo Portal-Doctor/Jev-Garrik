@@ -1,6 +1,6 @@
 {
   "commitSha": "db465cb0f63b925eaaaed3a2dbdcde3beb58126d",
-  "dataRootHash": "67b8963191a52383657fff6bd6bc505327aa540fe4009de6d264e2c4cd2799d8",
+  "dataRootHash": "a222f69716094e26b90c10ab4fe145d342ff6728f6c0b589ed08bb255711c282",
   "createdAt": "2026-10-10T22:45:22.256Z",
   "phaseId": "P1",
   "note": "Sample windows only. The exchange product payload has no listing or delist timestamp, so this does not decide whether candles exist across a product's whole trading life.",
