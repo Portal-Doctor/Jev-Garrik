@@ -334,5 +334,8 @@
     "flag": false
   },
   "maxOpen": null,
-  "skipped": []
+  "maxOpenNote": "G2 concurrency measured in the post-hash rerun",
+  "skipped": [],
+  "commitSha": "c48580363bcb4600512c4f7ac1564c482f8e52db",
+  "createdAt": "2026-10-11T21:30:55.471Z"
 }
