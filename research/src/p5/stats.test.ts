@@ -16,8 +16,18 @@ import {
   mondayWeeks,
   normCdf,
   normInv,
+  expandingFolds,
+  HOLM_FAMILIES,
+  isPrefix,
+  meanHurdleBps,
+  N_CUM_V31,
+  netR,
+  netRStreamP,
   oneSided80,
+  oosSlice,
   percentileLinear,
+  purgedAtBoundary,
+  selectByFold,
   selectInSample,
   studentTCdf,
   tradeMoments,
@@ -120,4 +130,34 @@ test("the in-sample tie breaks on cents, then keeps registration order", () => {
   ).id).toBe("first");
   expect(forwardStreamP(29, 0.01)).toEqual({ p: 1, status: "not testable" });
   expect(forwardStreamP(30, 0.01)).toEqual({ p: 0.01, status: "testable" });
+});
+
+test("each fold re-selects A on its expanding in-sample prefix and purges the boundary trade", () => {
+  const folds = expandingFolds();
+  expect(folds).toHaveLength(8);
+  expect(folds[0]).toEqual({ id: "OOS-2026-02-10", isStart: "2025-11-10", isEnd: "2026-02-09", oosStart: "2026-02-10", oosEnd: "2026-03-09" });
+  expect(folds[7]?.oosEnd).toBe("2026-10-09");
+  expect(purgedAtBoundary("2026-02-01", "2026-02-10", "2026-02-10")).toBe(true);
+  expect(HOLM_FAMILIES.historical).toEqual({ streams: 2, firstStep: 0.025, promotes: false });
+  expect(HOLM_FAMILIES.classFamily.firstStep).toBeCloseTo(0.01, 10);
+  expect(HOLM_FAMILIES.jevFamily.firstStep).toBeCloseTo(0.0125, 10);
+  expect(N_CUM_V31).toBe(157);
+  const early = { entryDate: "2026-01-05", exitDate: "2026-01-20", netUsd: 10 };
+  const crossing = { entryDate: "2026-02-01", exitDate: "2026-02-12", netUsd: 99 };
+  const oos = { entryDate: "2026-02-12", exitDate: "2026-02-20", netUsd: 3 };
+  expect(isPrefix([early, crossing, oos], folds[0]!)).toEqual([early]);
+  expect(oosSlice([early, crossing, oos], folds[0]!)).toEqual([oos]);
+  const picks = selectByFold(
+    ["low", "high"],
+    [folds[0]!],
+    (id) => (id === "high" ? [{ ...early, netUsd: 50 }] : [early]),
+    (trades) => trades.reduce((sum, trade) => sum + trade.netUsd, 0),
+    (trades) => trades.reduce((sum, trade) => sum + trade.netUsd, 0),
+  );
+  expect(picks[0]?.chosen).toBe("high");
+  expect(netR(30, 60)).toBeCloseTo(0.5, 8);
+  expect(netRStreamP([1, 2]).status).toBe("not testable");
+  expect(netRStreamP(Array.from({ length: 30 }, () => 1)).p).toBe(0);
+  expect(meanHurdleBps([{ costBps: 190, stopBps: 100 }])).toBe(215);
+  expect(meanHurdleBps([{ costBps: 190, stopBps: 200 }])).toBe(220);
 });

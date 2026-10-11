@@ -81,6 +81,9 @@ export interface ClosedTrade {
   spreadBps: number;
   entryFeeBps: number;
   exitFeeBps: number;
+  entryRiskUsd: number;
+  stopBps: number;
+  costBps: number;
 }
 
 export interface GateHits {
@@ -132,6 +135,8 @@ interface Position {
   lastBar: BookBar;
   spreadBps: number;
   entryRiskUsd: number;
+  stopBps: number;
+  costBps: number;
   beta: number | null;
   stopMoved: boolean;
 }
@@ -199,6 +204,9 @@ function closeTrade(pos: Position, reason: ClosedTrade["reason"], exitTs: number
     spreadBps: pos.spreadBps,
     entryFeeBps: TAKER_FEE_BPS,
     exitFeeBps: TAKER_FEE_BPS,
+    entryRiskUsd: pos.entryRiskUsd,
+    stopBps: pos.stopBps,
+    costBps: pos.costBps,
   };
 }
 
@@ -376,6 +384,8 @@ export function runBook(opts: {
         lastBar: bar,
         spreadBps: opts.sBtBps,
         entryRiskUsd: addRisk,
+        stopBps,
+        costBps,
         beta,
         stopMoved: false,
       });

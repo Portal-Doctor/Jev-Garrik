@@ -5,7 +5,7 @@
  * The historical Holm family is [A, B] at alpha 0.05. N is the registered 7 and 135.
  */
 
-import { classKill } from "../p3/design-rules";
+import { classKill, section1HurdleBps } from "../p3/design-rules";
 import { FIRST_UNIVERSE_DATE, OOS_END, OOS_START } from "../p2/universe";
 import { foldStartDates } from "../p3/schedule";
 
@@ -16,9 +16,18 @@ export const BOOTSTRAP_SEED = 20261011;
 export const DSR_TRIALS_REQUESTED = 136;
 export const DSR_TRIALS_REGISTERED = 135;
 export const N_CUM_SENSITIVITY = 154;
+/** v3.1 trial count: the registered 135 plus the 22 historical rows re-run. 135 and 154 stay beside it. */
+export const N_CUM_V31 = 157;
 export const MAX_OF_N_REQUESTED = 8;
 export const MAX_OF_N_REGISTERED = 7;
 export const HOLM_ALPHA = 0.05;
+
+export const HOLM_FAMILIES = {
+  historical: { streams: 2, firstStep: HOLM_ALPHA / 2, promotes: false },
+  classFamily: { streams: 5, firstStep: HOLM_ALPHA / 5, promotes: true },
+  jevFamily: { streams: 4, firstStep: HOLM_ALPHA / 4, promotes: true },
+  jevGuardFamily: { streams: 2, firstStep: HOLM_ALPHA / 2, promotes: true },
+} as const;
 /** Mean dollars per week times this factor is mean dollars per month. */
 export const WEEKS_PER_MONTH = 365.25 / 12 / 7;
 
@@ -68,6 +77,67 @@ export function foldOf(entryDate: string): Fold | null {
 /** IS trades still open at the OOS boundary are dropped from both samples. */
 export function boundaryPurge(entryDate: string, exitDate: string): boolean {
   return entryDate < OOS_START && exitDate >= OOS_START;
+}
+
+export interface ExpandingFold {
+  id: string;
+  isStart: string;
+  isEnd: string;
+  oosStart: string;
+  oosEnd: string;
+}
+
+/** Eight anchored folds. IS always starts at 2025-11-10 and ends the day before that fold's OOS month. */
+export function expandingFolds(): ExpandingFold[] {
+  return historicalFolds()
+    .filter((fold) => fold.sample === "OOS")
+    .map((fold) => ({
+      id: fold.id,
+      isStart: FIRST_UNIVERSE_DATE,
+      isEnd: addDays(fold.start, -1),
+      oosStart: fold.start,
+      oosEnd: fold.end,
+    }));
+}
+
+/** A trade open across `boundary` is dropped from both the IS prefix and that fold's OOS. */
+export function purgedAtBoundary(entryDate: string, exitDate: string, boundary: string): boolean {
+  return entryDate < boundary && exitDate >= boundary;
+}
+
+export function isPrefix<T extends { entryDate: string; exitDate: string }>(trades: readonly T[], fold: ExpandingFold): T[] {
+  return trades.filter((trade) => trade.entryDate >= fold.isStart && trade.entryDate <= fold.isEnd && !purgedAtBoundary(trade.entryDate, trade.exitDate, fold.oosStart));
+}
+
+export function oosSlice<T extends { entryDate: string; exitDate: string }>(trades: readonly T[], fold: ExpandingFold): T[] {
+  return trades.filter((trade) => trade.entryDate >= fold.oosStart && trade.entryDate <= fold.oosEnd && !purgedAtBoundary(trade.entryDate, trade.exitDate, fold.oosStart));
+}
+
+/** One config per fold, in fold order. Configs stay in registration order for the tie-break. */
+export function selectByFold<T>(configs: readonly T[], folds: readonly ExpandingFold[], tradesOf: (config: T) => readonly { entryDate: string; exitDate: string; netUsd: number }[], l80Of: (trades: readonly { entryDate: string; exitDate: string; netUsd: number }[], fold: ExpandingFold) => number, totalOf: (trades: readonly { entryDate: string; exitDate: string; netUsd: number }[]) => number): { fold: ExpandingFold; chosen: T }[] {
+  return folds.map((fold) => {
+    const rows = configs.map((config) => ({ config, trades: isPrefix(tradesOf(config), fold) }));
+    const chosen = selectInSample(rows, (row) => l80Of(row.trades, fold), (row) => totalOf(row.trades));
+    return { fold, chosen: chosen.config };
+  });
+}
+
+export function netR(netUsd: number, riskUsd: number): number | null {
+  if (!(riskUsd > 0) || !Number.isFinite(netUsd)) return null;
+  return netUsd / riskUsd;
+}
+
+/** Realized net R. n below 30 enters at p = 1. */
+export function netRStreamP(values: readonly number[]): { p: number; status: "testable" | "not testable"; n: number } {
+  const n = values.length;
+  if (n < 30) return { p: 1, status: "not testable", n };
+  return { ...forwardStreamP(n, meanAboveZeroP(values)), n };
+}
+
+/** Mean of C + max(25, 0.15 S) over the class's own trades. The v3 constant 150 is not used. */
+export function meanHurdleBps(trades: readonly { costBps: number; stopBps: number }[]): number | null {
+  if (trades.length === 0) return null;
+  return trades.reduce((sum, trade) => sum + section1HurdleBps(trade.costBps, trade.stopBps), 0) / trades.length;
 }
 
 export function killVerdict(n: number, meanGrossBps: number, upper80Bps: number): "insufficient" | "kill" | "keep" {

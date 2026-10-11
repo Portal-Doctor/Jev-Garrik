@@ -20,6 +20,7 @@ import {
   classATenDayExit,
   classBHeld,
   classBSelected,
+  classKill,
 } from "../p3/design-rules";
 import { classBarInputs, type ClassBarInputs, type GroupFlags } from "../p3/bar-access";
 import { registeredFlags } from "./flags";
@@ -31,10 +32,19 @@ import {
   BOOTSTRAP_REPS,
   BOOTSTRAP_SEED,
   DSR_TRIALS_REGISTERED,
+  expandingFolds,
   HOLM_ALPHA,
+  HOLM_FAMILIES,
+  isPrefix,
   KILL_HURDLE_BPS,
   MAX_OF_N_REGISTERED,
+  meanHurdleBps,
   N_CUM_SENSITIVITY,
+  N_CUM_V31,
+  netR,
+  netRStreamP,
+  oosSlice,
+  purgedAtBoundary,
   WEEKS_PER_MONTH,
   addDays,
   bhAdjusted,
@@ -47,12 +57,10 @@ import {
   forwardStreamP,
   historicalFolds,
   holmAdjusted,
-  killVerdict,
-  meanAboveZeroP,
   mondayWeeks,
   oneSided80,
   oneSided80TradeMean,
-  selectInSample,
+  selectByFold,
   tradeMoments,
   weekKey,
   weeklyGroups,
@@ -308,9 +316,11 @@ function summarize(rows: readonly TradeRow[], sample: "IS" | "OOS", weeks: reado
   const grossBound = oneSided80TradeMean(weeklyGroups(points.map((point, index) => ({ week: point.week, value: gross[index]! })), weeks));
   const netBound = oneSided80TradeMean(weeklyGroups(points.map((point, index) => ({ week: point.week, value: net[index]! })), weeks));
   const dollarBound = oneSided80(weeklyValues(kept.map((row) => ({ week: weekKey(row.entryDate), value: row.netUsd })), weeks), { scale: WEEKS_PER_MONTH });
+  const rValues = kept.map((row) => netR(row.netUsd, row.entryRiskUsd)).filter((value): value is number => value != null);
   const meanGrossBps = mean(gross);
-  const verdict = meanGrossBps == null || grossBound == null ? "insufficient" : killVerdict(kept.length, meanGrossBps, grossBound.u80);
-  const moments = tradeMoments(gross);
+  const hurdle = meanHurdleBps(kept);
+  const verdict = meanGrossBps == null || grossBound == null || hurdle == null ? "insufficient" : classKill({ n: kept.length, meanGrossBps, upper80Bps: grossBound.u80, hurdleBps: hurdle });
+  const moments = tradeMoments(rValues);
   const dsr = (trials: number) => moments == null ? null : deflatedSharpe({ sharpe: moments.sharpe, nObs: moments.n, skew: moments.skew, kurtosis: moments.kurtosis, nTrials: trials });
   return {
     n: kept.length,
@@ -324,10 +334,13 @@ function summarize(rows: readonly TradeRow[], sample: "IS" | "OOS", weeks: reado
     totalNetUsd: kept.reduce((sum, row) => sum + row.netUsd, 0),
     l80NetUsdPerMonth: dollarBound?.l80 ?? null,
     u80NetUsdPerMonth: dollarBound?.u80 ?? null,
+    meanNetR: mean(rValues),
+    hurdleBps: hurdle,
     perTradeSharpe: moments?.sharpe ?? null,
     skew: moments?.skew ?? null,
     kurtosis: moments?.kurtosis ?? null,
     verdict,
+    dsrAt157: dsr(N_CUM_V31),
     dsrAt135: dsr(DSR_TRIALS_REGISTERED),
     dsrAt154: dsr(N_CUM_SENSITIVITY),
     windowMarks: kept.filter((row) => row.windowMark).length,
@@ -579,54 +592,56 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       blocked: { base: base.result.hitsByClass.A, stress: stress.result.hitsByClass.A },
     };
   });
-  const chosen = selectInSample(
-    configRows,
-    (row) => row.base.is.l80NetUsdPerMonth ?? -1_000_000_000,
-    (row) => row.base.is.totalNetUsd,
-  );
-  const officialBase = ran.get(`${chosen.config}|base`)!;
-  const officialStress = ran.get(`${chosen.config}|stress`)!;
-  const bBase = officialBase.trades.filter((row) => row.classId === "B");
-  const bStress = officialStress.trades.filter((row) => row.classId === "B");
-  const classBRow = {
-    config: "B",
-    classId: "B" as const,
-    book: chosen.config,
-    base: { is: summarize(bBase, "IS", isWeeks), oos: summarize(bBase, "OOS", oosWeeks) },
-    stress: { is: summarize(bStress, "IS", isWeeks), oos: summarize(bStress, "OOS", oosWeeks) },
-    blocked: { base: officialBase.result.hitsByClass.B, stress: officialStress.result.hitsByClass.B },
+  const foldList = expandingFolds();
+  const l80Of = (trades: readonly { entryDate: string; netUsd: number }[], fold: (typeof foldList)[number]) => {
+    const weeks = mondayWeeks(fold.isStart, fold.isEnd);
+    const bound = oneSided80(weeklyValues(trades.map((trade) => ({ week: weekKey(trade.entryDate), value: trade.netUsd })), weeks), { scale: WEEKS_PER_MONTH });
+    return bound?.l80 ?? -1_000_000_000;
   };
-  const officialA = officialBase.trades.filter((row) => row.classId === "A");
+  const picks = selectByFold(
+    configRows,
+    foldList,
+    (row) => ran.get(`${row.config}|base`)!.trades.filter((trade) => trade.classId === "A"),
+    l80Of,
+    (trades) => trades.reduce((sum, trade) => sum + trade.netUsd, 0),
+  );
+  const stitch = (path: "base" | "stress", classId: "A" | "B") => picks.flatMap((pick) => oosSlice(ran.get(`${pick.chosen.config}|${path}`)!.trades.filter((trade) => trade.classId === classId), pick.fold));
+  const stitchedA = stitch("base", "A");
+  const stitchedB = stitch("base", "B");
+  const stitchedAStress = stitch("stress", "A");
+  const stitchedBStress = stitch("stress", "B");
+  const classARow = { base: summarize(stitchedA, "OOS", oosWeeks), stress: summarize(stitchedAStress, "OOS", oosWeeks) };
+  const classBRow = { base: summarize(stitchedB, "OOS", oosWeeks), stress: summarize(stitchedBStress, "OOS", oosWeeks) };
   const streamOf = (rows: readonly TradeRow[]) => {
-    const oos = rows.filter((row) => row.sample === "OOS" && !row.purged);
-    const p = meanAboveZeroP(oos.map((row) => row.grossBps));
-    return { id: "", n: oos.length, p: p ?? 1, status: p == null ? "not testable" : "p-value" };
+    const values = rows.map((row) => netR(row.netUsd, row.entryRiskUsd)).filter((value): value is number => value != null);
+    const stream = netRStreamP(values);
+    return { id: "", n: stream.n, p: stream.p, status: stream.status };
   };
   const historicalStreams = [
-    { ...streamOf(officialA), id: "A" },
-    { ...streamOf(bBase), id: "B" },
+    { ...streamOf(stitchedA), id: "A" },
+    { ...streamOf(stitchedB), id: "B" },
   ];
-  const withDecision = (rows: { id: string; n: number; p: number; status: string }[]) => {
+  const withDecision = (rows: { id: string; n: number; p: number; status: string }[], promotes: boolean) => {
     const holm = holmAdjusted(rows.map((row) => ({ id: row.id, p: row.p })));
     const bh = bhAdjusted(rows.map((row) => ({ id: row.id, p: row.p })));
     return holm.map((row) => {
       const source = rows.find((item) => item.id === row.id)!;
       const bhRow = bh.find((item) => item.id === row.id)!;
+      const pass = source.status !== "not testable" && row.adjusted < HOLM_ALPHA;
       return {
         id: row.id,
         n: source.n,
         status: source.status,
         p: row.p,
         holmAdjusted: row.adjusted,
-        holmPass: source.status === "not testable" ? false : row.adjusted < HOLM_ALPHA,
+        decision: promotes ? (pass ? "pass" : "fail") : "reported",
         bhAdjusted: bhRow.adjusted,
-        bhPassAt010: source.status === "not testable" ? false : bhRow.adjusted < 0.1,
-        rawBelowForwardFirstStep: row.p < 0.01,
+        bhAt010: source.status === "not testable" ? "not testable" : bhRow.adjusted < 0.1 ? "below" : "not below",
       };
     });
   };
   const forward = ["A", "B", "C", "D", "E"].map((id) => ({ id, n: 0, ...forwardStreamP(0, null) }));
-  const keptOfficial = (rows: readonly TradeRow[], sample: "IS" | "OOS") => rows.filter((row) => row.sample === sample && !row.purged);
+  const guardStreams = ["3a", "3b"].map((id) => ({ id, n: 0, ...forwardStreamP(0, null) }));
   const clusterMonths = months.map((month) => {
     const assigned = clusterMaps.get(month)!;
     const groups = new Map<string, number>();
@@ -636,11 +651,20 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
   });
   const trades = [...ran.values()].flatMap((book) => book.trades);
   trades.sort((a, b) => a.book.localeCompare(b.book) || a.path.localeCompare(b.path) || a.classId.localeCompare(b.classId) || a.entryDate.localeCompare(b.entryDate) || a.productId.localeCompare(b.productId));
-  const purged = officialBase.trades.filter((row) => row.purged).length + officialStress.trades.filter((row) => row.purged).length;
+  const droppedOnFolds = picks.reduce((sum, pick) => {
+    const book = ran.get(`${pick.chosen.config}|base`)!.trades;
+    return sum + book.filter((trade) => purgedAtBoundary(trade.entryDate, trade.exitDate, pick.fold.oosStart)).length;
+  }, 0);
+  const foldPicks = picks.map((pick) => {
+    const trades = isPrefix(ran.get(`${pick.chosen.config}|base`)!.trades.filter((trade) => trade.classId === "A"), pick.fold);
+    const l80 = l80Of(trades, pick.fold);
+    const total = trades.reduce((sum, trade) => sum + trade.netUsd, 0);
+    return { fold: pick.fold.id, config: pick.chosen.config, isN: trades.length, l80NetUsdPerMonth: l80, totalNetUsd: total, l80Cents: cents(l80), totalCents: cents(total) };
+  });
   const results = {
     label: registration.validation.label,
-    role: "registered capped book",
-    hurdleBps: KILL_HURDLE_BPS,
+    role: "v3.1 code path, not run",
+    v3HurdleBps: KILL_HURDLE_BPS,
     sBt: { baseBps: 5, stressBps: 10 },
     feeBps: { entry: 90, exit: 90, note: "X1 and the rule, stop, or window-end exit are taker legs. Dollar net uses the same bps, charged on entry notional." },
     sizing: { riskUsd: 60, notionalCapUsd: 1500, costBps: { base: sizingCostBps(5), stress: sizingCostBps(10) }, costNote: "C is 2 times (90 + s_bt). The spread stays in the fill." },
@@ -661,10 +685,10 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
     purge: {
       rule: "A trade belongs to its entry fold. IS trades open at the OOS boundary are dropped from both and counted. OOS trades are scored to their real exit. A trade open at the window end is marked to the last 15m close and flagged. Embargo is 0.",
       embargoDays: 0,
-      droppedOnOfficialBook: purged,
+      droppedOnFolds,
       windowMarks: {
-        base: officialBase.trades.filter((row) => row.windowMark).length,
-        stress: officialStress.trades.filter((row) => row.windowMark).length,
+        base: [...stitchedA, ...stitchedB].filter((row) => row.windowMark).length,
+        stress: [...stitchedAStress, ...stitchedBStress].filter((row) => row.windowMark).length,
       },
     },
     geometry: {
@@ -673,56 +697,57 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       E: { returns: null },
     },
     selection: {
-      statistic: "highest L80 of IS mean net dollars per month at fixed caps",
+      statistic: "highest L80 of the expanding IS mean net dollars per month at fixed caps",
       tieBreak: "higher IS total net dollars after rounding to $0.01, then registration order",
       registrationOrder: A_CONFIGS.map((row) => row.id),
-      chosen: chosen.config,
-      l80NetUsdPerMonth: chosen.base.is.l80NetUsdPerMonth,
-      totalNetUsd: chosen.base.is.totalNetUsd,
-      l80Cents: chosen.base.is.l80NetUsdPerMonth == null ? null : cents(chosen.base.is.l80NetUsdPerMonth),
-      totalCents: cents(chosen.base.is.totalNetUsd),
-      rows: configRows.map((row) => ({
-        config: row.config,
-        isN: row.base.is.n,
-        l80NetUsdPerMonth: row.base.is.l80NetUsdPerMonth,
-        l80Cents: row.base.is.l80NetUsdPerMonth == null ? null : cents(row.base.is.l80NetUsdPerMonth),
-        totalNetUsd: row.base.is.totalNetUsd,
-        totalCents: cents(row.base.is.totalNetUsd),
-      })),
+      folds: foldPicks,
     },
-    configs: configRows.map((row) => ({ ...row, selected: row.config === chosen.config, holmFamily: row.config === chosen.config })),
+    configs: configRows,
+    classA: classARow,
     classB: classBRow,
     concentration: {
-      gross: "share of the sum of gross dollars",
-      A: { is: concentration(keptOfficial(officialA, "IS")), oos: concentration(keptOfficial(officialA, "OOS")) },
-      B: { is: concentration(keptOfficial(bBase, "IS")), oos: concentration(keptOfficial(bBase, "OOS")) },
+      dollarShare: "share of the sum of gross dollars on the stitched OOS",
+      A: concentration(stitchedA),
+      B: concentration(stitchedB),
     },
     blocked: {
-      note: "A rejected attempt increments every gate that failed. Beta uses signed OLS. A missing beta does not block that name.",
-      officialBase: { attempts: officialBase.result.attempts, taken: officialBase.result.taken, noBar: officialBase.result.noBar, invalidStop: officialBase.result.invalidStop, hits: officialBase.result.hits, byClass: officialBase.result.hitsByClass },
-      officialStress: { attempts: officialStress.result.attempts, taken: officialStress.result.taken, noBar: officialStress.result.noBar, invalidStop: officialStress.result.invalidStop, hits: officialStress.result.hits, byClass: officialStress.result.hitsByClass },
+      note: "A rejected attempt increments every gate that failed. Hits belong to each config's full-window book. Beta uses signed OLS. A missing beta does not block that name.",
+      configs: A_CONFIGS.map((config) => ({
+        config: config.id,
+        base: ran.get(`${config.id}|base`)!.result.hits,
+        stress: ran.get(`${config.id}|stress`)!.result.hits,
+      })),
     },
     clusters: clusterMonths,
     holm: {
       alpha: HOLM_ALPHA,
       historicalFamily: ["A", "B"],
-      historicalFirstCriticalValue: HOLM_ALPHA / 2,
-      historical: withDecision(historicalStreams),
-      forwardFamily: forward.map((row) => row.id),
-      forwardFirstStep: HOLM_ALPHA / 5,
-      forward: withDecision(forward),
-      pValue: "one-sided t test that mean OOS gross bps is above zero, on the selected book",
+      historicalFirstStep: HOLM_FAMILIES.historical.firstStep,
+      historicalPromotes: HOLM_FAMILIES.historical.promotes,
+      historical: withDecision(historicalStreams, false),
+      classFamily: forward.map((row) => row.id),
+      classFirstStep: HOLM_FAMILIES.classFamily.firstStep,
+      classStreams: withDecision(forward, true),
+      jevFamilyStreams: HOLM_FAMILIES.jevFamily.streams,
+      jevFirstStep: HOLM_FAMILIES.jevFamily.firstStep,
+      jevGuardIds: guardStreams.map((row) => row.id),
+      jevGuardFirstStep: HOLM_FAMILIES.jevGuardFamily.firstStep,
+      jevGuards: withDecision(guardStreams, true),
+      pValue: "one-sided t test that mean OOS realized net R is above zero, on the stitched book. The same test is on the stress row.",
     },
     maxOfN: {
       registered: MAX_OF_N_REGISTERED,
       expectedMaxSharpe: expectedMaxSharpe(MAX_OF_N_REGISTERED),
-      note: "7 is the registered trial count. It is not a choice among the six A configs.",
+      note: "7 stays the trial count. It is not 8.",
     },
     dsr: {
+      governingTrials: N_CUM_V31,
       registeredTrials: DSR_TRIALS_REGISTERED,
       sensitivityTrials: N_CUM_SENSITIVITY,
-      A: { dsrAt135: chosen.base.oos.dsrAt135, dsrAt154: chosen.base.oos.dsrAt154 },
-      B: { dsrAt135: classBRow.base.oos.dsrAt135, dsrAt154: classBRow.base.oos.dsrAt154 },
+      A: { dsrAt157: classARow.base.dsrAt157, dsrAt135: classARow.base.dsrAt135, dsrAt154: classARow.base.dsrAt154 },
+      B: { dsrAt157: classBRow.base.dsrAt157, dsrAt135: classBRow.base.dsrAt135, dsrAt154: classBRow.base.dsrAt154 },
+      stressA: { dsrAt157: classARow.stress.dsrAt157, dsrAt135: classARow.stress.dsrAt135, dsrAt154: classARow.stress.dsrAt154 },
+      stressB: { dsrAt157: classBRow.stress.dsrAt157, dsrAt135: classBRow.stress.dsrAt135, dsrAt154: classBRow.stress.dsrAt154 },
     },
     registeredFlags: {
       source: "p4-registration.json barAccess.names",
