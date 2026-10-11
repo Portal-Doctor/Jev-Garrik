@@ -15,7 +15,7 @@
  *   bun run research/src/cli.ts refresh-reports
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { boot } from "./index";
 import { stampFromGit, type ArtifactStamp } from "./manifest";
@@ -36,6 +36,12 @@ import { usdSpotFromExchange, type UsdSpotProduct } from "./data/products";
 import { productsUrl, publicHeaders } from "./data/public";
 import { buildP1Report } from "./data/p1-report";
 import { tickReport, type TickReport } from "./data/tick";
+import { assertNoBannedKeys } from "./data/banned";
+import { proposeExclusions } from "./p2/exclusion";
+import { loadPair, scanFacts } from "./p3/geometry-run";
+import { jevSmoke } from "./p3/jev";
+import { assertScanSchema } from "./p3/scan-schema";
+import { survivorshipReport } from "./p3/survivorship";
 
 const started = boot();
 if (!started.ok) {
@@ -101,13 +107,19 @@ async function main(): Promise<void> {
     case "refresh-reports":
       refreshReports();
       return;
+    case "geometry":
+      writeGeometry();
+      return;
+    case "jev-smoke":
+      await writeJevSmoke();
+      return;
     case "revision-sample":
     case "revision-check":
       console.log("Brian dropped P1 task 9 on 2026-10-10. The revision check is not run.");
       return;
     default:
       throw new Error(
-        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports",
+        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | jev-smoke",
       );
   }
 }
@@ -560,4 +572,103 @@ function refreshReports(): void {
   console.log(
     `refresh lastRefreshed ${manifest.lastRefreshed?.commit} derivedRoot ${derived.derivedRootHash} candleRoot ${manifest.dataRootHash}`,
   );
+}
+
+function pairDirs(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((name) => !name.startsWith(".")).sort();
+}
+
+function writeGeometry(): void {
+  const fifteen = existsSync(paths.manifest) ? (JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest) : null;
+  const dailyPath = join(dailyDir(), "data-manifest.json");
+  const daily = existsSync(dailyPath) ? (JSON.parse(readFileSync(dailyPath, "utf8")) as DataManifest) : null;
+  if (!fifteen?.dataRootHash || !fifteen.snapshot?.universeComplete) throw new Error("15m snapshot is not frozen");
+  if (!daily?.dataRootHash || !daily.snapshot?.universeComplete) throw new Error("daily snapshot is not frozen");
+  if (fifteen.snapshotLift?.reason !== D2_LIFT_REASON) throw new Error("15m snapshot is not the D2 lift");
+  const artifact = stamp("P3");
+  const ids = [...new Set([...pairDirs(paths.candles), ...pairDirs(join(dailyDir(), "candles"))])].sort();
+  const pairs = ids.map((id) => loadPair(id, join(dailyDir(), "candles"), paths.candles)).filter((pair) => pair != null);
+  const exclusion = proposeExclusions(loadProducts().map((product) => product.productId));
+  const excluded = new Set(exclusion.productIds);
+  const scan = scanFacts(pairs, excluded);
+  const decision = existsSync(decisionPath()) ? (JSON.parse(readFileSync(decisionPath(), "utf8")) as OwnerDecisionFile) : null;
+  const reasons = new Map<string, string>();
+  const cut = decision?.entries.find((entry) => entry.id === "universe-cut");
+  if (cut?.id === "universe-cut") {
+    for (const row of cut.dropped) reasons.set(row.productId, row.reason);
+  }
+  const downloaded = pairDirs(paths.candles);
+  const survival = survivorshipReport({
+    catalog: loadProducts().map((product) => product.productId),
+    downloaded,
+    d2Executed: true,
+    reasonFor: (productId) => reasons.get(productId) ?? "candles-not-served",
+  });
+  const roots = { dataRootHash: fifteen.dataRootHash, dailyRootHash: daily.dataRootHash };
+  const scanDoc = {
+    ...artifact,
+    ...roots,
+    label: scan.d3.b.label,
+    signalCounts: scan.signalCounts,
+    projectedOos: scan.projectedOos,
+    d3: scan.d3,
+    stopWidths: scan.stopWidths,
+    btcFilterShares: scan.btcFilterShares,
+    universeSize: scan.universeSize,
+    passCounts: scan.passCounts,
+    passCountFlag: scan.passCountFlag,
+    volumeTier: scan.volumeTier,
+    above5m: scan.above5m,
+    overlap: scan.overlap,
+    warmup: scan.warmup,
+    firstUniverseDate: scan.firstUniverseDate,
+    coverage: { names: pairs.length, fifteenFiles: fifteen.files.length, dailyFiles: daily.files.length },
+  };
+  assertScanSchema(scanDoc);
+  if (Date.parse(scan.overlap.tolerance.recordedAt) >= Date.parse(artifact.createdAt)) {
+    throw new Error("overlap tolerance was not recorded before the scan timestamp");
+  }
+  const handoff = {
+    ...artifact,
+    ...roots,
+    openItems: [
+      "Exclusion proposal is unconfirmed.",
+      "Overlap tolerance is unconfirmed.",
+      "Fee tier is unconfirmed.",
+      "Class E blackout calendar is not applied.",
+      "Class D full-engine parity on the earlier candle set is not run. Numeric swing geometry is tested. The v3 target multiple is 4. The 87b35d0 omitted-argument default is 3.",
+      "The class C book-wide cap of 3 entries per UTC day is not applied to geometry counts.",
+      "Purge, embargo, and Holm are registration work and are not built.",
+    ],
+  };
+  const files: [string, unknown][] = [
+    ["exclusion-proposal.json", { ...artifact, ...roots, ...exclusion }],
+    ["warmup-ledger.json", { ...artifact, ...roots, firstUniverseDate: scan.firstUniverseDate, rows: scan.warmupRows }],
+    ["survivorship.json", { ...artifact, ...roots, ...survival }],
+    ["overlap-check.json", { ...artifact, ...roots, ...scan.overlap }],
+    ["geometry-scan.json", scanDoc],
+    ["p3-handoff.json", handoff],
+  ];
+  for (const [name, body] of files) {
+    assertNoBannedKeys(body, name);
+    writeJson(join(paths.reports, name), body);
+  }
+  console.log(`geometry names ${pairs.length} fifteen ${fifteen.dataRootHash} daily ${daily.dataRootHash}`);
+}
+
+async function writeJevSmoke(): Promise<void> {
+  const artifact = stamp("P3");
+  if (!process.env.TYPESAFE_AI_API_KEY) {
+    const body = { ...artifact, ran: false, synthetic: true, reason: "TYPESAFE_AI_API_KEY is not set" };
+    assertNoBannedKeys(body, "jev-smoke");
+    writeJson(join(paths.reports, "jev-smoke.json"), body);
+    console.log("jev smoke skipped: TYPESAFE_AI_API_KEY is not set");
+    return;
+  }
+  const smoke = await jevSmoke(process.env);
+  const body = { ...artifact, ran: true, modelId: smoke.modelId, latencyMs: smoke.latencyMs, synthetic: smoke.synthetic };
+  assertNoBannedKeys(body, "jev-smoke");
+  writeJson(join(paths.reports, "jev-smoke.json"), body);
+  console.log(`jev smoke model ${smoke.modelId} latencyMs ${Math.round(smoke.latencyMs)}`);
 }
