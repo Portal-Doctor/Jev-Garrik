@@ -39,6 +39,7 @@ import { tickReport, type TickReport } from "./data/tick";
 import { assertNoBannedKeys } from "./data/banned";
 import { proposeExclusions } from "./p2/exclusion";
 import { buildDerivedManifest } from "./data/derived-manifest";
+import { loadBlackoutCalendar } from "./p3/blackout";
 import { loadPair, scanTwoPass } from "./p3/geometry-run";
 import { jevSmoke } from "./p3/jev";
 import { assertScanSchema } from "./p3/scan-schema";
@@ -632,6 +633,7 @@ function writeGeometry(): void {
   if (!fifteen?.dataRootHash || !fifteen.snapshot?.universeComplete) throw new Error("15m snapshot is not frozen");
   if (!daily?.dataRootHash || !daily.snapshot?.universeComplete) throw new Error("daily snapshot is not frozen");
   if (fifteen.snapshotLift?.reason !== D2_LIFT_REASON) throw new Error("15m snapshot is not the D2 lift");
+  const blackout = loadBlackoutCalendar(join(paths.reports, "blackout-calendar.json"));
   const artifact = stamp("P3");
   const ids = [...new Set([...pairDirs(paths.candles), ...pairDirs(join(dailyDir(), "candles"))])].sort();
   const dailyCandles = join(dailyDir(), "candles");
@@ -647,7 +649,7 @@ function writeGeometry(): void {
   };
   const exclusion = proposeExclusions(loadProducts().map((product) => product.productId));
   const excluded = new Set(exclusion.productIds);
-  const scan = scanTwoPass(() => load(), excluded);
+  const scan = scanTwoPass(() => load(), excluded, blackout.events);
   const decision = existsSync(decisionPath()) ? (JSON.parse(readFileSync(decisionPath(), "utf8")) as OwnerDecisionFile) : null;
   const reasons = new Map<string, string>();
   const cut = decision?.entries.find((entry) => entry.id === "universe-cut");

@@ -349,7 +349,11 @@ function sampleOf(pair: PairFacts, date: string): NameDateSample {
 }
 
 /** Loads each pair twice so the bar arrays can be released between passes. */
-export function scanTwoPass(load: () => Iterable<PairFacts>, excluded: ReadonlySet<string>): GeometryResult {
+export function scanTwoPass(
+  load: () => Iterable<PairFacts>,
+  excluded: ReadonlySet<string>,
+  blackout: readonly { releaseAt: string }[] = [],
+): GeometryResult {
   const dates = membershipDates();
   const monthly = new Set(monthlyRebalanceDates());
   const sampleCache = new Map<string, NameDateSample[]>();
@@ -416,7 +420,7 @@ export function scanTwoPass(load: () => Iterable<PairFacts>, excluded: ReadonlyS
       bScores.push({ date: bar.date, score, member: memberOn(pair.productId, bar.date) });
     }
     addCounts(totals.C!, countClassC(bars, (date) => memberOn(pair.productId, date), atr));
-    addCounts(totals.E!, countClassE(pair.hour, pair.quarter, (date) => memberOn(pair.productId, date)));
+    addCounts(totals.E!, countClassE(pair.hour, pair.quarter, (date) => memberOn(pair.productId, date), blackout));
     const h4 = pair.four.map((bar) => ({ ts: bar.ts * 1000, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume }));
     const d1 = pair.days.filter((row) => !row.empty).map((row) => ({ ts: row.ts * 1000, open: row.close, high: row.high, low: row.low, close: row.close, volume: row.volume }));
     for (const signal of classDCandidates(pair.productId, h4, d1)) {

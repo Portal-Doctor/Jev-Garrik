@@ -1,0 +1,531 @@
+{
+  "rule": "No class E entry from 30 minutes before a release through 60 minutes after it, inclusive.",
+  "zoneNote": "BLS schedules state that all times are Eastern Time. The January 28, 2026 FOMC statement page says for release at 2:00 p.m. EST. Every two-day meeting uses 14:00 America/New_York on its second day. The August 22, 2025 notation vote has no statement time on the calendar and is not an event. The 2025 year page does not list an Employment Situation or CPI row for every month after September 2025; only the rows on that page are included.",
+  "sources": [
+    {
+      "id": "bls-2025",
+      "url": "https://www.bls.gov/schedule/2025/home.htm",
+      "note": "Employment Situation and Consumer Price Index rows. Times are Eastern."
+    },
+    {
+      "id": "bls-2026",
+      "url": "https://www.bls.gov/schedule/2026/home.htm",
+      "note": "Employment Situation and Consumer Price Index rows. Page note: All times on calendar are Eastern Time. Last modified June 10, 2026."
+    },
+    {
+      "id": "bls-cpi-forward",
+      "url": "https://www.bls.gov/schedule/news_release/cpi.htm",
+      "note": "CPI rows after the 2026 year page, through November 2027."
+    },
+    {
+      "id": "bls-nfp-forward",
+      "url": "https://www.bls.gov/schedule/news_release/empsit.htm",
+      "note": "Employment Situation rows after the 2026 year page, through November 2027."
+    },
+    {
+      "id": "fomc-dates",
+      "url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "note": "Meeting dates. Statement day is the second day."
+    },
+    {
+      "id": "fomc-clock",
+      "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260128a.htm",
+      "note": "For release at 2:00 p.m. EST."
+    }
+  ],
+  "retrievedAt": "2026-10-11T03:40:00.000Z",
+  "contentSha256": "c91d4b46f46d167d2bb20ed6cf1482ef0d29bb4df4da5978b7a3dd16ffef2ea1",
+  "hashInput": "sha256 of UTF-8 JSON of events, separators comma and colon, sorted by releaseAt then kind. The hash field is not part of that input.",
+  "events": [
+    {
+      "kind": "CPI",
+      "releaseAt": "2025-10-24T12:30:00.000Z",
+      "releaseLocal": "2025-10-24T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2025/home.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2025-10-29T18:00:00.000Z",
+      "releaseLocal": "2025-10-29T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2025-11-20T13:30:00.000Z",
+      "releaseLocal": "2025-11-20T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2025/home.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2025-12-10T19:00:00.000Z",
+      "releaseLocal": "2025-12-10T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2025-12-16T13:30:00.000Z",
+      "releaseLocal": "2025-12-16T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2025/home.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2025-12-18T13:30:00.000Z",
+      "releaseLocal": "2025-12-18T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2025/home.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2026-01-09T13:30:00.000Z",
+      "releaseLocal": "2026-01-09T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2026-01-13T13:30:00.000Z",
+      "releaseLocal": "2026-01-13T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2026-01-28T19:00:00.000Z",
+      "releaseLocal": "2026-01-28T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2026-02-11T13:30:00.000Z",
+      "releaseLocal": "2026-02-11T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2026-02-13T13:30:00.000Z",
+      "releaseLocal": "2026-02-13T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2026-03-06T13:30:00.000Z",
+      "releaseLocal": "2026-03-06T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2026-03-11T12:30:00.000Z",
+      "releaseLocal": "2026-03-11T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2026-03-18T18:00:00.000Z",
+      "releaseLocal": "2026-03-18T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2026-04-03T12:30:00.000Z",
+      "releaseLocal": "2026-04-03T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2026-04-10T12:30:00.000Z",
+      "releaseLocal": "2026-04-10T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2026-04-29T18:00:00.000Z",
+      "releaseLocal": "2026-04-29T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2026-05-08T12:30:00.000Z",
+      "releaseLocal": "2026-05-08T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2026-05-12T12:30:00.000Z",
+      "releaseLocal": "2026-05-12T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2026-06-05T12:30:00.000Z",
+      "releaseLocal": "2026-06-05T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2026-06-10T12:30:00.000Z",
+      "releaseLocal": "2026-06-10T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2026-06-17T18:00:00.000Z",
+      "releaseLocal": "2026-06-17T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2026-07-02T12:30:00.000Z",
+      "releaseLocal": "2026-07-02T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2026-07-14T12:30:00.000Z",
+      "releaseLocal": "2026-07-14T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2026-07-29T18:00:00.000Z",
+      "releaseLocal": "2026-07-29T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2026-08-07T12:30:00.000Z",
+      "releaseLocal": "2026-08-07T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2026-08-12T12:30:00.000Z",
+      "releaseLocal": "2026-08-12T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2026-09-04T12:30:00.000Z",
+      "releaseLocal": "2026-09-04T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2026-09-11T12:30:00.000Z",
+      "releaseLocal": "2026-09-11T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2026-09-16T18:00:00.000Z",
+      "releaseLocal": "2026-09-16T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2026-10-02T12:30:00.000Z",
+      "releaseLocal": "2026-10-02T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2026-10-14T12:30:00.000Z",
+      "releaseLocal": "2026-10-14T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2026-10-28T18:00:00.000Z",
+      "releaseLocal": "2026-10-28T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2026-11-06T13:30:00.000Z",
+      "releaseLocal": "2026-11-06T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2026-11-10T13:30:00.000Z",
+      "releaseLocal": "2026-11-10T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2026-12-04T13:30:00.000Z",
+      "releaseLocal": "2026-12-04T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2026-12-09T19:00:00.000Z",
+      "releaseLocal": "2026-12-09T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2026-12-10T13:30:00.000Z",
+      "releaseLocal": "2026-12-10T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/2026/home.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2027-01-08T13:30:00.000Z",
+      "releaseLocal": "2027-01-08T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/empsit.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2027-01-13T13:30:00.000Z",
+      "releaseLocal": "2027-01-13T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2027-01-27T19:00:00.000Z",
+      "releaseLocal": "2027-01-27T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2027-02-05T13:30:00.000Z",
+      "releaseLocal": "2027-02-05T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/empsit.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2027-02-11T13:30:00.000Z",
+      "releaseLocal": "2027-02-11T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2027-03-05T13:30:00.000Z",
+      "releaseLocal": "2027-03-05T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/empsit.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2027-03-10T13:30:00.000Z",
+      "releaseLocal": "2027-03-10T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2027-03-17T18:00:00.000Z",
+      "releaseLocal": "2027-03-17T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2027-04-02T12:30:00.000Z",
+      "releaseLocal": "2027-04-02T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/empsit.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2027-04-13T12:30:00.000Z",
+      "releaseLocal": "2027-04-13T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2027-04-28T18:00:00.000Z",
+      "releaseLocal": "2027-04-28T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2027-05-07T12:30:00.000Z",
+      "releaseLocal": "2027-05-07T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/empsit.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2027-05-12T12:30:00.000Z",
+      "releaseLocal": "2027-05-12T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2027-06-04T12:30:00.000Z",
+      "releaseLocal": "2027-06-04T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/empsit.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2027-06-09T18:00:00.000Z",
+      "releaseLocal": "2027-06-09T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2027-06-10T12:30:00.000Z",
+      "releaseLocal": "2027-06-10T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2027-07-02T12:30:00.000Z",
+      "releaseLocal": "2027-07-02T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/empsit.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2027-07-14T12:30:00.000Z",
+      "releaseLocal": "2027-07-14T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2027-07-28T18:00:00.000Z",
+      "releaseLocal": "2027-07-28T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2027-08-06T12:30:00.000Z",
+      "releaseLocal": "2027-08-06T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/empsit.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2027-08-11T12:30:00.000Z",
+      "releaseLocal": "2027-08-11T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2027-09-03T12:30:00.000Z",
+      "releaseLocal": "2027-09-03T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/empsit.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2027-09-14T12:30:00.000Z",
+      "releaseLocal": "2027-09-14T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2027-09-15T18:00:00.000Z",
+      "releaseLocal": "2027-09-15T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2027-10-08T12:30:00.000Z",
+      "releaseLocal": "2027-10-08T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/empsit.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2027-10-14T12:30:00.000Z",
+      "releaseLocal": "2027-10-14T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2027-10-27T18:00:00.000Z",
+      "releaseLocal": "2027-10-27T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2027-11-05T12:30:00.000Z",
+      "releaseLocal": "2027-11-05T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/empsit.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2027-11-10T13:30:00.000Z",
+      "releaseLocal": "2027-11-10T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
+    },
+    {
+      "kind": "NFP",
+      "releaseAt": "2027-12-03T13:30:00.000Z",
+      "releaseLocal": "2027-12-03T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/empsit.htm"
+    },
+    {
+      "kind": "FOMC",
+      "releaseAt": "2027-12-08T19:00:00.000Z",
+      "releaseLocal": "2027-12-08T14:00:00",
+      "zone": "America/New_York",
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+    },
+    {
+      "kind": "CPI",
+      "releaseAt": "2027-12-10T13:30:00.000Z",
+      "releaseLocal": "2027-12-10T08:30:00",
+      "zone": "America/New_York",
+      "source": "https://www.bls.gov/schedule/news_release/cpi.htm"
+    }
+  ]
+}

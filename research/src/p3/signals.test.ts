@@ -22,14 +22,17 @@ test("class E counts a 15m close above VWAP and a swing high", () => {
   const event = 25;
   hour[event] = { ts: event * 3600, open: 10, high: 20, low: 8, close: 9, volume: 100 };
   const base = hour[event]!.ts;
-  const quarter: BarOHLC[] = [
+  const inside: BarOHLC[] = [
     { ts: base, open: 9, high: 12, low: 8, close: 11, volume: 5 },
     { ts: base + 900, open: 11, high: 11.5, low: 8, close: 9, volume: 5 },
     { ts: base + 1800, open: 9, high: 14, low: 9, close: 13, volume: 5 },
   ];
-  const member = () => true;
-  const counts = countClassE(hour, quarter, member);
+  expect(countClassE(hour, inside, () => true).signals).toBe(0);
+  const quarter: BarOHLC[] = inside.map((bar) => ({ ...bar, ts: bar.ts + 3600 }));
+  const counts = countClassE(hour, quarter, () => true);
   expect(counts.signals).toBeGreaterThan(0);
+  const releaseAt = new Date((quarter[2]!.ts + 900) * 1000).toISOString();
+  expect(countClassE(hour, quarter, () => true, [{ releaseAt }]).signals).toBe(0);
 });
 
 test("class E skips a stop tighter than 250 bps", () => {
@@ -45,9 +48,9 @@ test("class E skips a stop tighter than 250 bps", () => {
   hour[event] = { ts: event * 3600, open: 100, high: 100.08, low: 99.98, close: 100, volume: 20 };
   const base = hour[event]!.ts;
   const quarter: BarOHLC[] = [
-    { ts: base, open: 100, high: 100.2, low: 99.9, close: 100.1, volume: 5 },
-    { ts: base + 900, open: 100.1, high: 100.15, low: 99.9, close: 100, volume: 5 },
-    { ts: base + 1800, open: 100, high: 100.4, low: 100, close: 100.3, volume: 5 },
+    { ts: base + 3600, open: 100, high: 100.2, low: 99.9, close: 100.1, volume: 5 },
+    { ts: base + 4500, open: 100.1, high: 100.15, low: 99.9, close: 100, volume: 5 },
+    { ts: base + 5400, open: 100, high: 100.4, low: 100, close: 100.3, volume: 5 },
   ];
   expect(countClassE(hour, quarter, () => true).signals).toBe(0);
 });

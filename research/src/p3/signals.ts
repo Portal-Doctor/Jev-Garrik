@@ -144,8 +144,13 @@ export interface BarOHLC {
   volume: number;
 }
 
-/** Class E: 1h event, then a 15m close above anchored VWAP and the latest 15m swing high within 6h. */
-export function countClassE(hour: readonly BarOHLC[], quarter: readonly BarOHLC[], memberOn: (date: string) => boolean): ClassCounts {
+/** Class E: 1h event, then a 15m close above anchored VWAP and the latest 15m swing high. The scan starts at the close of the event bar. */
+export function countClassE(
+  hour: readonly BarOHLC[],
+  quarter: readonly BarOHLC[],
+  memberOn: (date: string) => boolean,
+  blackout: readonly { releaseAt: string }[] = [],
+): ClassCounts {
   const counts = emptyCounts();
   const atr = wilderAtr(hour.map((b) => b.high), hour.map((b) => b.low), hour.map((b) => b.close), 14);
   for (let i = 20; i < hour.length; i += 1) {
@@ -156,32 +161,46 @@ export function countClassE(hour: readonly BarOHLC[], quarter: readonly BarOHLC[
     const volAvg = hour.slice(i - 20, i).reduce((s, row) => s + row.volume, 0) / 20;
     const range = bar.high - bar.low;
     if (a == null || !(range > 3 * a) || !(bar.volume > 3 * volAvg) || !(range > 0) || (bar.close - bar.low) / range > 1 / 3) continue;
+    const eventClose = bar.ts + 3600;
+    const end = eventClose + 6 * 3600;
     const stopPrice = bar.low - 0.2 * a;
-    const stopBps = bar.close > stopPrice && bar.close > 0 ? ((bar.close - stopPrice) / bar.close) * 10_000 : 0;
-    if (stopBps < 250) continue;
-    const end = bar.ts + 6 * 3600;
     let pv = 0;
     let vol = 0;
     let swing: number | null = null;
     let prev: BarOHLC | null = null;
-    let triggered = false;
+    let entry: BarOHLC | null = null;
     for (const q of quarter) {
-      if (q.ts < bar.ts || q.ts >= end) continue;
+      if (q.ts < eventClose || q.ts >= end) continue;
       const typical = (q.high + q.low + q.close) / 3;
       pv += typical * q.volume;
       vol += q.volume;
       const vwap = vol > 0 ? pv / vol : q.close;
       if (prev && q.high < prev.high) swing = prev.high;
       if (swing != null && q.close > vwap && q.close > swing) {
-        triggered = true;
+        entry = q;
         break;
       }
       prev = q;
     }
-    if (!triggered) continue;
+    if (!entry || !(entry.close > stopPrice) || !(entry.close > 0)) continue;
+    const stopBps = ((entry.close - stopPrice) / entry.close) * 10_000;
+    if (stopBps < 250) continue;
+    const decisionTs = entry.ts + 900;
+    if (entryInBlackout(decisionTs, blackout)) continue;
     note(counts, date, undefined, { bps: stopBps, atrMultiple: 0.2 }, false);
   }
   return counts;
+}
+
+/** Inclusive window: 30 minutes before the release through 60 minutes after. `decisionTs` is unix seconds. */
+export function entryInBlackout(decisionTs: number, events: readonly { releaseAt: string }[]): boolean {
+  const atMs = decisionTs * 1000;
+  for (const event of events) {
+    const release = Date.parse(event.releaseAt);
+    if (!Number.isFinite(release)) continue;
+    if (atMs >= release - 30 * 60_000 && atMs <= release + 60 * 60_000) return true;
+  }
+  return false;
 }
 
 export function countClassB(dates: readonly { date: string; score: number; member: boolean }[], btcByDate: ReadonlyMap<string, BtcDay>): ClassCounts {
