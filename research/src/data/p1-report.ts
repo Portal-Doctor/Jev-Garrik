@@ -5,6 +5,7 @@ import { parseDecimal } from "./decimal";
 import type { DataManifest, SnapshotFreeze, SnapshotLift } from "./manifest-file";
 import type { DelistedProbeReport } from "./probe";
 import type { TickReport } from "./tick";
+import type { OwnerDecisionFile } from "./universe-cut";
 
 export interface P1Report extends ArtifactStamp {
   snapshot: SnapshotFreeze | null;
@@ -45,43 +46,12 @@ export interface P1Report extends ArtifactStamp {
     tickField: "quote_increment";
   };
   planDeviations: { id: string; detail: string }[];
-  ownerDecision: OwnerDecision | null;
+  ownerDecision: OwnerDecisionFile | null;
+  derivedManifest: DataManifest["derivedManifest"] | null;
+  qaOpen: { id: string; status: "open"; note: string }[];
 }
 
-export interface OwnerDecision {
-  granularitySec: number;
-  windowDays: number;
-  windowStart: string;
-  windowEnd: string;
-  measuredRequestsPerSec: number;
-  sampleSeconds: number;
-  fiveMinuteChunkCount: number;
-  fiveMinuteProjectedSec: number;
-  fifteenMinuteChunkCount: number;
-  fifteenMinuteProjectedSec: number | null;
-  choice: string;
-  universeCut: {
-    rule: string;
-    thresholds: {
-      negligibleQuoteVolume30d: string;
-      flatRange24hBelow: string;
-      erraticRange24hAbove: string;
-      planningRequestsPerSec: string;
-      rankDeadline: string;
-    };
-    kept: number;
-    dropped: { productId: string; reason: string; quoteVolume30d: string | null; range24h: string | null }[];
-  } | null;
-  keptSetDownload?: {
-    processStartedAt: string;
-    downloadUpdatedAt: string;
-    requests: number;
-    elapsedSec: number;
-    measuredRequestsPerSec: number;
-    pairMonthFiles: number;
-    note: string;
-  } | null;
-}
+export type OwnerDecision = OwnerDecisionFile;
 
 /** Parts of the design or plan that assumed 1m bars or more than one year. Not redesigned. */
 export const PLAN_DEVIATIONS: { id: string; detail: string }[] = [
@@ -224,6 +194,24 @@ export function buildP1Report(opts: {
     },
     planDeviations: PLAN_DEVIATIONS,
     ownerDecision: opts.ownerDecision ?? null,
+    derivedManifest: opts.manifest.derivedManifest ?? null,
+    qaOpen: [
+      {
+        id: "qa-cut-lookahead",
+        status: "open",
+        note: "OPEN for Architect. The universe cut uses public stats as of the stats snapshot and applies that filter to the whole past year, so the cut looks ahead of earlier days in the window.",
+      },
+      {
+        id: "qa-no-delisted-names",
+        status: "open",
+        note: "OPEN for Architect. This candle snapshot has no delisted names. Delisted products returned HTTP 400 from /stats and the cut drops non-200 responses.",
+      },
+      {
+        id: "qa-delisted-probe-sample-days",
+        status: "open",
+        note: "OPEN for Architect. The delisted probe uses fixed sample days. It does not decide a product's trading life.",
+      },
+    ],
   };
   const banned = findBannedKeys(report);
   if (banned.length > 0) throw new Error(`p1 report has banned fields: ${banned.join(", ")}`);

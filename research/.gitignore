@@ -1,0 +1,4 @@
+# Candle bytes, derived bars, and the stop file. Manifests and reports stay tracked.
+data/candles/
+data/derived/
+data/STOP

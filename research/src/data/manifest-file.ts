@@ -32,6 +32,8 @@ export interface SnapshotLift {
   supersededDataRootHash: string;
   supersededFrozenAt: string;
   supersededFileCount: number;
+  /** Earlier lift, so a second owner resume keeps the chain. */
+  priorSnapshotLift?: SnapshotLift;
 }
 
 export interface DataManifest extends ArtifactStamp {
@@ -44,6 +46,15 @@ export interface DataManifest extends ArtifactStamp {
   files: HashedFile[];
   snapshot?: SnapshotFreeze;
   snapshotLift?: SnapshotLift;
+  /** Pointer to the derived-bar manifest. Not part of the candle root hash. */
+  derivedManifest?: {
+    path: string;
+    sha256: string;
+    derivedRootHash: string;
+    fileCount: number;
+    bytes: number;
+  };
+  downloadRun?: { completedMonths: number; requests: number; stopped: string };
 }
 
 export function scanCandleFiles(dataDir: string): HashedFile[] {
@@ -102,7 +113,11 @@ export function sealFrozenSnapshot(
   const supersededCount = manifest.snapshotLift?.supersededFileCount;
   const hardStop = extra?.hardStop === true;
   const completed = extra?.universeComplete === true && !hardStop;
-  const supersededNote = `Superseded partial 1m root ${superseded ?? "none"}${supersededCount != null ? ` (${supersededCount} files)` : ""}.`;
+  const priorRoot = manifest.snapshotLift?.priorSnapshotLift?.supersededDataRootHash;
+  const countNote = supersededCount != null ? ` (${supersededCount} files)` : "";
+  const supersededNote = priorRoot
+    ? `Supersedes ${superseded ?? "none"}${countNote}. Prior root ${priorRoot} stays on snapshotLift.priorSnapshotLift.`
+    : `Superseded partial 1m root ${superseded ?? "none"}${countNote}.`;
   return {
     ...manifest,
     snapshot: {
@@ -117,6 +132,30 @@ export function sealFrozenSnapshot(
       frozenAt: frozenAt.toISOString(),
       ...(completed ? { universeComplete: true, supersededDataRootHash: superseded } : {}),
       ...(hardStop ? { blocksResume: true, universeComplete: false, supersededDataRootHash: superseded } : {}),
+    },
+  };
+}
+
+/**
+ * Clears a completed freeze so an owner can add products.
+ * The frozen root becomes snapshotLift, and any earlier lift is kept on priorSnapshotLift.
+ */
+export function liftCompletedFreeze(manifest: DataManifest, liftedAt: Date, reason: string): DataManifest {
+  const snapshot = manifest.snapshot;
+  if (snapshot?.status !== "frozen" || snapshot.universeComplete !== true) {
+    throw new Error("completed freeze lift requires universeComplete");
+  }
+  if (manifest.dataRootHash == null) throw new Error("cannot lift a manifest with no root hash");
+  const { snapshot: _removed, ...rest } = manifest;
+  return {
+    ...rest,
+    snapshotLift: {
+      liftedAt: liftedAt.toISOString(),
+      reason,
+      supersededDataRootHash: manifest.dataRootHash,
+      supersededFrozenAt: snapshot.frozenAt,
+      supersededFileCount: manifest.files.length,
+      ...(manifest.snapshotLift ? { priorSnapshotLift: manifest.snapshotLift } : {}),
     },
   };
 }

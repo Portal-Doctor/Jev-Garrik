@@ -42,6 +42,27 @@ export function repoRoot(start: string = import.meta.dir): string {
   }
 }
 
+/** Refuses when the work tree has uncommitted changes, so a stamp cannot silently name HEAD. */
+export function assertCleanWorkTree(cwd: string = repoRoot()): void {
+  const proc = spawnSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
+  if (proc.status !== 0) throw new Error(proc.stderr?.trim() || "git status --porcelain failed");
+  if (proc.stdout.trim() !== "") {
+    throw new Error(`refusing to stamp a dirty git tree:\n${proc.stdout.trim()}`);
+  }
+}
+
+/** Stamp from git only when the work tree is clean. */
+export function stampFromGit(opts: { phaseId: string; dataRootHash?: string | null; cwd?: string; createdAt?: Date }): ArtifactStamp {
+  const cwd = opts.cwd ?? repoRoot();
+  assertCleanWorkTree(cwd);
+  return stampArtifact({
+    commitSha: gitCommitSha(cwd),
+    dataRootHash: opts.dataRootHash,
+    createdAt: opts.createdAt,
+    phaseId: opts.phaseId,
+  });
+}
+
 export function gitCommitSha(cwd: string = repoRoot()): string {
   const proc = spawnSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" });
   if (proc.status !== 0) {

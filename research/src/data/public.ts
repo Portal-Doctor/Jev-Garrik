@@ -9,6 +9,10 @@ export function productsUrl(): string {
   return `${EXCHANGE_REST}/products`;
 }
 
+export function statsUrl(pair: string): string {
+  return `${EXCHANGE_REST}/products/${encodeURIComponent(pair)}/stats`;
+}
+
 /** `endSecInclusive` is the last bar open the exchange endpoint may return. */
 export function candlesUrl(pair: string, startSec: number, endSecInclusive: number, granularitySec = BAR_SEC): string {
   const params = new URLSearchParams({

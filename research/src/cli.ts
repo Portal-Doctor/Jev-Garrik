@@ -9,24 +9,32 @@
  *   bun run research/src/cli.ts coverage
  *   bun run research/src/cli.ts seal-snapshot
  *   bun run research/src/cli.ts p1-report
+ *   bun run research/src/cli.ts stats-fetch
+ *   bun run research/src/cli.ts stats-convert
+ *   bun run research/src/cli.ts universe-cut
+ *   bun run research/src/cli.ts refresh-reports
  */
 
 import { existsSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { boot } from "./index";
-import { gitCommitSha, stampArtifact, type ArtifactStamp } from "./manifest";
+import { stampFromGit, type ArtifactStamp } from "./manifest";
 import { createPacer, downloadUsdSpot } from "./data/download";
 import { derivePairMonthFile } from "./data/derive-store";
+import { buildDerivedManifest } from "./data/derived-manifest";
 import { sha256Bytes } from "./data/hash";
 import { writeBytes, writeJson } from "./data/io";
 import { buildCoverage, type CoverageReport } from "./data/coverage";
-import { scanCandleFiles, sealFrozenSnapshot, type DataManifest, type SnapshotLift } from "./data/manifest-file";
+import { liftCompletedFreeze, scanCandleFiles, sealFrozenSnapshot, type DataManifest, type SnapshotLift } from "./data/manifest-file";
+import { convertBareProductStats, fetchProductStats, parseProductStats } from "./data/product-stats";
+import { sha256File } from "./data/store";
+import { applyUniverseCut, droppedProductIds, type OwnerDecisionFile } from "./data/universe-cut";
 import { BAR_SEC } from "./data/time";
 import { dataPaths } from "./data/paths";
 import { probeDelisted, type DelistedProbeReport } from "./data/probe";
 import { usdSpotFromExchange, type UsdSpotProduct } from "./data/products";
 import { productsUrl, publicHeaders } from "./data/public";
-import { buildP1Report, type OwnerDecision } from "./data/p1-report";
+import { buildP1Report } from "./data/p1-report";
 import { tickReport, type TickReport } from "./data/tick";
 
 const started = boot();
@@ -72,12 +80,26 @@ async function main(): Promise<void> {
     case "p1-report":
       p1Report();
       return;
+    case "stats-fetch":
+      await statsFetch();
+      return;
+    case "stats-convert":
+      statsConvert();
+      return;
+    case "universe-cut":
+      universeCut();
+      return;
+    case "refresh-reports":
+      refreshReports();
+      return;
     case "revision-sample":
     case "revision-check":
-      console.log("P1 task 9 was dropped by owner decision on 2026-10-10. The revision check is not run.");
+      console.log("Brian dropped P1 task 9 on 2026-10-10. The revision check is not run.");
       return;
     default:
-      throw new Error("usage: snapshot | download | probe | derive | ticks | coverage | seal-snapshot | p1-report");
+      throw new Error(
+        "usage: snapshot | download | probe | derive | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports",
+      );
   }
 }
 
@@ -89,11 +111,19 @@ function repoDataDir(): string {
   return join(import.meta.dir, "..", "..");
 }
 
+function decisionPath(): string {
+  return join(paths.reports, "owner-decision.json");
+}
+
+function statsPath(): string {
+  return join(paths.reports, "product-stats.json");
+}
+
 function loadDroppedProductIds(): string[] {
-  const path = join(paths.reports, "owner-decision.json");
+  const path = decisionPath();
   if (!existsSync(path)) return [];
-  const body = JSON.parse(readFileSync(path, "utf8")) as OwnerDecision;
-  return (body.universeCut?.dropped ?? []).map((row) => row.productId);
+  const body = JSON.parse(readFileSync(path, "utf8")) as OwnerDecisionFile;
+  return droppedProductIds(body);
 }
 
 function loadProducts(): UsdSpotProduct[] {
@@ -108,23 +138,11 @@ function currentRootHash(): string | null {
 }
 
 function stamp(phaseId: string): ArtifactStamp {
-  return stampArtifact({
-    commitSha: gitCommitSha(repoDataDir()),
-    dataRootHash: currentRootHash(),
+  return stampFromGit({
     phaseId,
+    dataRootHash: currentRootHash(),
+    cwd: repoDataDir(),
   });
-}
-
-function applyRootHash(): void {
-  const hash = currentRootHash();
-  if (hash == null) return;
-  for (const path of [paths.usdSpot, paths.probe, paths.ticks, paths.coverage, paths.p1Report]) {
-    if (!existsSync(path)) continue;
-    const body = JSON.parse(readFileSync(path, "utf8")) as { dataRootHash?: string | null };
-    if (body.dataRootHash === hash) continue;
-    body.dataRootHash = hash;
-    writeJson(path, body);
-  }
 }
 
 async function snapshot(): Promise<void> {
@@ -158,12 +176,27 @@ function oneMinuteSuperseded(now: Date): SnapshotLift {
 async function download(): Promise<void> {
   let manifestCreatedAt: string | undefined;
   let snapshotLift = oneMinuteSuperseded(new Date());
+  let now = new Date();
   if (existsSync(paths.manifest)) {
     const existing = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
-    if (existing.snapshot?.universeComplete || existing.snapshot?.blocksResume) {
+    if (existing.snapshot?.blocksResume) {
       throw new Error("snapshot is frozen by owner decision; download will not resume");
     }
-    if (existing.barSec === BAR_SEC) {
+    if (existing.snapshot?.universeComplete) {
+      if (process.env.RESEARCH_LIFT_COMPLETED_FREEZE !== "1") {
+        throw new Error("snapshot is frozen by owner decision; download will not resume");
+      }
+      if (existing.barSec !== BAR_SEC) throw new Error(`refusing to lift a freeze whose bar size is not ${BAR_SEC}`);
+      now = new Date("2026-10-11T12:00:00.000Z");
+      const lifted = liftCompletedFreeze(
+        existing,
+        new Date(),
+        "Owner decision (Brian, 2026-10-11 20:19 CT): add back the 56 below-rank-cutoff names on the same 900-second window (2025-10-11T00:00:00.000Z inclusive through 2026-10-11T00:00:00.000Z exclusive). RESEARCH_LIFT_COMPLETED_FREEZE=1 is the guard change that allows this resume. Other cuts stay. Stats were not re-fetched.",
+      );
+      snapshotLift = lifted.snapshotLift ?? snapshotLift;
+      manifestCreatedAt = existing.createdAt;
+      writeSync(1, `lifted completed freeze ${existing.dataRootHash} files ${existing.files.length}\n`);
+    } else if (existing.barSec === BAR_SEC) {
       manifestCreatedAt = existing.createdAt;
       if (existing.snapshotLift) snapshotLift = existing.snapshotLift;
     } else {
@@ -183,7 +216,7 @@ async function download(): Promise<void> {
   const summary = await downloadUsdSpot({
     products,
     dataDir: paths.root,
-    now: new Date(),
+    now,
     stamp: stamp("P1"),
     intervalMs,
     concurrency,
@@ -195,7 +228,6 @@ async function download(): Promise<void> {
       writeSync(1, `${message}\n`);
     },
   });
-  applyRootHash();
   writeSync(1, `${JSON.stringify(summary)}\n`);
   if (summary.stopped === "finished" || summary.stopped === "deadline") {
     const manifest = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
@@ -204,11 +236,9 @@ async function download(): Promise<void> {
       hardStop: summary.stopped === "deadline",
       supersededDataRootHash: manifest.snapshotLift?.supersededDataRootHash ?? SUPERSEDED_1M_ROOT,
     });
+    sealed.downloadRun = summary;
     writeJson(paths.manifest, sealed);
     writeSync(1, `frozen ${sealed.snapshot?.frozenAt} root ${sealed.dataRootHash}\n`);
-    derive();
-    coverage();
-    p1Report();
   }
 }
 
@@ -256,7 +286,6 @@ function coverage(): void {
     stamp: stamp("P1"),
   });
   writeJson(paths.coverage, report);
-  applyRootHash();
   console.log(`coverage ${report.productCount} products`);
 }
 
@@ -280,7 +309,7 @@ function p1Report(): void {
   const probe = JSON.parse(readFileSync(paths.probe, "utf8")) as DelistedProbeReport;
   const ticksReport = JSON.parse(readFileSync(paths.ticks, "utf8")) as TickReport;
   const decisionPath = join(paths.reports, "owner-decision.json");
-  const ownerDecision = existsSync(decisionPath) ? (JSON.parse(readFileSync(decisionPath, "utf8")) as OwnerDecision) : null;
+  const ownerDecision = existsSync(decisionPath) ? (JSON.parse(readFileSync(decisionPath, "utf8")) as OwnerDecisionFile) : null;
   const report = buildP1Report({
     stamp: stamp("P1"),
     manifest,
@@ -290,6 +319,101 @@ function p1Report(): void {
     ownerDecision,
   });
   writeJson(paths.p1Report, report);
-  applyRootHash();
   console.log(`p1 report ${report.coverage.productCount} products root ${report.dataRootHash}`);
+}
+
+async function statsFetch(): Promise<void> {
+  if (existsSync(statsPath()) && process.env.RESEARCH_STATS_REFETCH !== "1") {
+    throw new Error("product-stats.json already exists. This freeze does not re-fetch. Set RESEARCH_STATS_REFETCH=1 to replace it.");
+  }
+  const file = await fetchProductStats({ products: loadProducts(), now: new Date() });
+  writeJson(statsPath(), file);
+  console.log(`stats ${file.products.length} fetchedAt ${file.fetchedAt}`);
+}
+
+function statsConvert(): void {
+  const text = readFileSync(statsPath(), "utf8");
+  const parsed: unknown = JSON.parse(text);
+  if (!Array.isArray(parsed)) {
+    console.log("product-stats.json is already the fetch envelope");
+    return;
+  }
+  writeJson(statsPath(), convertBareProductStats(text));
+  console.log("converted bare product-stats array to the fetch envelope");
+}
+
+function universeCut(): void {
+  const stats = parseProductStats(readFileSync(statsPath(), "utf8"));
+  const decision = applyUniverseCut(stats);
+  writeJson(decisionPath(), decision);
+  const cut = decision.entries[2];
+  console.log(`universe cut kept ${cut.kept.length} dropped ${cut.dropped.length} readded ${cut.readded.length}`);
+}
+
+function refreshReports(): void {
+  const artifact = stamp("P1");
+  const raw = readFileSync(paths.productsRaw);
+  const products = usdSpotFromExchange(new TextDecoder().decode(raw));
+  writeJson(paths.usdSpot, {
+    ...artifact,
+    source: productsUrl(),
+    rawSha256: sha256Bytes(new Uint8Array(raw)),
+    rawBytes: raw.byteLength,
+    listingDateNote: "listing date is not in the exchange products payload",
+    products,
+  });
+  writeJson(paths.ticks, tickReport(products, artifact));
+  const probes = existsSync(paths.probe)
+    ? (JSON.parse(readFileSync(paths.probe, "utf8")) as { products: { productId: string; status: UsdSpotProduct["status"]; statusRaw: string; candlesServed: boolean | null; windows: [] }[] }).products
+    : [];
+  writeJson(
+    paths.coverage,
+    buildCoverage({
+      products,
+      probes,
+      dataDir: paths.root,
+      stamp: artifact,
+    }),
+  );
+  const files = scanCandleFiles(paths.root);
+  let derivedCount = 0;
+  for (const file of files) {
+    derivedCount += derivePairMonthFile({
+      sqlitePath: join(paths.root, file.path),
+      outDir: paths.derived,
+      stamp: artifact,
+    }).length;
+  }
+  const derived = buildDerivedManifest({ stamp: artifact, dataDir: paths.root });
+  const derivedPath = join(paths.root, "derived-manifest.json");
+  writeJson(derivedPath, derived);
+  const manifest = JSON.parse(readFileSync(paths.manifest, "utf8")) as DataManifest;
+  if (manifest.dataRootHash !== artifact.dataRootHash) throw new Error("candle root hash changed during refresh");
+  manifest.commitSha = artifact.commitSha;
+  manifest.derivedManifest = {
+    path: "derived-manifest.json",
+    sha256: sha256File(derivedPath),
+    derivedRootHash: derived.derivedRootHash,
+    fileCount: derived.files.length,
+    bytes: derived.files.reduce((sum, file) => sum + file.bytes, 0),
+  };
+  writeJson(paths.manifest, manifest);
+  const ownerDecision = existsSync(decisionPath()) ? (JSON.parse(readFileSync(decisionPath(), "utf8")) as OwnerDecisionFile) : null;
+  const coverageReport = JSON.parse(readFileSync(paths.coverage, "utf8")) as CoverageReport;
+  const probe = JSON.parse(readFileSync(paths.probe, "utf8")) as DelistedProbeReport;
+  const ticksReport = JSON.parse(readFileSync(paths.ticks, "utf8")) as TickReport;
+  writeJson(
+    paths.p1Report,
+    buildP1Report({
+      stamp: artifact,
+      manifest,
+      coverage: coverageReport,
+      probe,
+      ticks: ticksReport,
+      ownerDecision,
+    }),
+  );
+  console.log(
+    `refresh derived ${derivedCount} files derivedRoot ${derived.derivedRootHash} candleRoot ${manifest.dataRootHash}`,
+  );
 }

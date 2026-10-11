@@ -99,6 +99,8 @@ test("the P1 report freezes the snapshot and does not leave the revision check o
     note: expect.stringContaining("not an open item"),
   });
   expect(report.openQuestions.map((item) => item.id)).toEqual(["listing-date", "effective-listing", "delisted-trading-life"]);
+  expect(report.qaOpen.map((item) => item.status)).toEqual(["open", "open", "open"]);
+  expect(report.derivedManifest).toBeNull();
   expect(report.coverage.products[0]?.yearsOfDownloadedHistory).toBe("3.00");
   expect(report.coverage.products[1]?.yearsOfDownloadedHistory).toBeNull();
   expect(findBannedKeys(report)).toEqual([]);

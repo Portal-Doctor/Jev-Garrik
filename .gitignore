@@ -1,11 +1,13 @@
 node_modules
 .env
-/data/
+data/
 
-# research candle files are large. Manifests, product snapshots, and reports stay tracked.
-research/data/candles/
-research/data/derived/
-research/data/STOP
+# `data/` matches every directory of that name. Source and the research data records stay visible.
+# Candle bytes and derived bars are ignored from research/.gitignore.
+!research/src/data/
+!research/src/data/**
+!research/data/
+!research/data/**
 
 # cb runtime logs (redirected stdout/stderr from `bun run cb`)
 cb_run.out

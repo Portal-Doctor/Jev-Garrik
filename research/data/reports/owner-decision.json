@@ -1,1163 +1,1535 @@
 {
-  "granularitySec": 900,
-  "windowDays": 365,
-  "windowStart": "2025-10-11T00:00:00.000Z",
-  "windowEnd": "2026-10-11T00:00:00.000Z",
-  "measuredRequestsPerSec": 9.997,
-  "sampleSeconds": 60,
-  "fiveMinuteChunkCount": 174168,
-  "fiveMinuteProjectedSec": 17422,
-  "fifteenMinuteChunkCount": 59040,
-  "fifteenMinuteProjectedSec": 5906,
-  "choice": "Fifteen-minute candles, with a mechanical universe cut. The 5-minute download started at 2026-10-10T23:45:34Z. A 60-second sample from chunk 200 to chunk 800 ran at 9.997 requests/second. 174168 five-minute requests project to 17422 seconds (4.84 hours), past two hours. 59040 fifteen-minute requests at that rate project to 5906 seconds (1.64 hours). The fifteen-minute download started at 2026-10-10T23:47:48Z and then sustained about 7.5 requests/second over the first 16 minutes (7250 chunks), which projects the full 492-name set past two hours and past the 01:40 UTC hard stop. The cut below keeps the download inside that clock. The revision check stays dropped. The kept 304-name download then ran from 2026-10-11T00:08:14Z to 2026-10-11T01:00:46.608Z at 9.997 requests/second (31515 requests, 3952 pair-month files). The kept download started after 00:00 UTC on 2026-10-11, so the latest completed UTC day is 2026-10-10. The stored window is 2025-10-11T00:00:00.000Z inclusive through 2026-10-11T00:00:00.000Z exclusive (365 days).",
-  "universeCut": {
-    "rule": "Public GET /products/{id}/stats. quote_volume_30d = volume_30day \u00d7 last. range_24h = (high \u2212 low) / last. Drop HTTP responses that are not 200 (no-30-day-stats). Drop quote_volume_30d < 1000000 (negligible-volume). Drop last = 0 or range_24h < 0.005 (flat-price). Drop range_24h > 0.5 (erratic-price). Rank the rest by quote_volume_30d descending and keep the longest prefix whose remaining 15-minute chunks fit before 2026-10-11T01:22:00Z at 7.0 requests/second (below-rank-cutoff). Names are not hand-picked.",
-    "thresholds": {
-      "negligibleQuoteVolume30d": "1000000",
-      "flatRange24hBelow": "0.005",
-      "erraticRange24hAbove": "0.5",
-      "planningRequestsPerSec": "7.0",
-      "rankDeadline": "2026-10-11T01:22:00.000Z"
+  "entries": [
+    {
+      "id": "granularity",
+      "owner": "Brian",
+      "decidedAt": "2026-10-10T23:38:00.000Z",
+      "granularitySec": 900,
+      "note": "Brian chose fifteen-minute candles. The 5-minute download started at 2026-10-10T23:45:34Z. A 60-second sample from chunk 200 to chunk 800 ran at 9.997 requests/second. 174168 five-minute requests project to 17422 seconds (4.84 hours), past two hours. 59040 fifteen-minute requests at that rate project to 5906 seconds (1.64 hours). The fifteen-minute download then sustained about 7.5 requests/second over its first 16 minutes (7250 chunks). The kept 304-name download ran from 2026-10-11T00:08:14Z to 2026-10-11T01:00:46.608Z at 9.997 requests/second (31515 requests, 3952 pair-month files)."
     },
-    "kept": 304,
-    "dropped": [
-      {
-        "productId": "00-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "881285.5162089843",
-        "range24h": "0.07260854656774122419767897068"
-      },
-      {
-        "productId": "ACS-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "970675.0485464",
-        "range24h": "0.02959697732997481108312342569"
-      },
-      {
-        "productId": "ACX-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "AERGO-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1663850.5887220",
-        "range24h": "0.05290602933188484519282998370"
-      },
-      {
-        "productId": "AGLD-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1753100.51995",
-        "range24h": "0.04164625183733463988241058305"
-      },
-      {
-        "productId": "AI-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1935421.1965",
-        "range24h": "0.03588516746411483253588516746"
-      },
-      {
-        "productId": "ALT-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "513020.30080",
-        "range24h": "0.07758620689655172413793103448"
-      },
-      {
-        "productId": "ANT-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "APR-USD",
-        "reason": "erratic-price",
-        "quoteVolume30d": "4871489.83248",
-        "range24h": "0.5159574468085106382978723404"
-      },
-      {
-        "productId": "ARKM-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "2053139.3662466",
-        "range24h": "0.03835120036237354673108863053"
-      },
-      {
-        "productId": "ASM-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1578301.44414",
-        "range24h": "0.2554179566563467492260061920"
-      },
-      {
-        "productId": "ATA-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "AUCTION-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1374054.7209913",
-        "range24h": "0.04585881787345423466253572287"
-      },
-      {
-        "productId": "AWE-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1423785.932243",
-        "range24h": "0.06889258196102130231152742106"
-      },
-      {
-        "productId": "BADGER-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "BAND-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "961387.6973184",
-        "range24h": "0.04450757575757575757575757576"
-      },
-      {
-        "productId": "BARD-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1871470.1736",
-        "range24h": "0.02177419354838709677419354839"
-      },
-      {
-        "productId": "BIGTIME-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1456463.91335",
-        "range24h": "0.06013904982618771726535341831"
-      },
-      {
-        "productId": "BIT-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "BLEND-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "547572.88071",
-        "range24h": "0.02092675635276532137518684604"
-      },
-      {
-        "productId": "BLUR-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1185813.5551715",
-        "range24h": "0.04418347464321449260097951446"
-      },
-      {
-        "productId": "BNT-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "430832.8626767637",
-        "range24h": "0.01418439716312056737588652482"
-      },
-      {
-        "productId": "BOBA-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "910881.9968683968",
-        "range24h": "0.02403846153846153846153846154"
-      },
-      {
-        "productId": "BOND-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "BREV-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "613748.98375",
-        "range24h": "0.2022857142857142857142857143"
-      },
-      {
-        "productId": "BTRST-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1535190.1416112",
-        "range24h": "0.03455137481910274963820549928"
-      },
-      {
-        "productId": "BUSD-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "CHECK-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "616800.8916",
-        "range24h": "0.1288135593220338983050847458"
-      },
-      {
-        "productId": "CLV-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "COSMOSDYDX-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "785508.13752",
-        "range24h": "0.05899280575539568345323741007"
-      },
-      {
-        "productId": "COVAL-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "CRPT-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "DAI-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "DAR-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "DATA-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "363885.0748",
-        "range24h": "0.04665314401622718052738336714"
-      },
-      {
-        "productId": "DDX-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "DEGEN-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1985375.069568",
-        "range24h": "0.01201201201201201201201201201"
-      },
-      {
-        "productId": "DESO-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "DEXT-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "422012.0534",
-        "range24h": "0.05465116279069767441860465116"
-      },
-      {
-        "productId": "DIEM-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1062272.585570",
-        "range24h": "0.03933775619002487856888994195"
-      },
-      {
-        "productId": "DNT-USD",
-        "reason": "erratic-price",
-        "quoteVolume30d": "2461697.7260238",
-        "range24h": "0.6775067750677506775067750678"
-      },
-      {
-        "productId": "DOLO-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "532078.81012",
-        "range24h": "0.03630481667864845434938892883"
-      },
-      {
-        "productId": "DOOD-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1181894.771154",
-        "range24h": "0.02274162981680353758686039166"
-      },
-      {
-        "productId": "DREP-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "DYP-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "ELA-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1078923.82416",
-        "range24h": "0.06593406593406593406593406593"
-      },
-      {
-        "productId": "ELSA-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "958931.45742",
-        "range24h": "0.02076381164256581386725991843"
-      },
-      {
-        "productId": "ENJ-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "EOS-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "ERA-USD",
-        "reason": "erratic-price",
-        "quoteVolume30d": "2329297.09848",
-        "range24h": "0.5429292929292929292929292929"
-      },
-      {
-        "productId": "ERN-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "EURC-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "FIDA-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1017622.452888",
-        "range24h": "0.05767757993490331227264024507"
-      },
-      {
-        "productId": "FIGHT-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1742573.74464",
-        "range24h": "0.03645833333333333333333333333"
-      },
-      {
-        "productId": "FIS-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "FOX-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "717341.856537",
-        "range24h": "0.03683241252302025782688766114"
-      },
-      {
-        "productId": "FUN1-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "2031266.474916",
-        "range24h": "0.02599243856332703213610586011"
-      },
-      {
-        "productId": "FX-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "GAL-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "GALA-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "GNO-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "425474.392437",
-        "range24h": "0.03652576524050415844979850810"
-      },
-      {
-        "productId": "GODS-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1947368.4467342",
-        "range24h": "0.05517536355859709153122326775"
-      },
-      {
-        "productId": "GROVE-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1419882.2784",
-        "range24h": "0.03611111111111111111111111111"
-      },
-      {
-        "productId": "GST-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1792439.11372525",
-        "range24h": "0.05116279069767441860465116279"
-      },
-      {
-        "productId": "GUSD-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "GYEN-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "HOPR-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1680930.5809890",
-        "range24h": "0.09336401994629842731108553893"
-      },
-      {
-        "productId": "HYPER-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "425124.48303",
-        "range24h": "0.04219409282700421940928270042"
-      },
-      {
-        "productId": "ICNT-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1252320.3316",
-        "range24h": "0.06275303643724696356275303644"
-      },
-      {
-        "productId": "IDEX-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "IMU-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1269631.356864",
-        "range24h": "0.03477344573234984193888303477"
-      },
-      {
-        "productId": "INDEX-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1636616.8312926",
-        "range24h": "0.04864463423691050872632751578"
-      },
-      {
-        "productId": "INX-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1386833.315766",
-        "range24h": "0.03920386007237635705669481303"
-      },
-      {
-        "productId": "IOTX-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "IP-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "IRYS-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1204836.08576",
-        "range24h": "0.02209944751381215469613259669"
-      },
-      {
-        "productId": "JUP-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "KAVA-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1730646.10468",
-        "range24h": "0.01323529411764705882352941176"
-      },
-      {
-        "productId": "KEEP-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "KNC-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1189382.1160",
-        "range24h": "0.02249637155297532656023222061"
-      },
-      {
-        "productId": "KRL-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "361250.319",
-        "range24h": "0.02056737588652482269503546099"
-      },
-      {
-        "productId": "LAYER-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "668337.383466",
-        "range24h": "0.07259239634388660749768181216"
-      },
-      {
-        "productId": "LINEA-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1999162.0976379",
-        "range24h": "0.05193458040869956087272224335"
-      },
-      {
-        "productId": "LIT-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "LMTS-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "731534.40096",
-        "range24h": "0.09634387351778656126482213439"
-      },
-      {
-        "productId": "LOKA-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "LOOM-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "LQTY-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1429133.069658",
-        "range24h": "0.03537532355478861087144089733"
-      },
-      {
-        "productId": "LRC-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MAGIC-USD",
-        "reason": "erratic-price",
-        "quoteVolume30d": "20688135.0567312",
-        "range24h": "0.7632547067734256654403808699"
-      },
-      {
-        "productId": "MATH-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1516957.50400",
-        "range24h": "0.05078125"
-      },
-      {
-        "productId": "MATIC-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MCO2-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MEDIA-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "META-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "598315.49543",
-        "range24h": "0.07105835144624644708242768768"
-      },
-      {
-        "productId": "MEZO-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1910759.0043468",
-        "range24h": "0.05550811272416737830913748933"
-      },
-      {
-        "productId": "MIR-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MKR-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MLN-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1123556.1763859",
-        "range24h": "0.03504459582835873305709670623"
-      },
-      {
-        "productId": "MOBILE-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MONA-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MOVE-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MPL-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MSOL-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "718309.21448",
-        "range24h": "0.01232337570165817149493515711"
-      },
-      {
-        "productId": "MTL-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MULTI-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MUSD-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MUSE-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "MXC-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "NEST-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "NEWT-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "712417.899648",
-        "range24h": "0.02301255230125523012552301255"
-      },
-      {
-        "productId": "NEX-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1959100.61364819",
-        "range24h": "0.04938271604938271604938271605"
-      },
-      {
-        "productId": "NOICE-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1134873.87587937",
-        "range24h": "0.1165523996082272282076395690"
-      },
-      {
-        "productId": "NU-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "OCEAN-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1839940.92873",
-        "range24h": "0.04243668720054757015742642026"
-      },
-      {
-        "productId": "OMG-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "OMNI-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "OOKI-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "OPN-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1344255.449295",
-        "range24h": "0.06698564593301435406698564593"
-      },
-      {
-        "productId": "ORN-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "OSMO-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1115122.54158906",
-        "range24h": "0.04730636366231764067719188055"
-      },
-      {
-        "productId": "PAX-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "172662.690554",
-        "range24h": "0.007501500300060012002400480096"
-      },
-      {
-        "productId": "PAXG-USD",
-        "reason": "flat-price",
-        "quoteVolume30d": "46338074.5255176",
-        "range24h": "0.001865279026611314112988081345"
-      },
-      {
-        "productId": "PERP-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1532906.0878644",
-        "range24h": "0.08962264150943396226415094340"
-      },
-      {
-        "productId": "PIRATE-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "PLA-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "PLU-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "2174152.5668287",
-        "range24h": "0.09288550851450494716295348994"
-      },
-      {
-        "productId": "POLS-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1305036.413219",
-        "range24h": "0.3204930662557781201848998459"
-      },
-      {
-        "productId": "POLY-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "PRQ-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "PYR-USD",
-        "reason": "erratic-price",
-        "quoteVolume30d": "7129021.6495520",
-        "range24h": "0.6023083264633140972794723825"
-      },
-      {
-        "productId": "PYUSD-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "QSP-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "QUICK-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "RAI-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "RBN-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "RECALL-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1229011.63363034",
-        "range24h": "0.03260918657693871098866356533"
-      },
-      {
-        "productId": "REN-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "REP-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "REQ-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "787396.1617",
-        "range24h": "0.05850091407678244972577696527"
-      },
-      {
-        "productId": "RGT-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "RLY-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "RNBW-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "386697.275256",
-        "range24h": "0.02491408934707903780068728522"
-      },
-      {
-        "productId": "RNDR-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "RONIN-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "RPL-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1392142.58784",
-        "range24h": "0.04072327044025157232704402516"
-      },
-      {
-        "productId": "RSC-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "936256.3766325",
-        "range24h": "0.01628908444111589589964426137"
-      },
-      {
-        "productId": "SAPIEN-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1541130.130380",
-        "range24h": "0.02242725337118523775727466288"
-      },
-      {
-        "productId": "SD-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1616802.345564",
-        "range24h": "0.07182320441988950276243093923"
-      },
-      {
-        "productId": "SEAM-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "SHPING-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1945560.288158",
-        "range24h": "0.2619808306709265175718849840"
-      },
-      {
-        "productId": "SIGN-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "633865.592079",
-        "range24h": "0.04560511516832293351821893537"
-      },
-      {
-        "productId": "SNT-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "STORJ-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "SUKU-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1116023.353776",
-        "range24h": "0.05683901723505683901723505684"
-      },
-      {
-        "productId": "SUP-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1322653.566168",
-        "range24h": "0.05426997245179063360881542700"
-      },
-      {
-        "productId": "SYLO-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "SYN-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "SYND-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1870705.64841048",
-        "range24h": "0.2073855658522886829542263409"
-      },
-      {
-        "productId": "THQ-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "681351.131865",
-        "range24h": "0.05070422535211267605633802817"
-      },
-      {
-        "productId": "TIME-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "TNSR-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1783824.8992584",
-        "range24h": "0.04488378306171520170985840235"
-      },
-      {
-        "productId": "TONE-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "TRIBE-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "TRU-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "TVK-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "UNFI-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "UPI-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "USD1-USD",
-        "reason": "flat-price",
-        "quoteVolume30d": "39745853.72064",
-        "range24h": "0.0004004004004004004004004004004"
-      },
-      {
-        "productId": "USDS-USD",
-        "reason": "flat-price",
-        "quoteVolume30d": "17388968.640574",
-        "range24h": "0.001000200040008001600320064013"
-      },
-      {
-        "productId": "USDT-USD",
-        "reason": "flat-price",
-        "quoteVolume30d": "4943042478.7949184",
-        "range24h": "0.0002402306213965406790518898142"
-      },
-      {
-        "productId": "UST-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "VGX-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "VOXEL-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "2097707.74367298",
-        "range24h": "0.06235512285581826611033843301"
-      },
-      {
-        "productId": "WAL-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1836794.04304",
-        "range24h": "0.2260638297872340425531914894"
-      },
-      {
-        "productId": "WAMPL-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "WAXL-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "320241.580741",
-        "range24h": "0.4954627949183303085299455535"
-      },
-      {
-        "productId": "WBTC-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "WCFG-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "WCT-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "546434.06067",
-        "range24h": "0.06619385342789598108747044917"
-      },
-      {
-        "productId": "WET-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "587324.82215",
-        "range24h": "0.02314049586776859504132231405"
-      },
-      {
-        "productId": "WHUF-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1013290.48821",
-        "range24h": "0.2560275545350172215843857635"
-      },
-      {
-        "productId": "WLUNA-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "WRON-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "826373.350824",
-        "range24h": "0.2523158359064843405381561535"
-      },
-      {
-        "productId": "YB-USD",
-        "reason": "negligible-volume",
-        "quoteVolume30d": "564080.820773",
-        "range24h": "0.1269649334945586457073760580"
-      },
-      {
-        "productId": "YFII-USD",
-        "reason": "no-30-day-stats",
-        "quoteVolume30d": null,
-        "range24h": null
-      },
-      {
-        "productId": "ZETACHAIN-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1782111.072951",
-        "range24h": "0.03382663847780126849894291755"
-      },
-      {
-        "productId": "ZKP-USD",
-        "reason": "below-rank-cutoff",
-        "quoteVolume30d": "1190719.024263",
-        "range24h": "0.03859435303676619947186674792"
-      }
-    ]
-  },
-  "keptSetDownload": {
-    "processStartedAt": "2026-10-11T00:08:14Z",
-    "downloadUpdatedAt": "2026-10-11T01:00:46.608Z",
-    "requests": 31515,
-    "elapsedSec": 3152.608,
-    "measuredRequestsPerSec": 9.997,
-    "pairMonthFiles": 3952,
-    "note": "Rate of the kept 304-name fifteen-minute download after the cut, from process start to the manifest update. 31515 requests in 3152.608 seconds. This rate did not drive the cut. The cut used the earlier 7.5 requests/second sustained rate of the full 492-name attempt."
-  }
+    {
+      "id": "window",
+      "owner": "Brian",
+      "decidedAt": "2026-10-10T23:38:00.000Z",
+      "windowDays": 365,
+      "windowStart": "2025-10-11T00:00:00.000Z",
+      "windowEnd": "2026-10-11T00:00:00.000Z",
+      "note": "One year ending at the latest completed UTC day when the kept download ran. The stored window is 2025-10-11T00:00:00.000Z inclusive through 2026-10-11T00:00:00.000Z exclusive."
+    },
+    {
+      "id": "universe-cut",
+      "owner": "Brian",
+      "decidedAt": "2026-10-11T01:19:00.000Z",
+      "rule": "Public GET /products/{id}/stats from the committed product-stats.json snapshot. Stats are not re-fetched. quote_volume_30d = volume_30day × last. range_24h = (high − low) / last, compared by cross-multiplication so the ratio is not rounded. Drop HTTP responses that are not 200 (no-30-day-stats). Drop quote_volume_30d < 1000000 (negligible-volume). Drop last = 0 or range_24h < 0.005 (flat-price). Drop range_24h > 0.5 (erratic-price). There is no rank cutoff. Names are not hand-picked. Brian (2026-10-11 01:19 UTC) adds back the 56 names the earlier rank cutoff had dropped.",
+      "ohlcNote": "open, high, low, and last are the exchange 24-hour stats. The cut uses high, low, and last only to form range_24h. They are not returns.",
+      "thresholds": {
+        "negligibleQuoteVolume30d": "1000000",
+        "flatRange24hBelow": "0.005",
+        "erraticRange24hAbove": "0.5"
+      },
+      "inputs": "research/data/reports/product-stats.json",
+      "kept": [
+        "1INCH-USD",
+        "2Z-USD",
+        "A8-USD",
+        "AAVE-USD",
+        "ABT-USD",
+        "ACH-USD",
+        "ADA-USD",
+        "AERGO-USD",
+        "AERO-USD",
+        "AGLD-USD",
+        "AI-USD",
+        "AIOZ-USD",
+        "AKT-USD",
+        "ALCX-USD",
+        "ALEO-USD",
+        "ALEPH-USD",
+        "ALGO-USD",
+        "ALICE-USD",
+        "ALIGN-USD",
+        "ALLO-USD",
+        "AMP-USD",
+        "ANKR-USD",
+        "APE-USD",
+        "API3-USD",
+        "APT-USD",
+        "ARB-USD",
+        "ARKM-USD",
+        "ARPA-USD",
+        "ARX-USD",
+        "ASM-USD",
+        "AST-USD",
+        "ASTER-USD",
+        "ATH-USD",
+        "ATOM-USD",
+        "AUCTION-USD",
+        "AUDIO-USD",
+        "AURORA-USD",
+        "AVAX-USD",
+        "AVNT-USD",
+        "AVT-USD",
+        "AWE-USD",
+        "AXL-USD",
+        "AXS-USD",
+        "AZTEC-USD",
+        "B3-USD",
+        "BAL-USD",
+        "BARD-USD",
+        "BASECAT-USD",
+        "BASED1-USD",
+        "BAT-USD",
+        "BCH-USD",
+        "BEAM-USD",
+        "BERA-USD",
+        "BICO-USD",
+        "BIGTIME-USD",
+        "BILL-USD",
+        "BIO-USD",
+        "BIRB-USD",
+        "BLAST-USD",
+        "BLUECHIP-USD",
+        "BLUR-USD",
+        "BLZ-USD",
+        "BNB-USD",
+        "BNKR-USD",
+        "BOBBOB-USD",
+        "BONK-USD",
+        "BTC-USD",
+        "BTRST-USD",
+        "C98-USD",
+        "CAKE-USD",
+        "CAP-USD",
+        "CBETH-USD",
+        "CELR-USD",
+        "CFG-USD",
+        "CGLD-USD",
+        "CHIP-USD",
+        "CHZ-USD",
+        "CLANKER-USD",
+        "COMP-USD",
+        "COOKIE-USD",
+        "CORECHAIN-USD",
+        "COTI-USD",
+        "COW-USD",
+        "CP-USD",
+        "CRO-USD",
+        "CRV-USD",
+        "CT-USD",
+        "CTR-USD",
+        "CTSI-USD",
+        "CTX-USD",
+        "CVC-USD",
+        "CVX-USD",
+        "DASH-USD",
+        "DBR-USD",
+        "DEEP-USD",
+        "DEGEN-USD",
+        "DIA-USD",
+        "DIEM-USD",
+        "DIMO-USD",
+        "DOGE-USD",
+        "DOGINME-USD",
+        "DOOD-USD",
+        "DOT-USD",
+        "DRB-USD",
+        "DRIFT-USD",
+        "DRV-USD",
+        "EDGE-USD",
+        "EDGEX-USD",
+        "EGLD-USD",
+        "EIGEN-USD",
+        "ELA-USD",
+        "ENA-USD",
+        "ENS-USD",
+        "ESP-USD",
+        "ETC-USD",
+        "ETH-USD",
+        "ETHFI-USD",
+        "EUL-USD",
+        "FAI-USD",
+        "FARM-USD",
+        "FARTCOIN-USD",
+        "FET-USD",
+        "FIDA-USD",
+        "FIGHT-USD",
+        "FIL-USD",
+        "FLOCK-USD",
+        "FLOKI-USD",
+        "FLOW-USD",
+        "FLR-USD",
+        "FLUID-USD",
+        "FORT-USD",
+        "FORTH-USD",
+        "FUN1-USD",
+        "G-USD",
+        "GEOD-USD",
+        "GFI-USD",
+        "GHST-USD",
+        "GIGA-USD",
+        "GLM-USD",
+        "GMT-USD",
+        "GODS-USD",
+        "GRASS-USD",
+        "GROVE-USD",
+        "GRT-USD",
+        "GRVT-USD",
+        "GST-USD",
+        "GTC-USD",
+        "GWEI-USD",
+        "HBAR-USD",
+        "HFT-USD",
+        "HIGH-USD",
+        "HNT-USD",
+        "HOME-USD",
+        "HONEY-USD",
+        "HOPR-USD",
+        "HYPE-USD",
+        "ICNT-USD",
+        "ICP-USD",
+        "ILV-USD",
+        "IMU-USD",
+        "IMX-USD",
+        "INDEX-USD",
+        "INJ-USD",
+        "INV-USD",
+        "INX-USD",
+        "IO-USD",
+        "IRYS-USD",
+        "JASMY-USD",
+        "JITOSOL-USD",
+        "JTO-USD",
+        "JUPITER-USD",
+        "KAIO-USD",
+        "KAITO-USD",
+        "KARRAT-USD",
+        "KAT-USD",
+        "KAVA-USD",
+        "KERNEL-USD",
+        "KEYCAT-USD",
+        "KITE-USD",
+        "KMNO-USD",
+        "KNC-USD",
+        "KSM-USD",
+        "KTA-USD",
+        "L3-USD",
+        "LA-USD",
+        "LCX-USD",
+        "LDO-USD",
+        "LIGHTER-USD",
+        "LINEA-USD",
+        "LINK-USD",
+        "LPT-USD",
+        "LQTY-USD",
+        "LRDS-USD",
+        "LSETH-USD",
+        "LTC-USD",
+        "MAMO-USD",
+        "MANA-USD",
+        "MANTLE-USD",
+        "MASK-USD",
+        "MATH-USD",
+        "MDT-USD",
+        "ME-USD",
+        "MEGA-USD",
+        "MET-USD",
+        "METIS-USD",
+        "MEZO-USD",
+        "MINA-USD",
+        "MLN-USD",
+        "MNDE-USD",
+        "MOG-USD",
+        "MON-USD",
+        "MOODENG-USD",
+        "MORPHO-USD",
+        "MPLX-USD",
+        "NCT-USD",
+        "NEAR-USD",
+        "NEON-USD",
+        "NEX-USD",
+        "NKN-USD",
+        "NMR-USD",
+        "NOICE-USD",
+        "NOM-USD",
+        "O-USD",
+        "OCEAN-USD",
+        "OGN-USD",
+        "ONDO-USD",
+        "OP-USD",
+        "OPG-USD",
+        "OPN-USD",
+        "ORCA-USD",
+        "OSMO-USD",
+        "OXT-USD",
+        "PENDLE-USD",
+        "PENGU-USD",
+        "PEPE-USD",
+        "PERP-USD",
+        "PLU-USD",
+        "PLUME-USD",
+        "PNG-USD",
+        "PNUT-USD",
+        "POL-USD",
+        "POLS-USD",
+        "POND-USD",
+        "PONS-USD",
+        "POPCAT-USD",
+        "POWR-USD",
+        "PRCL-USD",
+        "PRIME-USD",
+        "PRL-USD",
+        "PRO-USD",
+        "PROMPT-USD",
+        "PROS-USD",
+        "PROVE-USD",
+        "PUMP-USD",
+        "PUNDIX-USD",
+        "PYTH-USD",
+        "QI-USD",
+        "QNT-USD",
+        "RAD-USD",
+        "RARE-USD",
+        "RARI-USD",
+        "RAVE-USD",
+        "RAY-USD",
+        "RE-USD",
+        "RECALL-USD",
+        "RED-USD",
+        "RENDER-USD",
+        "REZ-USD",
+        "RLC-USD",
+        "RLS-USD",
+        "ROBO-USD",
+        "ROSE-USD",
+        "RPL-USD",
+        "RSR-USD",
+        "S-USD",
+        "SAFE-USD",
+        "SAND-USD",
+        "SAPIEN-USD",
+        "SD-USD",
+        "SEI-USD",
+        "SENT-USD",
+        "SHDW-USD",
+        "SHIB-USD",
+        "SHPING-USD",
+        "SKL-USD",
+        "SKR-USD",
+        "SKY-USD",
+        "SNX-USD",
+        "SOL-USD",
+        "SPA-USD",
+        "SPELL-USD",
+        "SPK-USD",
+        "SPX-USD",
+        "SQD-USD",
+        "STG-USD",
+        "STRK-USD",
+        "STX-USD",
+        "SUI-USD",
+        "SUKU-USD",
+        "SUP-USD",
+        "SUPER-USD",
+        "SUSHI-USD",
+        "SWELL-USD",
+        "SWFTC-USD",
+        "SXT-USD",
+        "SYND-USD",
+        "SYRUP-USD",
+        "T-USD",
+        "TAO-USD",
+        "TIA-USD",
+        "TNSR-USD",
+        "TON-USD",
+        "TOSHI-USD",
+        "TOWNS-USD",
+        "TRAC-USD",
+        "TRB-USD",
+        "TREE-USD",
+        "TRIA-USD",
+        "TROLL-USD",
+        "TRUMP-USD",
+        "TRUST-USD",
+        "TURBO-USD",
+        "UMA-USD",
+        "UNI-USD",
+        "UP-USD",
+        "USELESS-USD",
+        "VARA-USD",
+        "VELO-USD",
+        "VET-USD",
+        "VIRTUAL-USD",
+        "VOXEL-USD",
+        "VTHO-USD",
+        "VVV-USD",
+        "W-USD",
+        "WAL-USD",
+        "WELL-USD",
+        "WHUF-USD",
+        "WIF-USD",
+        "WLD-USD",
+        "WLFI-USD",
+        "WMTX-USD",
+        "XAN-USD",
+        "XCN-USD",
+        "XLM-USD",
+        "XPL-USD",
+        "XRP-USD",
+        "XTZ-USD",
+        "XYO-USD",
+        "YFI-USD",
+        "ZAMA-USD",
+        "ZEC-USD",
+        "ZEN-USD",
+        "ZETA-USD",
+        "ZETACHAIN-USD",
+        "ZK-USD",
+        "ZKC-USD",
+        "ZKP-USD",
+        "ZORA-USD",
+        "ZRO-USD",
+        "ZRX-USD"
+      ],
+      "dropped": [
+        {
+          "productId": "00-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "881285.5162089843",
+          "range24h": "0.0726085465677412241976789706820791534344"
+        },
+        {
+          "productId": "ACS-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "970675.0485464",
+          "range24h": "0.0295969773299748110831234256926952141057"
+        },
+        {
+          "productId": "ACX-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "ALT-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "513020.3008",
+          "range24h": "0.0775862068965517241379310344827586206896"
+        },
+        {
+          "productId": "ANT-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "APR-USD",
+          "reason": "erratic-price",
+          "quoteVolume30d": "4871489.83248",
+          "range24h": "0.5159574468085106382978723404255319148936"
+        },
+        {
+          "productId": "ATA-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "BADGER-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "BAND-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "961387.6973184",
+          "range24h": "0.0445075757575757575757575757575757575757"
+        },
+        {
+          "productId": "BIT-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "BLEND-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "547572.88071",
+          "range24h": "0.0209267563527653213751868460388639760837"
+        },
+        {
+          "productId": "BNT-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "430832.8626767637",
+          "range24h": "0.0141843971631205673758865248226950354609"
+        },
+        {
+          "productId": "BOBA-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "910881.9968683968",
+          "range24h": "0.0240384615384615384615384615384615384615"
+        },
+        {
+          "productId": "BOND-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "BREV-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "613748.98375",
+          "range24h": "0.2022857142857142857142857142857142857142"
+        },
+        {
+          "productId": "BUSD-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "CHECK-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "616800.8916",
+          "range24h": "0.1288135593220338983050847457627118644067"
+        },
+        {
+          "productId": "CLV-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "COSMOSDYDX-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "785508.13752",
+          "range24h": "0.0589928057553956834532374100719424460431"
+        },
+        {
+          "productId": "COVAL-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "CRPT-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "DAI-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "DAR-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "DATA-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "363885.0748",
+          "range24h": "0.0466531440162271805273833671399594320486"
+        },
+        {
+          "productId": "DDX-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "DESO-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "DEXT-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "422012.0534",
+          "range24h": "0.0546511627906976744186046511627906976744"
+        },
+        {
+          "productId": "DNT-USD",
+          "reason": "erratic-price",
+          "quoteVolume30d": "2461697.7260238",
+          "range24h": "0.677506775067750677506775067750677506775"
+        },
+        {
+          "productId": "DOLO-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "532078.81012",
+          "range24h": "0.0363048166786484543493889288281811646297"
+        },
+        {
+          "productId": "DREP-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "DYP-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "ELSA-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "958931.45742",
+          "range24h": "0.0207638116425658138672599184278828327771"
+        },
+        {
+          "productId": "ENJ-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "EOS-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "ERA-USD",
+          "reason": "erratic-price",
+          "quoteVolume30d": "2329297.09848",
+          "range24h": "0.5429292929292929292929292929292929292929"
+        },
+        {
+          "productId": "ERN-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "EURC-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "FIS-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "FOX-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "717341.856537",
+          "range24h": "0.0368324125230202578268876611418047882136"
+        },
+        {
+          "productId": "FX-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "GAL-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "GALA-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "GNO-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "425474.392437",
+          "range24h": "0.0365257652405041584497985081025465146188"
+        },
+        {
+          "productId": "GUSD-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "GYEN-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "HYPER-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "425124.48303",
+          "range24h": "0.04219409282700421940928270042194092827"
+        },
+        {
+          "productId": "IDEX-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "IOTX-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "IP-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "JUP-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "KEEP-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "KRL-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "361250.319",
+          "range24h": "0.0205673758865248226950354609929078014184"
+        },
+        {
+          "productId": "LAYER-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "668337.383466",
+          "range24h": "0.0725923963438866074976818121605510663664"
+        },
+        {
+          "productId": "LIT-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "LMTS-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "731534.40096",
+          "range24h": "0.0963438735177865612648221343873517786561"
+        },
+        {
+          "productId": "LOKA-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "LOOM-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "LRC-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MAGIC-USD",
+          "reason": "erratic-price",
+          "quoteVolume30d": "20688135.0567312",
+          "range24h": "0.7632547067734256654403808699415710885089"
+        },
+        {
+          "productId": "MATIC-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MCO2-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MEDIA-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "META-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "598315.49543",
+          "range24h": "0.0710583514462464470824276876776458786156"
+        },
+        {
+          "productId": "MIR-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MKR-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MOBILE-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MONA-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MOVE-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MPL-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MSOL-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "718309.21448",
+          "range24h": "0.0123233757016581714949351571069101232337"
+        },
+        {
+          "productId": "MTL-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MULTI-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MUSD-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MUSE-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "MXC-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "NEST-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "NEWT-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "712417.899648",
+          "range24h": "0.0230125523012552301255230125523012552301"
+        },
+        {
+          "productId": "NU-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "OMG-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "OMNI-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "OOKI-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "ORN-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "PAX-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "172662.690554",
+          "range24h": "0.0075015003000600120024004800960192038407"
+        },
+        {
+          "productId": "PAXG-USD",
+          "reason": "flat-price",
+          "quoteVolume30d": "46338074.5255176",
+          "range24h": "0.0018652790266113141129880813452966271928"
+        },
+        {
+          "productId": "PIRATE-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "PLA-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "POLY-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "PRQ-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "PYR-USD",
+          "reason": "erratic-price",
+          "quoteVolume30d": "7129021.649552",
+          "range24h": "0.6023083264633140972794723825226710634789"
+        },
+        {
+          "productId": "PYUSD-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "QSP-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "QUICK-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "RAI-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "RBN-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "REN-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "REP-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "REQ-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "787396.1617",
+          "range24h": "0.0585009140767824497257769652650822669104"
+        },
+        {
+          "productId": "RGT-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "RLY-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "RNBW-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "386697.275256",
+          "range24h": "0.0249140893470790378006872852233676975945"
+        },
+        {
+          "productId": "RNDR-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "RONIN-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "RSC-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "936256.3766325",
+          "range24h": "0.0162890844411158958996442613742744804343"
+        },
+        {
+          "productId": "SEAM-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "SIGN-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "633865.592079",
+          "range24h": "0.0456051151683229335182189353670749557044"
+        },
+        {
+          "productId": "SNT-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "STORJ-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "SYLO-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "SYN-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "THQ-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "681351.131865",
+          "range24h": "0.050704225352112676056338028169014084507"
+        },
+        {
+          "productId": "TIME-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "TONE-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "TRIBE-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "TRU-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "TVK-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "UNFI-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "UPI-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "USD1-USD",
+          "reason": "flat-price",
+          "quoteVolume30d": "39745853.72064",
+          "range24h": "0.0004004004004004004004004004004004004004"
+        },
+        {
+          "productId": "USDS-USD",
+          "reason": "flat-price",
+          "quoteVolume30d": "17388968.640574",
+          "range24h": "0.0010002000400080016003200640128025605121"
+        },
+        {
+          "productId": "USDT-USD",
+          "reason": "flat-price",
+          "quoteVolume30d": "4943042478.7949184",
+          "range24h": "0.0002402306213965406790518898142216527866"
+        },
+        {
+          "productId": "UST-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "VGX-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "WAMPL-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "WAXL-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "320241.580741",
+          "range24h": "0.4954627949183303085299455535390199637023"
+        },
+        {
+          "productId": "WBTC-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "WCFG-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "WCT-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "546434.06067",
+          "range24h": "0.0661938534278959810874704491725768321513"
+        },
+        {
+          "productId": "WET-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "587324.82215",
+          "range24h": "0.0231404958677685950413223140495867768595"
+        },
+        {
+          "productId": "WLUNA-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        },
+        {
+          "productId": "WRON-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "826373.350824",
+          "range24h": "0.2523158359064843405381561535068372298191"
+        },
+        {
+          "productId": "YB-USD",
+          "reason": "negligible-volume",
+          "quoteVolume30d": "564080.820773",
+          "range24h": "0.1269649334945586457073760580411124546553"
+        },
+        {
+          "productId": "YFII-USD",
+          "reason": "no-30-day-stats",
+          "quoteVolume30d": null,
+          "range24h": null
+        }
+      ],
+      "readded": [
+        {
+          "productId": "AERGO-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1663850.588722",
+          "range24h": "0.0529060293318848451928299837045084193373"
+        },
+        {
+          "productId": "AGLD-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1753100.51995",
+          "range24h": "0.0416462518373346398824105830475257226849"
+        },
+        {
+          "productId": "AI-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1935421.1965",
+          "range24h": "0.0358851674641148325358851674641148325358"
+        },
+        {
+          "productId": "ARKM-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "2053139.3662466",
+          "range24h": "0.0383512003623735467310886305299713120942"
+        },
+        {
+          "productId": "ASM-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1578301.44414",
+          "range24h": "0.2554179566563467492260061919504643962848"
+        },
+        {
+          "productId": "AUCTION-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1374054.7209913",
+          "range24h": "0.0458588178734542346625357228706498223872"
+        },
+        {
+          "productId": "AWE-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1423785.932243",
+          "range24h": "0.068892581961021302311527421060583169663"
+        },
+        {
+          "productId": "BARD-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1871470.1736",
+          "range24h": "0.0217741935483870967741935483870967741935"
+        },
+        {
+          "productId": "BIGTIME-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1456463.91335",
+          "range24h": "0.0601390498261877172653534183082271147161"
+        },
+        {
+          "productId": "BLUR-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1185813.5551715",
+          "range24h": "0.0441834746432144926009795144557375322555"
+        },
+        {
+          "productId": "BTRST-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1535190.1416112",
+          "range24h": "0.0345513748191027496382054992764109985528"
+        },
+        {
+          "productId": "DEGEN-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1985375.069568",
+          "range24h": "0.012012012012012012012012012012012012012"
+        },
+        {
+          "productId": "DIEM-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1062272.58557",
+          "range24h": "0.0393377561900248785688899419500059234687"
+        },
+        {
+          "productId": "DOOD-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1181894.771154",
+          "range24h": "0.0227416298168035375868603916614024005053"
+        },
+        {
+          "productId": "ELA-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1078923.82416",
+          "range24h": "0.0659340659340659340659340659340659340659"
+        },
+        {
+          "productId": "FIDA-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1017622.452888",
+          "range24h": "0.0576775799349033122726402450698832088837"
+        },
+        {
+          "productId": "FIGHT-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1742573.74464",
+          "range24h": "0.0364583333333333333333333333333333333333"
+        },
+        {
+          "productId": "FUN1-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "2031266.474916",
+          "range24h": "0.0259924385633270321361058601134215500945"
+        },
+        {
+          "productId": "GODS-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1947368.4467342",
+          "range24h": "0.0551753635585970915312232677502138579982"
+        },
+        {
+          "productId": "GROVE-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1419882.2784",
+          "range24h": "0.0361111111111111111111111111111111111111"
+        },
+        {
+          "productId": "GST-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1792439.11372525",
+          "range24h": "0.0511627906976744186046511627906976744186"
+        },
+        {
+          "productId": "HOPR-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1680930.580989",
+          "range24h": "0.0933640199462984273110855389336401994629"
+        },
+        {
+          "productId": "ICNT-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1252320.3316",
+          "range24h": "0.0627530364372469635627530364372469635627"
+        },
+        {
+          "productId": "IMU-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1269631.356864",
+          "range24h": "0.0347734457323498419388830347734457323498"
+        },
+        {
+          "productId": "INDEX-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1636616.8312926",
+          "range24h": "0.0486446342369105087263275157816561455625"
+        },
+        {
+          "productId": "INX-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1386833.315766",
+          "range24h": "0.039203860072376357056694813027744270205"
+        },
+        {
+          "productId": "IRYS-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1204836.08576",
+          "range24h": "0.0220994475138121546961325966850828729281"
+        },
+        {
+          "productId": "KAVA-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1730646.10468",
+          "range24h": "0.0132352941176470588235294117647058823529"
+        },
+        {
+          "productId": "KNC-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1189382.116",
+          "range24h": "0.0224963715529753265602322206095791001451"
+        },
+        {
+          "productId": "LINEA-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1999162.0976379",
+          "range24h": "0.0519345804086995608727222433525811693924"
+        },
+        {
+          "productId": "LQTY-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1429133.069658",
+          "range24h": "0.0353753235547886108714408973252804141501"
+        },
+        {
+          "productId": "MATH-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1516957.504",
+          "range24h": "0.05078125"
+        },
+        {
+          "productId": "MEZO-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1910759.0043468",
+          "range24h": "0.0555081127241673783091374893253629376601"
+        },
+        {
+          "productId": "MLN-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1123556.1763859",
+          "range24h": "0.0350445958283587330570967062293700400309"
+        },
+        {
+          "productId": "NEX-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1959100.61364819",
+          "range24h": "0.0493827160493827160493827160493827160493"
+        },
+        {
+          "productId": "NOICE-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1134873.87587937",
+          "range24h": "0.1165523996082272282076395690499510284035"
+        },
+        {
+          "productId": "OCEAN-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1839940.92873",
+          "range24h": "0.0424366872005475701574264202600958247775"
+        },
+        {
+          "productId": "OPN-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1344255.449295",
+          "range24h": "0.0669856459330143540669856459330143540669"
+        },
+        {
+          "productId": "OSMO-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1115122.54158906",
+          "range24h": "0.047306363662317640677191880549290547292"
+        },
+        {
+          "productId": "PERP-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1532906.0878644",
+          "range24h": "0.0896226415094339622641509433962264150943"
+        },
+        {
+          "productId": "PLU-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "2174152.5668287",
+          "range24h": "0.0928855085145049471629534899374032442619"
+        },
+        {
+          "productId": "POLS-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1305036.413219",
+          "range24h": "0.3204930662557781201848998459167950693374"
+        },
+        {
+          "productId": "RECALL-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1229011.63363034",
+          "range24h": "0.0326091865769387109886635653312858497809"
+        },
+        {
+          "productId": "RPL-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1392142.58784",
+          "range24h": "0.0407232704402515723270440251572327044025"
+        },
+        {
+          "productId": "SAPIEN-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1541130.13038",
+          "range24h": "0.0224272533711852377572746628814762242725"
+        },
+        {
+          "productId": "SD-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1616802.345564",
+          "range24h": "0.0718232044198895027624309392265193370165"
+        },
+        {
+          "productId": "SHPING-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1945560.288158",
+          "range24h": "0.2619808306709265175718849840255591054313"
+        },
+        {
+          "productId": "SUKU-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1116023.353776",
+          "range24h": "0.0568390172350568390172350568390172350568"
+        },
+        {
+          "productId": "SUP-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1322653.566168",
+          "range24h": "0.0542699724517906336088154269972451790633"
+        },
+        {
+          "productId": "SYND-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1870705.64841048",
+          "range24h": "0.2073855658522886829542263409154731816905"
+        },
+        {
+          "productId": "TNSR-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1783824.8992584",
+          "range24h": "0.0448837830617152017098584023510553032327"
+        },
+        {
+          "productId": "VOXEL-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "2097707.74367298",
+          "range24h": "0.0623551228558182661103384330088085303662"
+        },
+        {
+          "productId": "WAL-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1836794.04304",
+          "range24h": "0.2260638297872340425531914893617021276595"
+        },
+        {
+          "productId": "WHUF-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1013290.48821",
+          "range24h": "0.2560275545350172215843857634902411021814"
+        },
+        {
+          "productId": "ZETACHAIN-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1782111.072951",
+          "range24h": "0.0338266384778012684989429175475687103594"
+        },
+        {
+          "productId": "ZKP-USD",
+          "reason": "readded-below-rank-cutoff",
+          "quoteVolume30d": "1190719.024263",
+          "range24h": "0.0385943530367661994718667479179362177534"
+        }
+      ]
+    },
+    {
+      "id": "revision-check",
+      "owner": "Brian",
+      "decidedAt": "2026-10-10T23:16:00.000Z",
+      "status": "dropped",
+      "openItemForHash": false,
+      "note": "Brian dropped P1 task 9, the 24h revision check, on 2026-10-10 18:16 CT. No re-download comparison is scheduled. This is not an open item for the hash."
+    }
+  ]
 }

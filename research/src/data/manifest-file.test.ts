@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { liftInProgressFreeze, sealFrozenSnapshot, type DataManifest } from "./manifest-file";
+import { liftCompletedFreeze, liftInProgressFreeze, sealFrozenSnapshot, type DataManifest } from "./manifest-file";
 
 test("sealing a snapshot keeps the root hash and records the owner freeze", () => {
   const manifest: DataManifest = {
@@ -68,4 +68,8 @@ test("an in-progress freeze can be lifted and a completed universe cannot", () =
   expect(sealed.snapshot?.reason.startsWith("Frozen by owner decision")).toBe(true);
   expect(sealed.snapshot?.reason.includes(superseded)).toBe(true);
   expect(() => liftInProgressFreeze(sealed, new Date("2026-10-11T01:00:00.000Z"))).toThrow("completed snapshot stays frozen");
+  const again = liftCompletedFreeze(sealed, new Date("2026-10-11T02:00:00.000Z"), "add names back");
+  expect(again.snapshot).toBeUndefined();
+  expect(again.snapshotLift?.supersededDataRootHash).toBe(superseded);
+  expect(again.snapshotLift?.priorSnapshotLift?.supersededDataRootHash).toBe(superseded);
 });

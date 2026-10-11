@@ -25,14 +25,22 @@ Public exchange endpoints only. `RESEARCH_DATA_DIR` overrides the data directory
 bun run research/src/cli.ts snapshot
 bun run research/src/cli.ts probe
 bun run research/src/cli.ts ticks
+bun run research/src/cli.ts stats-fetch
+bun run research/src/cli.ts stats-convert
+bun run research/src/cli.ts universe-cut
 bun run research/src/cli.ts download
 bun run research/src/cli.ts derive
 bun run research/src/cli.ts coverage
 bun run research/src/cli.ts seal-snapshot
 bun run research/src/cli.ts p1-report
+bun run research/src/cli.ts refresh-reports
 ```
 
-`download` resumes an in-progress manifest. A freeze that was applied before every USD product was stored is lifted and the reason is written to `snapshotLift`. A freeze with `universeComplete: true` stays frozen and download refuses to resume.
+Stamping reads `HEAD` only when `git status --porcelain` is empty. A dirty tree refuses the stamp.
+
+`stats-fetch` writes `reports/product-stats.json` (raw response bodies plus `fetchedAt`). It refuses to replace an existing file unless `RESEARCH_STATS_REFETCH=1`. This freeze does not re-fetch. `stats-convert` wraps the original bare array in that envelope without inventing wire bytes. `universe-cut` reads that file and writes `reports/owner-decision.json`.
+
+`download` resumes an in-progress manifest. A completed freeze stays frozen unless `RESEARCH_LIFT_COMPLETED_FREEZE=1`, which records the previous root on `snapshotLift` and keeps the earlier lift on `priorSnapshotLift`. The lift used for the 56-name add-back pins the window clock at `2026-10-11T12:00:00.000Z`.
 
 Public candle requests stay at or under Coinbase's sustained public limit of 10 requests per second per IP (`RESEARCH_REQUEST_INTERVAL_MS` defaults to 100). `RESEARCH_DOWNLOAD_CONCURRENCY` defaults to 10 so that many requests can be in flight without raising the start rate. Each request aborts after 20 seconds and retries. Remove `research/data/STOP` before resuming. The candle files under `research/data/candles/` have to still be on this machine; the manifest records their hashes and does not contain the bytes.
 
@@ -49,11 +57,12 @@ P1 task 9, the 24h revision check, was dropped by Brian on 2026-10-10 18:16 CT. 
 | `research/data/products/exchange-products.raw.json` | yes | Exact exchange `/products` response bytes |
 | `research/data/products/usd-spot.json` | yes | USD quote rows: status, base, quote, current `quote_increment`, listing date null |
 | `research/data/candles/<PAIR>/<YYYY-MM>.sqlite` | no | One file per pair-month. Empty bars are stored as empty |
-| `research/data/data-manifest.json` | yes | Per-file SHA-256, the root hash, and the freeze record |
+| `research/data/data-manifest.json` | yes | Per-file SHA-256, the candle root hash, the freeze record, and a pointer to the derived manifest |
+| `research/data/derived-manifest.json` | yes | Per-file SHA-256 and the root hash of the 1h, 4h, and daily files |
 | `research/data/derived/` | no | 1h, 4h, and daily bars derived from the stored candles |
-| `research/data/reports/` | yes | Delisted probe, tick flags, coverage, P1 report |
+| `research/data/reports/` | yes | Product stats, owner decision, delisted probe, tick flags, coverage, P1 report |
 
-Candle and derived files are gitignored. This snapshot's pair-month files were written under `research/data/candles/` on the download host and are not in git. `data-manifest.json` is the committed record of each path, byte size, and SHA-256. Recomputing the root hash requires those sqlite files.
+Candle and derived files are gitignored by `research/.gitignore`. The pair-month files live on the download host and are not in git. `data-manifest.json` records each candle path, byte size, and SHA-256. `derived-manifest.json` does the same for derived bars. The candle root hash does not include derived files. Recomputing either hash needs those files on disk.
 
 ## Root hash
 
