@@ -62,8 +62,15 @@ export interface OwnerDecision {
   choice: string;
   universeCut: {
     rule: string;
+    thresholds: {
+      negligibleQuoteVolume30d: string;
+      flatRange24hBelow: string;
+      erraticRange24hAbove: string;
+      planningRequestsPerSec: string;
+      rankDeadline: string;
+    };
     kept: number;
-    dropped: { productId: string; reason: string }[];
+    dropped: { productId: string; reason: string; quoteVolume30d: string | null; range24h: string | null }[];
   } | null;
 }
 

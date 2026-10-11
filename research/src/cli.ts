@@ -89,6 +89,13 @@ function repoDataDir(): string {
   return join(import.meta.dir, "..", "..");
 }
 
+function loadDroppedProductIds(): string[] {
+  const path = join(paths.reports, "owner-decision.json");
+  if (!existsSync(path)) return [];
+  const body = JSON.parse(readFileSync(path, "utf8")) as OwnerDecision;
+  return (body.universeCut?.dropped ?? []).map((row) => row.productId);
+}
+
 function loadProducts(): UsdSpotProduct[] {
   const body = JSON.parse(readFileSync(paths.usdSpot, "utf8")) as { products: UsdSpotProduct[] };
   return body.products;
@@ -170,8 +177,11 @@ async function download(): Promise<void> {
   const deadlineMs = process.env.RESEARCH_DOWNLOAD_DEADLINE_ISO
     ? Date.parse(process.env.RESEARCH_DOWNLOAD_DEADLINE_ISO)
     : undefined;
+  const dropped = new Set(loadDroppedProductIds());
+  const products = loadProducts().filter((product) => !dropped.has(product.productId));
+  for (const productId of dropped) rmSync(join(paths.candles, productId), { recursive: true, force: true });
   const summary = await downloadUsdSpot({
-    products: loadProducts(),
+    products,
     dataDir: paths.root,
     now: new Date(),
     stamp: stamp("P1"),
