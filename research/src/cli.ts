@@ -702,6 +702,7 @@ function writeGeometry(): void {
     ["exclusion-proposal.json", { ...artifact, ...roots, ...exclusion }],
     ["warmup-ledger.json", { ...artifact, ...roots, firstUniverseDate: scan.firstUniverseDate, rows: scan.warmupRows }],
     ["survivorship.json", { ...artifact, ...roots, ...survival }],
+    ["universe-membership.json", { ...artifact, ...roots, firstUniverseDate: scan.firstUniverseDate, members: scan.universeMembers }],
     ["overlap-check.json", { ...artifact, ...roots, ...scan.overlap }],
     ["geometry-scan.json", scanDoc],
     ["p3-handoff.json", handoff],

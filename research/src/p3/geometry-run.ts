@@ -269,6 +269,7 @@ export interface GeometryResult {
   passCountFlag: ReturnType<typeof passCountFlag>;
   passCounts: { date: string; legA: number; legB: number; legC: number; tier: number; combined: number }[];
   universeSize: { date: string; names: number }[];
+  universeMembers: { date: string; names: string[] }[];
   signalCounts: Record<string, { signals: number; oosSignals: number }>;
   projectedOos: { layout: string; n: Record<string, number> };
   d3: {
@@ -390,7 +391,8 @@ export function scanTwoPass(load: () => Iterable<PairFacts>, excluded: ReadonlyS
   });
   const { passCounts, members } = built;
   const tier = built.volumeTier;
-  const universeSize = dates.map((date) => ({ date, names: members.get(date)?.size ?? 0 }));
+  const universeMembers = dates.map((date) => ({ date, names: [...(members.get(date) ?? [])].sort() }));
+  const universeSize = universeMembers.map((row) => ({ date: row.date, names: row.names.length }));
   const memberOn = (productId: string, date: string) => {
     const prior = dates.filter((item) => item <= date).pop();
     if (!prior) return false;
@@ -458,6 +460,7 @@ export function scanTwoPass(load: () => Iterable<PairFacts>, excluded: ReadonlyS
     passCountFlag: passCountFlag(passCounts.map((row) => row.combined)),
     passCounts,
     universeSize,
+    universeMembers,
     signalCounts,
     projectedOos: { layout: "D3b", n: projected },
     d3: {
