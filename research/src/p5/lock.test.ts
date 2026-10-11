@@ -99,3 +99,35 @@ test("the registered capped run keeps its results hash", () => {
   expect(report.results.classB.base.oos.verdict).toBe("keep");
   expect(report.results.blocked.officialBase.hits.slotA).toBe(32);
 });
+
+test("the v3.1 registration is unapproved and cites the frozen bases", () => {
+  const path = join(reports, "p5-v31-registration.json");
+  expect(sha256(path)).toBe("2c8368559a838e8e8a71da678fe6480bbbba557f9ccf22af81d8b78f1644b91a");
+  expect(readFileSync(join(reports, "p5-v31-registration.sha256"), "utf8")).toBe(
+    "2c8368559a838e8e8a71da678fe6480bbbba557f9ccf22af81d8b78f1644b91a  research/data/reports/p5-v31-registration.json\n",
+  );
+  const doc = JSON.parse(readFileSync(path, "utf8")) as {
+    approved: boolean;
+    approval?: unknown;
+    baseRegistrationSha256: string;
+    amendmentSha256: string;
+    baseRegistrationEdited: boolean;
+    amendmentEdited: boolean;
+    geometrySha256: string;
+    breadth: { entryDays: number; pausedDays: number; flag: boolean };
+    momentumConditionDates: string[];
+    clusters: { monthCount: number; monthsAbove60: number; flag: boolean };
+    maxOpen: number | null;
+  };
+  expect(doc.approved).toBe(false);
+  expect("approval" in doc).toBe(false);
+  expect(doc.baseRegistrationSha256).toBe("49bc506092114e2dec3e3ec73faa1adad4afdf04b0941d4c7b01bd22cd2317f3");
+  expect(doc.amendmentSha256).toBe("e0948e26f2bbe2ec7c113d23db8b4dbb9daed70a9d2cef0e3f0a0c49f70d7760");
+  expect(doc.baseRegistrationEdited).toBe(false);
+  expect(doc.amendmentEdited).toBe(false);
+  expect(doc.geometrySha256).toBe(sha256(join(reports, "p5-v31-geometry.json")));
+  expect(doc.breadth).toEqual({ entryDays: 334, pausedDays: 222, flag: true });
+  expect(doc.momentumConditionDates).toEqual([]);
+  expect(doc.clusters).toEqual({ monthCount: 11, monthsAbove60: 1, flag: false });
+  expect(doc.maxOpen).toBeNull();
+});
