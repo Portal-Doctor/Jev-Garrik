@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const COMMANDS = ["geometry", "derive-new", "coverage", "p1-report", "ticks", "universe-cut", "download-daily"] as const;
+const COMMANDS = ["geometry", "derive-new", "coverage", "p1-report", "ticks", "universe-cut", "download-daily", "p5"] as const;
 
 test("artifact commands refuse an empty data dir and write nothing", () => {
   const cli = join(import.meta.dir, "..", "cli.ts");

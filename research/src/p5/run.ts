@@ -21,7 +21,8 @@ import {
   classBHeld,
   classBSelected,
 } from "../p3/design-rules";
-import { classBarInputs, groupFlagsOf, type ClassBarInputs, type GroupFlags } from "../p3/bar-access";
+import { classBarInputs, type ClassBarInputs, type GroupFlags } from "../p3/bar-access";
+import { registeredFlags } from "./flags";
 import { WINDOW_START } from "../p3/f5";
 import { loadPair, type PairFacts } from "../p3/geometry-run";
 import { btcVeto, type BtcDay } from "../p3/signals";
@@ -369,6 +370,8 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
     execution: { sBt: { baseBps: number; stressBps: number } };
     validation: { maxOfN: number; nCum: number; label: string };
     feeTier: { makerBps: number; takerBps: number };
+    overlap?: { priceGroupFailNames?: string[]; volumeGroupFailNames?: string[]; boundarySavesCloses?: string[] };
+    barAccess?: { names?: { productId: string; priceGroupPasses: boolean; volumeGroupPasses: boolean; boundarySaved: boolean }[] };
   };
   if (registration.execution.sBt.baseBps !== 5 || registration.execution.sBt.stressBps !== 10) {
     throw new Error("registered s_bt is not base 5 and stress 10");
@@ -388,6 +391,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
   };
   const isMember = memberFn(membership.members);
   const names = [...new Set(membership.members.flatMap((row) => row.names))].sort();
+  const flagBook = registeredFlags(registration, names);
   const ids = ["BTC-USD", ...names.filter((id) => id !== "BTC-USD")];
   const dailyDir = join(dataDir, "daily", "candles");
   const states = new Map<string, PairState>();
@@ -402,7 +406,8 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       veto = (date) => btcVeto(days.get(date));
     }
     if (!membership.members.some((row) => row.names.includes(id))) continue;
-    const flags = groupFlagsOf(pair.f5);
+    const flags = flagBook.byId.get(id);
+    if (!flags) continue;
     const inputs = classBarInputs(flags, pair.days, pair.listedDate ?? WINDOW_START);
     const atrOn = wilderAtr(inputs.ohlc.map((row) => row.high), inputs.ohlc.map((row) => row.low), inputs.ohlc.map((row) => row.close), 14);
     const atrByDate = new Map<string, number>();
@@ -655,6 +660,12 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       sensitivityTrials: N_CUM_SENSITIVITY,
       A: { dsrAt135: chosen.base.oos.dsrAt135, dsrAt154: chosen.base.oos.dsrAt154 },
       B: { dsrAt135: classBRow.base.oos.dsrAt135, dsrAt154: classBRow.base.oos.dsrAt154 },
+    },
+    registeredFlags: {
+      source: "p4-registration.json barAccess.names",
+      recomputed: false,
+      missing: flagBook.missing,
+      conflicts: flagBook.conflicts,
     },
     questions: [
       "The registration caps BTC-beta-weighted notional at $6,000 and does not define beta. The beta cap was not applied.",

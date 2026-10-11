@@ -584,6 +584,7 @@ function writeGeometry(): void {
 }
 
 function p5(): void {
+  requireFrozenWrites();
   const artifact = stamp("P5");
   const report = buildP5Report(artifact, realDataDir());
   writeJson(join(paths.reports, "p5-registered.json"), report);
