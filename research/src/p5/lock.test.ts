@@ -102,9 +102,9 @@ test("the registered capped run keeps its results hash", () => {
 
 test("the v3.1 registration is unapproved and cites the frozen bases", () => {
   const path = join(reports, "p5-v31-registration.json");
-  expect(sha256(path)).toBe("40f8120ef2b418b48d0e9f9788025aacc5469f29722cac4c21a674f2ffdf7c98");
+  expect(sha256(path)).toBe("f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d");
   expect(readFileSync(join(reports, "p5-v31-registration.sha256"), "utf8")).toBe(
-    "40f8120ef2b418b48d0e9f9788025aacc5469f29722cac4c21a674f2ffdf7c98  research/data/reports/p5-v31-registration.json\n",
+    "f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d  research/data/reports/p5-v31-registration.json\n",
   );
   const doc = JSON.parse(readFileSync(path, "utf8")) as {
     approved: boolean;
@@ -126,12 +126,12 @@ test("the v3.1 registration is unapproved and cites the frozen bases", () => {
     resultsPath: string;
     rulesBoundBy: { sha256: string };
     sources: { path: string; sha256: string }[];
-    resolvedDefaults: { id: number; status: string }[];
+    resolvedDefaults: { id: number; status: string; text: string }[];
   };
   expect(doc.approved).toBe(false);
   expect("approval" in doc).toBe(false);
   expect("questions" in doc).toBe(false);
-  expect(doc.supersedesSha256).toBe("02e2ee8fdf2410dd2a960c9c622ce1e3cd099f125977d791eebfd5538d1680da");
+  expect(doc.supersedesSha256).toBe("40f8120ef2b418b48d0e9f9788025aacc5469f29722cac4c21a674f2ffdf7c98");
   expect(doc.rulesBoundBy.sha256).toBe("4ace3c484a9a919f6d319b4582367e0b13b03d55d4b8cadd6f26cc08bf509c15");
   expect(doc.sources.map((row) => row.sha256)).toEqual([
     "7dbf08776ebd7a3e7601b4bd0506080e74ea4da43e82eec4005174ebd67e42d9",
@@ -142,6 +142,7 @@ test("the v3.1 registration is unapproved and cites the frozen bases", () => {
     "4ace3c484a9a919f6d319b4582367e0b13b03d55d4b8cadd6f26cc08bf509c15",
     "aa0276da30aa85dbb8618dcdaf2a88821fe4e554a9e0eb49ce897a4370abea67",
     "df6c139749c9592f4d231d998b069d63f8a768a3ffa129ccb2eca20cc214d616",
+    "3e465bc145b93d008b6f582f095034351374aa62de9009ee6439a586979fe512",
   ]);
   expect(doc.sources.every((row) => row.path.startsWith("research/data/registration-sources/"))).toBe(true);
   expect(doc.baseRegistrationSha256).toBe("49bc506092114e2dec3e3ec73faa1adad4afdf04b0941d4c7b01bd22cd2317f3");
@@ -149,7 +150,7 @@ test("the v3.1 registration is unapproved and cites the frozen bases", () => {
   expect(doc.baseRegistrationEdited).toBe(false);
   expect(doc.amendmentEdited).toBe(false);
   expect(doc.geometrySha256).toBe(sha256(join(reports, "p5-v31-geometry.json")));
-  expect(doc.geometrySha256).toBe("fbe6f6e3f2d13f5cedff25417ca027dda3eaac28cb5764e26ff751b6ab5355f9");
+  expect(doc.geometrySha256).toBe("f492f3634b665e9d0173b6ff35120f9f03eb953b94ca821d69df1c484873e5cf");
   expect(doc.breadth).toEqual({ entryDays: 334, pausedDays: 222, flag: true });
   expect(doc.breadthDecision).toMatchObject({ option: "c", blocksEntries: false, resizes: false });
   expect(doc.momentumConditionDates).toEqual([]);
@@ -161,4 +162,7 @@ test("the v3.1 registration is unapproved and cites the frozen bases", () => {
   expect(doc.resultsPath).toBe("research/data/reports/p5-v31-results.json");
   expect(doc.resolvedDefaults).toHaveLength(18);
   expect(doc.resolvedDefaults.filter((row) => row.status === "corrected").map((row) => row.id)).toEqual([1, 4, 6, 7, 9, 14, 15]);
+  expect(doc.resolvedDefaults.find((row) => row.id === 15)?.text).toBe(
+    "sigma = 1.5R until 20 forward trades, then frozen at the realized SD of net R over trades 1-20; Wald +/- ln 4, H0 +0.25R vs H1 0, report-only. Report both LLR paths (the frozen-realized path and the fixed 1.5R path).",
+  );
 });
