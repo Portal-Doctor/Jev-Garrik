@@ -1,0 +1,10 @@
+{
+  "commitSha": "e0d2129f10791c978d70a30cfad821d9d27c356c",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-11T03:04:17.965Z",
+  "phaseId": "P1",
+  "priorDerivedRootHash": "1e509c1bd5b760703b4f52cc53a1e0ccab512f3e75e5f5b9fe1c00e4e0eefe7b",
+  "derivedRootHash": "bd6dc35cc0b7212c0e4a95bfba6a6aafe1bb19dcdf3091196ce47953498a1eb5",
+  "newMonths": 1716,
+  "note": "New pair-months were derived. Existing derived files were not rewritten, so their embedded stamps stay in the new root."
+}
