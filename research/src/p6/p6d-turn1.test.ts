@@ -37,9 +37,10 @@ test("the live lease expires inside 3 minutes and a crash gap stays under 15 min
   let now = 50_000_000;
   const kv = memoryKv(() => now);
   expect(await tryAcquire(kv, "A", now + 1_800_000, now)).toBe(true);
+  const token = JSON.parse((await kv.get("p6:lease")) ?? "{}") as { token?: string };
   await noteLeaseSave(kv, now);
   now += 60_000;
-  expect(await renewLease(kv, now)).toBe(true);
+  expect(await renewLease(kv, now, token.token)).toBe(true);
   now += LEASE_TTL_MS - 1_000;
   expect(await kv.get("p6:lease")).not.toBeNull();
   now += 2_000;
@@ -227,7 +228,15 @@ test("a contiguous handover replays in order and a hole stays uncovered", () => 
       },
     ],
   });
-  host.feedBuffer = [trade(12, 89, 6, ts + 2), trade(11, 95, 5, ts + 1)];
+  host.socketOpenedMs = ts - 60_000;
+  host.socketHole = false;
+  host.feedBufferCapped = false;
+  host.feedCut = {
+    atMs: ts,
+    wallMs: ts,
+    trade: { productId: "ETH-USD", tradeId: "4", time: new Date(ts).toISOString(), price: 100, size: 1 },
+  };
+  host.feedBuffer = [trade(10, 100, 4, ts), trade(12, 89, 6, ts + 2), trade(11, 95, 5, ts + 1)];
   expect(replayHandover(host)).toBe(true);
   expect(host.book.positions).toHaveLength(0);
   expect(host.book.incidents.some((row) => row.includes("handover_micro"))).toBe(true);
@@ -256,8 +265,14 @@ test("a contiguous handover replays in order and a hole stays uncovered", () => 
   holed.feedBuffer = [trade(13, 80, 5, ts + 1)];
   const quiet = startPaperHost(["ETH-USD"], {});
   quiet.feedCursor = { l2: 10, tradeId: 4 };
+  quiet.socketOpenedMs = ts - 60_000;
+  quiet.feedCut = {
+    atMs: ts,
+    wallMs: ts,
+    trade: { productId: "ETH-USD", tradeId: "4", time: new Date(ts).toISOString(), price: 100, size: 1 },
+  };
   expect(feedFramesContiguous(quiet.feedCursor, [])).toBe(true);
-  expect(replayHandover(quiet)).toBe(true);
+  expect(replayHandover(quiet)).toBe(false);
   expect(feedFramesContiguous({ l2: null, tradeId: null }, [])).toBe(false);
   expect(feedFramesContiguous(holed.feedCursor, holed.feedBuffer)).toBe(false);
   expect(replayHandover(holed)).toBe(false);
@@ -343,12 +358,13 @@ test("persist writes the warmup key once and does not read it again", async () =
   let gets = 0;
   const get = kv.get.bind(kv);
   kv.get = async (key) => {
-    if (key === "p6:warmup") gets += 1;
+    if (key === "p6:warmup:ZZ-WARM") gets += 1;
     return get(key);
   };
   await persistRun(kv, host);
   await persistRun(kv, host);
   expect(gets).toBe(0);
-  expect(await kv.get("p6:warmup")).toContain("2026-10-01");
+  expect(await kv.get("p6:warmup:ZZ-WARM")).toContain("2026-10-01");
+  expect(await kv.get("p6:warmup")).toBeNull();
   expect(gets).toBe(1);
 });

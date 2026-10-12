@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import recorded from "./fixtures/coinbase-two-sockets.json";
 import { amendmentV61CiteBody, AMENDMENT_V61_SHA256 } from "./amendment-v61";
+import { amendmentV62ApprovalBody, amendmentV62Body } from "./amendment-v62";
 import { deriveForwardBook } from "./generate";
 import {
   bar15Key,
@@ -13,24 +14,33 @@ import {
   loadSplit,
   persistSplit,
   UPSTASH_LIMITS,
+  warmupKey,
 } from "./hot-store";
 import {
   FEED_BUFFER_MAX,
   FIFTEEN_RETAIN_DAYS,
   FOUR_KEEP,
   HOUR_KEEP,
+  contiguousTail,
   foldBars,
+  FOUR_HOUR_EMA_BARS,
   ingestSocketMessage,
   feedFramesContiguous,
+  logFoldMismatches,
+  markOrdersBeforeTape,
   replayHandover,
   resyncBooksFromRest,
+  REST_PACE_MS,
   rollSettled,
   SAVE_HEARTBEAT_MS,
+  seedFourHours,
   startPaperHost,
   acceptRestBar,
 } from "./paper-host";
+import { readFileSync } from "node:fs";
+import type { Book } from "./engine";
 import { decodeLease, HOT_KEY, LEASE_KEY, LEASE_META_KEY, memoryKv, renewLease, runInvocation, tryAcquire } from "./relay";
-import { hostHolder, persistRun } from "./vercel-live";
+import { hostHolder, LEASE_POLL_MS, persistRun } from "./vercel-live";
 
 test("a failed save keeps the lease, and a lost lease stops the holder", async () => {
   let now = 8_000_000;
@@ -80,7 +90,10 @@ test("a failed save keeps the lease, and a lost lease stops the holder", async (
   loser.stopped = true;
   const kept = JSON.parse((await stolen.get(HOT_KEY)) ?? "{}") as { realizedUsd?: number };
   expect(kept.realizedUsd).toBe(4);
-  expect(await renewLease(stolen, now)).toBe(true);
+  const before = decodeLease(await stolen.get(LEASE_KEY))?.savedAtMs;
+  expect(await renewLease(stolen, now, loser.leaseToken ?? undefined)).toBe(false);
+  expect(decodeLease(await stolen.get(LEASE_KEY))?.savedAtMs).toBe(before);
+  expect(await renewLease(stolen, now + 1, winner.leaseToken ?? undefined)).toBe(true);
   expect(decodeLease(await stolen.get(LEASE_KEY))?.holder).toBe("W");
 });
 
@@ -105,8 +118,11 @@ test("a failed final save still releases the lease", async () => {
     },
   });
   expect(result.action).toBe("handover");
+  expect(result.cause).toBe("uncovered");
   expect(await kv.get(LEASE_KEY)).toBeNull();
-  expect(decodeLease(await kv.get(LEASE_META_KEY))?.release).toBe("deadline");
+  const meta = decodeLease(await kv.get(LEASE_META_KEY));
+  expect(meta?.release).toBe("deadline");
+  expect(meta?.saveFailed).toBe(true);
   expect(await tryAcquire(kv, "W", 2_000_000, 1_800_000)).toBe(true);
 });
 
@@ -119,6 +135,8 @@ test("the overlap buffer is capped and a takeover rebuilds the book from REST", 
   }
   expect(host.feedBuffer.length).toBe(FEED_BUFFER_MAX);
   expect(host.feedBufferCapped).toBe(true);
+  expect(host.gaps.some((gap) => gap.cause === "uncovered ETH-USD")).toBe(true);
+  expect([...host.overflowByDay.values()]).toEqual([1]);
   expect(replayHandover(host)).toBe(false);
   expect(host.book.positions).toHaveLength(0);
 
@@ -276,10 +294,15 @@ test("a duplicate append is a no-op", async () => {
 test("a heartbeat write over 256 KB is an incident and is not stored", async () => {
   const kv = memoryKv();
   const host = startPaperHost(["ETH-USD"], {});
+  const start = Math.floor(Date.now() / 1000) - 900;
+  host.clock = () => Date.now();
+  host.fifteen.push({ productId: "ETH-USD", startSec: start, open: 1, high: 1, low: 1, close: 1, volume: 1 });
   host.book.incidents.push("x".repeat(HOT_MAX_BYTES));
-  await expect(persistRun(kv, host)).rejects.toThrow(/256 KB/);
+  await persistRun(kv, host);
   expect(host.book.incidents.some((row) => row.includes("exceeds 256 KB"))).toBe(true);
   expect(await kv.get(HOT_KEY)).toBeNull();
+  const stored = JSON.parse((await kv.get(bar15Key("ETH-USD", new Date(start * 1000).toISOString().slice(0, 10)))) ?? "[]") as { startSec: number }[];
+  expect(stored.some((bar) => bar.startSec === start)).toBe(true);
 });
 
 test("50 products stay inside the hot cap and Upstash's published request cap", () => {
@@ -349,4 +372,221 @@ test("the new wording approval cites bb0c02bd and does not edit f20ca24a", () =>
   expect(body.approvalOf).toBe("wording");
   expect(body.bindsToFileHash).toBe(false);
   expect(body.approvedBy).toBe("Brian");
+});
+
+test("the live host does not walk up to .git", () => {
+  const source = readFileSync(new URL("./paper-host.ts", import.meta.url), "utf8");
+  expect(source.includes("repoRoot")).toBe(false);
+  const pick = readFileSync(new URL("./select.ts", import.meta.url), "utf8");
+  expect(pick.includes("readForwardPick(root = repoRoot())")).toBe(false);
+  expect(LEASE_POLL_MS).toBe(500);
+  expect(LEASE_POLL_MS).toBeGreaterThan(REST_PACE_MS);
+  expect(LEASE_POLL_MS).toBeLessThan(1_000);
+});
+
+test("REST 1h candles seed 200 contiguous 4h bars and a short product is flagged", async () => {
+  const host = startPaperHost(["AAA-USD"], {});
+  host.products = ["AAA-USD", "BBB-USD"];
+  const end = Math.floor(Date.parse("2026-10-12T00:00:00.000Z") / 1000);
+  host.clock = () => end * 1000;
+  await seedFourHours(host, async (url) => {
+    const parsed = new URL(url);
+    const product = decodeURIComponent(parsed.pathname.split("/")[2] ?? "");
+    const start = Number(parsed.searchParams.get("start"));
+    const stop = Number(parsed.searchParams.get("end"));
+    const rows: number[][] = [];
+    const limit = product === "BBB-USD" ? start + 10 * 3_600 : stop;
+    for (let ts = Math.floor(start / 3_600) * 3_600; ts <= Math.min(stop, limit); ts += 3_600) {
+      rows.push([ts, 1, 2, 1.1, 1.5, 3]);
+    }
+    return { ok: true, status: 200, json: async () => rows };
+  });
+  const seeded = host.fourBars.get("AAA-USD") ?? [];
+  expect(seeded.length).toBeGreaterThanOrEqual(FOUR_HOUR_EMA_BARS);
+  expect(contiguousTail(seeded, 14_400).length).toBeGreaterThanOrEqual(FOUR_HOUR_EMA_BARS);
+  expect(host.fourSeedSrc.get("AAA-USD")).toBe("rest_1h");
+  expect(host.ema200.get("AAA-USD")).toBe("seeded");
+  expect(host.book.incidents.some((row) => row.startsWith("4h seed short BBB-USD"))).toBe(true);
+  expect(host.fourSeedSrc.get("BBB-USD")).toBe("rest_1h");
+});
+
+test("a 1h fold that differs from the 15m fold is logged and EMA200 stays seeded", () => {
+  const host = startPaperHost(["ETH-USD"], {});
+  logFoldMismatches(
+    host,
+    "ETH-USD",
+    [{ ts: 14_400, open: 1, high: 2, low: 1, close: 2, volume: 4 }],
+    [{ ts: 14_400, open: 1, high: 2, low: 1, close: 9, volume: 4 }],
+  );
+  expect(host.book.incidents.some((row) => row === "4h fold mismatch ETH-USD 14400")).toBe(true);
+  host.fourBars.set(
+    "ETH-USD",
+    Array.from({ length: 200 }, (_, index) => ({ ts: (index + 1) * 14_400, open: 1, high: 1, low: 1, close: 1, volume: 1 })),
+  );
+  host.fourSeedThrough.set("ETH-USD", 0);
+  host.ema200.set("ETH-USD", "seeded");
+  host.fifteen.push({ productId: "ETH-USD", startSec: 0, open: 1, high: 1, low: 1, close: 1, volume: 1 });
+  rollSettled(host, "ETH-USD", 86_400);
+  expect(host.ema200.get("ETH-USD")).toBe("live");
+});
+
+test("an order placed before the warm tape is indeterminate", () => {
+  const host = startPaperHost(["ETH-USD"], {});
+  const now = Date.parse("2026-10-12T12:00:00.000Z");
+  host.clock = () => now;
+  host.trades.push({ productId: "ETH-USD", tsSec: Math.floor(now / 1000) - 120, price: 1, size: 1 });
+  const working = (placedTs: number) =>
+    ({
+      order: { placedTs, pair: "ETH-USD", expireTs: now + 60_000 },
+      classId: "D",
+      status: "working",
+    }) as Book["working"][number];
+  host.book.working.push(working(now - 20 * 60_000), working(now - 60_000));
+  markOrdersBeforeTape(host);
+  expect(host.book.working[0]?.status).toBe("indeterminate");
+  expect(host.book.working[1]?.status).toBe("working");
+  expect(host.book.incidents).toContain("tape window indeterminate");
+});
+
+test("an ambiguous cut stays uncovered and a unique trade id is applied after the cut", () => {
+  const ts = Date.parse("2026-10-13T12:00:00.000Z");
+  const host = startPaperHost(["ETH-USD"], {});
+  host.clock = () => ts;
+  host.socketOpenedMs = ts - 60_000;
+  host.feedCut = {
+    atMs: ts,
+    wallMs: ts,
+    trade: { productId: "ETH-USD", tradeId: "4", time: new Date(ts).toISOString(), price: 1, size: 1 },
+  };
+  const trade = (id: string, at: number) => ({
+    sequence: 1,
+    events: [{ kind: "trade" as const, productId: "ETH-USD", price: 1, size: 1, time: new Date(at).toISOString(), side: "BUY", tradeId: id }],
+  });
+  host.feedBuffer = [trade("4", ts), trade("4", ts + 1)];
+  expect(replayHandover(host)).toBe(false);
+
+  const covered = startPaperHost(["ETH-USD"], {});
+  covered.clock = () => ts;
+  covered.socketOpenedMs = ts - 60_000;
+  covered.feedCut = {
+    atMs: ts,
+    wallMs: ts,
+    trade: { productId: "ETH-USD", tradeId: "4", time: new Date(ts).toISOString(), price: 1, size: 1 },
+  };
+  covered.feedBuffer = [trade("4", ts - 1_000), trade("9", ts + 1_000)];
+  expect(replayHandover(covered)).toBe(true);
+  expect(covered.overlapSeen).toBe(true);
+  expect(covered.trades.some((row) => row.tsSec === Math.floor((ts + 1_000) / 1000))).toBe(true);
+  expect(covered.trades.some((row) => row.tsSec === Math.floor((ts - 1_000) / 1000))).toBe(false);
+});
+
+test("50 products keep each warmup under 1 MB and a failed warmup still appends", async () => {
+  const ids = Array.from({ length: 50 }, (_, index) => `P${index}-USD`);
+  const host = startPaperHost(["BTC-USD"], {});
+  host.products = ids;
+  host.clock = () => Date.parse("2026-10-12T00:00:00.000Z");
+  for (const id of ids) {
+    host.warmup.set(
+      id,
+      Array.from({ length: 300 }, (_, index) => {
+        const ts = Date.parse("2025-01-01T00:00:00.000Z") / 1000 + index * 86_400;
+        return {
+          date: new Date(ts * 1000).toISOString().slice(0, 10),
+          ts,
+          open: 100 + index / 100,
+          high: 101.25,
+          low: 99.5,
+          close: 100.75,
+          volume: 12_345.67,
+          empty: false,
+        };
+      }),
+    );
+  }
+  const kv = memoryKv();
+  const start = Math.floor(host.clock() / 1000) - 900;
+  host.fifteen.push({ productId: ids[0]!, startSec: start, open: 1, high: 1, low: 1, close: 1, volume: 1 });
+  const set = kv.set.bind(kv);
+  kv.set = async (key, value, opts) => (key === warmupKey(ids[0]!) ? false : set(key, value, opts));
+  await persistSplit(kv, host);
+  expect(await kv.get(warmupKey(ids[0]!))).toBeNull();
+  expect(host.warmupStored).toBe(false);
+  for (const id of ids.slice(1)) {
+    const raw = await kv.get(warmupKey(id));
+    expect(raw).toBeTruthy();
+    expect(Buffer.byteLength(raw ?? "")).toBeLessThan(1_048_576);
+  }
+  const day = new Date(start * 1000).toISOString().slice(0, 10);
+  expect(JSON.parse((await kv.get(bar15Key(ids[0]!, day))) ?? "[]")).toHaveLength(1);
+  expect(hotBytes(host)).toBeLessThan(HOT_MAX_BYTES);
+});
+
+test("the reworded handover is a new wording record", () => {
+  const body = amendmentV62Body();
+  expect(body.amendmentV61Edited).toBe(false);
+  expect(body.amendmentV6Edited).toBe(false);
+  expect(body.amendmentV61Sha256.startsWith("bb0c02bd")).toBe(true);
+  expect(body.rule).toContain("trade_id");
+  expect(body.rule).toContain("never by socket sequence_num");
+  expect(body.rule).toContain("does not by itself change the covered result");
+  expect(body.live).toBe(true);
+  expect(body.featureFlag).toBe(false);
+  const approval = amendmentV62ApprovalBody();
+  expect(approval.approvedBy).toBe("Brian");
+  expect(approval.approvedAt).toBe("2026-10-12T22:23:00Z");
+  expect(approval.approvalOf).toBe("wording");
+  expect(approval.bindsToFileHash).toBe(false);
+  expect(approval.confirmedBy).toEqual(["Quant", "Trader"]);
+  expect(approval.amendmentV61Edited).toBe(false);
+});
+
+test("the next holder records a failed final save as an uncovered gap", async () => {
+  const kv = memoryKv(() => 1_800_000);
+  await runInvocation({
+    kv,
+    self: "K",
+    nowMs: 0,
+    deadlineMs: 1_800_000,
+    clock: () => 0,
+    holder: {
+      async warm() {},
+      async applyDueBars() {
+        return [];
+      },
+      releaseDeadline() {},
+      async sampleUntil() {},
+      async persist() {
+        throw new Error("kv set p6:hot failed");
+      },
+    },
+  });
+  const host = startPaperHost(["ZZ-SAVE"], {});
+  host.products = [];
+  host.shards = [];
+  host.openSockets = [];
+  host.clock = () => 1_800_000;
+  host.book.working.push({
+    order: { placedTs: 1_800_000, pair: "ZZ-SAVE", expireTs: 9_000_000 },
+    classId: "D",
+    status: "working",
+  } as Book["working"][number]);
+  const holder = hostHolder(host, kv);
+  await runInvocation({
+    kv,
+    self: "W",
+    nowMs: 1_800_000,
+    deadlineMs: 3_600_000,
+    clock: () => 1_800_000,
+    holder: {
+      warm: () => holder.warm(),
+      applyDueBars: () => holder.applyDueBars(),
+      releaseDeadline: () => holder.releaseDeadline(),
+      recordGap: (gap) => holder.recordGap(gap),
+      reload: () => holder.reload(),
+      persist: async () => {},
+    },
+  });
+  expect(host.book.incidents).toContain("save failed");
+  expect(host.gaps.some((gap) => gap.cause === "uncovered")).toBe(true);
+  expect(host.book.working[0]?.status).toBe("indeterminate");
 });

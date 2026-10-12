@@ -3,8 +3,9 @@
  * Redis is a Kv. This file does not choose a Marketplace vendor.
  */
 
-import { loadSplit, persistSplit } from "./hot-store";
-import { acceptRestBar, attachMemberCloses, catchUpHistory, driveHost, installPaperState, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
+import type { SourceDay } from "../p3/bar-access";
+import { loadSplit, persistSplit, warmupKey } from "./hot-store";
+import { acceptRestBar, attachMemberCloses, catchUpHistory, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
 import type { OhlcvBar } from "./rest-bars";
 import {
   commitBar,
@@ -21,6 +22,9 @@ import {
   type InvocationResult,
   type Kv,
 } from "./relay";
+
+/** Watcher lease poll. Slower than the REST pace, and still under the 1s writer-switch rule. */
+export const LEASE_POLL_MS = 500;
 
 /** Lease-checked hot write plus appends. The warmup key is not read on this path. */
 export async function persistRun(kv: Kv, host: PaperHost): Promise<void> {
@@ -56,16 +60,8 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
     async warm() {
       const saved = await loadSplit(kv, host);
       if (saved) installPaperState(host, saved);
-      if (!host.warmupStored && [...host.products].some((id) => (host.warmup.get(id)?.length ?? 0) === 0)) {
-        const warm = await kv.get(WARMUP_KEY);
-        if (warm) {
-          const rows = JSON.parse(warm) as [string, NonNullable<NonNullable<typeof saved>["warmup"]>[number][1]][];
-          for (const [id, days] of rows) {
-            if ((host.warmup.get(id)?.length ?? 0) === 0 && days.length > 0) host.warmup.set(id, days);
-          }
-          host.warmupStored = true;
-        }
-      }
+      await loadWarmup(kv, host);
+      markOrdersBeforeTape(host);
       rememberPersistedBars(host);
       if (host.restWarm && (host.warmup.size === 0 || [...host.products].some((id) => (host.hourWarm.get(id)?.length ?? 0) === 0 || (host.fourBars.get(id)?.length ?? 0) < 200))) {
         await warmSeriesFromRest(host);
@@ -77,6 +73,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       const saved = await loadSplit(kv, host);
       if (!saved) return;
       installPaperState(host, saved);
+      markOrdersBeforeTape(host);
       rememberPersistedBars(host);
       attachMemberCloses(host);
     },
@@ -102,6 +99,16 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       return persistRun(kv, host);
     },
     recordGap(gap) {
+      if (gap.cause === "save failed") {
+        host.gaps.push({ ...gap, cause: "uncovered" });
+        host.book.incidents.push("save failed");
+        for (const order of host.book.working) {
+          if (order.status !== "working") continue;
+          order.status = "indeterminate";
+          host.book.indeterminateByClass[order.classId] += 1;
+        }
+        return;
+      }
       host.gaps.push(gap);
     },
     async confirmHandover() {
@@ -120,7 +127,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
         },
         heartbeat: async () => {
           if (host.leaseToken) {
-            const renewed = await renewLease(kv, host.clock());
+            const renewed = await renewLease(kv, host.clock(), host.leaseToken ?? undefined);
             if (!renewed) {
               host.stopped = true;
               host.book.incidents.push("lease lost");
@@ -139,15 +146,43 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
     },
     watchUntil(untilMs: number) {
       host.bufferFeeds = true;
+      let lastPoll = 0;
       return driveHost(host, untilMs, {
         applyBars: false,
         stopWhen: async () => {
+          const now = host.clock();
+          if (lastPoll !== 0 && now - lastPoll < LEASE_POLL_MS) return false;
+          lastPoll = now;
           const lease = decodeLease(await kv.get(LEASE_KEY));
-          return !lease || lease.untilMs <= host.clock();
+          return !lease || lease.untilMs <= now;
         },
       });
     },
   };
+}
+
+async function loadWarmup(kv: Kv, host: PaperHost): Promise<void> {
+  const missing = [...new Set([...host.products, "BTC-USD"])].filter((id) => (host.warmup.get(id)?.length ?? 0) === 0);
+  if (missing.length === 0) return;
+  const values = await Promise.all(missing.map((id) => kv.get(warmupKey(id))));
+  missing.forEach((id, index) => {
+    const raw = values[index];
+    if (!raw) return;
+    const days = JSON.parse(raw) as SourceDay[];
+    if (days.length > 0) host.warmup.set(id, days);
+  });
+  const still = missing.filter((id) => (host.warmup.get(id)?.length ?? 0) === 0);
+  if (still.length > 0) {
+    const legacy = await kv.get(WARMUP_KEY);
+    if (legacy) {
+      const rows = JSON.parse(legacy) as [string, SourceDay[]][];
+      for (const [id, days] of rows) {
+        if (!still.includes(id) || days.length === 0) continue;
+        if ((host.warmup.get(id)?.length ?? 0) === 0) host.warmup.set(id, days);
+      }
+    }
+  }
+  if (missing.every((id) => (host.warmup.get(id)?.length ?? 0) > 0)) host.warmupStored = true;
 }
 
 export async function loadDashboard(kv: Kv): Promise<Dashboard> {

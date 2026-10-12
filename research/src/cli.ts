@@ -140,6 +140,8 @@ async function main(): Promise<void> {
     case "p6-stamp-amendment-v61":
     case "p6-stamp-amendment-v61-approval":
     case "p6-stamp-amendment-v61-cite":
+    case "p6-stamp-amendment-v62":
+    case "p6-stamp-amendment-v62-approval":
     case "p6-stamp-kelly-superseding":
     case "p6-stamp-forward-a":
     case "p6-stamp-wide-parity":

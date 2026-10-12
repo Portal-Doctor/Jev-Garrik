@@ -13,7 +13,7 @@ import {
   type PaperStateBody,
   retainDailyCloses,
 } from "./paper-host";
-import { HOT_KEY, LEASE_KEY, VALUE_MAX_BYTES, WARMUP_KEY, type Kv } from "./relay";
+import { HOT_KEY, LEASE_KEY, VALUE_MAX_BYTES, type Kv } from "./relay";
 
 /** Heartbeat payload cap. A larger write is an incident and is not sent. */
 export const HOT_MAX_BYTES = 256 * 1024;
@@ -65,6 +65,11 @@ export function tapeKey(productId: string, minute: number): string {
   return `p6:tape:${productId}:${minute}`;
 }
 
+/** One product's daily warmup. A single blob of every product exceeds the 1 MB value guard. */
+export function warmupKey(productId: string): string {
+  return `p6:warmup:${productId}`;
+}
+
 export function utcDay(startSec: number): string {
   return new Date(startSec * 1000).toISOString().slice(0, 10);
 }
@@ -101,6 +106,12 @@ interface HotBody {
   jevMeter: PaperStateBody["jevMeter"];
   emitted: string[];
   weeks: PaperStateBody["weeks"];
+  feedCut: PaperStateBody["feedCut"];
+  overflowByDay: [string, number][];
+  fourSeedSrc: [string, "research" | "rest_1h"][];
+  ema200: [string, "seeded" | "live"][];
+  fourSeedThrough: [string, number][];
+  overlapSeen: boolean;
 }
 
 export function captureHot(host: PaperHost): HotBody {
@@ -137,6 +148,12 @@ export function captureHot(host: PaperHost): HotBody {
     jevMeter: { ...host.jevMeter },
     emitted: [...host.emitted].slice(-80),
     weeks: [...host.weeks.entries()],
+    feedCut: host.feedCut,
+    overflowByDay: [...host.overflowByDay.entries()],
+    fourSeedSrc: [...host.fourSeedSrc.entries()],
+    ema200: [...host.ema200.entries()],
+    fourSeedThrough: [...host.fourSeedThrough.entries()],
+    overlapSeen: host.overlapSeen,
   };
 }
 
@@ -186,18 +203,48 @@ async function appendOwned(
   return "lost";
 }
 
-/** One heartbeat write of the small book, then appends for bars that are not stored yet. */
+function leaseLost(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("lease lost");
+}
+
+function writeIncident(host: PaperHost, error: unknown): void {
+  const message = error instanceof Error ? error.message : "failed";
+  host.book.incidents.push(message.startsWith("kv set") || message.includes("lease lost") ? message : `kv set ${message}`);
+}
+
+/** One heartbeat write of the small book, then appends for bars that are not stored yet. A failed hot or warmup write still appends. */
 export async function persistSplit(kv: Kv, host: PaperHost): Promise<void> {
   const json = JSON.stringify(captureHot(host));
   const bytes = Buffer.byteLength(json);
   if (bytes > HOT_MAX_BYTES) {
     host.book.incidents.push(`heartbeat write ${bytes} exceeds 256 KB`);
-    throw new Error("kv set p6:hot exceeds 256 KB");
+  } else {
+    try {
+      await writeOwned(kv, host, HOT_KEY, json);
+    } catch (error) {
+      if (leaseLost(error)) throw error;
+      writeIncident(host, error);
+    }
   }
-  await writeOwned(kv, host, HOT_KEY, json);
   if (!host.warmupStored && host.warmup.size > 0) {
-    await writeOwned(kv, host, WARMUP_KEY, JSON.stringify([...host.warmup.entries()]));
-    host.warmupStored = true;
+    let failed = false;
+    for (const [productId, days] of host.warmup) {
+      if (days.length === 0) continue;
+      const payload = JSON.stringify(days);
+      if (Buffer.byteLength(payload) > VALUE_MAX_BYTES) {
+        host.book.incidents.push(`kv value exceeds 1 MB warmup ${productId}`);
+        failed = true;
+        continue;
+      }
+      try {
+        await writeOwned(kv, host, warmupKey(productId), payload);
+      } catch (error) {
+        if (leaseLost(error)) throw error;
+        writeIncident(host, error);
+        failed = true;
+      }
+    }
+    if (!failed) host.warmupStored = true;
   }
   for (const bar of host.fifteen) {
     const mark = `${bar.productId}:${bar.startSec}`;

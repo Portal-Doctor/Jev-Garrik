@@ -145,7 +145,7 @@ export interface VolHour {
  * divided by one week. Top-decile realized-vol hours are the highest 10% by rv.
  * A no-go is a weekly forward-monitor flag on that week's Jev and D stats.
  */
-/** V6.1. Covered only when the gap is under 1s and the incoming feed proved contiguous. */
+/** Covered when the writer switch is under 1s and the incoming feed proved the reworded rule. */
 export function handoverCause(widthMs: number, feedOk: boolean): "handover_micro" | "uncovered" {
   if (widthMs < HANDOVER_MICRO_MS && feedOk) return "handover_micro";
   return "uncovered";

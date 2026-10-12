@@ -116,6 +116,8 @@ export interface Lease {
   token?: string;
   /** Last heartbeat or save. A crash gap starts here, not at lease expiry. */
   savedAtMs?: number;
+  /** The final book write failed. The next holder treats the handover as uncovered. */
+  saveFailed?: boolean;
 }
 
 export function encodeLease(lease: Lease): string {
@@ -132,6 +134,7 @@ export function decodeLease(raw: string | null): Lease | null {
     release: body.release ?? "none",
     ...(body.token ? { token: body.token } : {}),
     ...(body.savedAtMs != null ? { savedAtMs: body.savedAtMs } : {}),
+    ...(body.saveFailed ? { saveFailed: true } : {}),
   };
 }
 
@@ -270,10 +273,11 @@ export async function tryAcquire(kv: Kv, self: string, untilMs: number, nowMs = 
  * Extend the live key by one TTL and move the crash clock. This does not save the book.
  * A lost compare-and-swap means this process no longer holds the lease.
  */
-export async function renewLease(kv: Kv, nowMs: number): Promise<boolean> {
+export async function renewLease(kv: Kv, nowMs: number, token?: string): Promise<boolean> {
   const raw = await kv.get(LEASE_KEY);
   const current = decodeLease(raw);
   if (!current || current.release !== "none") return false;
+  if (current.token && current.token !== token) return false;
   const next = encodeLease({ ...current, savedAtMs: nowMs });
   const won = await kv.cas(LEASE_KEY, raw, next, { px: leasePx(current.untilMs, nowMs) });
   if (!won) return false;
@@ -295,7 +299,13 @@ export async function noteLeaseSave(kv: Kv, nowMs: number): Promise<void> {
  * Token-checked. A holder that does not own the lease does not overwrite it.
  * The live key is removed, so a released lease does not look held. The cause stays on the meta key.
  */
-export async function releaseLease(kv: Kv, self: string, release: "deadline" | "crash", nowMs: number): Promise<void> {
+export async function releaseLease(
+  kv: Kv,
+  self: string,
+  release: "deadline" | "crash",
+  nowMs: number,
+  opts?: { saveFailed?: boolean },
+): Promise<void> {
   const raw = await kv.get(LEASE_KEY);
   const current = decodeLease(raw);
   if (current && current.holder !== self) return;
@@ -305,6 +315,7 @@ export async function releaseLease(kv: Kv, self: string, release: "deadline" | "
     untilMs: nowMs,
     release,
     ...(current?.savedAtMs != null ? { savedAtMs: current.savedAtMs } : {}),
+    ...(opts?.saveFailed ? { saveFailed: true } : {}),
   });
   if (current) {
     const won = await kv.cas(LEASE_KEY, raw, next);
@@ -341,8 +352,8 @@ export async function runInvocation(opts: {
     /** Load p6:state after this instance owns the lease, before it records or saves. */
     reload?(): Promise<void>;
     /**
-     * Replay the overlap buffer. True only when sequence and trade ids are contiguous
-     * and every trade has an exchange timestamp.
+     * Replay the overlap buffer. True only when the incoming socket, the cut, and the
+     * buffer satisfy the reworded handover rule.
      */
     confirmHandover?(): Promise<boolean>;
   };
@@ -363,28 +374,49 @@ export async function runInvocation(opts: {
     for (const gap of staged) opts.holder.recordGap?.(gap);
     staged.length = 0;
   };
+  const writeFailure = (error: unknown) => {
+    const message = error instanceof Error ? error.message : "failed";
+    return message.includes("lease lost") || message.includes("kv set") || message.includes("256 KB") || message.includes("1 MB");
+  };
   // A failed book write is an incident. It must not skip the lease release or kill the holder.
   const persistBook = async () => {
     try {
       await opts.holder.persist?.();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "failed";
-      if (message.includes("lease lost") || message.includes("kv set") || message.includes("256 KB") || message.includes("1 MB")) return;
+      if (writeFailure(error)) return;
       throw error;
     }
+  };
+  // Retry a final save until the deadline minus 10s. A frozen injected clock tries once.
+  const persistFinal = async (): Promise<boolean> => {
+    const limit = opts.deadlineMs - 10_000;
+    for (;;) {
+      try {
+        await opts.holder.persist?.();
+        return true;
+      } catch (error) {
+        if (!writeFailure(error)) throw error;
+        const now = opts.clock ? opts.clock() : Date.now();
+        if (now >= limit) return false;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const after = opts.clock ? opts.clock() : Date.now();
+        if (after === now) return false;
+      }
+    }
+  };
+  const releaseFinal = async (at: number) => {
+    const saved = await persistFinal();
+    opts.holder.recordGap?.({ startMs: at, endMs: at, cause: saved ? "handover" : "save failed" });
+    opts.holder.releaseDeadline();
+    await releaseLease(opts.kv, opts.self, "deadline", at, saved ? undefined : { saveFailed: true });
+    return saved;
   };
   if (plan.action === "duplicate") {
     return { ...plan, applied: [], holder: lease0?.holder ?? null };
   }
   if (plan.action === "handover") {
-    opts.holder.recordGap?.({ startMs: nowMs, endMs: nowMs, cause: "handover" });
-    try {
-      await persistBook();
-    } finally {
-      opts.holder.releaseDeadline();
-      await releaseLease(opts.kv, opts.self, "deadline", nowMs);
-    }
-    return { ...plan, applied: [], holder: null };
+    const saved = await releaseFinal(nowMs);
+    return { ...plan, applied: [], holder: null, cause: saved ? plan.cause : "uncovered" };
   }
   await opts.holder.warm();
   if (plan.action === "overlap") {
@@ -414,7 +446,7 @@ export async function runInvocation(opts: {
     stage({
       startMs: width === 0 ? nowMs : meta.untilMs,
       endMs: width === 0 ? nowMs : nowMs,
-      cause: width === 0 ? "handover" : missed ? "missed-cron" : "uncovered",
+      cause: meta.saveFailed ? "save failed" : width === 0 ? "handover" : missed ? "missed-cron" : "uncovered",
     });
   } else if (plan.feedGapMs > 0) {
     const start = lease?.untilMs ?? nowMs - plan.feedGapMs;
@@ -455,14 +487,8 @@ export async function runInvocation(opts: {
   }
   if (sampled) {
     const at = opts.deadlineMs - HANDOVER_MARGIN_MS;
-    opts.holder.recordGap?.({ startMs: at, endMs: at, cause: "handover" });
-    try {
-      await persistBook();
-    } finally {
-      opts.holder.releaseDeadline();
-      await releaseLease(opts.kv, opts.self, "deadline", at);
-    }
-    return { action: "handover", applied, socketGap: false, feedGapMs, cause: plan.cause ?? "handover", holder: null };
+    const saved = await releaseFinal(at);
+    return { action: "handover", applied, socketGap: false, feedGapMs, cause: saved ? (plan.cause ?? "handover") : "uncovered", holder: null };
   }
   await persistBook();
   await noteLeaseSave(opts.kv, nowMs);
@@ -641,64 +667,144 @@ const CAS_LUA = [
 ].join("\n");
 
 /**
- * Generic Redis over redis:// or rediss://. No Marketplace SDK. One connection per command.
+ * Generic Redis over redis:// or rediss://. No Marketplace SDK.
+ * One socket for the process. AUTH runs once per connection. A command timeout
+ * drops that socket; the next command connects and authenticates again.
  * Brian's deployment sets REDIS_URL. Tests use memoryKv.
  */
 export function redisKvFromUrl(url: string): Kv {
   const endpoint = assertRedisTransport(url);
-  const send = async (parts: string[]): Promise<string | null> => {
-    const net = await import("node:net");
-    const tls = endpoint.tls ? await import("node:tls") : null;
+  type Waiter = {
+    resolve: (reply: string | null) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+    done: boolean;
+  };
+  let socket: import("node:net").Socket | null = null;
+  let buf = "";
+  let authed = false;
+  let opening: Promise<void> | null = null;
+  const waiters: Waiter[] = [];
+
+  const failAll = (error: Error) => {
+    authed = false;
+    const dead = socket;
+    socket = null;
+    opening = null;
+    buf = "";
+    if (dead) {
+      dead.removeAllListeners();
+      dead.destroy();
+    }
+    const pending = waiters.splice(0, waiters.length);
+    for (const waiter of pending) {
+      if (waiter.done) continue;
+      waiter.done = true;
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    }
+  };
+
+  const pump = () => {
+    for (;;) {
+      if (waiters.length === 0) return;
+      const taken = takeReply(buf);
+      if (!taken) return;
+      buf = taken.rest;
+      const waiter = waiters.shift();
+      if (!waiter || waiter.done) continue;
+      waiter.done = true;
+      clearTimeout(waiter.timer);
+      waiter.resolve(taken.reply);
+      releaseIdle();
+    }
+  };
+
+  const writeCommand = (parts: string[]): Promise<string | null> => {
+    const current = socket;
+    if (!current) return Promise.reject(new Error("redis closed"));
     return new Promise((resolve, reject) => {
-      const socket = tls
-        ? tls.connect({
-            host: endpoint.host,
-            port: endpoint.port,
-            ...(net.isIP(endpoint.host) === 0 ? { servername: endpoint.host } : {}),
-          })
-        : net.connect({ host: endpoint.host, port: endpoint.port });
-      socket.setTimeout(endpoint.timeoutMs);
-      const pending: string[] = [];
-      let buf = "";
-      let settled = false;
-      const finish = (error: unknown, reply?: string | null) => {
-        if (settled) return;
-        settled = true;
-        socket.destroy();
-        if (error) reject(error instanceof Error ? error : new Error(String(error)));
-        else resolve(reply ?? null);
+      const waiter: Waiter = {
+        resolve,
+        reject,
+        done: false,
+        timer: setTimeout(() => {
+          if (waiter.done) return;
+          waiter.done = true;
+          failAll(new Error("redis timeout"));
+        }, endpoint.timeoutMs),
       };
-      socket.on("timeout", () => finish(new Error("redis timeout")));
-      socket.on("error", (error: Error) => finish(error));
-      socket.on("data", (chunk: Buffer) => {
-        buf += chunk.toString("utf8");
-        try {
-          for (;;) {
-            if (pending.length === 0) return;
-            const taken = takeReply(buf);
-            if (!taken) return;
-            buf = taken.rest;
-            const want = pending.shift();
-            if (want === "auth") continue;
-            finish(null, taken.reply);
-            return;
-          }
-        } catch (error) {
-          finish(error);
-        }
-      });
-      socket.on("connect", () => {
-        if (endpoint.username && endpoint.password) {
-          pending.push("auth");
-          socket.write(encodeCommand(["AUTH", endpoint.username, endpoint.password]));
-        } else if (endpoint.password) {
-          pending.push("auth");
-          socket.write(encodeCommand(["AUTH", endpoint.password]));
-        }
-        pending.push("cmd");
-        socket.write(encodeCommand(parts));
-      });
+      waiters.push(waiter);
+      current.ref();
+      current.write(encodeCommand(parts));
     });
+  };
+
+  const releaseIdle = () => {
+    if (waiters.length === 0) socket?.unref();
+  };
+
+  const connect = async () => {
+    const net = await import("node:net");
+    const tlsMod = endpoint.tls ? await import("node:tls") : null;
+    const sock = tlsMod
+      ? tlsMod.connect({
+          host: endpoint.host,
+          port: endpoint.port,
+          ...(net.isIP(endpoint.host) === 0 ? { servername: endpoint.host } : {}),
+        })
+      : net.connect({ host: endpoint.host, port: endpoint.port });
+    socket = sock;
+    sock.on("data", (chunk: Buffer) => {
+      if (socket !== sock) return;
+      buf += chunk.toString("utf8");
+      try {
+        pump();
+      } catch (error) {
+        failAll(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+    sock.on("error", (error: Error) => {
+      if (socket === sock) failAll(error);
+    });
+    sock.on("close", () => {
+      if (socket === sock) failAll(new Error("redis closed"));
+    });
+    await new Promise<void>((resolve, reject) => {
+      sock.once("connect", () => resolve());
+      sock.once("error", (error: Error) => reject(error));
+    });
+    const auth =
+      endpoint.username && endpoint.password
+        ? ["AUTH", endpoint.username, endpoint.password]
+        : endpoint.password
+          ? ["AUTH", endpoint.password]
+          : null;
+    if (auth) {
+      const reply = await writeCommand(auth);
+      if (reply !== "OK") throw new Error("redis auth failed");
+    }
+    authed = true;
+  };
+
+  const ensure = async () => {
+    if (socket && !socket.destroyed && authed) return;
+    if (!opening) {
+      opening = connect()
+        .catch((error: unknown) => {
+          failAll(error instanceof Error ? error : new Error(String(error)));
+          throw error;
+        })
+        .finally(() => {
+          opening = null;
+        });
+    }
+    await opening;
+  };
+
+  const send = async (parts: string[]): Promise<string | null> => {
+    await ensure();
+    return writeCommand(parts);
   };
   return {
     async get(key) {

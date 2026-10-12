@@ -9,7 +9,8 @@
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { dataFile } from "./live-data";
 import { repoRoot } from "../manifest";
 import { addDays, cents, mondayWeeks, oneSided80, selectInSample, weeklyValues, weekKey, WEEKS_PER_MONTH } from "../p5/stats";
 
@@ -207,7 +208,14 @@ export function startDateReport(goLive: string, root = repoRoot()): Record<strin
   };
 }
 
-export function readForwardPick(root = repoRoot()): APick {
+/** Repo root of the forward-pick file. Does not walk up looking for .git. */
+function pickRoot(): string {
+  const file = dataFile("reports", FORWARD_PICK_FILE);
+  if (!file) throw new Error("forward pick unavailable");
+  return dirname(dirname(dirname(dirname(file))));
+}
+
+export function readForwardPick(root = pickRoot()): APick {
   const path = join(root, "research/data/reports", FORWARD_PICK_FILE);
   const bytes = readFileSync(path);
   const sidecar = readFileSync(path.replace(/\.json$/, ".sha256"), "utf8").trim().split(/\s+/)[0] ?? "";

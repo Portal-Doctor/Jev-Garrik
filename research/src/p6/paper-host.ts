@@ -13,7 +13,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, write
 import { join } from "node:path";
 import type { GroupFlags, SourceDay } from "../p3/bar-access";
 import type { ClassBRow } from "../p3/design-rules";
-import { repoRoot } from "../manifest";
+import { dataFile } from "./live-data";
 import { registeredFlags, type RegistrationFlagSource } from "../p5/flags";
 import { isDayCloseBar } from "../p5/book";
 import { assertSafeToStart } from "../safety";
@@ -204,6 +204,36 @@ export interface PaperHost {
   stopped: boolean;
   /** ws after a live snapshot. rest_snapshot after a takeover rebuild, until the socket snapshots. */
   l2BookSrc: Map<string, "ws" | "rest_snapshot">;
+  /** Buffer overflows per UTC day. One increment when the cap is first hit. */
+  overflowByDay: Map<string, number>;
+  /** research when the candle store had 200 contiguous 4h bars. rest_1h when folded from REST 1h candles. */
+  fourSeedSrc: Map<string, "research" | "rest_1h">;
+  /** seeded until 200 4h bars have been built live. Nothing is gated on this. */
+  ema200: Map<string, "seeded" | "live">;
+  /** Newest seeded 4h timestamp. A later bar with a greater ts counts as live. */
+  fourSeedThrough: Map<string, number>;
+  /** The incoming socket saw a sequence_num hole. A reconnect while buffering counts. */
+  socketHole: boolean;
+  /** When this instance's socket opened. Coverage is measured on this socket alone. */
+  socketOpenedMs: number | null;
+  /** Last trade the writer applied. The next holder cuts the incoming stream here. */
+  feedCut: FeedCut | null;
+  /** True when a buffered event is timestamped before feedCut.atMs. It does not change coverage. */
+  overlapSeen: boolean;
+}
+
+export interface FeedCutTrade {
+  productId: string;
+  tradeId: string | null;
+  time: string | null;
+  price: number;
+  size: number;
+}
+
+export interface FeedCut {
+  atMs: number;
+  wallMs: number;
+  trade: FeedCutTrade | null;
 }
 
 export interface StatusPublisher {
@@ -246,8 +276,8 @@ export function historyOriginSec(days: readonly SourceDay[]): number | null {
 
 function loadTicks(): Map<string, number> {
   const ticks = new Map<string, number>();
-  const path = join(repoRoot(), "research/data/products/usd-spot.json");
-  if (!existsSync(path)) return ticks;
+  const path = dataFile("products", "usd-spot.json");
+  if (!path) return ticks;
   const body = JSON.parse(readFileSync(path, "utf8")) as { products?: { productId?: string; tickSize?: string | null }[] };
   for (const product of body.products ?? []) {
     const tick = Number(product.tickSize);
@@ -257,10 +287,9 @@ function loadTicks(): Map<string, number> {
 }
 
 function loadContext(): HostContext | null {
-  const root = repoRoot();
-  const registrationPath = join(root, "research/data/reports/p4-registration.json");
-  const membershipPath = join(root, "research/data/reports/universe-membership.json");
-  if (!existsSync(registrationPath) || !existsSync(membershipPath)) return null;
+  const registrationPath = dataFile("reports", "p4-registration.json");
+  const membershipPath = dataFile("reports", "universe-membership.json");
+  if (!registrationPath || !membershipPath) return null;
   const registration = JSON.parse(readFileSync(registrationPath, "utf8")) as RegistrationFlagSource;
   const membership = JSON.parse(readFileSync(membershipPath, "utf8")) as { members: { date: string; names: string[] }[] };
   const ids = [...new Set(membership.members.flatMap((row) => row.names))];
@@ -306,10 +335,10 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     if (body.channel === "user" || body.channel === "orders" || body.channel === "full") throw new Error("refusing an order channel");
   }
   const context = loadContext();
-  const dailyDir = join(repoRoot(), "research/data/daily");
+  const dailyDir = dataFile("daily");
   const warmup = new Map<string, SourceDay[]>();
   const watched = [...new Set([...products, "BTC-USD"])];
-  if (!existsSync(join(dailyDir, "candles"))) {
+  if (!dailyDir || !existsSync(join(dailyDir, "candles"))) {
     // The book still starts. Entries that need daily ATR wait for a store.
   } else {
     for (const productId of watched) warmup.set(productId, readDailyHistory(dailyDir, productId));
@@ -329,7 +358,7 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
   });
   book.config.liveQuotes = true;
   if (!context) book.incidents.push("registration flags unavailable");
-  if (!existsSync(join(dailyDir, "candles"))) book.incidents.push("daily warmup unavailable");
+  if (!dailyDir || !existsSync(join(dailyDir, "candles"))) book.incidents.push("daily warmup unavailable");
   else {
     for (const productId of products) {
       if ((warmup.get(productId)?.length ?? 0) === 0) book.incidents.push(`daily warmup missing ${productId}`);
@@ -397,13 +426,21 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     leaseToken: null,
     stopped: false,
     l2BookSrc: new Map(),
+    overflowByDay: new Map(),
+    fourSeedSrc: new Map(),
+    ema200: new Map(),
+    fourSeedThrough: new Map(),
+    socketHole: false,
+    socketOpenedMs: null,
+    feedCut: null,
+    overlapSeen: false,
   };
 }
 
 function loadJevMeter(): JevMeter {
   try {
-    const path = join(repoRoot(), "research/data/reports/p6-jev-spend.json");
-    if (!existsSync(path)) return freshJevMeter();
+    const path = dataFile("reports", "p6-jev-spend.json");
+    if (!path) return freshJevMeter();
     const body = JSON.parse(readFileSync(path, "utf8")) as { costUsd?: number };
     return freshJevMeter(body.costUsd ?? 0);
   } catch {
@@ -506,6 +543,7 @@ export function armShard(host: PaperHost, shardIndex: number, nowMs: number): vo
   host.openedMs[shardIndex] = nowMs;
   host.lastHeartbeatMs[shardIndex] = null;
   host.gapOpen[shardIndex] = false;
+  if (host.socketOpenedMs == null) host.socketOpenedMs = nowMs;
 }
 
 /** Timer path. A shard that never heartbeats, or that misses another beat, reconnects. */
@@ -637,6 +675,19 @@ export function applyPublic(host: PaperHost, shardIndex: number, events: readonl
       const tradeId = event.tradeId != null ? Number(event.tradeId) : Number.NaN;
       if (Number.isInteger(tradeId)) host.feedCursor.tradeId = tradeId;
       host.trades.push({ productId: event.productId, tsSec: Math.floor(tsMs / 1000), price: event.price, size: event.size });
+      if (!host.bufferFeeds) {
+        host.feedCut = {
+          atMs: tsMs,
+          wallMs: nowMs,
+          trade: {
+            productId: event.productId,
+            tradeId: event.tradeId ?? null,
+            time: event.time ?? null,
+            price: event.price,
+            size: event.size,
+          },
+        };
+      }
       if (event.side === "BUY" || event.side === "SELL" || opts?.handoverMicro) {
         applyForward(host.book, {
           kind: "trade",
@@ -793,6 +844,11 @@ export function rollSettled(host: PaperHost, productId: string, nowSec: number):
   if (!derived) return;
   host.hourWarm.set(productId, mergeRolled(host.hourWarm.get(productId) ?? [], derived.hour, HOUR_KEEP));
   host.fourBars.set(productId, mergeRolled(host.fourBars.get(productId) ?? [], derived.four, FOUR_KEEP));
+  const through = host.fourSeedThrough.get(productId);
+  if (through != null) {
+    const live = (host.fourBars.get(productId) ?? []).filter((bar) => bar.ts > through).length;
+    host.ema200.set(productId, live >= FOUR_HOUR_EMA_BARS ? "live" : "seeded");
+  }
   const daily = derived.days
     .filter((row) => !row.empty && row.close > 0)
     .map((row) => ({ ts: row.ts, open: row.open, high: row.high, low: row.low, close: row.close, volume: row.volume }));
@@ -807,8 +863,8 @@ export function rollSettled(host: PaperHost, productId: string, nowSec: number):
 
 function ensureHourWarm(host: PaperHost, productId: string): void {
   if (host.hourWarm.has(productId)) return;
-  const dir = join(repoRoot(), "research/data/candles", productId);
-  if (!existsSync(dir)) {
+  const dir = dataFile("candles", productId);
+  if (!dir) {
     host.hourWarm.set(productId, []);
     return;
   }
@@ -1305,6 +1361,12 @@ export interface PaperStateBody {
   fourBars?: [string, BarOHLC[]][];
   feedCursor?: FeedCursor;
   jevMeter?: JevMeter;
+  feedCut?: FeedCut | null;
+  overflowByDay?: [string, number][];
+  fourSeedSrc?: [string, "research" | "rest_1h"][];
+  ema200?: [string, "seeded" | "live"][];
+  fourSeedThrough?: [string, number][];
+  overlapSeen?: boolean;
 }
 
 /** Persistence for the book and the last processed bar. The driver does not choose the store. */
@@ -1427,6 +1489,12 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     fourBars: [...host.fourBars.entries()],
     feedCursor: { ...host.feedCursor },
     jevMeter: { ...host.jevMeter },
+    feedCut: host.feedCut ? { ...host.feedCut, trade: host.feedCut.trade ? { ...host.feedCut.trade } : null } : null,
+    overflowByDay: [...host.overflowByDay.entries()],
+    fourSeedSrc: [...host.fourSeedSrc.entries()],
+    ema200: [...host.ema200.entries()],
+    fourSeedThrough: [...host.fourSeedThrough.entries()],
+    overlapSeen: host.overlapSeen,
   };
 }
 
@@ -1479,6 +1547,12 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   if (body.gaps) host.gaps = body.gaps.map((gap) => ({ ...gap }));
   if (body.dSubmitted != null) host.book.submittedByClass.D = body.dSubmitted;
   if (body.dIndeterminate != null) host.book.indeterminateByClass.D = body.dIndeterminate;
+  if (body.feedCut !== undefined) host.feedCut = body.feedCut ? { ...body.feedCut, trade: body.feedCut.trade ? { ...body.feedCut.trade } : null } : null;
+  if (body.overflowByDay) host.overflowByDay = new Map(body.overflowByDay);
+  if (body.fourSeedSrc) host.fourSeedSrc = new Map(body.fourSeedSrc);
+  if (body.ema200) host.ema200 = new Map(body.ema200);
+  if (body.fourSeedThrough) host.fourSeedThrough = new Map(body.fourSeedThrough);
+  if (body.overlapSeen != null) host.overlapSeen = body.overlapSeen;
   if (body.appliedThrough) {
     for (const productId of host.products) {
       const resumed = resumeRestCursor(host.restCursor.get(productId), host.appliedThrough.get(productId));
@@ -1575,15 +1649,36 @@ function envelopeSequence(raw: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function noteBufferSequence(host: PaperHost, shardIndex: number, sequence: number): void {
+  const key = `buf:${shardIndex}`;
+  const last = host.lastL2Seq.get(key) ?? null;
+  if (!l2SequenceOk(last, sequence)) host.socketHole = true;
+  host.lastL2Seq.set(key, sequence);
+}
+
+function noteOverflow(host: PaperHost, shardIndex: number, nowMs: number): void {
+  if (host.feedBufferCapped) return;
+  host.feedBufferCapped = true;
+  const day = new Date(nowMs).toISOString().slice(0, 10);
+  const count = (host.overflowByDay.get(day) ?? 0) + 1;
+  host.overflowByDay.set(day, count);
+  host.book.incidents.push(`buffer overflow ${day} ${count}`);
+  for (const productId of host.shards[shardIndex] ?? []) {
+    host.gaps.push({ startMs: nowMs, endMs: nowMs, cause: `uncovered ${productId}` });
+  }
+}
+
 /** One socket frame. The envelope sequence covers every channel, then the book updates. */
 export function ingestSocketMessage(host: PaperHost, shardIndex: number, raw: unknown, nowMs: number): void {
   if (host.bufferFeeds) {
+    if (host.socketOpenedMs == null) host.socketOpenedMs = nowMs;
     const frame = { sequence: envelopeSequence(raw), events: parsePublicMessage(raw) };
     const nextBytes = Buffer.byteLength(JSON.stringify(frame));
     if (host.feedBuffer.length >= FEED_BUFFER_MAX || nextBytes > FEED_BUFFER_MAX_BYTES) {
-      host.feedBufferCapped = true;
+      noteOverflow(host, shardIndex, nowMs);
       return;
     }
+    if (frame.sequence != null) noteBufferSequence(host, shardIndex, frame.sequence);
     host.feedBuffer.push(frame);
     return;
   }
@@ -1621,17 +1716,40 @@ export function feedFramesContiguous(cursor: FeedCursor, frames: readonly FeedFr
   return true;
 }
 
-/** Replay a contiguous handover buffer in sequence order. Stops fill on the first trade through them. */
+function sameCut(cut: FeedCutTrade, event: { productId: string; tradeId?: string; time?: string; price: number; size: number }): boolean {
+  if (cut.productId !== event.productId) return false;
+  if (cut.tradeId && event.tradeId) return cut.tradeId === event.tradeId;
+  return cut.time === (event.time ?? null) && cut.price === event.price && cut.size === event.size;
+}
+
+/**
+ * Resume on the incoming stream at the first event after the outgoing writer's last trade.
+ * The cut is an exchange trade id, or exchange time plus price plus size. Sequence numbers are not compared.
+ * Zero matches or more than one match leaves the handover uncovered and applies nothing.
+ */
 export function replayHandover(host: PaperHost): boolean {
   const capped = host.feedBufferCapped;
+  const hole = host.socketHole;
   const frames = host.feedBuffer.splice(0, host.feedBuffer.length);
   host.bufferFeeds = false;
   host.feedBufferCapped = false;
-  if (capped || !feedFramesContiguous(host.feedCursor, frames)) return false;
-  const ordered = frames.slice().sort((a, b) => a.sequence! - b.sequence!);
-  for (const frame of ordered) {
-    if (frame.sequence != null) host.feedCursor.l2 = frame.sequence;
-    applyPublic(host, 0, frame.events, host.clock(), { handoverMicro: true });
+  const cut = host.feedCut;
+  if (capped || hole || cut?.wallMs == null || !cut.trade) return false;
+  if (host.socketOpenedMs == null || host.socketOpenedMs > cut.wallMs - 60_000) return false;
+  const flat: PublicEvent[] = [];
+  for (const frame of frames) flat.push(...frame.events);
+  const matches: number[] = [];
+  for (let index = 0; index < flat.length; index += 1) {
+    const event = flat[index]!;
+    if (event.kind !== "trade") continue;
+    const exchangeMs = event.time ? Date.parse(event.time) : Number.NaN;
+    if (Number.isFinite(exchangeMs) && exchangeMs < cut.atMs) host.overlapSeen = true;
+    if (sameCut(cut.trade, event)) matches.push(index);
+  }
+  if (matches.length !== 1) return false;
+  const cutAt = matches[0]!;
+  for (let index = cutAt + 1; index < flat.length; index += 1) {
+    applyPublic(host, 0, [flat[index]!], host.clock(), { handoverMicro: true });
   }
   return true;
 }
@@ -1657,6 +1775,7 @@ function openShard(host: PaperHost, shardIndex: number, url: string): WebSocket 
   const ws = new WebSocket(url);
   ws.addEventListener("open", () => {
     if (host.socketGen[shardIndex] !== gen) return;
+    if (host.bufferFeeds && host.socketOpenedMs != null) host.socketHole = true;
     host.lastL2Seq.delete(String(shardIndex));
     armShard(host, shardIndex, Date.now());
     for (const frame of framesForShard(host, shardIndex)) ws.send(frame);
@@ -1977,37 +2096,117 @@ export async function warmSeriesFromRest(
   await seedFourHours(host, fetchImpl);
 }
 
-/** 4h seed. Research 15m history is aggregated with the replay. REST falls back to 1h candles folded into UTC 4h bars. */
+/** Bars walking backward from the newest, each exactly `stepSec` after the previous. A hole ends the tail. */
+export function contiguousTail<T extends { ts: number }>(bars: readonly T[], stepSec: number): T[] {
+  if (bars.length === 0) return [];
+  const ordered = bars.slice().sort((a, b) => a.ts - b.ts);
+  const tail: T[] = [ordered[ordered.length - 1]!];
+  for (let index = ordered.length - 2; index >= 0; index -= 1) {
+    const prev = ordered[index]!;
+    if (tail[0]!.ts - prev.ts !== stepSec) break;
+    tail.unshift(prev);
+  }
+  return tail;
+}
+
+const FOUR_STEP_SEC = 14_400;
+const HOUR_SEC = 3_600;
+const REST_HOUR_PAGE = 300 * HOUR_SEC;
+const REST_HOUR_PAGES = 40;
+
+function sameOhlcv(left: BarOHLC, right: BarOHLC): boolean {
+  return left.open === right.open && left.high === right.high && left.low === right.low && left.close === right.close && left.volume === right.volume;
+}
+
+/** Log a 1h fold that does not match the 15m fold on an overlapping timestamp. */
+export function logFoldMismatches(host: PaperHost, productId: string, folded: readonly BarOHLC[], fromFifteen: readonly BarOHLC[]): void {
+  for (const bar of folded) {
+    const other = fromFifteen.find((row) => row.ts === bar.ts);
+    if (other && !sameOhlcv(other, bar)) host.book.incidents.push(`4h fold mismatch ${productId} ${bar.ts}`);
+  }
+}
+
+function rememberFourSeed(host: PaperHost, productId: string, bars: readonly BarOHLC[], src: "research" | "rest_1h"): void {
+  const kept = bars.slice(-FOUR_KEEP);
+  if (kept.length > 0) host.fourBars.set(productId, kept);
+  host.fourSeedSrc.set(productId, src);
+  host.ema200.set(productId, "seeded");
+  const newest = kept[kept.length - 1];
+  if (newest) host.fourSeedThrough.set(productId, newest.ts);
+}
+
+/** Orders placed before the restored tape, or before the 10-minute warm window when the tape is empty. */
+export function markOrdersBeforeTape(host: PaperHost): void {
+  const earliestTrade = host.trades.reduce((min, trade) => Math.min(min, trade.tsSec * 1000), Number.POSITIVE_INFINITY);
+  const earliest = Number.isFinite(earliestTrade) ? earliestTrade : host.clock() - 10 * 60_000;
+  for (const order of host.book.working) {
+    if (order.status !== "working") continue;
+    if (order.order.placedTs >= earliest) continue;
+    order.status = "indeterminate";
+    host.book.indeterminateByClass[order.classId] += 1;
+    host.book.incidents.push("tape window indeterminate");
+  }
+}
+
+/**
+ * 4h seed. Use the research store only when its contiguous tail has 200 bars.
+ * Otherwise page public REST 1h candles backward and fold them on UTC 4h boundaries.
+ * A product whose contiguous tail stays under 200 is flagged. Nothing is invented across a hole.
+ */
 export async function seedFourHours(
   host: PaperHost,
   fetchImpl: (url: string) => Promise<Pick<Response, "status" | "ok" | "json">> = fetch,
 ): Promise<void> {
   const nowSec = Math.floor(host.clock() / 1000);
   for (const productId of host.products) {
-    if ((host.fourBars.get(productId)?.length ?? 0) >= FOUR_HOUR_EMA_BARS) continue;
-    const fromStore = fourFromResearch(productId);
-    if (fromStore.length > 0) {
-      host.fourBars.set(productId, fromStore.slice(-FOUR_KEEP));
+    const existing = contiguousTail(host.fourBars.get(productId) ?? [], FOUR_STEP_SEC);
+    if (existing.length >= FOUR_HOUR_EMA_BARS) {
+      if (!host.ema200.has(productId)) host.ema200.set(productId, "seeded");
+      if (!host.fourSeedThrough.has(productId)) host.fourSeedThrough.set(productId, existing[existing.length - 1]!.ts);
       continue;
     }
-    const start = nowSec - FOUR_KEEP * 4 * 3_600;
+    const fromStore = fourFromResearch(productId);
+    const storeTail = contiguousTail(fromStore, FOUR_STEP_SEC);
+    if (storeTail.length >= FOUR_HOUR_EMA_BARS) {
+      rememberFourSeed(host, productId, storeTail, "research");
+      continue;
+    }
     const hours: BarOHLC[] = [];
+    let tail: BarOHLC[] = [];
+    let end = nowSec;
     try {
-      for (let cursor = start; cursor <= nowSec; cursor += 300 * 3_600) {
-        const spanEnd = Math.min(nowSec, cursor + 300 * 3_600 - 3_600);
-        const response = await fetchImpl(historyCandleUrl(productId, cursor, spanEnd, 3_600));
+      for (let page = 0; page < REST_HOUR_PAGES; page += 1) {
+        const start = end - REST_HOUR_PAGE;
+        const inclusiveEnd = page === 0 ? end : end - HOUR_SEC;
+        if (inclusiveEnd < start) break;
+        const response = await fetchImpl(historyCandleUrl(productId, start, inclusiveEnd, HOUR_SEC));
         if (!response.ok) {
           host.book.incidents.push(`4h seed rest ${productId} ${response.status}`);
           break;
         }
         const rows = (await response.json()) as number[][];
-        for (const bar of barsFromExchangeCandles(productId, Array.isArray(rows) ? rows : [])) {
+        const got = barsFromExchangeCandles(productId, Array.isArray(rows) ? rows : []);
+        if (got.length === 0) break;
+        for (const bar of got) {
           hours.push({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume });
         }
+        const folded = foldBars(hours, FOUR_STEP_SEC, HOUR_SEC);
+        const nextTail = contiguousTail(folded, FOUR_STEP_SEC);
+        if (nextTail.length >= FOUR_HOUR_EMA_BARS) {
+          tail = nextTail;
+          break;
+        }
+        if (page > 0 && nextTail.length === tail.length) {
+          tail = nextTail;
+          break;
+        }
+        tail = nextTail;
+        end = start;
       }
-      const folded = foldBars(hours, 14_400, 3_600).slice(-FOUR_KEEP);
-      if (folded.length > 0) host.fourBars.set(productId, folded);
-      host.book.incidents.push(`4h seed rest ${productId} ${folded.length}`);
+      logFoldMismatches(host, productId, foldBars(hours, FOUR_STEP_SEC, HOUR_SEC), fromStore);
+      rememberFourSeed(host, productId, tail, "rest_1h");
+      if (tail.length < FOUR_HOUR_EMA_BARS) host.book.incidents.push(`4h seed short ${productId} ${tail.length}`);
+      else host.book.incidents.push(`4h seed rest ${productId} ${tail.length} seed_src=rest_1h`);
     } catch (error) {
       host.book.incidents.push(`4h seed rest ${productId} ${error instanceof Error ? error.message : "failed"}`);
     }
@@ -2015,8 +2214,8 @@ export async function seedFourHours(
 }
 
 function fourFromResearch(productId: string): BarOHLC[] {
-  const dir = join(repoRoot(), "research/data/candles", productId);
-  if (!existsSync(dir)) return [];
+  const dir = dataFile("candles", productId);
+  if (!dir) return [];
   const months = readdirSync(dir).filter((name) => name.endsWith(".sqlite")).sort().slice(-2);
   const bars: FifteenBar[] = [];
   for (const month of months) {
