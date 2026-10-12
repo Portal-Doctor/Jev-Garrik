@@ -8,6 +8,7 @@ import {
   cronAuthorized,
   dashboard,
   encodeCommand,
+  HOT_KEY,
   LEASE_KEY,
   LEASE_META_KEY,
   markerBytesPerDay,
@@ -169,21 +170,16 @@ test("a bar key is idempotent and holds the book, orders, bars, weeks, rings, ta
   expect(marker).toBe(barMarker("ZZ-RELAY", 900));
   expect(marker).not.toContain("warmup");
   expect(await kv.get(WARMUP_KEY)).toBeNull();
-  const parsed = JSON.parse((await kv.get(STATE_KEY))!) as typeof body;
-  expect(parsed.fifteen).toHaveLength(1);
+  const parsed = JSON.parse((await kv.get(HOT_KEY))!) as typeof body;
+  expect(parsed.fifteen).toBeUndefined();
   expect(parsed.queued).toEqual([]);
   expect(parsed.weeks[0]?.[1][0]?.date).toBe("2026-10-12");
-  expect(parsed.rings).toHaveLength(1);
-  expect(parsed.tape).toHaveLength(1);
   expect(parsed.restCursor).toEqual([]);
   expect(parsed.jevPackets).toBe(4);
   expect(parsed.jevSkipped).toBe(1);
   expect(parsed.warmup).toBeUndefined();
   expect(parsed.memberCloses).toBeUndefined();
-  const next = startPaperHost(["ZZ-RELAY"], {});
-  await hostHolder(next, kv, []).warm();
-  expect(next.fifteen).toHaveLength(1);
-  expect(next.book.jevSkipped).toBe(1);
+  expect(await kv.get(STATE_KEY)).toBeNull();
 });
 
 test("the cron route rejects a missing secret and a second runner does not apply", async () => {
@@ -395,7 +391,7 @@ test("the book, member closes, gaps, and D counts survive a run that has no inje
   let stateWrites = 0;
   const set = kv.set.bind(kv);
   kv.set = async (key, value, opts) => {
-    if (key === "p6:state") stateWrites += 1;
+    if (key === "p6:hot") stateWrites += 1;
     return set(key, value, opts);
   };
   const flags = { priceGroupPasses: true, volumeGroupPasses: false, boundarySaved: false };
@@ -408,7 +404,7 @@ test("the book, member closes, gaps, and D counts survive a run that has no inje
   host.book.indeterminateByClass.D = 1;
   host.gaps.push({ startMs: 0, endMs: 16 * 60 * 1000, cause: "missed-cron" });
   await driveHost(host, 0, { persist: () => persistRun(kv, host) });
-  const saved = await kv.get("p6:state");
+  const saved = await kv.get("p6:hot");
   expect(saved).toBeTruthy();
   expect(saved).not.toContain("memberCloses");
   expect(stateWrites).toBe(1);
@@ -931,7 +927,7 @@ test("a successor reloads the outgoing book after the lease, so an A to D chain 
   await step("A", "B", T, "from-A", 11, 4);
   await step("B", "C", T + 15 * 60_000, "from-B", 21, 6);
   await step("C", "D", T + 30 * 60_000, "from-C", 31, 8);
-  const saved = JSON.parse((await kv.get(STATE_KEY)) ?? "{}") as {
+  const saved = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as {
     realizedUsd: number;
     dSubmitted: number;
     dIndeterminate: number;

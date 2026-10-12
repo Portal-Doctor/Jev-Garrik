@@ -86,3 +86,38 @@ export function amendmentV61ApprovalBody(): {
     amendmentV6Edited: false,
   };
 }
+
+/** Bytes of the stamped V6.1 record. The earlier approval file is not edited. */
+export const AMENDMENT_V61_SHA256 = "bb0c02bda3a8acab7f4f2127462b78b9e63792a88155c2ea08eba054e7bd0af1";
+export const AMENDMENT_V61_APPROVAL_SHA256 = "f20ca24a4935b5ae36b01bd6a9ceee5eba57c8434757aedda536725e19ac663d";
+
+/** A second wording-only approval. It cites the stamped amendment and leaves f20ca24a untouched. */
+export function amendmentV61CiteBody(): {
+  approvedBy: "Brian";
+  approvedAt: "2026-10-12T18:35:00Z";
+  confirmedBy: ["Quant", "Trader"];
+  approvalOf: "wording";
+  bindsToFileHash: false;
+  amendmentV61Sha256: string;
+  amendmentV61File: string;
+  priorApprovalSha256: string;
+  priorApprovalFile: string;
+  priorApprovalEdited: false;
+  amendmentV6Edited: false;
+  note: string;
+} {
+  return {
+    approvedBy: "Brian",
+    approvedAt: "2026-10-12T18:35:00Z",
+    confirmedBy: ["Quant", "Trader"],
+    approvalOf: "wording",
+    bindsToFileHash: false,
+    amendmentV61Sha256: AMENDMENT_V61_SHA256,
+    amendmentV61File: "research/data/reports/p6-amendment-v61.json",
+    priorApprovalSha256: AMENDMENT_V61_APPROVAL_SHA256,
+    priorApprovalFile: "research/data/reports/p6-amendment-v61-approval.json",
+    priorApprovalEdited: false,
+    amendmentV6Edited: false,
+    note: "Wording-only. Cites the stamped V6.1 record bb0c02bd. Does not edit the earlier approval f20ca24a, and does not bind the approval to a file hash.",
+  };
+}

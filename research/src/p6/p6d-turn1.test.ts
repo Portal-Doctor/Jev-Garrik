@@ -10,10 +10,8 @@ import {
   capturePaperState,
   DAILY_CLOSE_DAYS,
   feedFramesContiguous,
-  FIFTEEN_LOOKBACK_DAYS,
   FIFTEEN_RETAIN_DAYS,
-  FOUR_HOUR_BARS_PER_DAY,
-  FOUR_HOUR_EMA_BARS,
+  FOUR_KEEP,
   replayHandover,
   SAVE_HEARTBEAT_MS,
   startPaperHost,
@@ -86,26 +84,18 @@ test("the heartbeat saves state and renews the lease", async () => {
   host.rest.clear();
   host.clock = () => now;
   expect(await tryAcquire(kv, "h", now + 1_800_000, now)).toBe(true);
-  let writes = 0;
-  const set = kv.set.bind(kv);
-  kv.set = async (key, value, opts) => {
-    if (key === "p6:state") writes += 1;
-    return set(key, value, opts);
-  };
   const pending = hostHolder(host, kv).sampleUntil(now + SAVE_HEARTBEAT_MS + 1);
   await new Promise((resolve) => setTimeout(resolve, 300));
   now += SAVE_HEARTBEAT_MS + 1;
   await pending;
-  expect(writes).toBeGreaterThan(0);
+  expect(await kv.get("p6:hot")).toBeTruthy();
   const saved = JSON.parse((await kv.get("p6:lease")) ?? "{}") as { savedAtMs?: number };
   expect(saved.savedAtMs).toBe(now);
 });
 
-test("15m bars stay for the 4h EMA200 window and daily closes stay at 260", () => {
-  expect(FIFTEEN_LOOKBACK_DAYS).toBe(Math.ceil(FOUR_HOUR_EMA_BARS / FOUR_HOUR_BARS_PER_DAY));
-  expect(FIFTEEN_LOOKBACK_DAYS).toBe(34);
-  expect(FIFTEEN_RETAIN_DAYS).toBe(35);
-  expect(7).toBeLessThan(FIFTEEN_LOOKBACK_DAYS);
+test("15m bars stay for 8 days and daily closes stay at 260", () => {
+  expect(FIFTEEN_RETAIN_DAYS).toBe(8);
+  expect(FOUR_KEEP).toBeGreaterThanOrEqual(220);
   const nowSec = Math.floor(Date.parse("2026-10-12T12:00:00.000Z") / 1000);
   const host = startPaperHost(["ETH-USD"], {});
   host.clock = () => nowSec * 1000;
@@ -129,8 +119,8 @@ test("15m bars stay for the 4h EMA200 window and daily closes stay at 260", () =
   expect(host.dailyCloses.get("ETH-USD")).toHaveLength(DAILY_CLOSE_DAYS);
   expect(host.book.config.memberCloses?.[0]?.days).toHaveLength(DAILY_CLOSE_DAYS);
   expect(host.book.config.memberCloses?.[0]?.days[0]?.date).toBe(day(40));
-  const old = nowSec - 36 * 86_400;
-  const kept = nowSec - 10 * 86_400;
+  const old = nowSec - 9 * 86_400;
+  const kept = nowSec - 2 * 86_400;
   acceptRestBar(host, { productId: "ETH-USD", startSec: old, open: 1, high: 1, low: 1, close: 1, volume: 1 });
   acceptRestBar(host, { productId: "ETH-USD", startSec: kept, open: 1, high: 1, low: 1, close: 2, volume: 1 });
   expect(host.fifteen.some((bar) => bar.startSec === old)).toBe(false);
@@ -148,8 +138,8 @@ test("a failed state write is an incident", async () => {
   const kv = memoryKv();
   const host = startPaperHost(["ZZ-SET"], {});
   const set = kv.set.bind(kv);
-  kv.set = async (key, value, opts) => (key === "p6:state" ? false : set(key, value, opts));
-  await expect(saveState(kv, capturePaperState(host))).rejects.toThrow(/kv set p6:state failed/);
+  kv.set = async (key, value, opts) => (key === "p6:hot" ? false : set(key, value, opts));
+  await expect(saveState(kv, capturePaperState(host))).rejects.toThrow(/kv set p6:hot failed/);
   host.products = [];
   host.shards = [];
   host.openSockets = [];

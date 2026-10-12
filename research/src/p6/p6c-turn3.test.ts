@@ -19,7 +19,7 @@ import {
   warmSeriesFromRest,
   type RestSlot,
 } from "./paper-host";
-import { memoryKv, STATE_KEY } from "./relay";
+import { HOT_KEY, memoryKv } from "./relay";
 import { FORWARD_PICK_SHA256, paperWindow, readForwardPick, startDateReport } from "./select";
 import { hostHolder, persistRun } from "./vercel-live";
 import { equityState } from "./session";
@@ -115,11 +115,12 @@ test("an exchange day on the host rolls, recomputes, falls back, and reloads mid
   const kv = memoryKv();
   await persistRun(kv, host);
   const next = startPaperHost(["ETH-USD"], {});
+  next.clock = host.clock;
   await hostHolder(next, kv).warm();
   expect(next.book.day).toBe("2026-10-13");
   expect(next.book.realizedUsd).toBe(12);
   expect(next.fifteen.some((bar) => bar.startSec === open + 900)).toBe(true);
-  expect(JSON.parse((await kv.get(STATE_KEY)) ?? "{}").memberCloses).toBeUndefined();
+  expect(JSON.parse((await kv.get(HOT_KEY)) ?? "{}").memberCloses).toBeUndefined();
 });
 
 test("halts, the $900 and $8,000 backstops, the pair latch, the beta cap, and 10R/20R run on the host book", () => {

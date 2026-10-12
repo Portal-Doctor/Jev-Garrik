@@ -35,6 +35,7 @@ import {
   historyCandleUrl,
   planHistorySpans,
   productBookUrl,
+  productBookLevel2Url,
   restOrTrades,
   restSettleSchedule,
   tradesBuilt15m,
@@ -52,16 +53,20 @@ export const REST_PACE_MS = 200;
 /** Lower bound of the 60–120s save heartbeat. Crash gaps start at this save, not at the previous bar. */
 export const SAVE_HEARTBEAT_MS = 60_000;
 /**
- * Longest registered 15m-derived lookback is class D's 4h EMA200: 200 four-hour
- * bars, which is 34 days. The B weekly window is 7 days, 1h ATR14 is 14 hours,
- * and class E's 15m follow-through is 6 hours. Retention is the longest plus one day.
- * Daily EMA200, the 55-day lookback, and 60-day correlation read the daily series.
+ * 15m bars cover the B weekly window (7 days) plus one day. Class D's 4h EMA200
+ * is a rolled 4h series, not a longer 15m book. No other registered 15m lookback
+ * exceeds 7 days: 1h ATR14 is 14 hours and class E's follow-through is 6 hours.
  */
 export const FOUR_HOUR_EMA_BARS = 200;
 export const FOUR_HOUR_BARS_PER_DAY = 6;
-export const FIFTEEN_LOOKBACK_DAYS = Math.ceil(FOUR_HOUR_EMA_BARS / FOUR_HOUR_BARS_PER_DAY);
-export const FIFTEEN_RETAIN_DAYS = FIFTEEN_LOOKBACK_DAYS + 1;
+export const FIFTEEN_RETAIN_DAYS = 8;
+/** Capped rolled series. The minimums are Architect's: 4h 220, 1h 48, daily 260. */
+export const FOUR_KEEP = 220;
+export const HOUR_KEEP = 48;
 export const DAILY_CLOSE_DAYS = 260;
+/** Overlap buffer. A longer watch cannot prove a sub-second handover, so it stops here. */
+export const FEED_BUFFER_MAX = 32;
+export const FEED_BUFFER_MAX_BYTES = 256 * 1024;
 
 export interface DailyClose {
   date: string;
@@ -175,18 +180,30 @@ export interface PaperHost {
   quoteNotBefore: Map<string, number>;
   /** Sockets opened by an overlapping warmup. The lease holder reuses them. */
   openSockets?: WebSocket[];
-  /** Daily closes kept in p6:state. Clusters and betas read this, not the 15m bars. */
+  /** Daily closes. Clusters and betas read this, not the 15m bars. */
   dailyCloses: Map<string, DailyClose[]>;
+  /** Full daily bars rolled at 00:00 UTC. The close series is the date and close of these. */
+  dailyBars: Map<string, BarOHLC[]>;
+  /** 4h bars rolled from settled 15m bars, seeded from REST or research history. */
+  fourBars: Map<string, BarOHLC[]>;
   /** True after p6:warmup was loaded or written. Saves do not re-read that key. */
   warmupStored: boolean;
   /** Last level2 sequence and trade id, checked by the next holder. */
   feedCursor: FeedCursor;
   /** Messages received before this instance owns the lease. */
   feedBuffer: FeedFrame[];
+  /** Set when the overlap buffer hits its cap. The handover cannot be proved contiguous. */
+  feedBufferCapped: boolean;
   /** While true, socket messages are buffered instead of applied. */
   bufferFeeds: boolean;
   /** Cumulative and monthly Jev spend. Live calls are not made. */
   jevMeter: JevMeter;
+  /** Lease token this process acquired. A save without it does not claim the lease. */
+  leaseToken: string | null;
+  /** Set when the lease renew fails. The holder stops and does not write again. */
+  stopped: boolean;
+  /** ws after a live snapshot. rest_snapshot after a takeover rebuild, until the socket snapshots. */
+  l2BookSrc: Map<string, "ws" | "rest_snapshot">;
 }
 
 export interface StatusPublisher {
@@ -369,11 +386,17 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     quoteTried: new Set(),
     quoteNotBefore: new Map(),
     dailyCloses: new Map(),
+    dailyBars: new Map(),
+    fourBars: new Map(),
     warmupStored: false,
     feedCursor: { l2: null, tradeId: null },
     feedBuffer: [],
+    feedBufferCapped: false,
     bufferFeeds: false,
     jevMeter: loadJevMeter(),
+    leaseToken: null,
+    stopped: false,
+    l2BookSrc: new Map(),
   };
 }
 
@@ -388,18 +411,73 @@ function loadJevMeter(): JevMeter {
   }
 }
 
+export function mergeRolled<T extends { ts: number }>(existing: readonly T[], derived: readonly T[], keep: number): T[] {
+  const byTs = new Map<number, T>();
+  for (const bar of existing) byTs.set(bar.ts, bar);
+  for (const bar of derived) byTs.set(bar.ts, bar);
+  const merged = [...byTs.values()].sort((a, b) => a.ts - b.ts);
+  return merged.length > keep ? merged.slice(merged.length - keep) : merged;
+}
+
 function trimSeries(host: PaperHost): void {
   const nowSec = Math.floor(host.clock() / 1000);
   host.fifteen = retainFifteens(host.fifteen, nowSec);
   for (const [id, rows] of host.dailyCloses) host.dailyCloses.set(id, retainDailyCloses(rows));
+  for (const [id, rows] of host.dailyBars) host.dailyBars.set(id, rows.slice(-DAILY_CLOSE_DAYS));
+  for (const [id, rows] of host.fourBars) host.fourBars.set(id, rows.slice(-FOUR_KEEP));
+  for (const [id, rows] of host.hourWarm) host.hourWarm.set(id, rows.slice(-HOUR_KEEP));
 }
 
 function seedDailyCloses(host: PaperHost): void {
   for (const [productId, days] of host.warmup) {
+    const filled = days.filter((row) => !row.empty && row.close > 0);
+    if ((host.dailyBars.get(productId)?.length ?? 0) === 0 && filled.length > 0) {
+      host.dailyBars.set(
+        productId,
+        filled.slice(-DAILY_CLOSE_DAYS).map((row) => ({
+          ts: row.ts,
+          open: row.open,
+          high: row.high,
+          low: row.low,
+          close: row.close,
+          volume: row.volume,
+        })),
+      );
+    }
     if ((host.dailyCloses.get(productId)?.length ?? 0) > 0) continue;
-    const seeded = days.filter((row) => !row.empty && row.close > 0).map((row) => ({ date: row.date, close: row.close }));
+    const seeded = filled.map((row) => ({ date: row.date, close: row.close }));
     if (seeded.length > 0) host.dailyCloses.set(productId, retainDailyCloses(seeded));
   }
+}
+
+/** Fold child bars into UTC spans. A partial span is omitted. The live 15m roll uses deriveForwardBook instead. */
+export function foldBars(bars: readonly BarOHLC[], spanSec: number, childSec: number): BarOHLC[] {
+  const need = spanSec / childSec;
+  if (!(need >= 1) || need !== Math.floor(need)) return [];
+  const groups = new Map<number, BarOHLC[]>();
+  for (const bar of bars) {
+    const start = Math.floor(bar.ts / spanSec) * spanSec;
+    const list = groups.get(start) ?? [];
+    list.push(bar);
+    groups.set(start, list);
+  }
+  const out: BarOHLC[] = [];
+  for (const [start, list] of [...groups.entries()].sort((a, b) => a[0] - b[0])) {
+    const ordered = list.slice().sort((a, b) => a.ts - b.ts);
+    const first = ordered[0];
+    const last = ordered[ordered.length - 1];
+    if (!first || !last || ordered.length < need) continue;
+    if (first.ts !== start || last.ts !== start + spanSec - childSec) continue;
+    out.push({
+      ts: start,
+      open: first.open,
+      high: Math.max(...ordered.map((bar) => bar.high)),
+      low: Math.min(...ordered.map((bar) => bar.low)),
+      close: last.close,
+      volume: ordered.reduce((sum, bar) => sum + bar.volume, 0),
+    });
+  }
+  return out;
 }
 
 function closeSource(row: DailyClose): SourceDay {
@@ -577,13 +655,18 @@ export function applyPublic(host: PaperHost, shardIndex: number, events: readonl
       for (const [price, size] of event.bids) applyLevel(book, "bid", price, size);
       for (const [price, size] of event.asks) applyLevel(book, "ask", price, size);
       host.books.set(event.productId, book);
+      host.l2BookSrc.set(event.productId, "ws");
       host.l2Ts.set(event.productId, nowMs);
       dirty.add(event.productId);
       continue;
     }
     if (event.kind === "l2-update") {
       const book = levelsOf(host, event.productId);
+      const resync = host.l2BookSrc.get(event.productId) === "rest_snapshot";
       applyLevel(book, event.side, event.price, event.size);
+      if (resync && !host.book.incidents.includes(`l2 resync ${event.productId}`)) {
+        host.book.incidents.push(`l2 resync ${event.productId}`);
+      }
       host.l2Ts.set(event.productId, nowMs);
       dirty.add(event.productId);
     }
@@ -694,13 +777,32 @@ export function universeEntries(host: PaperHost, nowSec: number): ReturnType<typ
     warmupDays: host.warmup,
     veto: vetoFromBtc(btcDays, btcFour),
     pick: { lookback: host.book.aPick.lookback, k: host.book.aPick.k },
+    seededBars: { four: host.fourBars, hour: host.hourWarm },
   });
   host.weeks.set("*", generated.weeks);
   return generated;
 }
 
 function hourSeries(host: PaperHost, productId: string, derived: readonly BarOHLC[]): BarOHLC[] {
-  return [...(host.hourWarm.get(productId) ?? []), ...derived];
+  return mergeRolled(host.hourWarm.get(productId) ?? [], derived, HOUR_KEEP);
+}
+
+/** Keep the seeded series and let a newly closed bar replace the same timestamp. */
+export function rollSettled(host: PaperHost, productId: string, nowSec: number): void {
+  const derived = deriveForwardBook(host.fifteen.filter((bar) => bar.productId === productId), nowSec);
+  if (!derived) return;
+  host.hourWarm.set(productId, mergeRolled(host.hourWarm.get(productId) ?? [], derived.hour, HOUR_KEEP));
+  host.fourBars.set(productId, mergeRolled(host.fourBars.get(productId) ?? [], derived.four, FOUR_KEEP));
+  const daily = derived.days
+    .filter((row) => !row.empty && row.close > 0)
+    .map((row) => ({ ts: row.ts, open: row.open, high: row.high, low: row.low, close: row.close, volume: row.volume }));
+  host.dailyBars.set(productId, mergeRolled(host.dailyBars.get(productId) ?? [], daily, DAILY_CLOSE_DAYS));
+  const closes = new Map((host.dailyCloses.get(productId) ?? []).map((row) => [row.date, row]));
+  for (const row of derived.days) {
+    if (row.empty || !(row.close > 0)) continue;
+    closes.set(row.date, { date: row.date, close: row.close });
+  }
+  host.dailyCloses.set(productId, retainDailyCloses([...closes.values()]));
 }
 
 function ensureHourWarm(host: PaperHost, productId: string): void {
@@ -731,7 +833,7 @@ function ensureHourWarm(host: PaperHost, productId: string): void {
     });
   }
   const end = bars.length > 0 ? bars[bars.length - 1]!.startSec + 900 : 0;
-  host.hourWarm.set(productId, deriveForwardBook(bars, end)?.hour.slice(-400) ?? []);
+  host.hourWarm.set(productId, deriveForwardBook(bars, end)?.hour.slice(-HOUR_KEEP) ?? []);
 }
 
 function entryId(entry: GeneratedEntry): string {
@@ -794,6 +896,44 @@ export async function ensureSendQuote(
     host.book.incidents.push(`rest book ${productId} ${error instanceof Error ? error.message : "failed"}`);
   }
   return "stale";
+}
+
+/**
+ * After an uncovered takeover the socket book is only the updates that arrived
+ * since the snapshot was dropped. Replace it with the REST level-2 ladder and
+ * let later level2 updates resync on top. The book stays flagged until a live snapshot.
+ */
+export async function resyncBooksFromRest(
+  host: PaperHost,
+  fetchImpl: BookFetch = fetch,
+): Promise<void> {
+  for (const productId of host.products) {
+    try {
+      const response = await fetchImpl(productBookLevel2Url(productId));
+      if (response.status === 429) {
+        const wait = retryAfterMs(response.headers?.get("retry-after") ?? null);
+        host.quoteNotBefore.set(productId, host.clock() + wait);
+        host.book.incidents.push(`l2 rest snapshot ${productId} 429`);
+        continue;
+      }
+      if (!response.ok) {
+        host.book.incidents.push(`l2 rest snapshot ${productId} ${response.status}`);
+        continue;
+      }
+      const body = (await response.json()) as { bids?: [string, string][]; asks?: [string, string][] };
+      const book = { bids: new Map<string, number>(), asks: new Map<string, number>() };
+      for (const level of body.bids ?? []) applyLevel(book, "bid", level[0], level[1]);
+      for (const level of body.asks ?? []) applyLevel(book, "ask", level[0], level[1]);
+      host.books.set(productId, book);
+      host.l2BookSrc.set(productId, "rest_snapshot");
+      host.l2Ts.set(productId, host.clock());
+      const top = touch(book);
+      if (top) host.book.quotes[productId] = { bid: top.bid, ask: top.ask, tsMs: host.clock(), quoteSrc: "rest_fallback" };
+      host.book.incidents.push(`l2 rest snapshot ${productId}`);
+    } catch (error) {
+      host.book.incidents.push(`l2 rest snapshot ${productId} ${error instanceof Error ? error.message : "failed"}`);
+    }
+  }
 }
 
 /** One snapshot for this leg. A 429 does not consume it and is not retried until the backoff ends. */
@@ -933,7 +1073,8 @@ function pushBar(host: PaperHost, bar: OhlcvBar): void {
   let bScores: ClassBRow[] | undefined;
   let missing1m = false;
   const dailyClose = isDayCloseBar(bar.startSec);
-  const live = host.clock() - nowSec * 1000 < 180_000;
+  const liveBar = host.clock() >= nowSec * 1000 && host.clock() - nowSec * 1000 < 180_000;
+  const live = liveBar;
   publishLiveQuote(host, bar.productId, host.clock());
   try {
     ensureHourWarm(host, bar.productId);
@@ -945,7 +1086,8 @@ function pushBar(host: PaperHost, bar: OhlcvBar): void {
       noteMemberDay(host.book, bar.productId, closeSource({ date, close: bar.close }));
     }
     const jev = buildJevPackets({ members: host.products, barStartSec: bar.startSec, nowSec, mids: host.book.mids.completed });
-    missing1m = jev.missing;
+    missing1m = liveBar && jev.missing;
+    rollSettled(host, bar.productId, nowSec);
     if ((live || dailyClose) && host.generatedSec !== nowSec) {
       host.generated = universeEntries(host, nowSec);
       host.generatedSec = nowSec;
@@ -979,6 +1121,7 @@ function pushBar(host: PaperHost, bar: OhlcvBar): void {
     ...(bScores ? { bScores } : {}),
     dailyClose,
     missing1m,
+    countJev: liveBar,
   };
   applyForward(host.book, { ...fields, phase: "gap" });
   applyForward(host.book, { ...fields, phase: "rest" });
@@ -1158,6 +1301,8 @@ export interface PaperStateBody {
   dSubmitted?: number;
   dIndeterminate?: number;
   dailyCloses?: [string, DailyClose[]][];
+  dailyBars?: [string, BarOHLC[]][];
+  fourBars?: [string, BarOHLC[]][];
   feedCursor?: FeedCursor;
   jevMeter?: JevMeter;
 }
@@ -1278,6 +1423,8 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     dSubmitted: book.submittedByClass.D,
     dIndeterminate: book.indeterminateByClass.D,
     dailyCloses: [...host.dailyCloses.entries()],
+    dailyBars: [...host.dailyBars.entries()],
+    fourBars: [...host.fourBars.entries()],
     feedCursor: { ...host.feedCursor },
     jevMeter: { ...host.jevMeter },
   };
@@ -1325,6 +1472,8 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
     host.warmupStored = true;
   }
   if (body.dailyCloses) host.dailyCloses = new Map(body.dailyCloses.map(([id, rows]) => [id, rows.map((row) => ({ ...row }))]));
+  if (body.dailyBars) host.dailyBars = new Map(body.dailyBars.map(([id, rows]) => [id, rows.map((row) => ({ ...row }))]));
+  if (body.fourBars) host.fourBars = new Map(body.fourBars.map(([id, rows]) => [id, rows.map((row) => ({ ...row }))]));
   if (body.feedCursor) host.feedCursor = { l2: body.feedCursor.l2 ?? null, tradeId: body.feedCursor.tradeId ?? null };
   if (body.jevMeter) host.jevMeter = { ...body.jevMeter };
   if (body.gaps) host.gaps = body.gaps.map((gap) => ({ ...gap }));
@@ -1429,7 +1578,13 @@ function envelopeSequence(raw: unknown): number | null {
 /** One socket frame. The envelope sequence covers every channel, then the book updates. */
 export function ingestSocketMessage(host: PaperHost, shardIndex: number, raw: unknown, nowMs: number): void {
   if (host.bufferFeeds) {
-    host.feedBuffer.push({ sequence: envelopeSequence(raw), events: parsePublicMessage(raw) });
+    const frame = { sequence: envelopeSequence(raw), events: parsePublicMessage(raw) };
+    const nextBytes = Buffer.byteLength(JSON.stringify(frame));
+    if (host.feedBuffer.length >= FEED_BUFFER_MAX || nextBytes > FEED_BUFFER_MAX_BYTES) {
+      host.feedBufferCapped = true;
+      return;
+    }
+    host.feedBuffer.push(frame);
     return;
   }
   const sequence = envelopeSequence(raw);
@@ -1468,9 +1623,11 @@ export function feedFramesContiguous(cursor: FeedCursor, frames: readonly FeedFr
 
 /** Replay a contiguous handover buffer in sequence order. Stops fill on the first trade through them. */
 export function replayHandover(host: PaperHost): boolean {
+  const capped = host.feedBufferCapped;
   const frames = host.feedBuffer.splice(0, host.feedBuffer.length);
   host.bufferFeeds = false;
-  if (!feedFramesContiguous(host.feedCursor, frames)) return false;
+  host.feedBufferCapped = false;
+  if (capped || !feedFramesContiguous(host.feedCursor, frames)) return false;
   const ordered = frames.slice().sort((a, b) => a.sequence! - b.sequence!);
   for (const frame of ordered) {
     if (frame.sequence != null) host.feedCursor.l2 = frame.sequence;
@@ -1638,6 +1795,11 @@ export interface DriveHooks {
   stopWhen?: () => Promise<boolean> | boolean;
 }
 
+function kvIncident(error: unknown): string {
+  const message = error instanceof Error ? error.message : "failed";
+  return message.startsWith("kv set") || message.includes("lease lost") ? message : `kv set ${message}`;
+}
+
 /** Sample on an existing host until `untilMs`, then close the sockets as a deadline handover. */
 export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHooks = {}): Promise<void> {
   const apply = hooks.applyBars !== false;
@@ -1656,9 +1818,21 @@ export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHo
       void (async () => {
         try {
           const now = host.clock();
+          if (host.stopped) {
+            clearInterval(timer);
+            resolve();
+            return;
+          }
           if (hooks.heartbeat && now - lastBeat >= SAVE_HEARTBEAT_MS) {
             lastBeat = now;
             await hooks.heartbeat();
+          }
+          if (host.stopped) {
+            clearInterval(timer);
+            for (const socket of sockets) socket.close();
+            host.openSockets = undefined;
+            resolve();
+            return;
           }
           if (apply) await sendDueEntries(host, now);
           host.shards.forEach((_, index) => {
@@ -1686,7 +1860,7 @@ export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHo
         .catch((error: unknown) => {
           due.slot.inflight = false;
           noteRestMiss(host, due.slot);
-          host.book.incidents.push(`kv set ${error instanceof Error ? error.message : "failed"}`);
+          host.book.incidents.push(kvIncident(error));
         });
             } else if (due?.action === "fallback") {
               await prepareExitQuotes(host, due.slot.productId, due.slot.barStartSec, now);
@@ -1707,11 +1881,11 @@ export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHo
           try {
             await hooks.persist?.();
           } catch (error) {
-            host.book.incidents.push(`kv set ${error instanceof Error ? error.message : "failed"}`);
+            host.book.incidents.push(kvIncident(error));
           }
           resolve();
         } catch (error) {
-          host.book.incidents.push(`kv set ${error instanceof Error ? error.message : "failed"}`);
+          host.book.incidents.push(kvIncident(error));
         } finally {
           busy = false;
         }
@@ -1794,10 +1968,73 @@ export async function warmSeriesFromRest(
       }
       host.hourWarm.set(
         productId,
-        bars.slice(-400).map((bar) => ({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume })),
+        bars.slice(-HOUR_KEEP).map((bar) => ({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume })),
       );
     } catch (error) {
       host.book.incidents.push(`history hour ${productId} ${error instanceof Error ? error.message : "failed"}`);
     }
   }
+  await seedFourHours(host, fetchImpl);
+}
+
+/** 4h seed. Research 15m history is aggregated with the replay. REST falls back to 1h candles folded into UTC 4h bars. */
+export async function seedFourHours(
+  host: PaperHost,
+  fetchImpl: (url: string) => Promise<Pick<Response, "status" | "ok" | "json">> = fetch,
+): Promise<void> {
+  const nowSec = Math.floor(host.clock() / 1000);
+  for (const productId of host.products) {
+    if ((host.fourBars.get(productId)?.length ?? 0) >= FOUR_HOUR_EMA_BARS) continue;
+    const fromStore = fourFromResearch(productId);
+    if (fromStore.length > 0) {
+      host.fourBars.set(productId, fromStore.slice(-FOUR_KEEP));
+      continue;
+    }
+    const start = nowSec - FOUR_KEEP * 4 * 3_600;
+    const hours: BarOHLC[] = [];
+    try {
+      for (let cursor = start; cursor <= nowSec; cursor += 300 * 3_600) {
+        const spanEnd = Math.min(nowSec, cursor + 300 * 3_600 - 3_600);
+        const response = await fetchImpl(historyCandleUrl(productId, cursor, spanEnd, 3_600));
+        if (!response.ok) {
+          host.book.incidents.push(`4h seed rest ${productId} ${response.status}`);
+          break;
+        }
+        const rows = (await response.json()) as number[][];
+        for (const bar of barsFromExchangeCandles(productId, Array.isArray(rows) ? rows : [])) {
+          hours.push({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume });
+        }
+      }
+      const folded = foldBars(hours, 14_400, 3_600).slice(-FOUR_KEEP);
+      if (folded.length > 0) host.fourBars.set(productId, folded);
+      host.book.incidents.push(`4h seed rest ${productId} ${folded.length}`);
+    } catch (error) {
+      host.book.incidents.push(`4h seed rest ${productId} ${error instanceof Error ? error.message : "failed"}`);
+    }
+  }
+}
+
+function fourFromResearch(productId: string): BarOHLC[] {
+  const dir = join(repoRoot(), "research/data/candles", productId);
+  if (!existsSync(dir)) return [];
+  const months = readdirSync(dir).filter((name) => name.endsWith(".sqlite")).sort().slice(-2);
+  const bars: FifteenBar[] = [];
+  for (const month of months) {
+    const rows = readPairMonth(join(dir, month)).rows;
+    for (const row of rows) {
+      if (row.empty || row.open == null || row.high == null || row.low == null || row.close == null) continue;
+      bars.push({
+        productId,
+        startSec: row.minuteSec,
+        open: Number(row.open),
+        high: Number(row.high),
+        low: Number(row.low),
+        close: Number(row.close),
+        volume: Number(row.volume ?? 0),
+      });
+    }
+  }
+  if (bars.length === 0) return [];
+  const end = bars[bars.length - 1]!.startSec + 900;
+  return deriveForwardBook(bars, end)?.four ?? [];
 }

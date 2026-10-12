@@ -68,6 +68,13 @@ export function productBookUrl(productId: string): string {
   return url;
 }
 
+/** Public level-2 book. A takeover rebuilds the full price ladder from this, then resyncs. */
+export function productBookLevel2Url(productId: string): string {
+  const url = `https://api.exchange.coinbase.com/products/${encodeURIComponent(productId)}/book?level=2`;
+  assertMarketDataUrl(url);
+  return url;
+}
+
 /** Fold completed child bars into a higher bar. A partial span is not emitted. */
 export function aggregateBars(bars: readonly OhlcvBar[], spanSec: number): OhlcvBar[] {
   if (!(spanSec > 0)) throw new Error("span must be positive");

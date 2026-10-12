@@ -21,7 +21,10 @@ export const LEASE_KEY = "p6:lease";
 /** Survives the lease TTL so a kill is visible after Redis expires the live key. */
 export const LEASE_META_KEY = "p6:lease-meta";
 export const STATE_KEY = "p6:state";
+export const HOT_KEY = "p6:hot";
 export const CRON_KEY = "p6:cron";
+/** Architect's cap. Upstash's published request cap is larger; this process stays under 1 MB. */
+export const VALUE_MAX_BYTES = 1_048_576;
 
 export interface Kv {
   get(key: string): Promise<string | null>;
@@ -30,6 +33,19 @@ export interface Kv {
   del(key: string): Promise<void>;
   /** Write only when the current value equals `expect`. `null` means the key is absent. px is a TTL. */
   cas(key: string, expect: string | null, value: string, opts?: { px?: number }): Promise<boolean>;
+  /** SET only when the lease JSON token matches. One Lua script on Redis. False means the lease is gone. */
+  ownedSet(leaseKey: string, token: string, key: string, value: string, opts?: { px?: number }): Promise<boolean>;
+  /**
+   * Append one JSON object to a JSON array only when the lease token matches.
+   * 1 applied, 2 duplicate, 0 lost the lease, 3 the value would exceed 1 MB.
+   */
+  ownedAppend(
+    leaseKey: string,
+    token: string,
+    key: string,
+    member: string,
+    opts: { id: string; field: string; max?: number; px?: number },
+  ): Promise<number>;
 }
 
 export function memoryKv(clock: () => number = Date.now): Kv {
@@ -62,6 +78,27 @@ export function memoryKv(clock: () => number = Date.now): Kv {
       if (actual !== expect) return false;
       rows.set(key, { value, expiresAt: opts?.px != null ? clock() + opts.px : null });
       return true;
+    },
+    async ownedSet(leaseKey, token, key, value, opts) {
+      const lease = decodeLease(live(leaseKey)?.value ?? null);
+      if (!lease || lease.token !== token || lease.release !== "none") return false;
+      if (Buffer.byteLength(value) > VALUE_MAX_BYTES) return false;
+      rows.set(key, { value, expiresAt: opts?.px != null ? clock() + opts.px : null });
+      return true;
+    },
+    async ownedAppend(leaseKey, token, key, member, opts) {
+      const lease = decodeLease(live(leaseKey)?.value ?? null);
+      if (!lease || lease.token !== token || lease.release !== "none") return 0;
+      const current = live(key)?.value;
+      const list = current ? (JSON.parse(current) as Record<string, unknown>[]) : [];
+      if (list.some((row) => String(row[opts.field]) === opts.id)) return 2;
+      list.push(JSON.parse(member) as Record<string, unknown>);
+      const max = opts.max ?? 0;
+      const trimmed = max > 0 && list.length > max ? list.slice(list.length - max) : list;
+      const encoded = JSON.stringify(trimmed);
+      if (Buffer.byteLength(encoded) > VALUE_MAX_BYTES) return 3;
+      rows.set(key, { value: encoded, expiresAt: opts.px != null ? clock() + opts.px : null });
+      return 1;
     },
   };
 }
@@ -116,17 +153,24 @@ export function markerBytesPerDay(products: number, example = barMarker("BTC-USD
 }
 
 export async function saveState(kv: Kv, body: PaperStateBody, opts?: { writeWarmup?: boolean }): Promise<void> {
-  const { warmup, memberCloses, ...live } = body;
+  const { warmup, memberCloses, fifteen, hourWarm, dailyCloses, dailyBars, fourBars, rings, tape, ...live } = body;
   void memberCloses;
-  const wrote = await kv.set(STATE_KEY, JSON.stringify(live));
-  if (!wrote) throw new Error("kv set p6:state failed");
+  void fifteen;
+  void hourWarm;
+  void dailyCloses;
+  void dailyBars;
+  void fourBars;
+  void rings;
+  void tape;
+  const wrote = await kv.set(HOT_KEY, JSON.stringify(live));
+  if (!wrote) throw new Error("kv set p6:hot failed");
   if (opts?.writeWarmup !== true || !warmup) return;
   const warmWrote = await kv.set(WARMUP_KEY, JSON.stringify(warmup));
   if (!warmWrote) throw new Error("kv set p6:warmup failed");
 }
 
 export async function loadState(kv: Kv): Promise<PaperStateBody | null> {
-  const raw = await kv.get(STATE_KEY);
+  const raw = await kv.get(HOT_KEY);
   if (!raw) return null;
   const body = JSON.parse(raw) as PaperStateBody;
   if (!body.warmup) {
@@ -223,8 +267,8 @@ export async function tryAcquire(kv: Kv, self: string, untilMs: number, nowMs = 
 }
 
 /**
- * Extend the live key by one TTL and move the crash clock. The caller saves
- * p6:state first. A lost compare-and-swap means this process no longer holds the lease.
+ * Extend the live key by one TTL and move the crash clock. This does not save the book.
+ * A lost compare-and-swap means this process no longer holds the lease.
  */
 export async function renewLease(kv: Kv, nowMs: number): Promise<boolean> {
   const raw = await kv.get(LEASE_KEY);
@@ -319,14 +363,27 @@ export async function runInvocation(opts: {
     for (const gap of staged) opts.holder.recordGap?.(gap);
     staged.length = 0;
   };
+  // A failed book write is an incident. It must not skip the lease release or kill the holder.
+  const persistBook = async () => {
+    try {
+      await opts.holder.persist?.();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "failed";
+      if (message.includes("lease lost") || message.includes("kv set") || message.includes("256 KB") || message.includes("1 MB")) return;
+      throw error;
+    }
+  };
   if (plan.action === "duplicate") {
     return { ...plan, applied: [], holder: lease0?.holder ?? null };
   }
   if (plan.action === "handover") {
     opts.holder.recordGap?.({ startMs: nowMs, endMs: nowMs, cause: "handover" });
-    await opts.holder.persist?.();
-    opts.holder.releaseDeadline();
-    await releaseLease(opts.kv, opts.self, "deadline", nowMs);
+    try {
+      await persistBook();
+    } finally {
+      opts.holder.releaseDeadline();
+      await releaseLease(opts.kv, opts.self, "deadline", nowMs);
+    }
     return { ...plan, applied: [], holder: null };
   }
   await opts.holder.warm();
@@ -389,7 +446,7 @@ export async function runInvocation(opts: {
       const savedAt = decodeLease(await opts.kv.get(LEASE_META_KEY))?.savedAtMs ?? nowMs;
       opts.holder.recordGap?.({ startMs: savedAt, endMs: Math.max(savedAt, failedAt), cause: "crash" });
       try {
-        await opts.holder.persist?.();
+        await persistBook();
       } finally {
         await releaseLease(opts.kv, opts.self, "crash", failedAt);
       }
@@ -399,12 +456,15 @@ export async function runInvocation(opts: {
   if (sampled) {
     const at = opts.deadlineMs - HANDOVER_MARGIN_MS;
     opts.holder.recordGap?.({ startMs: at, endMs: at, cause: "handover" });
-    await opts.holder.persist?.();
-    opts.holder.releaseDeadline();
-    await releaseLease(opts.kv, opts.self, "deadline", at);
+    try {
+      await persistBook();
+    } finally {
+      opts.holder.releaseDeadline();
+      await releaseLease(opts.kv, opts.self, "deadline", at);
+    }
     return { action: "handover", applied, socketGap: false, feedGapMs, cause: plan.cause ?? "handover", holder: null };
   }
-  await opts.holder.persist?.();
+  await persistBook();
   await noteLeaseSave(opts.kv, nowMs);
   return { action: "hold", applied, socketGap: plan.socketGap, feedGapMs, cause: plan.cause, holder: opts.self };
 }
@@ -527,6 +587,47 @@ export function assertRedisTransport(url: string): RedisEndpoint {
   return endpoint;
 }
 
+const OWNED_SET_LUA = [
+  "local raw = redis.call('GET', KEYS[1])",
+  "if not raw then return 0 end",
+  "local ok, lease = pcall(cjson.decode, raw)",
+  "if not ok or type(lease) ~= 'table' then return 0 end",
+  "if lease['token'] ~= ARGV[1] or lease['release'] ~= 'none' then return 0 end",
+  "if string.len(ARGV[2]) > 1048576 then return 0 end",
+  "local px = tonumber(ARGV[3])",
+  "if px > 0 then redis.call('SET', KEYS[2], ARGV[2], 'PX', px) else redis.call('SET', KEYS[2], ARGV[2]) end",
+  "return 1",
+].join("\n");
+
+const OWNED_APPEND_LUA = [
+  "local raw = redis.call('GET', KEYS[1])",
+  "if not raw then return 0 end",
+  "local ok, lease = pcall(cjson.decode, raw)",
+  "if not ok or type(lease) ~= 'table' then return 0 end",
+  "if lease['token'] ~= ARGV[1] or lease['release'] ~= 'none' then return 0 end",
+  "local cur = redis.call('GET', KEYS[2])",
+  "local arr = {}",
+  "if cur and cur ~= '' then",
+  "  local ok2, parsed = pcall(cjson.decode, cur)",
+  "  if ok2 and type(parsed) == 'table' then arr = parsed end",
+  "end",
+  "local field = ARGV[4]",
+  "local id = ARGV[3]",
+  "for _, item in ipairs(arr) do",
+  "  if type(item) == 'table' and tostring(item[field]) == id then return 2 end",
+  "end",
+  "local ok3, member = pcall(cjson.decode, ARGV[2])",
+  "if not ok3 or type(member) ~= 'table' then return 0 end",
+  "table.insert(arr, member)",
+  "local maxn = tonumber(ARGV[5])",
+  "while maxn > 0 and #arr > maxn do table.remove(arr, 1) end",
+  "local encoded = cjson.encode(arr)",
+  "if string.len(encoded) > 1048576 then return 3 end",
+  "local px = tonumber(ARGV[6])",
+  "if px > 0 then redis.call('SET', KEYS[2], encoded, 'PX', px) else redis.call('SET', KEYS[2], encoded) end",
+  "return 1",
+].join("\n");
+
 const CAS_LUA = [
   "local cur = redis.call('GET', KEYS[1])",
   "if ARGV[1] == '1' then",
@@ -616,6 +717,27 @@ export function redisKvFromUrl(url: string): Kv {
     async cas(key, expect, value, opts) {
       const reply = await send(["EVAL", CAS_LUA, "1", key, expect == null ? "1" : "0", expect ?? "", value, String(opts?.px ?? 0)]);
       return reply === "1";
+    },
+    async ownedSet(leaseKey, token, key, value, opts) {
+      const reply = await send(["EVAL", OWNED_SET_LUA, "2", leaseKey, key, token, value, String(opts?.px ?? 0)]);
+      return reply === "1";
+    },
+    async ownedAppend(leaseKey, token, key, member, opts) {
+      const reply = await send([
+        "EVAL",
+        OWNED_APPEND_LUA,
+        "2",
+        leaseKey,
+        key,
+        token,
+        member,
+        opts.id,
+        opts.field,
+        String(opts.max ?? 0),
+        String(opts.px ?? 0),
+      ]);
+      const code = Number(reply);
+      return code === 1 || code === 2 || code === 3 ? code : 0;
     },
   };
 }

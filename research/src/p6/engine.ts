@@ -283,6 +283,8 @@ export type ForwardEvent =
       phase?: "gap" | "rest" | "all";
       /** V6. A 1m bar is missing in this window, so Jev is not called. */
       missing1m?: boolean;
+      /** False for catch-up and history bars. Those bars do not move the skip count. */
+      countJev?: boolean;
       /** V6. This bar is the first price after a feed gap. */
       feedGap?: boolean;
     }
@@ -1232,7 +1234,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       touchTime(book, event.startSec * 1000);
     } else if (closed) {
       book.marks[event.productId] = event.close;
-      if (book.jevBarSec !== event.startSec) {
+      if (event.countJev !== false && book.jevBarSec !== event.startSec) {
         book.jevBarSec = event.startSec;
         const packets = shadowPackets({ members: book.config.members, barStartSec: event.startSec, nowSec: event.nowSec, warming: false });
         book.jevPackets += packets.length;

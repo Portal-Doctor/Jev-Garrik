@@ -92,6 +92,18 @@ export interface GenerateInput {
    * matches loadPair, including empty days and the listing date.
    */
   products?: ReadonlyMap<string, { days: readonly SourceDay[]; hour: readonly BarOHLC[]; four: readonly BarOHLC[]; quarter: readonly BarOHLC[] }>;
+  /** Older 4h and 1h bars from REST or research history. A live bar at the same timestamp wins. */
+  seededBars?: { four?: ReadonlyMap<string, readonly BarOHLC[]>; hour?: ReadonlyMap<string, readonly BarOHLC[]> };
+}
+
+/** Seeded bars stay in front of the live derivation. The same timestamp keeps the live bar. */
+export function withSeededSeries(derived: readonly BarOHLC[], seeded: readonly BarOHLC[] | undefined): BarOHLC[] {
+  if (!seeded || seeded.length === 0) return [...derived];
+  const first = derived[0]?.ts ?? Number.POSITIVE_INFINITY;
+  const byTs = new Map<number, BarOHLC>();
+  for (const bar of seeded) if (bar.ts < first) byTs.set(bar.ts, bar);
+  for (const bar of derived) byTs.set(bar.ts, bar);
+  return [...byTs.values()].sort((a, b) => a.ts - b.ts);
 }
 
 function completed(bars: readonly FifteenBar[], nowSec: number): FifteenBar[] {
@@ -283,7 +295,13 @@ export function generateForward(input: GenerateInput): GenerateResult {
   const aConfig = registeredAConfig(lookback, k);
   const memberOn = input.memberOn ?? (() => true);
   const veto = input.veto ?? (() => false);
-  const ids = [...new Set([...(input.products?.keys() ?? []), ...(input.warmupDays?.keys() ?? []), ...input.bars.map((bar) => bar.productId)])].sort();
+  const ids = [...new Set([
+    ...(input.products?.keys() ?? []),
+    ...(input.warmupDays?.keys() ?? []),
+    ...(input.seededBars?.four?.keys() ?? []),
+    ...(input.seededBars?.hour?.keys() ?? []),
+    ...input.bars.map((bar) => bar.productId),
+  ])].sort();
   const books = new Map<string, DerivedBook>();
   for (const id of ids) {
     const prepared = input.products?.get(id);
@@ -292,8 +310,15 @@ export function generateForward(input: GenerateInput): GenerateResult {
       continue;
     }
     const derived = deriveForwardBook(input.bars.filter((bar) => bar.productId === id), input.nowSec);
-    if (derived) books.set(id, derived);
-    else if ((input.warmupDays?.get(id)?.length ?? 0) > 0) books.set(id, { days: [], hour: [], four: [], quarter: [] });
+    const seededFour = input.seededBars?.four?.get(id);
+    const seededHour = input.seededBars?.hour?.get(id);
+    if (derived) {
+      derived.four = withSeededSeries(derived.four, seededFour);
+      derived.hour = withSeededSeries(derived.hour, seededHour);
+      books.set(id, derived);
+    } else if ((seededFour?.length ?? 0) > 0 || (seededHour?.length ?? 0) > 0) {
+      books.set(id, { days: [], hour: [...(seededHour ?? [])], four: [...(seededFour ?? [])], quarter: [] });
+    } else if ((input.warmupDays?.get(id)?.length ?? 0) > 0) books.set(id, { days: [], hour: [], four: [], quarter: [] });
   }
   const out: GeneratedEntry[] = [];
   const bRows: { id: string; date: string; score: number; member: boolean }[] = [];
