@@ -511,6 +511,10 @@ test("features.ts is the cb accumulator byte for byte, and the amendment record 
   expect(() => assertP6Target("research/data/reports/p5-v31-registration.json")).toThrow(/refusing/);
   expect(() => assertP6Target("research/data/reports/p4-amendment-1.json")).toThrow(/refusing/);
   expect(() => assertP6Target("research/data/reports/p6-amendment-2.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/reports/p5-v31-geometry.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/reports/p6-jev-spend.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/data-manifest.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/registration-sources/p6-metric-definitions.md")).toThrow(/refusing/);
   const dir = mkdtempSync(join(tmpdir(), "p6-"));
   execFileSync("git", ["init"], { cwd: dir });
   execFileSync("git", ["config", "user.email", "p6@example.com"], { cwd: dir });
@@ -518,9 +522,11 @@ test("features.ts is the cb accumulator byte for byte, and the amendment record 
   writeFileSync(join(dir, "note.txt"), "clean\n");
   execFileSync("git", ["add", "note.txt"], { cwd: dir });
   execFileSync("git", ["commit", "-m", "init"], { cwd: dir });
-  const stamp = { commitSha: "a".repeat(40), dataRootHash: null, createdAt: "2026-10-12T01:23:00.000Z", phaseId: "P6" };
-  const written = writeP6(join(dir, "p6-note.json"), { ok: true }, { stamp, cwd: dir, sidecarLabel: "tmp/p6-note.json" });
-  expect(written.sha256).toHaveLength(64);
-  writeFileSync(join(dir, "dirty.txt"), "dirty\n");
-  expect(() => writeP6(join(dir, "x.json"), {}, { stamp, cwd: dir })).toThrow(/dirty/);
+  const stamp = { commitSha: "a".repeat(40), dataRootHash: null, createdAt: "2026-10-12T01:23:00.000Z", phaseId: "P6" as const };
+  expect(() => writeP6(join(dir, "p6-note.json"), { ok: true }, { stamp })).toThrow(/repo root/);
+  expect(() => writeP6(join(dir, "p5-v31-geometry.json"), { ok: true }, { stamp })).toThrow(/repo root/);
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  expect(() => writeP6(join(root, "research/data/reports/p5-v31-geometry.json"), { ok: true }, { stamp })).toThrow(/refusing to overwrite/);
+  expect(() => writeP6(join(root, "research/data/reports/p6-jev-spend.json"), { ok: true }, { stamp })).toThrow(/refusing to overwrite/);
+  expect(() => writeP6(join(root, "research/data/registration-sources/p6-metric-definitions.md"), { note: true }, { stamp })).toThrow(/refusing to overwrite/);
 });

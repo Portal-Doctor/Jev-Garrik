@@ -48,6 +48,7 @@ import { survivorshipReport } from "./p3/survivorship";
 import { buildP5Report } from "./p5/run";
 import { assertP5OutputPath, P5_V31_RESULTS } from "./p5/output";
 import { assertNoLiveEndpoint, replayInjected, type ForwardEvent } from "./p6/engine";
+import { P6_STAMP_COMMANDS, stampP6Record, type P6StampCommand } from "./p6/stamp-records";
 
 const started = boot();
 if (!started.ok) {
@@ -125,6 +126,15 @@ async function main(): Promise<void> {
     case "p6-replay":
       p6Replay();
       return;
+    case "p6-stamp-amendment-2":
+    case "p6-stamp-amendment-2a":
+    case "p6-stamp-amendment-2a-approval":
+    case "p6-stamp-kelly-ruling":
+    case "p6-stamp-kelly-status":
+    case "p6-stamp-amendment-2b":
+    case "p6-stamp-amendment-2b-approval":
+      stampP6(command);
+      return;
     case "jev-smoke":
       await writeJevSmoke();
       return;
@@ -134,7 +144,7 @@ async function main(): Promise<void> {
       return;
     default:
       throw new Error(
-        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | p5 | jev-smoke | p6-replay",
+        `usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | p5 | jev-smoke | p6-replay | ${P6_STAMP_COMMANDS.join(" | ")}`,
       );
   }
 }
@@ -587,6 +597,11 @@ function writeGeometry(): void {
     writeJson(join(paths.reports, name), body);
   }
   console.log(`geometry names ${scan.warmup.names} fifteen ${fifteen.dataRootHash} daily ${daily.dataRootHash}`);
+}
+
+function stampP6(command: string): void {
+  const written = stampP6Record(command as P6StampCommand, repoDataDir());
+  console.log(`${command} ${written.sha256}`);
 }
 
 function p6Replay(): void {

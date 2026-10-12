@@ -193,11 +193,17 @@ test("bars before the entry and forming bars do not stop, and the trail, ten-day
   expect(book.positions).toHaveLength(1);
   expect(book.positions[0]?.stop).toBe(90);
   applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec: start, nowSec: start + 900, open: 110, high: 112, low: 100, close: 110 });
+  expect(book.positions[0]?.stop).toBe(90);
+  const dayClose = start + 86_400 - 900;
+  applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec: dayClose, nowSec: dayClose + 900, open: 108, high: 112, low: 105, close: 110, dailyAtr: 2 });
   expect(book.positions[0]?.stop).toBeCloseTo(104, 6);
   expect(book.positions[0]?.pendingExit).toBeNull();
-  applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec: start + 900, nowSec: start + 1_800, open: 108, high: 109, low: 105, close: 99, dailyClose: true });
+  applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec: dayClose + 900, nowSec: dayClose + 1_800, open: 120, high: 121, low: 119, close: 120, dailyAtr: 2 });
+  expect(book.positions[0]?.stop).toBeCloseTo(104, 6);
+  const nextClose = dayClose + 86_400;
+  applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec: nextClose, nowSec: nextClose + 900, open: 105, high: 106, low: 104.5, close: 99, dailyAtr: 2 });
   expect(book.positions[0]?.pendingExit).toBe("rule");
-  applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec: start + 1_800, nowSec: start + 2_700, open: 108, high: 109, low: 107, close: 108 });
+  applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec: nextClose + 900, nowSec: nextClose + 1_800, open: 108, high: 109, low: 107, close: 108 });
   expect(book.positions).toHaveLength(0);
   expect(book.closed[0]?.exitKind).toBe("rule");
   const exit = book.legs.find((leg) => leg.side === "exit")!;
@@ -228,16 +234,18 @@ test("bars before the entry and forming bars do not stop, and the trail, ten-day
   expect(swing.closed[0]?.exitKind).toBe("target");
 });
 
-test("a B name that leaves the held set exits on the next open, and a D time exit pays the taker spread", () => {
-  const start = Math.floor(wednesday / 1000);
+test("a B name that leaves the held set exits at the Monday 01:00 open, and a D time exit pays the taker spread", () => {
+  const sundayClose = Date.parse("2026-03-01T23:45:00.000Z") / 1000;
+  const mondayMidnight = Date.parse("2026-03-02T00:00:00.000Z") / 1000;
+  const mondayHour = Date.parse("2026-03-02T01:00:00.000Z") / 1000;
   const held = freshBook({ members: ["ETH-USD", "BTC-USD"] });
-  applyForward(held, { kind: "clock", tsMs: wednesday });
+  applyForward(held, { kind: "clock", tsMs: Date.parse("2026-02-28T00:00:00.000Z") });
   applyForward(held, {
     kind: "x1",
     id: "bh",
     classId: "B",
     productId: "ETH-USD",
-    tsMs: wednesday,
+    tsMs: Date.parse("2026-02-28T01:00:00.000Z"),
     nextOpen: 100,
     stop: 80,
     atr1h: 1,
@@ -247,23 +255,28 @@ test("a B name that leaves the held set exits on the next open, and a D time exi
     sendTsMs: wednesday,
     decisionMid: 100,
   });
+  const scores = [
+    { id: "ETH-USD", score: 0, member: true },
+    { id: "BTC-USD", score: 2, member: true },
+  ];
   applyForward(held, {
     kind: "bar15",
     productId: "ETH-USD",
-    startSec: start,
-    nowSec: start + 900,
+    startSec: sundayClose,
+    nowSec: sundayClose + 900,
     open: 100,
     high: 101,
     low: 99,
     close: 100,
-    bScores: [
-      { id: "ETH-USD", score: 0, member: true },
-      { id: "BTC-USD", score: 2, member: true },
-    ],
+    bScores: scores,
   });
-  expect(held.positions[0]?.pendingExit).toBe("rebalance");
-  applyForward(held, { kind: "bar15", productId: "ETH-USD", startSec: start + 900, nowSec: start + 1_800, open: 101, high: 102, low: 100, close: 101 });
-  expect(held.closed[0]?.exitKind).toBe("rebalance");
+  expect(held.positions).toHaveLength(1);
+  expect(held.positions[0]?.pendingExitTs).toBe(mondayHour);
+  applyForward(held, { kind: "bar15", productId: "ETH-USD", startSec: mondayMidnight, nowSec: mondayMidnight + 900, open: 101, high: 102, low: 100, close: 101, bScores: scores });
+  expect(held.positions).toHaveLength(1);
+  applyForward(held, { kind: "bar15", productId: "ETH-USD", startSec: mondayHour, nowSec: mondayHour + 900, open: 101, high: 102, low: 100, close: 101 });
+  expect(held.closed[0]?.exitKind).toBe("rule");
+  expect(held.closed[0]?.exitTs).toBe(mondayHour * 1000);
   expect(held.legs.find((leg) => leg.side === "exit")!.fillPrice).toBeLessThan(101);
 
   const maker = freshBook({ members: ["ETH-USD"] });
@@ -283,9 +296,13 @@ test("a B name that leaves the held set exits on the next open, and a D time exi
     tick: 0.01,
   });
   applyForward(maker, { kind: "trade", productId: "ETH-USD", price: 99.98, size: 4, makerSide: "sell", tsMs: wednesday + 1_000 });
-  const later = start + 48 * 3_600;
-  applyForward(maker, { kind: "bar15", productId: "ETH-USD", startSec: later, nowSec: later + 900, open: 100, high: 101, low: 99, close: 100 });
+  const aligned = Math.floor(wednesday / 1000) + 48 * 3_600;
+  applyForward(maker, { kind: "bar15", productId: "ETH-USD", startSec: aligned, nowSec: aligned + 900, open: 100, high: 101, low: 99, close: 100 });
+  expect(maker.positions).toHaveLength(1);
+  const due = aligned + 900;
+  applyForward(maker, { kind: "bar15", productId: "ETH-USD", startSec: due, nowSec: due + 900, open: 100, high: 101, low: 99, close: 100 });
   expect(maker.closed[0]?.exitKind).toBe("time");
+  expect(maker.closed[0]?.exitTs).toBe(due * 1000);
   expect(maker.legs.find((leg) => leg.side === "exit")!.fillPrice).toBeLessThan(100);
 });
 

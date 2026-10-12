@@ -8,13 +8,14 @@
 import { newEntryOrder, type RestingOrder } from "../../vendor/87b35d0/fill.ts";
 import { MAKER_FEE_BPS, TAKER_FEE_BPS } from "../../vendor/87b35d0/config.ts";
 import {
+  BACKSTOP_PAIR_USD,
   classAExit,
   classATenDayExit,
   classBDisasterStop,
   classBHeld,
-  classCHoldExpired,
-  classEHoldExpired,
   classEMoveToBreakEven,
+  CLASS_C_MAX_HOLD_MS,
+  CLASS_E_MAX_HOLD_MS,
   PAPER_MINIMUM_USD,
   stopFillPrice,
   tradeThroughFill,
@@ -23,7 +24,9 @@ import {
 } from "../p3/design-rules";
 import { intrabarFill, trailAfterCompletedBar } from "../p3/fills";
 import type { ClassId } from "../p3/portfolio";
+import { dateOfTs, isDayCloseBar, TRAIL_ATR } from "../p5/book";
 import { momentumBlocked, momentumCrashOn } from "../p5/guards";
+import { isMondayCloseBar, x1EntryTs } from "../p5/run";
 import { assignBetas, averageLinkage, betaWeight } from "../p5/risk";
 import { weekKey } from "../p5/stats";
 import { shadowPackets, type ShadowPacket } from "./jev-shadow";
@@ -49,6 +52,23 @@ const CLASSES: ClassId[] = ["A", "B", "C", "D", "E"];
 
 export interface BookConfig {
   members: string[];
+  /** P5 historical book: fixed risk and s_bt, Jev guards off. */
+  parity?: { riskUsd: number; sBtBps: number } | null;
+}
+
+export interface PairBackstopLog {
+  kind: "trip" | "reenable";
+  tsMs: number;
+  realizedUsd: number;
+  markedUsd: number;
+  cumulativeUsd: number;
+}
+
+export interface PairBackstop {
+  latched: boolean;
+  /** Next trip is this cumulative P&L minus $500. Forward bar 1 starts at 0. */
+  baselineUsd: number;
+  log: PairBackstopLog[];
 }
 
 export interface Position {
@@ -70,6 +90,14 @@ export interface Position {
   dailyAtr: number;
   priorDailyCloses: number[];
   pendingExit: string | null;
+  /** Monday 01:00 (or another open) the held-set exit fills at. Unix seconds. */
+  pendingExitTs: number | null;
+  /** Precomputed P5 rule-exit open, unix seconds. */
+  ruleExitTs: number | null;
+  /** Bar open before the entry spread. Stop deduction uses this, as p5/book.ts does. */
+  rawEntry: number;
+  /** Highest completed daily close since entry. The A trail reads it only on the day-close bar. */
+  highestClose: number | null;
   clusterId: string;
   tick: number;
 }
@@ -140,6 +168,7 @@ export interface Book {
   haltWeeks: string[];
   clusterMonth: string | null;
   incidents: string[];
+  pairs: Record<string, PairBackstop>;
 }
 
 export type ForwardEvent =
@@ -167,6 +196,7 @@ export type ForwardEvent =
       target?: number;
       dailyAtr?: number;
       priorDailyCloses?: number[];
+      ruleExitTs?: number;
     }
   | {
       kind: "d-order";
@@ -195,6 +225,7 @@ export type ForwardEvent =
       close: number;
       atr1h?: number;
       dailyClose?: boolean;
+      dailyAtr?: number;
       bScores?: ClassBRow[];
     }
   | { kind: "btc"; tsMs: number; return60: number; return10: number }
@@ -212,7 +243,8 @@ export type ForwardEvent =
       riskUsd: number;
       entryDate: string;
       exitTs: number;
-    };
+    }
+  | { kind: "pair-enable"; productId: string; tsMs: number };
 
 function emptyCounts(): Record<ClassId, number> {
   return { A: 0, B: 0, C: 0, D: 0, E: 0 };
@@ -224,7 +256,7 @@ function emptyClasses(): Record<ClassId, ClassCurve> {
 
 export function freshBook(config: Partial<BookConfig> = {}): Book {
   return {
-    config: { members: config.members ?? [] },
+    config: { members: config.members ?? [], parity: config.parity ?? null },
     nowMs: 0,
     day: null,
     week: null,
@@ -255,6 +287,7 @@ export function freshBook(config: Partial<BookConfig> = {}): Book {
     haltWeeks: [],
     clusterMonth: null,
     incidents: [],
+    pairs: {},
   };
 }
 
@@ -298,28 +331,48 @@ function openMtm(book: Book): number {
   return total;
 }
 
-function pairPnl(book: Book, productId: string): number {
-  let closed = 0;
-  for (const trade of book.closed) if (trade.productId === productId) closed += trade.netUsd;
-  let open = 0;
+function pairParts(book: Book, productId: string): { realizedUsd: number; markedUsd: number; cumulativeUsd: number } {
+  let realizedUsd = 0;
+  for (const trade of book.closed) if (trade.productId === productId) realizedUsd += trade.netUsd;
+  let markedUsd = 0;
   for (const position of book.positions) {
     if (position.productId !== productId) continue;
     const mark = book.marks[productId] ?? position.fillPrice;
-    open += (mark - position.fillPrice) * position.units - exitCostUsd(position, mark);
+    markedUsd += (mark - position.fillPrice) * position.units - exitCostUsd(position, mark);
   }
-  return closed + open;
+  return { realizedUsd, markedUsd, cumulativeUsd: realizedUsd + markedUsd };
 }
 
-function pairLossOf(book: Book, productId: string): number {
-  const pnl = pairPnl(book, productId);
-  return pnl < 0 ? -pnl : 0;
+function pairState(book: Book, productId: string): PairBackstop {
+  const existing = book.pairs[productId];
+  if (existing) return existing;
+  const created: PairBackstop = { latched: false, baselineUsd: 0, log: [] };
+  book.pairs[productId] = created;
+  return created;
 }
 
-function worstPairLoss(book: Book): number {
-  const ids = new Set<string>([...book.positions.map((position) => position.productId), ...book.closed.map((trade) => trade.productId)]);
-  let worst = 0;
-  for (const id of ids) worst = Math.max(worst, pairLossOf(book, id));
-  return worst;
+/** Latches one pair at -$500 from its baseline. A recovery does not clear it. */
+function reviewPair(book: Book, productId: string, tsMs: number): void {
+  const state = pairState(book, productId);
+  if (state.latched) return;
+  const parts = pairParts(book, productId);
+  if (parts.cumulativeUsd <= state.baselineUsd - BACKSTOP_PAIR_USD) {
+    state.latched = true;
+    state.log.push({ kind: "trip", tsMs, realizedUsd: parts.realizedUsd, markedUsd: parts.markedUsd, cumulativeUsd: parts.cumulativeUsd });
+  }
+}
+
+function reviewKnownPairs(book: Book, tsMs: number): void {
+  const ids = new Set<string>([
+    ...book.positions.map((position) => position.productId),
+    ...book.closed.map((trade) => trade.productId),
+    ...Object.keys(book.marks),
+  ]);
+  for (const id of ids) reviewPair(book, id, tsMs);
+}
+
+function pairLatched(book: Book, productId: string): boolean {
+  return book.pairs[productId]?.latched === true;
 }
 
 function equityOf(book: Book) {
@@ -330,7 +383,7 @@ function equityOf(book: Book) {
     openMtmUsd: openMtm(book),
     dayStartEquity: book.dayStartEquity,
     weekStartEquity: book.weekStartEquity,
-    pairLossUsd: worstPairLoss(book),
+    pairLossUsd: 0,
   });
 }
 
@@ -386,7 +439,13 @@ function reviewKelly(book: Book, tsMs: number): void {
 }
 
 function scheduledRisk(book: Book, classId: ClassId): number {
+  if (book.config.parity) return book.config.parity.riskUsd;
   return book.kelly[classId]?.riskUsd ?? UNPROMOTED_RISK_USD;
+}
+
+function spreadBps(book: Book, bid: number, ask: number): number | null {
+  if (book.config.parity) return book.config.parity.sBtBps;
+  return halfSpreadBps(bid, ask);
 }
 
 function noteQuote(book: Book, productId: string, bid: number, ask: number, tsMs: number): void {
@@ -457,12 +516,19 @@ function tryEnter(book: Book, opts: {
   dailyAtr?: number;
   priorDailyCloses?: number[];
   tick?: number;
+  rawEntry?: number;
+  ruleExitTs?: number | null;
 }): boolean {
+  reviewKnownPairs(book, opts.tsMs);
+  if (pairLatched(book, opts.productId)) {
+    book.rejected.push({ id: opts.id, reason: "pair-backstop" });
+    return false;
+  }
   const equity = equityOf(book);
   const blockers = classBlockers(opts.classId, book.classes[opts.classId], {
     halt: equity.halt,
-    backstop: equity.backstop || pairLossOf(book, opts.productId) >= 500,
-    momentumBlocked: momentumBlocked(book.momentumDates, utcDay(opts.tsMs)),
+    backstop: equity.backstop,
+    momentumBlocked: book.config.parity ? false : momentumBlocked(book.momentumDates, utcDay(opts.tsMs)),
     killSwitch: book.killSwitch,
   });
   const decision = paperDecision({
@@ -538,6 +604,10 @@ function tryEnter(book: Book, opts: {
     dailyAtr: opts.dailyAtr ?? 0,
     priorDailyCloses: opts.priorDailyCloses ?? [],
     pendingExit: null,
+    pendingExitTs: null,
+    ruleExitTs: opts.ruleExitTs ?? null,
+    rawEntry: opts.rawEntry ?? opts.fillPrice,
+    highestClose: null,
     clusterId: clusterOf(book, opts.productId),
     tick: opts.tick ?? 0.01,
   });
@@ -566,7 +636,11 @@ function closePosition(
   const exitFee = (exitNotional * (opts.makerExit ? MAKER_FEE_BPS : TAKER_FEE_BPS)) / 10_000;
   const slip = opts.makerExit ? 0 : Math.max(0, arrivalMid - opts.fill) * position.units;
   const costUsd = position.entryFeeUsd + position.entrySpreadUsd + exitFee + slip;
-  const netUsd = (opts.fill - position.fillPrice) * position.units - position.entryFeeUsd - exitFee;
+  const takerParity = book.config.parity != null && opts.makerExit !== true && position.fillPrice > 0;
+  const netBps = ((opts.fill - position.fillPrice) / position.fillPrice) * 10_000 - TAKER_FEE_BPS - TAKER_FEE_BPS;
+  const netUsd = takerParity
+    ? (netBps / 10_000) * position.units * position.fillPrice
+    : (opts.fill - position.fillPrice) * position.units - position.entryFeeUsd - exitFee;
   const grossUsd = netUsd + costUsd;
   const netR = position.riskUsd > 0 ? netUsd / position.riskUsd : 0;
   book.legs.push({
@@ -601,6 +675,7 @@ function closePosition(
     exitTs: opts.tsMs,
     exitKind: opts.kind,
   });
+  reviewPair(book, position.productId, opts.tsMs);
 }
 
 function takerSell(open: number, sLive: number): number {
@@ -655,6 +730,10 @@ function addDFill(book: Book, working: Working, units: number, tsMs: number): vo
     dailyAtr: 0,
     priorDailyCloses: [],
     pendingExit: null,
+    pendingExitTs: null,
+    ruleExitTs: null,
+    rawEntry: fillPrice,
+    highestClose: null,
     clusterId: clusterOf(book, working.order.pair),
     tick: working.tick,
   });
@@ -706,6 +785,22 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
     book.marks[event.productId] = event.price;
     const equity = book.realizedUsd + openMtm(book);
     if (equity > book.peakEquity) book.peakEquity = equity;
+    reviewPair(book, event.productId, book.nowMs);
+    return book;
+  }
+  if (event.kind === "pair-enable") {
+    touchTime(book, event.tsMs);
+    const parts = pairParts(book, event.productId);
+    const state = pairState(book, event.productId);
+    state.latched = false;
+    state.baselineUsd = parts.cumulativeUsd;
+    state.log.push({
+      kind: "reenable",
+      tsMs: event.tsMs,
+      realizedUsd: parts.realizedUsd,
+      markedUsd: parts.markedUsd,
+      cumulativeUsd: parts.cumulativeUsd,
+    });
     return book;
   }
   if (event.kind === "realize") {
@@ -724,6 +819,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       exitTs: event.exitTs,
       exitKind: "realize",
     });
+    reviewPair(book, event.productId, event.exitTs);
     return book;
   }
   if (event.kind === "shadow") {
@@ -778,12 +874,14 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
   }
   if (event.kind === "x1") {
     touchTime(book, event.tsMs);
-    const sLive = halfSpreadBps(event.bid, event.ask);
+    const sLive = spreadBps(book, event.bid, event.ask);
     if (sLive == null) {
       book.rejected.push({ id: event.id, reason: "no-book" });
       return book;
     }
-    const stopBps = ((event.nextOpen - event.stop) / event.nextOpen) * 10_000;
+    let stop = event.stop;
+    if (event.classId === "B" && (event.dailyAtr ?? 0) > 0) stop = Math.max(stop, classBDisasterStop(event.nextOpen, event.dailyAtr ?? 0));
+    const stopBps = ((event.nextOpen - stop) / event.nextOpen) * 10_000;
     if (!(stopBps > 0)) {
       book.rejected.push({ id: event.id, reason: "stop" });
       return book;
@@ -804,20 +902,27 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       decisionMid: event.decisionMid,
       arrivalMid,
       fillPrice: x1FillPrice(event.nextOpen, "buy", sLive),
-      stop: event.stop,
+      stop,
       atr1h: event.atr1h,
       maker: false,
       target: event.target ?? null,
       dailyAtr: event.dailyAtr ?? 0,
       priorDailyCloses: event.priorDailyCloses ?? [],
+      rawEntry: event.nextOpen,
+      ruleExitTs: event.ruleExitTs ?? null,
     });
     return book;
   }
   if (event.kind === "d-order") {
     touchTime(book, event.placedTs);
-    const sLive = halfSpreadBps(event.bid, event.ask);
+    const sLive = spreadBps(book, event.bid, event.ask);
     if (sLive == null) {
       book.rejected.push({ id: event.id, reason: "no-book" });
+      return book;
+    }
+    reviewKnownPairs(book, event.placedTs);
+    if (pairLatched(book, event.productId)) {
+      book.rejected.push({ id: event.id, reason: "pair-backstop" });
       return book;
     }
     const arrivalMid = (event.bid + event.ask) / 2;
@@ -830,7 +935,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
     const equity = equityOf(book);
     const blockers = classBlockers("D", book.classes.D, {
       halt: equity.halt,
-      backstop: equity.backstop || pairLossOf(book, event.productId) >= 500,
+      backstop: equity.backstop,
       momentumBlocked: false,
       killSwitch: book.killSwitch,
     });
@@ -891,63 +996,66 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       book.marks[event.productId] = event.close;
       book.packets.push(...shadowPackets({ members: book.config.members, barStartSec: event.startSec, nowSec: event.nowSec, warming: false }));
       touchTime(book, (event.startSec + 900) * 1000);
+      reviewPair(book, event.productId, (event.startSec + 900) * 1000);
     }
     const barTs = event.startSec * 1000;
     const bar = { open: event.open, high: event.high, low: event.low, close: event.close };
+    const dayClose = isDayCloseBar(event.startSec);
     for (const position of [...book.positions]) {
       if (position.productId !== event.productId) continue;
-      if (!strategyBarClosed(event.startSec, event.nowSec) || !barBeginsAtOrAfterEntry(event.startSec, position.entryTs)) continue;
-      if (position.pendingExit) {
-        closePosition(book, position, {
-          tsMs: barTs,
-          fill: takerSell(event.open, position.sLiveBps),
-          kind: position.pendingExit,
-          triggerBarTs: barTs,
-          decisionMid: event.close,
-        });
-        continue;
-      }
-      let stop = position.stop;
-      if (position.classId === "B" && position.dailyAtr > 0) stop = Math.max(stop, classBDisasterStop(position.fillPrice, position.dailyAtr));
+      if (!closed || !barBeginsAtOrAfterEntry(event.startSec, position.entryTs)) continue;
+      const stop = position.stop;
       const hit = intrabarFill(bar, stop, Number.POSITIVE_INFINITY);
       if (hit.kind === "stop" && hit.price != null) {
         const gap = event.open <= stop;
-        const fill = gap ? event.open : stopFillPrice(stop, position.fillPrice, position.sLiveBps, event.atr1h ?? position.atr1h);
+        const fill = gap ? event.open : stopFillPrice(stop, position.rawEntry, position.sLiveBps, event.atr1h ?? position.atr1h);
         closePosition(book, position, { tsMs: barTs, fill, kind: "stop", triggerBarTs: barTs, decisionMid: event.close });
+        continue;
+      }
+      const openFill = () => takerSell(event.open, position.sLiveBps);
+      if (position.ruleExitTs != null && event.startSec === position.ruleExitTs) {
+        closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: "rule", triggerBarTs: barTs, decisionMid: event.close });
+        continue;
+      }
+      if (position.pendingExitTs != null && event.startSec >= position.pendingExitTs) {
+        closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: "rule", triggerBarTs: barTs, decisionMid: event.close });
+        continue;
+      }
+      if (position.pendingExit) {
+        closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: position.pendingExit, triggerBarTs: barTs, decisionMid: event.close });
         continue;
       }
       if (position.classId === "E" && position.target != null && event.high >= position.target) {
         closePosition(book, position, { tsMs: barTs, fill: position.target, kind: "target", triggerBarTs: barTs, decisionMid: event.close });
         continue;
       }
-      const endMs = (event.startSec + 900) * 1000;
-      if (position.classId === "C" && classCHoldExpired(position.entryTs, endMs)) {
-        closePosition(book, position, { tsMs: endMs, fill: takerSell(event.open, position.sLiveBps), kind: "time", triggerBarTs: barTs, decisionMid: event.close });
+      const hold = position.classId === "C" ? CLASS_C_MAX_HOLD_MS : position.classId === "E" ? CLASS_E_MAX_HOLD_MS : position.classId === "D" ? D_MAX_HOLD_MS : null;
+      if (hold != null && barTs >= position.entryTs + hold) {
+        closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: "time", triggerBarTs: barTs, decisionMid: event.close });
         continue;
       }
-      if (position.classId === "E" && classEHoldExpired(position.entryTs, endMs)) {
-        closePosition(book, position, { tsMs: endMs, fill: takerSell(event.open, position.sLiveBps), kind: "time", triggerBarTs: barTs, decisionMid: event.close });
-        continue;
+      if (position.classId === "B" && event.bScores && dayClose && isMondayCloseBar(dateOfTs(event.startSec)) && !classBHeld(event.bScores, position.productId)) {
+        position.pendingExitTs = x1EntryTs(dateOfTs(event.startSec));
       }
-      if (position.classId === "D" && endMs - position.entryTs >= D_MAX_HOLD_MS) {
-        closePosition(book, position, { tsMs: endMs, fill: takerSell(event.open, position.sLiveBps), kind: "time", triggerBarTs: barTs, decisionMid: event.close });
-        continue;
+      if (position.classId === "A" && dayClose) {
+        const atr = event.dailyAtr != null && event.dailyAtr > 0 ? event.dailyAtr : position.dailyAtr;
+        if (atr > 0 && event.close > 0) {
+          position.highestClose = Math.max(position.highestClose ?? Number.NEGATIVE_INFINITY, event.close);
+          position.dailyAtr = atr;
+          position.stop = Math.max(position.stop, position.highestClose - TRAIL_ATR * atr);
+        }
+        if (position.ruleExitTs == null) {
+          const heldDays = ((event.startSec + 900) * 1000 - position.entryTs) / 86_400_000;
+          const unrealizedR = position.riskUsd > 0 ? ((event.close - position.fillPrice) * position.units) / position.riskUsd : 0;
+          const prior = position.priorDailyCloses.slice(-10);
+          if (classATenDayExit(event.close, prior) || (classAExit(event.close, prior.length === 10 ? Math.min(...prior) : event.close, heldDays, unrealizedR) && heldDays >= 30 && unrealizedR < 1)) {
+            position.pendingExit = "rule";
+          }
+          position.priorDailyCloses = [...position.priorDailyCloses, event.close].slice(-10);
+        }
       }
-      if (position.classId === "B" && event.bScores && !classBHeld(event.bScores, position.productId)) {
-        position.pendingExit = "rebalance";
-      }
-      if (position.classId === "A" && position.dailyAtr > 0) position.stop = trailAfterCompletedBar(position.stop, event.close, position.dailyAtr);
       if (position.classId === "D" && position.dailyAtr > 0) position.stop = trailAfterCompletedBar(position.stop, event.close, position.dailyAtr);
       if (position.classId === "E") position.stop = classEMoveToBreakEven(position.stop, position.fillPrice, event.close);
-      if (position.classId === "A" && event.dailyClose) {
-        const heldDays = (endMs - position.entryTs) / 86_400_000;
-        const unrealizedR = position.riskUsd > 0 ? ((event.close - position.fillPrice) * position.units) / position.riskUsd : 0;
-        const prior = position.priorDailyCloses.slice(-10);
-        if (classATenDayExit(event.close, prior) || (classAExit(event.close, prior.length === 10 ? Math.min(...prior) : event.close, heldDays, unrealizedR) && heldDays >= 30 && unrealizedR < 1)) {
-          position.pendingExit = "rule";
-        }
-        position.priorDailyCloses = [...position.priorDailyCloses, event.close].slice(-10);
-      }
     }
     return book;
   }

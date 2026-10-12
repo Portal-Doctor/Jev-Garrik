@@ -124,14 +124,23 @@ export interface BarOHLC {
   volume: number;
 }
 
+export interface ClassEEntry {
+  date: string;
+  entryTs: number;
+  entry: number;
+  stop: number;
+  target: number;
+  stopBps: number;
+}
+
 /** Class E: 1h event, then a 15m close above anchored VWAP and the latest 15m swing high. The scan starts at the close of the event bar. */
-export function countClassE(
+export function classEEntries(
   hour: readonly BarOHLC[],
   quarter: readonly BarOHLC[],
   memberOn: (date: string) => boolean,
   blackout: readonly { releaseAt: string }[] = [],
-): ClassCounts {
-  const counts = emptyCounts();
+): ClassEEntry[] {
+  const out: ClassEEntry[] = [];
   const atr = wilderAtr(hour.map((b) => b.high), hour.map((b) => b.low), hour.map((b) => b.close), 14);
   for (let i = 20; i < hour.length; i += 1) {
     const bar = hour[i]!;
@@ -174,8 +183,21 @@ export function countClassE(
     }
     const target = classETarget(entry.close, stopPrice, sixHigh, bar.low);
     const targetBps = target == null ? null : ((target - entry.close) / entry.close) * 10_000;
-    if (!classEFloorPasses(stopBps, targetBps)) continue;
-    note(counts, date, undefined, { bps: stopBps, atrMultiple: 0.2 }, false);
+    if (!classEFloorPasses(stopBps, targetBps) || target == null) continue;
+    out.push({ date, entryTs: entry.ts, entry: entry.close, stop: stopPrice, target, stopBps });
+  }
+  return out;
+}
+
+export function countClassE(
+  hour: readonly BarOHLC[],
+  quarter: readonly BarOHLC[],
+  memberOn: (date: string) => boolean,
+  blackout: readonly { releaseAt: string }[] = [],
+): ClassCounts {
+  const counts = emptyCounts();
+  for (const entry of classEEntries(hour, quarter, memberOn, blackout)) {
+    note(counts, entry.date, undefined, { bps: entry.stopBps, atrMultiple: 0.2 }, false);
   }
   return counts;
 }
