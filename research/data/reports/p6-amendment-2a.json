@@ -1,0 +1,15 @@
+{
+  "commitSha": "9121b675592559dea4c1f6088bfe186af193d875",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T02:06:25.024Z",
+  "phaseId": "P6",
+  "registrationSha256": "f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d",
+  "amendment1Sha256": "e0948e26f2bbe2ec7c113d23db8b4dbb9daed70a9d2cef0e3f0a0c49f70d7760",
+  "amendment1File": "research/data/reports/p4-amendment-1.json",
+  "amendment2Sha256": "bfa6efb2e0e4b12034e34e8481256bb26b6c36a24e3e3a92c5300be9eaf496eb",
+  "amendment2File": "research/data/reports/p6-amendment-2.json",
+  "rule": "The 20R kill and the $1,200 class backstop are measured from the running high-water mark of the class's cumulative closed-trade net R (net $ for the backstop). A pause or resume never resets it; only a new high does. 1c re-fires after a resume only on a new trough below the prior one, or on 10R drawdown from a new high.",
+  "registrationEdited": false,
+  "amendment1Edited": false,
+  "amendment2Edited": false
+}
