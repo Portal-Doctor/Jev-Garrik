@@ -486,7 +486,7 @@ test("a stale level2 snapshot rejects the entry and the exit leg records it", ()
     decisionMid: 100,
     aConfig: "A55-k3",
   });
-  expect(book.rejected.some((row) => row.id === "stale" && row.reason === "stale-book")).toBe(true);
+  expect(book.rejected.some((row) => row.id === "stale" && row.reason === "missed_send_stale_quote")).toBe(true);
   applyForward(book, {
     kind: "x1",
     id: "fresh",

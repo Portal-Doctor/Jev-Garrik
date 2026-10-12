@@ -1,10 +1,20 @@
+import { headers } from "next/headers";
 import { loadDashboard } from "../../../../research/src/p6/vercel-live";
-import { redisKvFromUrl } from "../../../../research/src/p6/relay";
+import { cronAuthorized, redisKvFromUrl } from "../../../../research/src/p6/relay";
 
 export const dynamic = "force-dynamic";
 
-/** Read-only. There is no form, no reset, and no order path. */
+/** Read-only. There is no form, no reset, and no order path. The cron secret is required. */
 export default async function P6DashboardPage() {
+  const headerList = await headers();
+  if (!cronAuthorized(headerList.get("authorization"), process.env.CRON_SECRET)) {
+    return (
+      <main>
+        <h1>P6 paper</h1>
+        <p>Unauthorized. This page requires the cron secret.</p>
+      </main>
+    );
+  }
   const url = process.env.REDIS_URL;
   if (!url) {
     return (

@@ -186,18 +186,52 @@ test("entries send at the next open and staleness is the wall clock, not the sig
     aConfig: "A55-k3",
   };
   applyForward(book, { ...order, id: "late-send", tsMs: ts, bookTsMs: ts, sendTsMs: ts + 20_000 });
-  expect(book.rejected.find((row) => row.id === "late-send")?.reason).toBe("stale-book");
+  expect(book.rejected.find((row) => row.id === "late-send")?.reason).toBe("missed_send_stale_quote");
   applyForward(book, { ...order, id: "fresh-send", tsMs: ts - 60_000, bookTsMs: ts, sendTsMs: ts });
   expect(book.rejected.find((row) => row.id === "fresh-send")?.reason).not.toBe("stale-book");
 
   const host = startPaperHost(["ETH-USD"], {});
   const now = ts;
-  applyPublic(host, 0, [{ kind: "l2-snapshot", productId: "ETH-USD", bids: [["100", "1"]], asks: [["100.2", "1"]] }], now - 20_000);
+  applyPublic(host, 0, [{ kind: "l2-snapshot", productId: "ETH-USD", bids: [["100", "1"]], asks: [["100.2", "1"]] }], now - 16_000);
+  const closeTs = now - 90_000;
   const entry: GeneratedEntry = {
+    kind: "x1",
+    classId: "C",
+    productId: "ETH-USD",
+    tsMs: closeTs,
+    nextOpen: 0,
+    stop: 90,
+    target: null,
+    dailyAtr: 2,
+    priorDailyCloses: [],
+    signalDate: "2026-10-14",
+    fillAtOpen: true,
+    decisionTs: closeTs,
+    barCloseTs: closeTs,
+  };
+  host.queued.set(`C-ETH-USD-${closeTs}`, entry);
+  flushEntries(host, now);
+  expect(host.book.rejected.some((row) => row.id === `C-ETH-USD-${closeTs}` && row.reason === "missed_send_stale_quote")).toBe(true);
+  expect(host.book.positions.some((row) => row.id === `C-ETH-USD-${closeTs}`)).toBe(false);
+
+  host.restQuotes.set("ETH-USD", { bid: 100, ask: 100.2, tsMs: now - 1_000 });
+  const fallbackId = `C-ETH-USD-${closeTs + 1}`;
+  host.queued.set(fallbackId, { ...entry, tsMs: closeTs + 1 });
+  flushEntries(host, now);
+  const fallback = host.book.legs.find((leg) => leg.id === fallbackId);
+  expect(fallback?.quoteSrc).toBe("rest_fallback");
+  expect(fallback?.decisionTs).toBe(closeTs);
+  expect(fallback?.barCloseTs).toBe(closeTs);
+  expect(fallback?.orderSendTs).toBe(now);
+
+  const live = startPaperHost(["ETH-USD"], {});
+  applyPublic(live, 0, [{ kind: "l2-snapshot", productId: "ETH-USD", bids: [["200", "1"]], asks: [["200.2", "1"]] }], now - 500);
+  const freshId = `A-ETH-USD-${now - 45_000}`;
+  live.queued.set(freshId, {
     kind: "x1",
     classId: "A",
     productId: "ETH-USD",
-    tsMs: now,
+    tsMs: now - 45_000,
     nextOpen: 0,
     stop: 0,
     target: null,
@@ -206,25 +240,21 @@ test("entries send at the next open and staleness is the wall clock, not the sig
     signalDate: "2026-10-14",
     aConfig: "A55-k3",
     fillAtOpen: true,
-  };
-  host.queued.set(`A-ETH-USD-${now}`, entry);
-  flushEntries(host, now);
-  expect(host.book.rejected.some((row) => row.id === `A-ETH-USD-${now}` && row.reason === "stale-book")).toBe(true);
-  const late = now - 20_000;
-  host.queued.set(`A-ETH-USD-${late}`, { ...entry, tsMs: late });
-  flushEntries(host, now);
-  expect(host.book.incidents.some((row) => row.includes(`missed send A-ETH-USD-${late}`))).toBe(true);
-
-  applyPublic(host, 0, [{ kind: "l2-snapshot", productId: "ETH-USD", bids: [["200", "1"]], asks: [["200.2", "1"]] }], now);
-  const id = `A-ETH-USD-${now + 1}`;
-  host.queued.set(id, { ...entry, tsMs: now });
-  host.hourWarm.set("ETH-USD", Array.from({ length: 20 }, (_, index) => {
+    decisionTs: now - 45_000,
+    barCloseTs: now - 45_000,
+  });
+  live.hourWarm.set("ETH-USD", Array.from({ length: 20 }, (_, index) => {
     const px = 100 + index;
     return { ts: index * 3_600, open: px, high: px + 2, low: px - 2, close: px + 0.5, volume: 1 };
   }));
-  flushEntries(host, now);
-  expect(host.book.rejected.find((row) => row.id === id)?.reason).not.toBe("stale-book");
-  expect(host.book.incidents.some((row) => row.includes(`missed send ${id}`))).toBe(false);
+  flushEntries(live, now);
+  expect(live.book.rejected.find((row) => row.id === freshId)?.reason).not.toBe("missed_send_stale_quote");
+  const fresh = live.book.legs.find((leg) => leg.id === freshId);
+  expect(fresh?.quoteSrc).toBe("l2");
+  expect(now - (fresh?.arrivalSnapshotTs ?? 0)).toBeLessThan(1_000);
+  expect(fresh?.decisionTs).toBe(now - 45_000);
+  expect(fresh?.barCloseTs).toBe(now - 45_000);
+  expect(fresh?.orderSendTs).toBe(now);
 });
 
 test("startup past the deadline still fetches, and a spent attempt falls back", () => {

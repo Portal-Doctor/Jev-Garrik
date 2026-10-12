@@ -11,6 +11,8 @@ export const CRON_EVERY_MS = 15 * 60 * 1000;
 export const MAX_DURATION_MS = 1_800_000;
 export const HANDOVER_MARGIN_MS = 60_000;
 export const LEASE_KEY = "p6:lease";
+/** Survives the lease TTL so a kill is visible after Redis expires the live key. */
+export const LEASE_META_KEY = "p6:lease-meta";
 export const STATE_KEY = "p6:state";
 export const CRON_KEY = "p6:cron";
 
@@ -19,6 +21,8 @@ export interface Kv {
   /** Returns true when the write happened. nx refuses an existing key. px is a TTL in milliseconds. */
   set(key: string, value: string, opts?: { nx?: boolean; px?: number }): Promise<boolean>;
   del(key: string): Promise<void>;
+  /** Write only when the current value equals `expect`. `null` means the key is absent. px is a TTL. */
+  cas(key: string, expect: string | null, value: string, opts?: { px?: number }): Promise<boolean>;
 }
 
 export function memoryKv(): Kv {
@@ -45,6 +49,13 @@ export function memoryKv(): Kv {
     async del(key) {
       rows.delete(key);
     },
+    async cas(key, expect, value, opts) {
+      const current = live(key);
+      const actual = current?.value ?? null;
+      if (actual !== expect) return false;
+      rows.set(key, { value, expiresAt: opts?.px != null ? Date.now() + opts.px : null });
+      return true;
+    },
   };
 }
 
@@ -52,6 +63,8 @@ export interface Lease {
   holder: string;
   untilMs: number;
   release: "deadline" | "crash" | "none";
+  /** Identifies the holder that may release. A release checks this before it writes. */
+  token?: string;
 }
 
 export function encodeLease(lease: Lease): string {
@@ -62,7 +75,7 @@ export function decodeLease(raw: string | null): Lease | null {
   if (!raw) return null;
   const body = JSON.parse(raw) as Lease;
   if (!body.holder || !(body.untilMs > 0)) return null;
-  return { holder: body.holder, untilMs: body.untilMs, release: body.release ?? "none" };
+  return { holder: body.holder, untilMs: body.untilMs, release: body.release ?? "none", ...(body.token ? { token: body.token } : {}) };
 }
 
 /** One applied bar. The body is the book, orders, bars, B weeks, rings, tape, cursors, and Jev history. */
@@ -120,8 +133,10 @@ export function planRelay(opts: {
     return { action: "handover", socketGap: false, feedGapMs: 0, cause: null };
   }
   if (held && lease!.holder !== opts.self) {
-    const missed = opts.lastCronMs != null && opts.nowMs - opts.lastCronMs > every + 60_000;
-    return { action: missed ? "overlap" : "duplicate", socketGap: false, feedGapMs: 0, cause: missed ? "missed-cron-covered" : "duplicate" };
+    const since = opts.lastCronMs == null ? Number.POSITIVE_INFINITY : opts.nowMs - opts.lastCronMs;
+    const missed = opts.lastCronMs != null && since > every + 60_000;
+    if (since < 60_000) return { action: "duplicate", socketGap: false, feedGapMs: 0, cause: "duplicate" };
+    return { action: "overlap", socketGap: false, feedGapMs: 0, cause: missed ? "missed-cron-covered" : "overlap-warm" };
   }
   if (held && lease!.holder === opts.self) {
     return { action: "hold", socketGap: false, feedGapMs: 0, cause: null };
@@ -144,16 +159,33 @@ export function planRelay(opts: {
 }
 
 export async function tryAcquire(kv: Kv, self: string, untilMs: number, nowMs = Date.now()): Promise<boolean> {
-  const current = decodeLease(await kv.get(LEASE_KEY));
-  if (current && current.untilMs > nowMs) return current.holder === self;
-  if (current) await kv.del(LEASE_KEY);
-  return kv.set(LEASE_KEY, encodeLease({ holder: self, untilMs, release: "none" }), { nx: true });
+  const raw = await kv.get(LEASE_KEY);
+  const current = decodeLease(raw);
+  if (current && current.untilMs > nowMs && current.holder !== self) return false;
+  const ttl = Math.max(1, untilMs - nowMs);
+  const token = current && current.holder === self && current.token ? current.token : `${self}:${nowMs}`;
+  const next = encodeLease({ holder: self, untilMs, release: "none", token });
+  const won = await kv.cas(LEASE_KEY, raw, next, { px: ttl });
+  if (!won) return false;
+  await kv.set(LEASE_META_KEY, next);
+  return true;
 }
 
+/** Token-checked. A holder that does not own the lease does not overwrite it. No TTL, so the cause stays readable. */
 export async function releaseLease(kv: Kv, self: string, release: "deadline" | "crash", nowMs: number): Promise<void> {
-  const current = decodeLease(await kv.get(LEASE_KEY));
+  const raw = await kv.get(LEASE_KEY);
+  const current = decodeLease(raw);
   if (current && current.holder !== self) return;
-  await kv.set(LEASE_KEY, encodeLease({ holder: self, untilMs: nowMs, release }));
+  if (current?.token && current.holder !== self) return;
+  const next = encodeLease({
+    holder: current?.holder ?? self,
+    token: current?.token ?? self,
+    untilMs: nowMs,
+    release,
+  });
+  const won = await kv.cas(LEASE_KEY, raw, next);
+  if (!won) return;
+  await kv.set(LEASE_META_KEY, next);
 }
 
 export interface InvocationResult {
@@ -176,35 +208,73 @@ export async function runInvocation(opts: {
     applyDueBars(): Promise<string[]>;
     releaseDeadline(): void;
     sampleUntil?(untilMs: number): Promise<void>;
+    /** Subscribe before this instance owns the lease. A normal handover then has no feed gap. */
+    watchUntil?(untilMs: number): Promise<void>;
+    persist?(): Promise<void>;
+    recordGap?(gap: { startMs: number; endMs: number; cause: string }): void;
   };
 }): Promise<InvocationResult> {
   const lease = decodeLease(await opts.kv.get(LEASE_KEY));
+  const meta = decodeLease(await opts.kv.get(LEASE_META_KEY));
   const storedCron = await opts.kv.get(CRON_KEY);
   const lastCronMs = opts.lastCronMs !== undefined ? opts.lastCronMs : storedCron == null ? null : Number(storedCron);
   await opts.kv.set(CRON_KEY, String(opts.nowMs));
   const plan = planRelay({ nowMs: opts.nowMs, deadlineMs: opts.deadlineMs, self: opts.self, lease, lastCronMs });
-  if (plan.action === "overlap" || plan.action === "duplicate") {
+  const record = (gap: { startMs: number; endMs: number; cause: string }) => {
+    opts.holder.recordGap?.(gap);
+  };
+  if (plan.action === "duplicate") {
     return { ...plan, applied: [], holder: lease?.holder ?? null };
   }
   if (plan.action === "handover") {
     opts.holder.releaseDeadline();
     await releaseLease(opts.kv, opts.self, "deadline", opts.nowMs);
+    record({ startMs: opts.nowMs, endMs: opts.nowMs, cause: "handover" });
+    await opts.holder.persist?.();
     return { ...plan, applied: [], holder: null };
+  }
+  await opts.holder.warm();
+  if (plan.action === "overlap") {
+    if (!opts.holder.watchUntil) {
+      return { ...plan, applied: [], holder: lease?.holder ?? null, cause: plan.cause ?? "overlap-warm" };
+    }
+    await opts.holder.watchUntil(opts.deadlineMs - HANDOVER_MARGIN_MS);
+  }
+  if (meta && meta.release === "none" && meta.untilMs <= opts.nowMs && meta.holder !== opts.self) {
+    record({ startMs: meta.untilMs, endMs: opts.nowMs, cause: "crash" });
+  } else if (plan.feedGapMs > 0) {
+    const start = lease?.untilMs ?? opts.nowMs - plan.feedGapMs;
+    record({ startMs: start, endMs: opts.nowMs, cause: plan.cause === "kill" ? "crash" : (plan.cause ?? "uncovered") });
+  } else if (lease?.release === "deadline") {
+    record({ startMs: lease.untilMs, endMs: opts.nowMs, cause: "handover" });
   }
   const acquired = await tryAcquire(opts.kv, opts.self, opts.deadlineMs, opts.nowMs);
   if (!acquired) {
     return { action: "duplicate", applied: [], socketGap: false, feedGapMs: 0, cause: "duplicate", holder: lease?.holder ?? null };
   }
-  await opts.holder.warm();
   const applied = await opts.holder.applyDueBars();
+  let sampled = false;
   if (opts.holder.sampleUntil && opts.nowMs < opts.deadlineMs - HANDOVER_MARGIN_MS) {
-    await opts.holder.sampleUntil(opts.deadlineMs - HANDOVER_MARGIN_MS);
+    try {
+      await opts.holder.sampleUntil(opts.deadlineMs - HANDOVER_MARGIN_MS);
+      sampled = true;
+    } catch (error) {
+      opts.holder.releaseDeadline();
+      await releaseLease(opts.kv, opts.self, "crash", opts.nowMs);
+      record({ startMs: opts.nowMs, endMs: opts.nowMs, cause: "crash" });
+      await opts.holder.persist?.();
+      throw error;
+    }
   }
-  if (opts.nowMs >= opts.deadlineMs - HANDOVER_MARGIN_MS) {
+  if (sampled) {
+    const at = opts.deadlineMs - HANDOVER_MARGIN_MS;
     opts.holder.releaseDeadline();
-    await releaseLease(opts.kv, opts.self, "deadline", opts.nowMs);
-    return { action: "handover", applied, socketGap: false, feedGapMs: plan.feedGapMs, cause: plan.cause, holder: null };
+    await releaseLease(opts.kv, opts.self, "deadline", at);
+    record({ startMs: at, endMs: at, cause: "handover" });
+    await opts.holder.persist?.();
+    return { action: "handover", applied, socketGap: false, feedGapMs: plan.feedGapMs, cause: plan.cause ?? "handover", holder: null };
   }
+  await opts.holder.persist?.();
   return { action: "hold", applied, socketGap: plan.socketGap, feedGapMs: plan.feedGapMs, cause: plan.cause, holder: opts.self };
 }
 
@@ -290,27 +360,69 @@ export function takeReply(buf: string): { reply: string | null; rest: string } |
   return null;
 }
 
+export interface RedisEndpoint {
+  host: string;
+  port: number;
+  tls: boolean;
+  username: string;
+  password: string;
+  timeoutMs: number;
+}
+
+/** redis:// and rediss://. Username, password, and a command timeout. The Marketplace vendor stays behind Kv. */
+export function redisEndpoint(url: string, timeoutMs = Number(process.env.REDIS_TIMEOUT_MS ?? 5_000)): RedisEndpoint {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "redis:" && parsed.protocol !== "rediss:") throw new Error("REDIS_URL must be redis:// or rediss://");
+  const tls = parsed.protocol === "rediss:";
+  return {
+    host: parsed.hostname,
+    port: Number(parsed.port || (tls ? 6380 : 6379)),
+    tls,
+    username: parsed.username ? decodeURIComponent(parsed.username) : "",
+    password: parsed.password ? decodeURIComponent(parsed.password) : "",
+    timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 5_000,
+  };
+}
+
+const CAS_LUA = [
+  "local cur = redis.call('GET', KEYS[1])",
+  "if ARGV[1] == '1' then",
+  "  if cur then return 0 end",
+  "elseif cur ~= ARGV[2] then",
+  "  return 0",
+  "end",
+  "local px = tonumber(ARGV[4])",
+  "if px > 0 then redis.call('SET', KEYS[1], ARGV[3], 'PX', px) else redis.call('SET', KEYS[1], ARGV[3]) end",
+  "return 1",
+].join("\n");
+
 /**
- * Generic Redis over redis://. No Marketplace SDK. One connection per command.
+ * Generic Redis over redis:// or rediss://. No Marketplace SDK. One connection per command.
  * Brian's deployment sets REDIS_URL. Tests use memoryKv.
  */
 export function redisKvFromUrl(url: string): Kv {
-  const parsed = new URL(url);
+  const endpoint = redisEndpoint(url);
   const send = async (parts: string[]): Promise<string | null> => {
-    const { connect } = await import("node:net");
-    const port = Number(parsed.port || 6379);
-    const host = parsed.hostname;
-    const password = parsed.password ? decodeURIComponent(parsed.password) : "";
+    const net = await import("node:net");
+    const tls = endpoint.tls ? await import("node:tls") : null;
     return new Promise((resolve, reject) => {
-      const socket = connect({ host, port });
+      const socket = tls
+        ? tls.connect({ host: endpoint.host, port: endpoint.port, servername: endpoint.host })
+        : net.connect({ host: endpoint.host, port: endpoint.port });
+      socket.setTimeout(endpoint.timeoutMs);
       const pending: string[] = [];
       let buf = "";
-      const fail = (error: unknown) => {
+      let settled = false;
+      const finish = (error: unknown, reply?: string | null) => {
+        if (settled) return;
+        settled = true;
         socket.destroy();
-        reject(error instanceof Error ? error : new Error(String(error)));
+        if (error) reject(error instanceof Error ? error : new Error(String(error)));
+        else resolve(reply ?? null);
       };
-      socket.on("error", fail);
-      socket.on("data", (chunk) => {
+      socket.on("timeout", () => finish(new Error("redis timeout")));
+      socket.on("error", (error: Error) => finish(error));
+      socket.on("data", (chunk: Buffer) => {
         buf += chunk.toString("utf8");
         for (;;) {
           if (pending.length === 0) return;
@@ -319,15 +431,17 @@ export function redisKvFromUrl(url: string): Kv {
           buf = taken.rest;
           const want = pending.shift();
           if (want === "auth") continue;
-          socket.end();
-          resolve(taken.reply);
+          finish(null, taken.reply);
           return;
         }
       });
       socket.on("connect", () => {
-        if (password) {
+        if (endpoint.username && endpoint.password) {
           pending.push("auth");
-          socket.write(encodeCommand(["AUTH", password]));
+          socket.write(encodeCommand(["AUTH", endpoint.username, endpoint.password]));
+        } else if (endpoint.password) {
+          pending.push("auth");
+          socket.write(encodeCommand(["AUTH", endpoint.password]));
         }
         pending.push("cmd");
         socket.write(encodeCommand(parts));
@@ -347,6 +461,10 @@ export function redisKvFromUrl(url: string): Kv {
     },
     async del(key) {
       await send(["DEL", key]);
+    },
+    async cas(key, expect, value, opts) {
+      const reply = await send(["EVAL", CAS_LUA, "1", key, expect == null ? "1" : "0", expect ?? "", value, String(opts?.px ?? 0)]);
+      return reply === "1";
     },
   };
 }

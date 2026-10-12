@@ -9,13 +9,14 @@ import {
   encodeCommand,
   memoryKv,
   planRelay,
+  redisEndpoint,
   releaseLease,
   runInvocation,
   takeReply,
   tryAcquire,
 } from "./relay";
-import { capturePaperState, flushEntries, noteSocketClose, releaseForDeadline, startPaperHost } from "./paper-host";
-import { handleEngineRequest, hostHolder } from "./vercel-live";
+import { capturePaperState, driveHost, ensureSendQuote, flushEntries, noteSocketClose, releaseForDeadline, startPaperHost, warmSeriesFromRest } from "./paper-host";
+import { handleEngineRequest, hostHolder, loadDashboard, persistRun } from "./vercel-live";
 import type { GeneratedEntry } from "./generate";
 
 const secret = "cron-test";
@@ -371,4 +372,227 @@ test("a stale live book falls back to the REST product book and is flagged", () 
   flushEntries(host, now);
   expect(host.book.rejected.find((row) => row.id === `A-ETH-USD-${now}`)?.reason).not.toBe("stale-book");
   expect(host.book.legs.find((leg) => leg.id === `A-ETH-USD-${now}`)?.source).toBe("rest");
+  expect(host.book.legs.find((leg) => leg.id === `A-ETH-USD-${now}`)?.quoteSrc).toBe("rest_fallback");
+});
+
+test("the book, member closes, gaps, and D counts survive a run that has no injected bars", async () => {
+  const kv = memoryKv();
+  const host = startPaperHost(["ZZ-LIVE"], {});
+  host.book.realizedUsd = 7;
+  host.book.config.memberCloses = [{
+    productId: "ZZ-LIVE",
+    flags: { priceGroupPasses: true, volumeGroupPasses: false, boundarySaved: false },
+    days: [{ date: "2026-10-10", ts: 0, open: 1, high: 1, low: 1, close: 2, volume: 1, empty: false }],
+  }];
+  host.fifteen.push({ productId: "ZZ-LIVE", startSec: 1_700_000_100, open: 1, high: 1.2, low: 0.9, close: 1.1, volume: 1 });
+  host.book.submittedByClass.D = 4;
+  host.book.indeterminateByClass.D = 1;
+  host.gaps.push({ startMs: 0, endMs: 16 * 60 * 1000, cause: "missed-cron" });
+  await driveHost(host, 0, { persist: () => persistRun(kv, host) });
+  const saved = await kv.get("p6:state");
+  expect(saved).toBeTruthy();
+  expect(await kv.get("p6:bar:ZZ-LIVE:1700000100")).toBeTruthy();
+  const next = startPaperHost(["ZZ-LIVE"], {});
+  await hostHolder(next, kv, []).warm();
+  expect(next.book.realizedUsd).toBe(7);
+  expect(next.book.config.memberCloses?.[0]?.days[0]?.date).toBe("2026-10-10");
+  expect(next.book.submittedByClass.D).toBe(4);
+  expect(next.book.indeterminateByClass.D).toBe(1);
+  expect(next.gaps[0]?.cause).toBe("missed-cron");
+  const view = await loadDashboard(kv);
+  expect(view.g0).toBe(true);
+  expect(view.gaps.flags).toContain("gap-length");
+  expect(view.gaps.dIndeterminateShare).toBe(0.25);
+  expect(view.readOnly).toBe(true);
+});
+
+test("the next instance warms before the lease, and a sampled run releases at the deadline", async () => {
+  const kv = memoryKv();
+  expect(await tryAcquire(kv, "a", 1_800_000, 0)).toBe(true);
+  const order: string[] = [];
+  const overlap = await runInvocation({
+    kv,
+    self: "b",
+    nowMs: 15 * 60 * 1000,
+    deadlineMs: 15 * 60 * 1000 + 1_800_000,
+    lastCronMs: 0,
+    holder: {
+      async warm() {
+        order.push("warm");
+      },
+      async watchUntil() {
+        order.push("watch");
+        await releaseLease(kv, "a", "deadline", 15 * 60 * 1000);
+      },
+      async applyDueBars() {
+        order.push("apply");
+        return ["ETH-USD:1"];
+      },
+      releaseDeadline() {
+        order.push("release");
+      },
+      recordGap(gap) {
+        order.push(gap.cause);
+      },
+    },
+  });
+  expect(order[0]).toBe("warm");
+  expect(order[1]).toBe("watch");
+  expect(order).toContain("apply");
+  expect(overlap.applied).toEqual(["ETH-USD:1"]);
+  expect(overlap.socketGap).toBe(false);
+  expect(overlap.feedGapMs).toBe(0);
+
+  const sampledKv = memoryKv();
+  const sampled = await runInvocation({
+    kv: sampledKv,
+    self: "c",
+    nowMs: 0,
+    deadlineMs: 1_800_000,
+    lastCronMs: null,
+    holder: {
+      async warm() {},
+      async applyDueBars() {
+        return [];
+      },
+      releaseDeadline() {},
+      async sampleUntil() {},
+      recordGap(gap) {
+        expect(gap.cause).toBe("handover");
+      },
+    },
+  });
+  expect(sampled.action).toBe("handover");
+  const released = JSON.parse((await sampledKv.get("p6:lease")) ?? "{}") as { release?: string };
+  expect(released.release).toBe("deadline");
+
+  const crashKv = memoryKv();
+  expect(await tryAcquire(crashKv, "d", 50_000, 0)).toBe(true);
+  await expect(runInvocation({
+    kv: crashKv,
+    self: "d",
+    nowMs: 1_000,
+    deadlineMs: 1_800_000,
+    lastCronMs: 0,
+    holder: {
+      async warm() {},
+      async applyDueBars() {
+        return [];
+      },
+      releaseDeadline() {},
+      sampleUntil() {
+        throw new Error("killed");
+      },
+    },
+  })).rejects.toThrow("killed");
+  const crashed = JSON.parse((await crashKv.get("p6:lease-meta")) ?? "{}") as { release?: string };
+  expect(crashed.release).toBe("crash");
+});
+
+test("REST warmup fills daily and 1h history without a local store", async () => {
+  const host = startPaperHost(["ZZ-REST"], {});
+  host.warmup.clear();
+  host.hourWarm.clear();
+  host.historyFrom.clear();
+  const urls: string[] = [];
+  await warmSeriesFromRest(host, async (url) => {
+    urls.push(url);
+    const daily = url.includes("granularity=86400");
+    const row = daily ? [1_700_000_000, 1, 2, 1.1, 1.5, 3] : [1_700_000_000, 1, 2, 1.1, 1.4, 3];
+    return { ok: true, status: 200, json: async () => [row] };
+  });
+  expect(urls.some((url) => url.includes("granularity=86400"))).toBe(true);
+  expect(urls.some((url) => url.includes("granularity=3600"))).toBe(true);
+  expect(host.warmup.get("ZZ-REST")?.length).toBeGreaterThan(0);
+  expect((host.hourWarm.get("ZZ-REST")?.length ?? 0) > 0).toBe(true);
+  expect(host.historyFrom.get("ZZ-REST")).toBeTruthy();
+});
+
+test("a frozen book takes one REST snapshot and rejects the leg when that snapshot is stale", async () => {
+  const host = startPaperHost(["ETH-USD"], {});
+  const now = Date.parse("2026-10-15T01:00:00.000Z");
+  host.l2Ts.set("ETH-USD", now - 16_000);
+  host.books.set("ETH-USD", { bids: new Map([["100", 1]]), asks: new Map([["100.2", 1]]) });
+  let calls = 0;
+  const stale = await ensureSendQuote(host, "ETH-USD", now, async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({ bids: [["100", "1"]], asks: [["100.2", "1"]], time: new Date(now - 20_000).toISOString() }) };
+  });
+  expect(calls).toBe(1);
+  expect(stale).toBe("stale");
+  const fresh = await ensureSendQuote(host, "ETH-USD", now, async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({ bids: [["101", "1"]], asks: [["101.2", "1"]], time: new Date(now - 500).toISOString() }) };
+  });
+  expect(calls).toBe(2);
+  expect(fresh).toBe("rest_fallback");
+  expect(host.book.quotes["ETH-USD"]?.quoteSrc).toBe("rest_fallback");
+});
+
+test("an exit uses the book at send and a day-old quote is not a trade", () => {
+  const host = startPaperHost(["ETH-USD"], {});
+  const ts = Date.parse("2026-10-15T01:00:00.000Z");
+  applyForward(host.book, { kind: "clock", tsMs: ts });
+  applyForward(host.book, {
+    kind: "x1",
+    id: "held",
+    classId: "B",
+    productId: "ETH-USD",
+    tsMs: ts,
+    nextOpen: 100,
+    stop: 90,
+    atr1h: 1,
+    bid: 100,
+    ask: 100.1,
+    bookTsMs: ts,
+    sendTsMs: ts,
+    decisionMid: 100,
+  });
+  expect(host.book.positions).toHaveLength(1);
+  host.book.quotes["ETH-USD"] = { bid: 100, ask: 100.1, tsMs: ts, quoteSrc: "l2" };
+  const start = Math.floor(ts / 1000) + 86_400;
+  applyForward(host.book, {
+    kind: "bar15",
+    productId: "ETH-USD",
+    startSec: start,
+    nowSec: start + 900,
+    open: 80,
+    high: 81,
+    low: 70,
+    close: 80,
+  });
+  expect(host.book.closed).toHaveLength(0);
+  expect(host.book.rejected.some((row) => row.reason === "missed_send_stale_quote")).toBe(true);
+  const next = start + 900;
+  host.book.quotes["ETH-USD"] = { bid: 79, ask: 79.2, tsMs: next * 1000, quoteSrc: "l2" };
+  applyForward(host.book, {
+    kind: "bar15",
+    productId: "ETH-USD",
+    startSec: next,
+    nowSec: next + 900,
+    open: 78,
+    high: 79,
+    low: 70,
+    close: 78,
+  });
+  expect(host.book.closed[0]?.exitKind).toBe("stop");
+  expect(host.book.legs.find((leg) => leg.id === "held:exit")?.arrivalSnapshotTs).toBe(next * 1000);
+});
+
+test("redis urls carry tls, username, and timeout, and auth is checked before Redis", async () => {
+  const endpoint = redisEndpoint("rediss://alice:s3cret@redis.example:6380", 1500);
+  expect(endpoint.tls).toBe(true);
+  expect(endpoint.username).toBe("alice");
+  expect(endpoint.password).toBe("s3cret");
+  expect(endpoint.port).toBe(6380);
+  expect(endpoint.timeoutMs).toBe(1500);
+  const plain = redisEndpoint("redis://:onlypass@127.0.0.1:6379");
+  expect(plain.tls).toBe(false);
+  expect(plain.username).toBe("");
+  expect(plain.password).toBe("onlypass");
+  const request = new Request("https://paper.example/api/engine", { headers: { authorization: "Bearer no" } });
+  const denied = await handleEngineRequest(request, {});
+  expect(denied.status).toBe(401);
+  const missing = await handleEngineRequest(request, { CRON_SECRET: "no" });
+  expect(missing.status).toBe(503);
 });

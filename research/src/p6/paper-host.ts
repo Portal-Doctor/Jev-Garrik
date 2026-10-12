@@ -23,14 +23,17 @@ import { applyForward, freshBook, forwardBookPanel, noteMemberDay, type Book } f
 import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
 import { deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
-import { STALE_QUOTE_MS } from "./legs";
+import { MISSED_SEND_STALE_QUOTE, STALE_QUOTE_MS } from "./legs";
+import type { VolHour } from "./amendment-v6";
 import { HEARTBEAT_GAP_MS, heartbeatMustReconnect, type MidBar } from "./mid-feed";
 import { PUBLIC_CHANNELS, PUBLIC_WS_URL, subscribeFrames } from "./public-ws";
 import {
   barFromExchangeCandles,
   barsFromExchangeCandles,
   fifteenMinuteUrl,
+  historyCandleUrl,
   planHistorySpans,
+  productBookUrl,
   restOrTrades,
   restSettleSchedule,
   tradesBuilt15m,
@@ -113,6 +116,16 @@ export interface PaperHost {
   /** Set when this instance is leaving at the function deadline. The socket close is not a gap. */
   deadlineRelease: boolean;
   lastBar: { productId: string; atr1h: number; dailyAtr: number; dailyClose: boolean; bScores: number } | null;
+  /** Wall-clock time of the last L2 touch. Staleness uses this, not the signal time. */
+  l2Ts: Map<string, number>;
+  /** Logged feed gaps: handover, missed cron, and crash. */
+  gaps: { startMs: number; endMs: number; cause: string }[];
+  /** Vercel has no sqlite. REST warmup fills daily and 1h history into this host. */
+  restWarm: boolean;
+  /** Bar keys already written. A later save does not repeat them. */
+  persistedBars: Set<string>;
+  /** Sockets opened by an overlapping warmup. The lease holder reuses them. */
+  openSockets?: WebSocket[];
 }
 
 export interface StatusPublisher {
@@ -235,6 +248,7 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     members: [...products],
     ...(memberCloses.length > 0 ? { memberCloses, btcCloses, clusterMemberOn: context?.memberOn } : {}),
   });
+  book.config.liveQuotes = true;
   if (!context) book.incidents.push("registration flags unavailable");
   if (!existsSync(join(dailyDir, "candles"))) book.incidents.push("daily warmup unavailable");
   else {
@@ -286,6 +300,10 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     status: "live",
     lastBar: null,
     deadlineRelease: false,
+    l2Ts: new Map(),
+    gaps: [],
+    restWarm: false,
+    persistedBars: new Set(),
   };
 }
 
@@ -448,19 +466,24 @@ export function applyPublic(host: PaperHost, shardIndex: number, events: readonl
       for (const [price, size] of event.bids) applyLevel(book, "bid", price, size);
       for (const [price, size] of event.asks) applyLevel(book, "ask", price, size);
       host.books.set(event.productId, book);
+      host.l2Ts.set(event.productId, nowMs);
       dirty.add(event.productId);
       continue;
     }
     if (event.kind === "l2-update") {
       const book = levelsOf(host, event.productId);
       applyLevel(book, event.side, event.price, event.size);
+      host.l2Ts.set(event.productId, nowMs);
       dirty.add(event.productId);
     }
   }
   for (const productId of dirty) {
     const book = host.books.get(productId);
     const top = book ? touch(book) : null;
-    if (top) applyForward(host.book, { kind: "mid", tsMs: nowMs, productId, bid: top.bid, ask: top.ask });
+    if (top) {
+      host.book.quotes[productId] = { bid: top.bid, ask: top.ask, tsMs: nowMs, quoteSrc: "l2" };
+      applyForward(host.book, { kind: "mid", tsMs: nowMs, productId, bid: top.bid, ask: top.ask });
+    }
   }
   boundHost(host);
 }
@@ -603,33 +626,69 @@ function entryId(entry: GeneratedEntry): string {
   return `${entry.classId}-${entry.productId}-${entry.tsMs}`;
 }
 
-/** Send a queued entry at the fill open. Level2 is the book now. Staleness uses the wall clock. */
+/**
+ * Put the send-time book on the host. L2 wins when it is within 15s.
+ * Otherwise the one REST snapshot already taken, flagged rest_fallback.
+ * p6-staleness-ruling.md, 2026-10-12 11:25 AM CT.
+ */
+export function publishLiveQuote(host: PaperHost, productId: string, nowMs: number): "l2" | "rest_fallback" | "stale" {
+  const l2At = host.l2Ts.get(productId);
+  const stored = host.books.get(productId);
+  const top = stored ? touch(stored) : null;
+  if (top && l2At != null && nowMs - l2At <= STALE_QUOTE_MS) {
+    host.book.quotes[productId] = { bid: top.bid, ask: top.ask, tsMs: l2At, quoteSrc: "l2" };
+    return "l2";
+  }
+  const rest = host.restQuotes.get(productId);
+  if (rest && nowMs - rest.tsMs <= STALE_QUOTE_MS) {
+    host.book.quotes[productId] = { bid: rest.bid, ask: rest.ask, tsMs: rest.tsMs, quoteSrc: "rest_fallback" };
+    return "rest_fallback";
+  }
+  return "stale";
+}
+
+/** One REST product-book snapshot when L2 is older than 15s. A second call is not made for this send. */
+export async function ensureSendQuote(
+  host: PaperHost,
+  productId: string,
+  nowMs: number,
+  fetchImpl: (url: string) => Promise<Pick<Response, "status" | "ok" | "json">> = fetch,
+): Promise<"l2" | "rest_fallback" | "stale"> {
+  if (publishLiveQuote(host, productId, nowMs) === "l2") return "l2";
+  try {
+    const response = await fetchImpl(productBookUrl(productId));
+    if (response.ok) {
+      const body = (await response.json()) as { bids?: [string, string][]; asks?: [string, string][]; time?: string };
+      const bid = Number(body.bids?.[0]?.[0]);
+      const ask = Number(body.asks?.[0]?.[0]);
+      const stamped = body.time ? Date.parse(body.time) : nowMs;
+      const tsMs = Number.isFinite(stamped) ? stamped : nowMs;
+      if (bid > 0 && ask > 0 && nowMs - tsMs <= STALE_QUOTE_MS) {
+        host.restQuotes.set(productId, { bid, ask, tsMs });
+        return publishLiveQuote(host, productId, nowMs);
+      }
+    }
+  } catch (error) {
+    host.book.incidents.push(`rest book ${productId} ${error instanceof Error ? error.message : "failed"}`);
+  }
+  return "stale";
+}
+
+/** Send a queued entry at the fill open. The book is the one at send, never the one stored at the decision. */
 export function flushEntries(host: PaperHost, nowMs: number): void {
   for (const [id, entry] of host.queued) {
     if (entry.tsMs > nowMs) continue;
     host.queued.delete(id);
-    if (nowMs - entry.tsMs > STALE_QUOTE_MS) {
+    const quoteKind = publishLiveQuote(host, entry.productId, nowMs);
+    const quoted = host.book.quotes[entry.productId];
+    if (quoteKind === "stale" || !quoted || nowMs - quoted.tsMs > STALE_QUOTE_MS) {
       host.emitted.add(id);
-      host.book.rejected.push({ id, reason: "stale-book" });
-      host.book.incidents.push(`missed send ${id}`);
+      host.book.rejected.push({ id, reason: MISSED_SEND_STALE_QUOTE });
+      host.book.incidents.push(`${MISSED_SEND_STALE_QUOTE} ${id}`);
       continue;
     }
-    const stored = host.books.get(entry.productId);
-    let top = stored ? touch(stored) : null;
-    let quoted = host.book.quotes[entry.productId];
-    let quoteFallback = false;
-    const rest = host.restQuotes.get(entry.productId);
-    const restFresh = rest != null && nowMs - rest.tsMs <= STALE_QUOTE_MS;
-    if ((!top || !quoted || nowMs - quoted.tsMs > STALE_QUOTE_MS) && restFresh && rest) {
-      top = { bid: rest.bid, ask: rest.ask };
-      quoted = { bid: rest.bid, ask: rest.ask, tsMs: rest.tsMs };
-      quoteFallback = true;
-    }
-    if (!top || !quoted || nowMs - quoted.tsMs > STALE_QUOTE_MS) {
-      host.emitted.add(id);
-      host.book.rejected.push({ id, reason: "stale-book" });
-      continue;
-    }
+    const top = { bid: quoted.bid, ask: quoted.ask };
+    const quoteFallback = quoted.quoteSrc === "rest_fallback";
     const tick = host.ticks.get(entry.productId);
     if (entry.kind === "d-order" && !(tick && tick > 0)) {
       host.emitted.add(id);
@@ -664,6 +723,8 @@ export function flushEntries(host: PaperHost, nowMs: number): void {
         tick,
         target: entry.target ?? undefined,
         quoteFallback,
+        decisionTs: entry.decisionTs ?? entry.tsMs,
+        barCloseTs: entry.barCloseTs ?? entry.tsMs,
       });
       continue;
     }
@@ -686,6 +747,8 @@ export function flushEntries(host: PaperHost, nowMs: number): void {
       priorDailyCloses: entry.priorDailyCloses,
       ...(entry.aConfig ? { aConfig: entry.aConfig } : {}),
       quoteFallback,
+      decisionTs: entry.decisionTs ?? entry.tsMs,
+      barCloseTs: entry.barCloseTs ?? entry.tsMs,
     });
   }
 }
@@ -708,6 +771,7 @@ function pushBar(host: PaperHost, bar: OhlcvBar): void {
   let bScores: ClassBRow[] | undefined;
   const dailyClose = isDayCloseBar(bar.startSec);
   const live = host.clock() - nowSec * 1000 < 180_000;
+  publishLiveQuote(host, bar.productId, host.clock());
   try {
     ensureHourWarm(host, bar.productId);
     const derived = deriveForwardBook(host.fifteen.filter((row) => row.productId === bar.productId), nowSec);
@@ -919,12 +983,55 @@ export interface PaperStateBody {
   jevPackets: number;
   jevSkipped: number;
   gapFills: number;
+  memberCloses?: Book["config"]["memberCloses"];
+  btcCloses?: Book["config"]["btcCloses"];
+  warmup?: [string, SourceDay[]][];
+  gaps?: { startMs: number; endMs: number; cause: string }[];
+  volHours?: VolHour[];
+  dSubmitted?: number;
+  dIndeterminate?: number;
 }
 
 /** Persistence for the book and the last processed bar. The driver does not choose the store. */
 export interface PaperStore {
   load(): PaperStateBody | null;
   save(body: PaperStateBody): void;
+}
+
+/** Hour buckets for the V6 vol-hour cap. rv is the mean squared 15m log return in that hour. */
+export function volHoursFromFifteens(
+  bars: readonly { startSec: number; close: number }[],
+  gaps: readonly { startMs: number; endMs: number }[],
+): VolHour[] {
+  const byHour = new Map<number, number[]>();
+  for (const bar of bars) {
+    if (!(bar.close > 0)) continue;
+    const hour = Math.floor(bar.startSec / 3600) * 3600 * 1000;
+    const list = byHour.get(hour) ?? [];
+    list.push(bar.close);
+    byHour.set(hour, list);
+  }
+  const hours: VolHour[] = [];
+  for (const [hour, closes] of [...byHour.entries()].sort((a, b) => a[0] - b[0])) {
+    let sq = 0;
+    let n = 0;
+    for (let i = 1; i < closes.length; i += 1) {
+      const prev = closes[i - 1]!;
+      const next = closes[i]!;
+      if (!(prev > 0) || !(next > 0)) continue;
+      const ret = Math.log(next / prev);
+      sq += ret * ret;
+      n += 1;
+    }
+    const end = hour + 3_600_000;
+    let gappedMs = 0;
+    for (const gap of gaps) {
+      const width = Math.min(end, gap.endMs) - Math.max(hour, gap.startMs);
+      if (width > 0) gappedMs += width;
+    }
+    hours.push({ rv: n > 0 ? sq / n : 0, gappedMs, hourMs: 3_600_000 });
+  }
+  return hours;
 }
 
 export function capturePaperState(host: PaperHost): PaperStateBody {
@@ -960,6 +1067,13 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     jevPackets: host.book.jevPackets,
     jevSkipped: host.book.jevSkipped,
     gapFills: host.book.gapFills,
+    memberCloses: book.config.memberCloses,
+    btcCloses: book.config.btcCloses,
+    warmup: [...host.warmup.entries()],
+    gaps: host.gaps,
+    volHours: volHoursFromFifteens(host.fifteen, host.gaps),
+    dSubmitted: book.submittedByClass.D,
+    dIndeterminate: book.indeterminateByClass.D,
   };
 }
 
@@ -996,6 +1110,14 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   if (body.jevPackets != null) host.book.jevPackets = body.jevPackets;
   if (body.jevSkipped != null) host.book.jevSkipped = body.jevSkipped;
   if (body.gapFills != null) host.book.gapFills = body.gapFills;
+  if (body.memberCloses) {
+    host.book.config.memberCloses = body.memberCloses.map((row) => ({ ...row, days: [...row.days] }));
+  }
+  if (body.btcCloses) host.book.config.btcCloses = [...body.btcCloses];
+  if (body.warmup) host.warmup = new Map(body.warmup.map(([id, days]) => [id, [...days]]));
+  if (body.gaps) host.gaps = body.gaps.map((gap) => ({ ...gap }));
+  if (body.dSubmitted != null) host.book.submittedByClass.D = body.dSubmitted;
+  if (body.dIndeterminate != null) host.book.indeterminateByClass.D = body.dIndeterminate;
   if (body.appliedThrough) {
     for (const productId of host.products) {
       const resumed = resumeRestCursor(host.restCursor.get(productId), host.appliedThrough.get(productId));
@@ -1246,41 +1368,155 @@ export async function runPublicPaper(opts: {
   });
 }
 
+export interface DriveHooks {
+  /** Writes the book, member closes, gaps, and new bars. Called when the run ends and after each applied bar. */
+  persist?: () => Promise<void> | void;
+  onBar?: (bar: OhlcvBar) => Promise<void> | void;
+  /** False while the next instance is overlapping and does not yet hold the lease. */
+  applyBars?: boolean;
+  /** Overlap ends when this returns true, leaving the sockets up for the lease holder. */
+  stopWhen?: () => Promise<boolean> | boolean;
+}
+
 /** Sample on an existing host until `untilMs`, then close the sockets as a deadline handover. */
-export async function driveHost(host: PaperHost, untilMs: number): Promise<void> {
-  const sockets = host.shards.map((_, index) => openShard(host, index, PUBLIC_WS_URL));
+export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHooks = {}): Promise<void> {
+  const apply = hooks.applyBars !== false;
+  if (host.clock() >= untilMs) {
+    if (apply) await hooks.persist?.();
+    return;
+  }
+  const sockets = host.openSockets ?? host.shards.map((_, index) => openShard(host, index, PUBLIC_WS_URL));
+  host.openSockets = sockets;
   await new Promise<void>((resolve) => {
     const timer = setInterval(() => {
-      const now = Date.now();
-      flushEntries(host, now);
+      const now = host.clock();
+      if (apply) {
+        for (const entry of host.queued.values()) {
+          if (entry.tsMs <= now) void ensureSendQuote(host, entry.productId, now);
+        }
+        for (const position of host.book.positions) void ensureSendQuote(host, position.productId, now);
+        flushEntries(host, now);
+      }
       host.shards.forEach((_, index) => {
         if (!considerHeartbeatGap(host, index, now)) return;
         replaceShard(host, sockets, index, PUBLIC_WS_URL);
       });
-      const due = nextRest(host, now);
-      if (due?.action === "fetch") {
-        due.slot.inflight = true;
-        host.nextRestMs = now + REST_PACE_MS;
-        void fetchRestBar(due.slot.productId, due.slot.barStartSec)
-          .then((result) => {
-            if (result.status === 429) {
-              noteRest429(due.slot, Date.now(), result.retryAfterMs);
-              return;
-            }
-            noteRestMiss(host, due.slot);
-            if (result.bar) acceptRestBar(host, result.bar);
-          })
-          .catch(() => {
-            due.slot.inflight = false;
-            noteRestMiss(host, due.slot);
-          });
-      } else if (due?.action === "fallback") fallbackTradesBar(host, due.slot);
-      if (now >= untilMs) {
+      if (apply) {
+        const due = nextRest(host, now);
+        if (due?.action === "fetch") {
+          due.slot.inflight = true;
+          host.nextRestMs = now + REST_PACE_MS;
+          void fetchRestBar(due.slot.productId, due.slot.barStartSec)
+            .then(async (result) => {
+              if (result.status === 429) {
+                noteRest429(due.slot, Date.now(), result.retryAfterMs);
+                return;
+              }
+              noteRestMiss(host, due.slot);
+              if (result.bar && acceptRestBar(host, result.bar) === "accepted") {
+                await hooks.onBar?.(result.bar);
+                await hooks.persist?.();
+              }
+            })
+            .catch(() => {
+              due.slot.inflight = false;
+              noteRestMiss(host, due.slot);
+            });
+        } else if (due?.action === "fallback") {
+          const built = fallbackTradesBar(host, due.slot);
+          if (built) void hooks.onBar?.(built);
+        }
+      }
+      void (async () => {
+        const stop = hooks.stopWhen ? await hooks.stopWhen() : false;
+        if (now < untilMs && !stop) return;
         clearInterval(timer);
+        if (!apply) {
+          resolve();
+          return;
+        }
         releaseForDeadline(host);
         for (const socket of sockets) socket.close();
+        host.openSockets = undefined;
+        await hooks.persist?.();
         resolve();
-      }
+      })();
     }, REST_PACE_MS);
   });
+}
+
+/** Daily and 1h history from public REST, stored on the host. There is no local candle store on Vercel. */
+export async function warmSeriesFromRest(
+  host: PaperHost,
+  fetchImpl: (url: string) => Promise<Pick<Response, "status" | "ok" | "json">> = fetch,
+): Promise<void> {
+  const nowSec = Math.floor(host.clock() / 1000);
+  const ids = [...new Set([...host.products, "BTC-USD"])];
+  for (const productId of ids) {
+    if ((host.warmup.get(productId)?.length ?? 0) > 0) continue;
+    const end = nowSec;
+    const start = end - 300 * 86_400;
+    try {
+      const response = await fetchImpl(historyCandleUrl(productId, start, end, 86_400));
+      if (!response.ok) {
+        host.book.incidents.push(`history daily ${productId} ${response.status}`);
+        continue;
+      }
+      const rows = (await response.json()) as number[][];
+      const bars = barsFromExchangeCandles(productId, Array.isArray(rows) ? rows : []);
+      const days: SourceDay[] = bars.map((bar) => ({
+        date: new Date(bar.startSec * 1000).toISOString().slice(0, 10),
+        ts: bar.startSec,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        volume: bar.volume,
+        empty: false,
+      }));
+      const series = withExplicitGaps(days);
+      host.warmup.set(productId, series);
+      const origin = historyOriginSec(series);
+      if (origin != null) host.historyFrom.set(productId, origin);
+    } catch (error) {
+      host.book.incidents.push(`history daily ${productId} ${error instanceof Error ? error.message : "failed"}`);
+    }
+  }
+  if (host.context) {
+    const memberCloses = [...host.warmup.entries()].flatMap(([productId, days]) => {
+      const flags = host.context?.byProduct.get(productId);
+      return flags && days.length > 0 ? [{ productId, flags, days }] : [];
+    });
+    if (memberCloses.length > 0) {
+      host.book.config.memberCloses = memberCloses;
+      host.book.config.btcCloses = (host.warmup.get("BTC-USD") ?? [])
+        .filter((row) => !row.empty && row.close > 0)
+        .map((row) => ({ date: row.date, close: row.close }));
+    }
+  }
+  for (const productId of host.products) {
+    if ((host.hourWarm.get(productId)?.length ?? 0) > 0) continue;
+    const end = nowSec;
+    const start = end - 400 * 3_600;
+    const span = 300 * 3_600;
+    try {
+      const bars: OhlcvBar[] = [];
+      for (let cursor = start; cursor <= end; cursor += span) {
+        const spanEnd = Math.min(end, cursor + span - 3_600);
+        const response = await fetchImpl(historyCandleUrl(productId, cursor, spanEnd, 3_600));
+        if (!response.ok) {
+          host.book.incidents.push(`history hour ${productId} ${response.status}`);
+          break;
+        }
+        const rows = (await response.json()) as number[][];
+        bars.push(...barsFromExchangeCandles(productId, Array.isArray(rows) ? rows : []));
+      }
+      host.hourWarm.set(
+        productId,
+        bars.slice(-400).map((bar) => ({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume })),
+      );
+    } catch (error) {
+      host.book.incidents.push(`history hour ${productId} ${error instanceof Error ? error.message : "failed"}`);
+    }
+  }
 }

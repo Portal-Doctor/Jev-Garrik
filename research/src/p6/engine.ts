@@ -35,7 +35,7 @@ import { daysBetween, weekKey } from "../p5/stats";
 import { shadowPackets, type ShadowPacket } from "./jev-shadow";
 import { bookPanel, parity7d, weeklyHaltsInLast6, type BookPanel } from "./review";
 import { forwardClassRisk, UNPROMOTED_RISK_USD, type KellyHold } from "./kelly";
-import { STALE_QUOTE_MS, type LegLog } from "./legs";
+import { MISSED_SEND_STALE_QUOTE, STALE_QUOTE_MS, type LegLog } from "./legs";
 import { BOOTSTRAP_SEEDS } from "./metrics";
 import { applyMidSample, freshMidBook, halfSpreadBps, heartbeatMustReconnect, takerSideFromMaker, type MidBook } from "./mid-feed";
 import { barBeginsAtOrAfterEntry, strategyBarClosed } from "./signals";
@@ -69,6 +69,11 @@ export interface BookConfig {
   memberCloses?: readonly MemberCloses[];
   btcCloses?: readonly { date: string; close: number }[];
   clusterMemberOn?: (productId: string, date: string) => boolean;
+  /**
+   * Live paper only. An exit reads the book at send and is not a trade when that book is stale.
+   * Parity and injected tests leave this off, so a stored quote still prices the exit.
+   */
+  liveQuotes?: boolean;
 }
 
 export interface PairBackstopLog {
@@ -155,7 +160,7 @@ interface Working {
   notionalUsd: number;
   stopBps: number;
   filledUnits: number;
-  quoteSource?: "l2" | "rest";
+  quoteSource?: "l2" | "rest" | "rest_fallback";
 }
 
 export interface Book {
@@ -185,7 +190,7 @@ export interface Book {
   rejected: { id: string; reason: string }[];
   indeterminateByClass: Record<ClassId, number>;
   submittedByClass: Record<ClassId, number>;
-  quotes: Record<string, { bid: number; ask: number; tsMs: number }>;
+  quotes: Record<string, { bid: number; ask: number; tsMs: number; quoteSrc?: "l2" | "rest_fallback" }>;
   momentumDates: string[];
   haltWeeks: string[];
   clusterMonth: string | null;
@@ -232,6 +237,10 @@ export type ForwardEvent =
       aConfig?: string;
       /** V6. The bid and ask are a REST product-book snapshot, flagged on the leg. */
       quoteFallback?: boolean;
+      /** When the signal was known. Logged. Not a staleness input. */
+      decisionTs?: number;
+      /** When the signal bar closed. Logged. Not a staleness input. */
+      barCloseTs?: number;
     }
   | {
       kind: "d-order";
@@ -251,6 +260,8 @@ export type ForwardEvent =
       target?: number;
       /** V6. The bid and ask are a REST product-book snapshot. */
       quoteFallback?: boolean;
+      decisionTs?: number;
+      barCloseTs?: number;
     }
   | { kind: "minute"; productId: string; tsMs: number; open: number; high: number; low: number; close: number; volume: number }
   | {
@@ -682,6 +693,8 @@ function tryEnter(book: Book, opts: {
   rawEntry?: number;
   aConfig?: string | null;
   quoteFallback?: boolean;
+  decisionTs?: number;
+  barCloseTs?: number;
 }): boolean {
   reviewKnownPairs(book, opts.tsMs);
   if (pairEntryBlocked(book, opts.productId)) {
@@ -744,6 +757,9 @@ function tryEnter(book: Book, opts: {
     feesUsd: entryFeeUsd,
     stale: opts.quoteFallback === true,
     source: opts.quoteFallback ? "rest" : "l2",
+    quoteSrc: opts.quoteFallback ? "rest_fallback" : "l2",
+    decisionTs: opts.decisionTs,
+    barCloseTs: opts.barCloseTs,
   });
   book.positions.push({
     id: opts.id,
@@ -791,7 +807,13 @@ function closePosition(
   opts: { tsMs: number; fill: number; kind: string; triggerBarTs: number | null; makerExit?: boolean; decisionMid?: number },
 ): void {
   const quote = book.quotes[position.productId];
-  const stale = quote == null || opts.tsMs - quote.tsMs > STALE_QUOTE_MS;
+  const age = quote ? opts.tsMs - quote.tsMs : Number.POSITIVE_INFINITY;
+  if (book.config.liveQuotes && !(quote && age <= STALE_QUOTE_MS)) {
+    book.rejected.push({ id: `${position.id}:exit`, reason: MISSED_SEND_STALE_QUOTE });
+    book.incidents.push(`${MISSED_SEND_STALE_QUOTE} ${position.id}`);
+    return;
+  }
+  const stale = quote == null || age > STALE_QUOTE_MS || quote.quoteSrc === "rest_fallback";
   const bid = quote?.bid ?? 0;
   const ask = quote?.ask ?? 0;
   const arrivalMid = opts.kind === "stop" ? position.stop : (bid + ask) / 2;
@@ -823,6 +845,10 @@ function closePosition(
     units: position.units,
     feesUsd: exitFee,
     stale,
+    source: quote?.quoteSrc === "rest_fallback" ? "rest" : "l2",
+    quoteSrc: quote?.quoteSrc ?? (quote ? "l2" : undefined),
+    decisionTs: opts.tsMs,
+    barCloseTs: opts.triggerBarTs ?? undefined,
   });
   book.positions = book.positions.filter((item) => item.id !== position.id);
   pushClosed(book, {
@@ -1065,7 +1091,8 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       return book;
     }
     if (event.sendTsMs - event.bookTsMs > STALE_QUOTE_MS) {
-      book.rejected.push({ id: event.id, reason: "stale-book" });
+      book.rejected.push({ id: event.id, reason: MISSED_SEND_STALE_QUOTE });
+      book.incidents.push(`${MISSED_SEND_STALE_QUOTE} ${event.id}`);
       return book;
     }
     const sLive = spreadBps(book, event.bid, event.ask);
@@ -1105,13 +1132,16 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       rawEntry: event.nextOpen,
       aConfig: event.classId === "A" ? (event.aConfig ?? null) : null,
       quoteFallback: event.quoteFallback === true,
+      decisionTs: event.decisionTs,
+      barCloseTs: event.barCloseTs,
     });
     return book;
   }
   if (event.kind === "d-order") {
     touchTime(book, event.placedTs);
     if ((event.sendTsMs ?? event.placedTs) - event.bookTsMs > STALE_QUOTE_MS) {
-      book.rejected.push({ id: event.id, reason: "stale-book" });
+      book.rejected.push({ id: event.id, reason: MISSED_SEND_STALE_QUOTE });
+      book.incidents.push(`${MISSED_SEND_STALE_QUOTE} ${event.id}`);
       return book;
     }
     const sLive = spreadBps(book, event.bid, event.ask);
@@ -1175,7 +1205,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       notionalUsd: decision.notionalUsd,
       stopBps,
       filledUnits: 0,
-      quoteSource: event.quoteFallback ? "rest" : "l2",
+      quoteSource: event.quoteFallback ? "rest_fallback" : "l2",
     });
     return book;
   }

@@ -49,6 +49,10 @@ export interface GeneratedEntry {
   aConfig?: string;
   /** True when the next open is not in the series yet. The host fills it at the entry time. */
   fillAtOpen?: boolean;
+  /** When the signal was known. Logged at send. It is not a staleness input. */
+  decisionTs?: number;
+  /** When the signal bar closed. The close-to-send delay is logged and does not reject. */
+  barCloseTs?: number;
 }
 
 export interface GenerateResult {

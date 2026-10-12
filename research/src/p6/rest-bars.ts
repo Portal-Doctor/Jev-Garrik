@@ -54,6 +54,20 @@ export function fifteenMinuteUrl(productId: string, startSec: number, endSecIncl
   return url;
 }
 
+/** Public candles for daily or 1h warmup. Vercel has no local store. */
+export function historyCandleUrl(productId: string, startSec: number, endSecInclusive: number, granularitySec: number): string {
+  const url = candlesUrl(productId, startSec, endSecInclusive, granularitySec);
+  assertMarketDataUrl(url);
+  return url;
+}
+
+/** Public level-1 product book. One snapshot when the L2 book is older than the staleness limit. */
+export function productBookUrl(productId: string): string {
+  const url = `https://api.exchange.coinbase.com/products/${encodeURIComponent(productId)}/book?level=1`;
+  assertMarketDataUrl(url);
+  return url;
+}
+
 /** Fold completed child bars into a higher bar. A partial span is not emitted. */
 export function aggregateBars(bars: readonly OhlcvBar[], spanSec: number): OhlcvBar[] {
   if (!(spanSec > 0)) throw new Error("span must be positive");
