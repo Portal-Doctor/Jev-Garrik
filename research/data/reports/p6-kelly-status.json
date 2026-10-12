@@ -1,0 +1,18 @@
+{
+  "commitSha": "2e5db761466bdf15b22fc604c540aa41bdb8771d",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T02:07:10.288Z",
+  "phaseId": "P6",
+  "role": "label",
+  "text": "$20 until promotion is registered (TDF Section 8, ADD Section 5, R5, default 13); the hard-coded $60 was the defect.",
+  "unpromotedRiskUsd": 20,
+  "registeredRiskUsd": 60,
+  "bankrollUsd": 8000,
+  "kellyInput": "L80",
+  "promotionMinDays": 90,
+  "promotionMinN": 30,
+  "default13": "resolved default 13: a null or non-positive lower-80% bound sizes at $20",
+  "registrationEdited": false,
+  "amendment2Edited": false,
+  "kellyRulingEdited": false
+}

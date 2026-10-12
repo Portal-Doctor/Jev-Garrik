@@ -26,6 +26,12 @@ const FROZEN = new Set([
   "p6-amendment-2.sha256",
   "p6-kelly-ruling.json",
   "p6-kelly-ruling.sha256",
+  "p6-amendment-2a.json",
+  "p6-amendment-2a.sha256",
+  "p6-amendment-2a-approval.json",
+  "p6-amendment-2a-approval.sha256",
+  "p6-kelly-status.json",
+  "p6-kelly-status.sha256",
 ]);
 
 export function assertP6Target(name: string): void {

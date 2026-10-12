@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "bun:test";
 import { section1CostBps } from "../p3/design-rules";
 import { applyForward, freshBook, replayInjected } from "./engine";
@@ -9,8 +12,41 @@ import { classDollarBackstop, freshClassCurve, stepClass } from "./session";
 import { kellyStatusBody, PAPER_BANKROLL_USD } from "./kelly";
 import { amendment2aBody } from "./amendment2a";
 import { subscribeFrames } from "./public-ws";
+import { assertP6Target } from "./write";
+
+function sidecarMatches(name: string): void {
+  const raw = readFileSync(fileURLToPath(new URL(`../../data/reports/${name}.json`, import.meta.url)));
+  const hash = createHash("sha256").update(raw).digest("hex");
+  const side = readFileSync(fileURLToPath(new URL(`../../data/reports/${name}.sha256`, import.meta.url)), "utf8");
+  expect(side).toBe(`${hash}  research/data/reports/${name}.json\n`);
+}
 
 const wednesday = Date.parse("2026-03-04T00:00:00.000Z");
+
+test("amendment 2a and the Kelly label are stamped and the frozen files are untouched", () => {
+  sidecarMatches("p6-amendment-2a");
+  sidecarMatches("p6-amendment-2a-approval");
+  sidecarMatches("p6-kelly-status");
+  const rule = JSON.parse(readFileSync(fileURLToPath(new URL("../../data/reports/p6-amendment-2a.json", import.meta.url)), "utf8")) as { rule: string; amendment2Edited: boolean };
+  expect(rule.rule).toBe(AMENDMENT_2A_RULE);
+  expect(rule.amendment2Edited).toBe(false);
+  const approval = JSON.parse(readFileSync(fileURLToPath(new URL("../../data/reports/p6-amendment-2a-approval.json", import.meta.url)), "utf8")) as {
+    approvedBy: string;
+    approvedAt: string;
+    amendment2aSha256: string;
+    commit: string;
+  };
+  expect(approval.approvedBy).toBe("Brian");
+  expect(approval.approvedAt).toBe("2026-10-12T01:49:00Z");
+  expect(approval.amendment2aSha256).toHaveLength(64);
+  expect(approval.commit).toBe("79eebb38ddc99e1e08ec0e6cf587af228ed5deb7");
+  const label = JSON.parse(readFileSync(fileURLToPath(new URL("../../data/reports/p6-kelly-status.json", import.meta.url)), "utf8")) as { text: string; kellyRulingEdited: boolean };
+  expect(label.text).toContain("hard-coded $60 was the defect");
+  expect(label.kellyRulingEdited).toBe(false);
+  expect(() => assertP6Target("p6-amendment-2.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("p6-amendment-2a.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("p6-kelly-ruling.json")).toThrow(/refusing/);
+});
 
 test("the dollar backstop uses the running high and a pause does not reset it", () => {
   let curve = freshClassCurve();
