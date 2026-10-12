@@ -52,14 +52,23 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
 export async function loadDashboard(kv: Kv): Promise<Dashboard> {
   const raw = await kv.get(STATE_KEY);
   const lease = decodeLease(await kv.get(LEASE_KEY));
-  const body = raw ? (JSON.parse(raw) as { positions?: Dashboard["positions"]; incidents?: string[]; jevSkipped?: number; jevPackets?: number }) : null;
+  const body = raw
+    ? (JSON.parse(raw) as {
+        positions?: Dashboard["positions"];
+        incidents?: string[];
+        jevSkipped?: number;
+        jevPackets?: number;
+        killSwitch?: boolean;
+        gaps?: { startMs: number; endMs: number }[];
+      })
+    : null;
   return dashboard({
     positions: body?.positions ?? [],
-    gates: [],
+    gates: body?.killSwitch ? ["kill-switch"] : [],
     leaseHolder: lease && lease.untilMs > Date.now() ? lease.holder : null,
     incidents: body?.incidents ?? [],
     weekMs: 7 * 24 * 60 * 60 * 1000,
-    gaps: [],
+    gaps: body?.gaps ?? [],
     hours: [],
     jevSkipped: body?.jevSkipped ?? 0,
     jevPackets: body?.jevPackets ?? 0,
