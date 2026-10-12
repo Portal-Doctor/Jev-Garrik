@@ -13,6 +13,7 @@ import {
   kvPaperStore,
   LEASE_KEY,
   MAX_DURATION_MS,
+  noteLeaseSave,
   runInvocation,
   STATE_KEY,
   type Dashboard,
@@ -24,6 +25,7 @@ import {
 export async function persistRun(kv: Kv, host: PaperHost): Promise<void> {
   const body = capturePaperState(host);
   await kvPaperStore(kv).save(body);
+  await noteLeaseSave(kv, host.clock());
   const seen = new Set<string>();
   for (const bar of host.fifteen) {
     const key = `${bar.productId}:${bar.startSec}`;
@@ -158,12 +160,14 @@ export async function handleEngineRequest(
   const self = deps?.self ?? `cron-${nowMs}`;
   const host = deps?.holder ? null : startPaperHost((env.P6_PRODUCTS ?? "BTC-USD").split(",").filter(Boolean), env);
   if (host) host.restWarm = true;
-  const holder = deps?.holder ?? {
-    ...hostHolder(host!, kv),
-    sampleUntil(untilMs: number) {
-      return driveHost(host!, untilMs);
-    },
-  };
-  const result: InvocationResult = await runInvocation({ kv, self, nowMs, deadlineMs, holder });
+  const holder = deps?.holder ?? hostHolder(host!, kv);
+  const result: InvocationResult = await runInvocation({
+    kv,
+    self,
+    nowMs,
+    deadlineMs,
+    holder,
+    ...(deps?.nowMs == null ? { clock: () => Date.now() } : {}),
+  });
   return Response.json({ ...result, readOnly: false, writes: "cron-only" });
 }

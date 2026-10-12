@@ -134,10 +134,13 @@ export interface VolHour {
   rv: number;
   gappedMs: number;
   hourMs: number;
+  /** Set when the hour is one product. Hours are not merged across products. */
+  productId?: string;
 }
 
 /**
- * Gap caps for one week. Top-decile realized-vol hours are the highest 10% by rv.
+ * Gap caps per week. The share is the worst week of length `weekMs`, not the sum of every gap
+ * divided by one week. Top-decile realized-vol hours are the highest 10% by rv.
  * A no-go is a weekly forward-monitor flag on that week's Jev and D stats.
  */
 export function gapWeekReport(opts: {
@@ -161,13 +164,23 @@ export function gapWeekReport(opts: {
   flags: string[];
 } {
   const weekMs = opts.weekMs > 0 ? opts.weekMs : 7 * 24 * 60 * 60 * 1000;
-  let gappedMs = 0;
   let longestMs = 0;
+  const byWeek = new Map<number, number>();
   for (const gap of opts.gaps) {
     const width = Math.max(0, gap.endMs - gap.startMs);
-    gappedMs += width;
     if (width > longestMs) longestMs = width;
+    if (!(gap.endMs > gap.startMs)) continue;
+    let cursor = gap.startMs;
+    while (cursor < gap.endMs) {
+      const index = Math.floor(cursor / weekMs);
+      const weekEnd = (index + 1) * weekMs;
+      const sliceEnd = Math.min(gap.endMs, weekEnd);
+      byWeek.set(index, (byWeek.get(index) ?? 0) + (sliceEnd - cursor));
+      cursor = sliceEnd;
+    }
   }
+  let gappedMs = 0;
+  for (const width of byWeek.values()) if (width > gappedMs) gappedMs = width;
   const gappedShare = gappedMs / weekMs;
   const hourMs = opts.hours.reduce((sum, hour) => sum + Math.max(0, hour.hourMs), 0);
   const hourGap = opts.hours.reduce((sum, hour) => sum + Math.max(0, hour.gappedMs), 0);

@@ -53,6 +53,8 @@ export interface GeneratedEntry {
   decisionTs?: number;
   /** When the signal bar closed. The close-to-send delay is logged and does not reject. */
   barCloseTs?: number;
+  /** Wilder ATR of the closed 1h bars at the entry. The offline replay does not use daily ATR / 24. */
+  atr1h?: number;
 }
 
 export interface GenerateResult {
@@ -362,7 +364,7 @@ export function generateForward(input: GenerateInput): GenerateResult {
         nextOpen: bar.close,
         stop,
         target,
-        dailyAtr: atrByDate.get(setup.date) ?? 0,
+        dailyAtr: lastCompletedDailyAtr(atrByDate, setup.date),
         priorDailyCloses: [],
         signalDate: setup.date,
       });
@@ -428,6 +430,10 @@ export function generateForward(input: GenerateInput): GenerateResult {
         signalDate: date,
       });
     }
+  }
+  for (const entry of out) {
+    const hour = books.get(entry.productId)?.hour ?? [];
+    entry.atr1h = hourAtrAt(hour, Math.floor(entry.tsMs / 1000));
   }
   out.sort((a, b) => a.tsMs - b.tsMs || (a.productId < b.productId ? -1 : 1) || (a.classId < b.classId ? -1 : 1));
   const weeks = [...byWeek.keys()].sort().map((date) => ({ date, rows: byWeek.get(date)! }));
@@ -504,7 +510,7 @@ export function entriesToEvents(entries: readonly GeneratedEntry[]): ForwardEven
       tsMs: entry.tsMs,
       nextOpen: entry.nextOpen,
       stop: entry.stop,
-      atr1h: Math.max(entry.dailyAtr / 24, 0.01),
+      atr1h: entry.atr1h ?? 0,
       bid: quote.bid,
       ask: quote.ask,
       bookTsMs: entry.tsMs,

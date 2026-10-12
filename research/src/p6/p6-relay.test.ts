@@ -3,19 +3,25 @@ import { gapWeekReport, jevSkipShare, missingMidKill, soakElapsed, staleFeedKill
 import { applyForward, freshBook } from "./engine";
 import {
   barKey,
+  barMarker,
   commitBar,
   cronAuthorized,
   dashboard,
   encodeCommand,
+  LEASE_KEY,
+  LEASE_META_KEY,
+  markerBytesPerDay,
   memoryKv,
   planRelay,
   redisEndpoint,
   releaseLease,
   runInvocation,
+  STATE_KEY,
   takeReply,
   tryAcquire,
+  WARMUP_KEY,
 } from "./relay";
-import { capturePaperState, driveHost, ensureSendQuote, flushEntries, noteSocketClose, releaseForDeadline, startPaperHost, warmSeriesFromRest } from "./paper-host";
+import { capturePaperState, driveHost, ensureSendQuote, flushEntries, noteSocketClose, prepareExitQuotes, releaseForDeadline, sendDueEntries, startPaperHost, volHoursFromFifteens, warmSeriesFromRest } from "./paper-host";
 import { handleEngineRequest, hostHolder, loadDashboard, persistRun } from "./vercel-live";
 import type { GeneratedEntry } from "./generate";
 
@@ -153,10 +159,15 @@ test("a bar key is idempotent and holds the book, orders, bars, weeks, rings, ta
   host.book.jevPackets = 4;
   host.book.jevSkipped = 1;
   const body = capturePaperState(host);
-  expect(await commitBar(kv, "ZZ-RELAY", 900, body)).toBe("applied");
-  expect(await commitBar(kv, "ZZ-RELAY", 900, body)).toBe("duplicate");
-  const saved = await kv.get(barKey("ZZ-RELAY", 900));
-  const parsed = JSON.parse(saved!) as typeof body;
+  host.warmup.set("ZZ-RELAY", [{ date: "2026-10-01", ts: 0, open: 1, high: 1, low: 1, close: 1, volume: 1, empty: false }]);
+  const withWarmup = capturePaperState(host);
+  expect(await commitBar(kv, "ZZ-RELAY", 900, withWarmup)).toBe("applied");
+  expect(await commitBar(kv, "ZZ-RELAY", 900, withWarmup)).toBe("duplicate");
+  const marker = await kv.get(barKey("ZZ-RELAY", 900));
+  expect(marker).toBe(barMarker("ZZ-RELAY", 900));
+  expect(marker).not.toContain("warmup");
+  expect(await kv.get(WARMUP_KEY)).toBeNull();
+  const parsed = JSON.parse((await kv.get(STATE_KEY))!) as typeof body;
   expect(parsed.fifteen).toHaveLength(1);
   expect(parsed.queued).toEqual([]);
   expect(parsed.weeks[0]?.[1][0]?.date).toBe("2026-10-12");
@@ -165,6 +176,7 @@ test("a bar key is idempotent and holds the book, orders, bars, weeks, rings, ta
   expect(parsed.restCursor).toEqual([]);
   expect(parsed.jevPackets).toBe(4);
   expect(parsed.jevSkipped).toBe(1);
+  expect(parsed.warmup).toBeUndefined();
   const next = startPaperHost(["ZZ-RELAY"], {});
   await hostHolder(next, kv, []).warm();
   expect(next.fifteen).toHaveLength(1);
@@ -408,7 +420,23 @@ test("the book, member closes, gaps, and D counts survive a run that has no inje
 
 test("the next instance warms before the lease, and a sampled run releases at the deadline", async () => {
   const kv = memoryKv();
-  expect(await tryAcquire(kv, "a", 1_800_000, 0)).toBe(true);
+  const opened = await runInvocation({
+    kv,
+    self: "a",
+    nowMs: 0,
+    deadlineMs: 1_800_000,
+    lastCronMs: null,
+    holder: {
+      async warm() {},
+      async applyDueBars() {
+        return [];
+      },
+      releaseDeadline() {},
+      async sampleUntil() {},
+    },
+  });
+  expect(opened.action).toBe("handover");
+  expect(await kv.get(LEASE_KEY)).toBeNull();
   const order: string[] = [];
   const overlap = await runInvocation({
     kv,
@@ -422,7 +450,6 @@ test("the next instance warms before the lease, and a sampled run releases at th
       },
       async watchUntil() {
         order.push("watch");
-        await releaseLease(kv, "a", "deadline", 15 * 60 * 1000);
       },
       async applyDueBars() {
         order.push("apply");
@@ -432,16 +459,50 @@ test("the next instance warms before the lease, and a sampled run releases at th
         order.push("release");
       },
       recordGap(gap) {
-        order.push(gap.cause);
+        order.push(`${gap.cause}:${gap.endMs - gap.startMs}`);
       },
     },
   });
   expect(order[0]).toBe("warm");
-  expect(order[1]).toBe("watch");
   expect(order).toContain("apply");
+  expect(order).toContain("handover:0");
+  expect(order).not.toContain("watch");
   expect(overlap.applied).toEqual(["ETH-USD:1"]);
+  expect(overlap.action).not.toBe("duplicate");
   expect(overlap.socketGap).toBe(false);
   expect(overlap.feedGapMs).toBe(0);
+  const stillHeld = memoryKv();
+  expect(await tryAcquire(stillHeld, "a", 1_800_000, 0)).toBe(true);
+  const watched: string[] = [];
+  const during = await runInvocation({
+    kv: stillHeld,
+    self: "b",
+    nowMs: 15 * 60 * 1000,
+    deadlineMs: 15 * 60 * 1000 + 1_800_000,
+    lastCronMs: 0,
+    holder: {
+      async warm() {
+        watched.push("warm");
+      },
+      async watchUntil() {
+        watched.push("watch");
+        await releaseLease(stillHeld, "a", "deadline", 1_800_000 - 60_000);
+      },
+      async applyDueBars() {
+        watched.push("apply");
+        return ["ETH-USD:2"];
+      },
+      releaseDeadline() {},
+      recordGap(gap) {
+        watched.push(`${gap.cause}:${gap.endMs - gap.startMs}`);
+      },
+    },
+  });
+  expect(watched[0]).toBe("warm");
+  expect(watched[1]).toBe("watch");
+  expect(during.applied).toEqual(["ETH-USD:2"]);
+  expect(during.action).not.toBe("duplicate");
+  expect(watched).toContain("handover:0");
 
   const sampledKv = memoryKv();
   const sampled = await runInvocation({
@@ -463,7 +524,8 @@ test("the next instance warms before the lease, and a sampled run releases at th
     },
   });
   expect(sampled.action).toBe("handover");
-  const released = JSON.parse((await sampledKv.get("p6:lease")) ?? "{}") as { release?: string };
+  expect(await sampledKv.get(LEASE_KEY)).toBeNull();
+  const released = JSON.parse((await sampledKv.get(LEASE_META_KEY)) ?? "{}") as { release?: string };
   expect(released.release).toBe("deadline");
 
   const crashKv = memoryKv();
@@ -595,4 +657,203 @@ test("redis urls carry tls, username, and timeout, and auth is checked before Re
   expect(denied.status).toBe(401);
   const missing = await handleEngineRequest(request, { CRON_SECRET: "no" });
   expect(missing.status).toBe(503);
+});
+
+test("a handover at 15m and at 30m is a zero gap, and a missed cron is the uncovered remainder", async () => {
+  const kv = memoryKv();
+  const T = Date.parse("2026-10-12T17:01:00Z");
+  const run = async (self: string, nowMs: number) => {
+    const rows: { cause: string; width: number }[] = [];
+    const result = await runInvocation({
+      kv,
+      self,
+      nowMs,
+      deadlineMs: nowMs + 30 * 60_000,
+      holder: {
+        async warm() {},
+        async applyDueBars() {
+          return [`${self}-bar`];
+        },
+        releaseDeadline() {},
+        async sampleUntil() {},
+        async watchUntil() {},
+        recordGap(gap) {
+          rows.push({ cause: gap.cause, width: gap.endMs - gap.startMs });
+        },
+      },
+    });
+    return { result, rows };
+  };
+  await run("A", T);
+  const at15 = await run("B", T + 15 * 60_000);
+  const at30 = await run("C", T + 30 * 60_000);
+  expect(at15.result.action).not.toBe("duplicate");
+  expect(at30.result.action).not.toBe("duplicate");
+  expect(at15.rows.some((row) => row.cause === "handover" && row.width === 0)).toBe(true);
+  expect(at30.rows.some((row) => row.cause === "handover" && row.width === 0)).toBe(true);
+  expect([...at15.rows, ...at30.rows].every((row) => row.width >= 0 && row.width < 1_000)).toBe(true);
+  const missedKv = memoryKv();
+  await runInvocation({
+    kv: missedKv,
+    self: "A",
+    nowMs: T,
+    deadlineMs: T + 30 * 60_000,
+    holder: { async warm() {}, async applyDueBars() { return []; }, releaseDeadline() {}, async sampleUntil() {} },
+  });
+  const missedRows: { cause: string; width: number }[] = [];
+  const missed = await runInvocation({
+    kv: missedKv,
+    self: "E",
+    nowMs: T + 45 * 60_000,
+    deadlineMs: T + 75 * 60_000,
+    holder: {
+      async warm() {},
+      async applyDueBars() { return []; },
+      releaseDeadline() {},
+      async sampleUntil() {},
+      recordGap(gap) {
+        missedRows.push({ cause: gap.cause, width: gap.endMs - gap.startMs });
+      },
+    },
+  });
+  expect(missed.feedGapMs).toBe(16 * 60_000);
+  expect(missedRows.some((row) => row.cause === "missed-cron" && row.width === 16 * 60_000)).toBe(true);
+});
+
+test("a kill during overlap records the crash from the last save, not the lease expiry", async () => {
+  const kv = memoryKv();
+  const start = 1_000_000;
+  expect(await tryAcquire(kv, "K", start + 30 * 60_000, start)).toBe(true);
+  const rows: { cause: string; startMs: number; endMs: number }[] = [];
+  const next = await runInvocation({
+    kv,
+    self: "N",
+    nowMs: start + 60_000,
+    deadlineMs: start + 60_000 + 30 * 60_000,
+    lastCronMs: start,
+    holder: {
+      async warm() {},
+      async applyDueBars() { return ["kept"]; },
+      releaseDeadline() {},
+      async watchUntil() {
+        await kv.del(LEASE_KEY);
+      },
+      recordGap(gap) {
+        rows.push(gap);
+      },
+    },
+  });
+  expect(next.applied).toEqual(["kept"]);
+  expect(next.action).not.toBe("duplicate");
+  const crash = rows[0];
+  expect(crash?.cause).toBe("crash");
+  expect(crash?.startMs).toBe(start);
+  expect((crash?.endMs ?? 0) - (crash?.startMs ?? 0)).toBe(60_000);
+  expect(rows.some((row) => row.cause === "handover")).toBe(false);
+});
+
+test("vol hours stay per product and gap share uses each week", () => {
+  const t = 1_791_820_800;
+  const bars = [];
+  for (let i = 0; i < 8; i += 1) {
+    bars.push({ productId: "BTC-USD", startSec: t + i * 900, close: 60_000 + i });
+    bars.push({ productId: "ETH-USD", startSec: t + i * 900, close: 2_400 + i });
+  }
+  const mixed = volHoursFromFifteens(bars, []);
+  const btc = volHoursFromFifteens(bars.filter((bar) => bar.productId === "BTC-USD"), []);
+  expect(mixed.filter((hour) => hour.productId === "BTC-USD").map((hour) => hour.rv)).toEqual(btc.map((hour) => hour.rv));
+  expect(mixed.some((hour) => hour.productId === "ETH-USD")).toBe(true);
+  const weekMs = 100_000;
+  const quiet = gapWeekReport({
+    weekMs,
+    gaps: [0, 1, 2, 3].map((week) => ({ startMs: week * weekMs, endMs: week * weekMs + 500 })),
+    hours: [],
+    jevSkipped: 0,
+    jevPackets: 1,
+    dIndeterminate: 0,
+    dSubmitted: 0,
+  });
+  expect(quiet.gappedShare).toBeCloseTo(0.005);
+  expect(quiet.flags).not.toContain("gap-share");
+  expect(markerBytesPerDay(50)).toBe(50 * 96 * Buffer.byteLength(barMarker("BTC-USD", 1_700_000_000)));
+});
+
+test("REST daily warmup drops today's partial candle so catch-up is not skipped", async () => {
+  const host = startPaperHost(["ZZ-REST"], {});
+  const now = Date.parse("2026-10-12T17:01:00Z");
+  host.clock = () => now;
+  host.warmup.clear();
+  host.hourWarm.clear();
+  host.historyFrom.clear();
+  const today = Math.floor(now / 1000 / 86_400) * 86_400;
+  await warmSeriesFromRest(host, async (url) => {
+    const daily = url.includes("granularity=86400");
+    const rows = daily ? [[today - 86_400, 1, 2, 1, 1.5, 3], [today, 1, 2, 1, 1.4, 3]] : [[today - 3_600, 1, 2, 1, 1.4, 3]];
+    return { ok: true, status: 200, json: async () => rows };
+  });
+  const days = host.warmup.get("ZZ-REST") ?? [];
+  expect(days.some((day) => day.date === "2026-10-12")).toBe(false);
+  expect(host.historyFrom.get("ZZ-REST")).toBe(today);
+  const newest = Math.floor(now / 1000 / 900) * 900 - 900;
+  expect((host.historyFrom.get("ZZ-REST") ?? Number.POSITIVE_INFINITY) <= newest).toBe(true);
+});
+
+test("a stale book is priced by one awaited REST snapshot, and a 429 is not retried until it clears", async () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  const now = Date.parse("2026-10-12T17:01:00Z");
+  host.books.set("BTC-USD", { bids: new Map([["60000", 1]]), asks: new Map([["60001", 1]]) });
+  host.l2Ts.set("BTC-USD", now - 16_000);
+  host.ticks.set("BTC-USD", 0.01);
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return { ok: true, status: 200, json: async () => ({ bids: [["59999", "1"]], asks: [["60002", "1"]], time: new Date(now).toISOString() }) };
+  };
+  host.queued.set("x", {
+    kind: "x1",
+    classId: "C",
+    productId: "BTC-USD",
+    tsMs: now - 30_000,
+    nextOpen: 60_000,
+    stop: 59_000,
+    target: null,
+    dailyAtr: 1_000,
+    priorDailyCloses: [],
+    signalDate: "2026-10-12",
+  });
+  await sendDueEntries(host, now, fetchImpl);
+  expect(calls).toBe(1);
+  expect(host.book.rejected).toEqual([]);
+  expect(host.book.positions.length + host.book.legs.length).toBeGreaterThan(0);
+  await sendDueEntries(host, now, fetchImpl);
+  expect(calls).toBe(1);
+
+  const limited = startPaperHost(["BTC-USD"], {});
+  limited.books.set("BTC-USD", { bids: new Map([["60000", 1]]), asks: new Map([["60001", 1]]) });
+  limited.l2Ts.set("BTC-USD", now - 16_000);
+  limited.queued.set("y", {
+    kind: "x1",
+    classId: "C",
+    productId: "BTC-USD",
+    tsMs: now - 30_000,
+    nextOpen: 60_000,
+    stop: 59_000,
+    target: null,
+    dailyAtr: 1_000,
+    priorDailyCloses: [],
+    signalDate: "2026-10-12",
+  });
+  let limitedCalls = 0;
+  const throttle = async () => {
+    limitedCalls += 1;
+    return { ok: false, status: 429, headers: { get: () => "30" }, json: async () => ({}) };
+  };
+  await sendDueEntries(limited, now, throttle);
+  await sendDueEntries(limited, now + 1_000, throttle);
+  expect(limitedCalls).toBe(1);
+  expect(limited.book.rejected).toEqual([]);
+  expect(limited.queued.has("y")).toBe(true);
+  await prepareExitQuotes(limited, "BTC-USD", 1, now + 1_000, throttle);
+  expect(limitedCalls).toBe(1);
 });

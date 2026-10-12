@@ -124,6 +124,10 @@ export interface PaperHost {
   restWarm: boolean;
   /** Bar keys already written. A later save does not repeat them. */
   persistedBars: Set<string>;
+  /** Legs that already took their one REST product-book snapshot. */
+  quoteTried: Set<string>;
+  /** Do not call the product book again until this time. A 429 sets it. */
+  quoteNotBefore: Map<string, number>;
   /** Sockets opened by an overlapping warmup. The lease holder reuses them. */
   openSockets?: WebSocket[];
 }
@@ -304,6 +308,8 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     gaps: [],
     restWarm: false,
     persistedBars: new Set(),
+    quoteTried: new Set(),
+    quoteNotBefore: new Map(),
   };
 }
 
@@ -647,16 +653,26 @@ export function publishLiveQuote(host: PaperHost, productId: string, nowMs: numb
   return "stale";
 }
 
-/** One REST product-book snapshot when L2 is older than 15s. A second call is not made for this send. */
+type BookFetch = (url: string) => Promise<Pick<Response, "status" | "ok" | "json"> & { headers?: { get(name: string): string | null } }>;
+
+/** One REST product-book snapshot when L2 is older than 15s. A fresh REST snapshot is reused. A 429 is deferred, not a failed snapshot. */
 export async function ensureSendQuote(
   host: PaperHost,
   productId: string,
   nowMs: number,
-  fetchImpl: (url: string) => Promise<Pick<Response, "status" | "ok" | "json">> = fetch,
+  fetchImpl: BookFetch = fetch,
 ): Promise<"l2" | "rest_fallback" | "stale"> {
-  if (publishLiveQuote(host, productId, nowMs) === "l2") return "l2";
+  const ready = publishLiveQuote(host, productId, nowMs);
+  if (ready !== "stale") return ready;
+  if (nowMs < (host.quoteNotBefore.get(productId) ?? 0)) return "stale";
   try {
     const response = await fetchImpl(productBookUrl(productId));
+    if (response.status === 429) {
+      const wait = retryAfterMs(response.headers?.get("retry-after") ?? null);
+      host.quoteNotBefore.set(productId, nowMs + wait);
+      host.book.incidents.push(`rest book ${productId} 429`);
+      return "stale";
+    }
     if (response.ok) {
       const body = (await response.json()) as { bids?: [string, string][]; asks?: [string, string][]; time?: string };
       const bid = Number(body.bids?.[0]?.[0]);
@@ -674,19 +690,59 @@ export async function ensureSendQuote(
   return "stale";
 }
 
-/** Send a queued entry at the fill open. The book is the one at send, never the one stored at the decision. */
-export function flushEntries(host: PaperHost, nowMs: number): void {
+/** One snapshot for this leg. A 429 does not consume it and is not retried until the backoff ends. */
+export async function ensureSendQuoteOnce(
+  host: PaperHost,
+  productId: string,
+  nowMs: number,
+  legId: string,
+  fetchImpl?: BookFetch,
+): Promise<"l2" | "rest_fallback" | "stale"> {
+  if (host.quoteTried.has(legId)) return publishLiveQuote(host, productId, nowMs);
+  const kind = await ensureSendQuote(host, productId, nowMs, fetchImpl);
+  if (nowMs < (host.quoteNotBefore.get(productId) ?? 0)) return kind;
+  host.quoteTried.add(legId);
+  return kind;
+}
+
+/** Await the send-time book, then flush. Entries still waiting on a 429 stay queued. */
+export async function sendDueEntries(host: PaperHost, nowMs: number, fetchImpl?: BookFetch): Promise<void> {
   for (const [id, entry] of host.queued) {
     if (entry.tsMs > nowMs) continue;
-    host.queued.delete(id);
+    await ensureSendQuoteOnce(host, entry.productId, nowMs, id, fetchImpl);
+  }
+  flushEntries(host, nowMs, { keepUntried: true });
+}
+
+/** One snapshot for an exit on this bar. Not called on the idle tick. */
+export async function prepareExitQuotes(
+  host: PaperHost,
+  productId: string,
+  barStartSec: number,
+  nowMs: number,
+  fetchImpl?: BookFetch,
+): Promise<void> {
+  for (const position of host.book.positions) {
+    if (position.productId !== productId) continue;
+    await ensureSendQuoteOnce(host, productId, nowMs, `${position.id}:exit:${barStartSec}`, fetchImpl);
+  }
+}
+
+/** Send a queued entry at the fill open. The book is the one at send, never the one stored at the decision. */
+export function flushEntries(host: PaperHost, nowMs: number, opts?: { keepUntried?: boolean }): void {
+  for (const [id, entry] of host.queued) {
+    if (entry.tsMs > nowMs) continue;
     const quoteKind = publishLiveQuote(host, entry.productId, nowMs);
     const quoted = host.book.quotes[entry.productId];
     if (quoteKind === "stale" || !quoted || nowMs - quoted.tsMs > STALE_QUOTE_MS) {
+      if (opts?.keepUntried && !host.quoteTried.has(id)) continue;
+      host.queued.delete(id);
       host.emitted.add(id);
       host.book.rejected.push({ id, reason: MISSED_SEND_STALE_QUOTE });
       host.book.incidents.push(`${MISSED_SEND_STALE_QUOTE} ${id}`);
       continue;
     }
+    host.queued.delete(id);
     const top = { bid: quoted.bid, ask: quoted.ask };
     const quoteFallback = quoted.quoteSrc === "rest_fallback";
     const tick = host.ticks.get(entry.productId);
@@ -760,7 +816,7 @@ function queueEntries(host: PaperHost, entries: readonly GeneratedEntry[], nowMs
     if (entry.tsMs < nowMs - 86_400_000) continue;
     host.queued.set(id, entry);
   }
-  flushEntries(host, nowMs);
+  flushEntries(host, nowMs, { keepUntried: true });
 }
 
 function pushBar(host: PaperHost, bar: OhlcvBar): void {
@@ -998,10 +1054,10 @@ export interface PaperStore {
   save(body: PaperStateBody): void;
 }
 
-/** Hour buckets for the V6 vol-hour cap. rv is the mean squared 15m log return in that hour. */
-export function volHoursFromFifteens(
+function hoursOfOneProduct(
   bars: readonly { startSec: number; close: number }[],
   gaps: readonly { startMs: number; endMs: number }[],
+  productId?: string,
 ): VolHour[] {
   const byHour = new Map<number, number[]>();
   for (const bar of bars) {
@@ -1029,7 +1085,26 @@ export function volHoursFromFifteens(
       const width = Math.min(end, gap.endMs) - Math.max(hour, gap.startMs);
       if (width > 0) gappedMs += width;
     }
-    hours.push({ rv: n > 0 ? sq / n : 0, gappedMs, hourMs: 3_600_000 });
+    hours.push({ rv: n > 0 ? sq / n : 0, gappedMs, hourMs: 3_600_000, ...(productId ? { productId } : {}) });
+  }
+  return hours;
+}
+
+/** Hour buckets for the V6 vol-hour cap. Each product is its own series. rv is that product's mean squared 15m log return. */
+export function volHoursFromFifteens(
+  bars: readonly { startSec: number; close: number; productId?: string }[],
+  gaps: readonly { startMs: number; endMs: number }[],
+): VolHour[] {
+  const groups = new Map<string, { startSec: number; close: number }[]>();
+  for (const bar of bars) {
+    const id = bar.productId ?? "";
+    const list = groups.get(id) ?? [];
+    list.push(bar);
+    groups.set(id, list);
+  }
+  const hours: VolHour[] = [];
+  for (const [productId, group] of [...groups.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    hours.push(...hoursOfOneProduct(group, gaps, productId || undefined));
   }
   return hours;
 }
@@ -1388,58 +1463,61 @@ export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHo
   const sockets = host.openSockets ?? host.shards.map((_, index) => openShard(host, index, PUBLIC_WS_URL));
   host.openSockets = sockets;
   await new Promise<void>((resolve) => {
+    let busy = false;
     const timer = setInterval(() => {
-      const now = host.clock();
-      if (apply) {
-        for (const entry of host.queued.values()) {
-          if (entry.tsMs <= now) void ensureSendQuote(host, entry.productId, now);
-        }
-        for (const position of host.book.positions) void ensureSendQuote(host, position.productId, now);
-        flushEntries(host, now);
-      }
-      host.shards.forEach((_, index) => {
-        if (!considerHeartbeatGap(host, index, now)) return;
-        replaceShard(host, sockets, index, PUBLIC_WS_URL);
-      });
-      if (apply) {
-        const due = nextRest(host, now);
-        if (due?.action === "fetch") {
-          due.slot.inflight = true;
-          host.nextRestMs = now + REST_PACE_MS;
-          void fetchRestBar(due.slot.productId, due.slot.barStartSec)
-            .then(async (result) => {
-              if (result.status === 429) {
-                noteRest429(due.slot, Date.now(), result.retryAfterMs);
-                return;
-              }
-              noteRestMiss(host, due.slot);
-              if (result.bar && acceptRestBar(host, result.bar) === "accepted") {
-                await hooks.onBar?.(result.bar);
-                await hooks.persist?.();
-              }
-            })
-            .catch(() => {
-              due.slot.inflight = false;
-              noteRestMiss(host, due.slot);
-            });
-        } else if (due?.action === "fallback") {
-          const built = fallbackTradesBar(host, due.slot);
-          if (built) void hooks.onBar?.(built);
-        }
-      }
+      if (busy) return;
+      busy = true;
       void (async () => {
-        const stop = hooks.stopWhen ? await hooks.stopWhen() : false;
-        if (now < untilMs && !stop) return;
-        clearInterval(timer);
-        if (!apply) {
+        try {
+          const now = host.clock();
+          if (apply) await sendDueEntries(host, now);
+          host.shards.forEach((_, index) => {
+            if (!considerHeartbeatGap(host, index, now)) return;
+            replaceShard(host, sockets, index, PUBLIC_WS_URL);
+          });
+          if (apply) {
+            const due = nextRest(host, now);
+            if (due?.action === "fetch") {
+              due.slot.inflight = true;
+              host.nextRestMs = now + REST_PACE_MS;
+              void fetchRestBar(due.slot.productId, due.slot.barStartSec)
+                .then(async (result) => {
+                  if (result.status === 429) {
+                    noteRest429(due.slot, Date.now(), result.retryAfterMs);
+                    return;
+                  }
+                  noteRestMiss(host, due.slot);
+                  if (result.bar) await prepareExitQuotes(host, result.bar.productId, result.bar.startSec, Date.now());
+                  if (result.bar && acceptRestBar(host, result.bar) === "accepted") {
+                    await hooks.onBar?.(result.bar);
+                    await hooks.persist?.();
+                  }
+                })
+                .catch(() => {
+                  due.slot.inflight = false;
+                  noteRestMiss(host, due.slot);
+                });
+            } else if (due?.action === "fallback") {
+              await prepareExitQuotes(host, due.slot.productId, due.slot.barStartSec, now);
+              const built = fallbackTradesBar(host, due.slot);
+              if (built) await hooks.onBar?.(built);
+            }
+          }
+          const stop = hooks.stopWhen ? await hooks.stopWhen() : false;
+          if (now < untilMs && !stop) return;
+          clearInterval(timer);
+          if (!apply) {
+            resolve();
+            return;
+          }
+          releaseForDeadline(host);
+          for (const socket of sockets) socket.close();
+          host.openSockets = undefined;
+          await hooks.persist?.();
           resolve();
-          return;
+        } finally {
+          busy = false;
         }
-        releaseForDeadline(host);
-        for (const socket of sockets) socket.close();
-        host.openSockets = undefined;
-        await hooks.persist?.();
-        resolve();
       })();
     }, REST_PACE_MS);
   });
@@ -1464,16 +1542,21 @@ export async function warmSeriesFromRest(
       }
       const rows = (await response.json()) as number[][];
       const bars = barsFromExchangeCandles(productId, Array.isArray(rows) ? rows : []);
-      const days: SourceDay[] = bars.map((bar) => ({
-        date: new Date(bar.startSec * 1000).toISOString().slice(0, 10),
-        ts: bar.startSec,
-        open: bar.open,
-        high: bar.high,
-        low: bar.low,
-        close: bar.close,
-        volume: bar.volume,
-        empty: false,
-      }));
+      const today = new Date(nowSec * 1000).toISOString().slice(0, 10);
+      const days: SourceDay[] = bars.flatMap((bar) => {
+        const date = new Date(bar.startSec * 1000).toISOString().slice(0, 10);
+        if (date >= today) return [];
+        return [{
+          date,
+          ts: bar.startSec,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close,
+          volume: bar.volume,
+          empty: false,
+        }];
+      });
       const series = withExplicitGaps(days);
       host.warmup.set(productId, series);
       const origin = historyOriginSec(series);

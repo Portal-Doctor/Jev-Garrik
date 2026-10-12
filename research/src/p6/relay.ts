@@ -65,6 +65,8 @@ export interface Lease {
   release: "deadline" | "crash" | "none";
   /** Identifies the holder that may release. A release checks this before it writes. */
   token?: string;
+  /** Last heartbeat or save. A crash gap starts here, not at lease expiry. */
+  savedAtMs?: number;
 }
 
 export function encodeLease(lease: Lease): string {
@@ -75,19 +77,55 @@ export function decodeLease(raw: string | null): Lease | null {
   if (!raw) return null;
   const body = JSON.parse(raw) as Lease;
   if (!body.holder || !(body.untilMs > 0)) return null;
-  return { holder: body.holder, untilMs: body.untilMs, release: body.release ?? "none", ...(body.token ? { token: body.token } : {}) };
+  return {
+    holder: body.holder,
+    untilMs: body.untilMs,
+    release: body.release ?? "none",
+    ...(body.token ? { token: body.token } : {}),
+    ...(body.savedAtMs != null ? { savedAtMs: body.savedAtMs } : {}),
+  };
 }
 
-/** One applied bar. The body is the book, orders, bars, B weeks, rings, tape, cursors, and Jev history. */
+/** One applied bar. The value is a marker. The book lives on the state key, and static warmup on its own key. */
 export function barKey(productId: string, startSec: number): string {
   return `p6:bar:${productId}:${startSec}`;
 }
 
+/** Static daily warmup. Written once, not on each bar key. */
+export const WARMUP_KEY = "p6:warmup";
+
+export function barMarker(productId: string, startSec: number): string {
+  return JSON.stringify({ productId, startSec });
+}
+
+/** Payload bytes of one day's bar markers. Redis object overhead is extra and is measured on a server. */
+export function markerBytesPerDay(products: number, example = barMarker("BTC-USD", 1_700_000_000)): number {
+  return products * 96 * Buffer.byteLength(example);
+}
+
+export async function saveState(kv: Kv, body: PaperStateBody, opts?: { writeWarmup?: boolean }): Promise<void> {
+  const { warmup, ...live } = body;
+  await kv.set(STATE_KEY, JSON.stringify(live));
+  if (opts?.writeWarmup === false || !warmup) return;
+  if (await kv.get(WARMUP_KEY)) return;
+  await kv.set(WARMUP_KEY, JSON.stringify(warmup));
+}
+
+export async function loadState(kv: Kv): Promise<PaperStateBody | null> {
+  const raw = await kv.get(STATE_KEY);
+  if (!raw) return null;
+  const body = JSON.parse(raw) as PaperStateBody;
+  if (!body.warmup) {
+    const warm = await kv.get(WARMUP_KEY);
+    if (warm) body.warmup = JSON.parse(warm) as PaperStateBody["warmup"];
+  }
+  return body;
+}
+
 export async function commitBar(kv: Kv, productId: string, startSec: number, body: PaperStateBody): Promise<"applied" | "duplicate"> {
-  const encoded = JSON.stringify(body);
-  const wrote = await kv.set(barKey(productId, startSec), encoded, { nx: true });
+  const wrote = await kv.set(barKey(productId, startSec), barMarker(productId, startSec), { nx: true });
   if (!wrote) return "duplicate";
-  await kv.set(STATE_KEY, encoded);
+  await saveState(kv, body, { writeWarmup: false });
   return "applied";
 }
 
@@ -100,11 +138,10 @@ export interface AsyncPaperStore {
 export function kvPaperStore(kv: Kv): AsyncPaperStore {
   return {
     async load() {
-      const raw = await kv.get(STATE_KEY);
-      return raw ? (JSON.parse(raw) as PaperStateBody) : null;
+      return loadState(kv);
     },
     async save(body) {
-      await kv.set(STATE_KEY, JSON.stringify(body));
+      await saveState(kv, body);
     },
   };
 }
@@ -164,27 +201,43 @@ export async function tryAcquire(kv: Kv, self: string, untilMs: number, nowMs = 
   if (current && current.untilMs > nowMs && current.holder !== self) return false;
   const ttl = Math.max(1, untilMs - nowMs);
   const token = current && current.holder === self && current.token ? current.token : `${self}:${nowMs}`;
-  const next = encodeLease({ holder: self, untilMs, release: "none", token });
+  const savedAtMs = current && current.holder === self && current.savedAtMs != null ? current.savedAtMs : nowMs;
+  const next = encodeLease({ holder: self, untilMs, release: "none", token, savedAtMs });
   const won = await kv.cas(LEASE_KEY, raw, next, { px: ttl });
   if (!won) return false;
   await kv.set(LEASE_META_KEY, next);
   return true;
 }
 
-/** Token-checked. A holder that does not own the lease does not overwrite it. No TTL, so the cause stays readable. */
+/** Move the crash-gap start to this save. A later kill is measured from here, not from the lease deadline. */
+export async function noteLeaseSave(kv: Kv, nowMs: number): Promise<void> {
+  const raw = await kv.get(LEASE_META_KEY);
+  const meta = decodeLease(raw);
+  if (!meta || meta.release !== "none") return;
+  if (meta.savedAtMs != null && nowMs < meta.savedAtMs) return;
+  await kv.set(LEASE_META_KEY, encodeLease({ ...meta, savedAtMs: nowMs }));
+}
+
+/**
+ * Token-checked. A holder that does not own the lease does not overwrite it.
+ * The live key is removed, so a released lease does not look held. The cause stays on the meta key.
+ */
 export async function releaseLease(kv: Kv, self: string, release: "deadline" | "crash", nowMs: number): Promise<void> {
   const raw = await kv.get(LEASE_KEY);
   const current = decodeLease(raw);
   if (current && current.holder !== self) return;
-  if (current?.token && current.holder !== self) return;
   const next = encodeLease({
     holder: current?.holder ?? self,
     token: current?.token ?? self,
     untilMs: nowMs,
     release,
+    ...(current?.savedAtMs != null ? { savedAtMs: current.savedAtMs } : {}),
   });
-  const won = await kv.cas(LEASE_KEY, raw, next);
-  if (!won) return;
+  if (current) {
+    const won = await kv.cas(LEASE_KEY, raw, next);
+    if (!won) return;
+    await kv.del(LEASE_KEY);
+  }
   await kv.set(LEASE_META_KEY, next);
 }
 
@@ -213,55 +266,79 @@ export async function runInvocation(opts: {
     persist?(): Promise<void>;
     recordGap?(gap: { startMs: number; endMs: number; cause: string }): void;
   };
+  /** Wall clock after an overlap watch. Injected runs keep `nowMs` unless this is set. */
+  clock?: () => number;
 }): Promise<InvocationResult> {
-  const lease = decodeLease(await opts.kv.get(LEASE_KEY));
-  const meta = decodeLease(await opts.kv.get(LEASE_META_KEY));
+  let nowMs = opts.nowMs;
+  const lease0 = decodeLease(await opts.kv.get(LEASE_KEY));
   const storedCron = await opts.kv.get(CRON_KEY);
   const lastCronMs = opts.lastCronMs !== undefined ? opts.lastCronMs : storedCron == null ? null : Number(storedCron);
-  await opts.kv.set(CRON_KEY, String(opts.nowMs));
-  const plan = planRelay({ nowMs: opts.nowMs, deadlineMs: opts.deadlineMs, self: opts.self, lease, lastCronMs });
+  await opts.kv.set(CRON_KEY, String(nowMs));
+  let plan = planRelay({ nowMs, deadlineMs: opts.deadlineMs, self: opts.self, lease: lease0, lastCronMs });
   const record = (gap: { startMs: number; endMs: number; cause: string }) => {
     opts.holder.recordGap?.(gap);
   };
   if (plan.action === "duplicate") {
-    return { ...plan, applied: [], holder: lease?.holder ?? null };
+    return { ...plan, applied: [], holder: lease0?.holder ?? null };
   }
   if (plan.action === "handover") {
     opts.holder.releaseDeadline();
-    await releaseLease(opts.kv, opts.self, "deadline", opts.nowMs);
-    record({ startMs: opts.nowMs, endMs: opts.nowMs, cause: "handover" });
+    await releaseLease(opts.kv, opts.self, "deadline", nowMs);
+    record({ startMs: nowMs, endMs: nowMs, cause: "handover" });
     await opts.holder.persist?.();
     return { ...plan, applied: [], holder: null };
   }
   await opts.holder.warm();
   if (plan.action === "overlap") {
     if (!opts.holder.watchUntil) {
-      return { ...plan, applied: [], holder: lease?.holder ?? null, cause: plan.cause ?? "overlap-warm" };
+      return { ...plan, applied: [], holder: lease0?.holder ?? null, cause: plan.cause ?? "overlap-warm" };
     }
+    const wall = Date.now();
     await opts.holder.watchUntil(opts.deadlineMs - HANDOVER_MARGIN_MS);
+    const waited = Date.now() - wall;
+    if (opts.clock) nowMs = opts.clock();
+    else if (waited >= 20) nowMs = opts.nowMs + waited;
+    plan = planRelay({ nowMs, deadlineMs: opts.deadlineMs, self: opts.self, lease: decodeLease(await opts.kv.get(LEASE_KEY)), lastCronMs });
   }
-  if (meta && meta.release === "none" && meta.untilMs <= opts.nowMs && meta.holder !== opts.self) {
-    record({ startMs: meta.untilMs, endMs: opts.nowMs, cause: "crash" });
+  const lease = decodeLease(await opts.kv.get(LEASE_KEY));
+  const meta = decodeLease(await opts.kv.get(LEASE_META_KEY));
+  const heldByOther = lease != null && lease.holder !== opts.self && lease.untilMs > nowMs;
+  let feedGapMs = 0;
+  if (!heldByOther && meta && meta.release === "none" && meta.holder !== opts.self) {
+    const start = meta.savedAtMs ?? nowMs;
+    const end = Math.max(start, nowMs);
+    feedGapMs = end - start;
+    record({ startMs: start, endMs: end, cause: "crash" });
+  } else if (meta?.release === "deadline" && meta.holder !== opts.self) {
+    const width = Math.max(0, nowMs - meta.untilMs);
+    feedGapMs = width;
+    const missed = lastCronMs != null && nowMs - lastCronMs > CRON_EVERY_MS + 60_000;
+    record({
+      startMs: width === 0 ? nowMs : meta.untilMs,
+      endMs: width === 0 ? nowMs : nowMs,
+      cause: width === 0 ? "handover" : missed ? "missed-cron" : "uncovered",
+    });
   } else if (plan.feedGapMs > 0) {
-    const start = lease?.untilMs ?? opts.nowMs - plan.feedGapMs;
-    record({ startMs: start, endMs: opts.nowMs, cause: plan.cause === "kill" ? "crash" : (plan.cause ?? "uncovered") });
-  } else if (lease?.release === "deadline") {
-    record({ startMs: lease.untilMs, endMs: opts.nowMs, cause: "handover" });
+    const start = lease?.untilMs ?? nowMs - plan.feedGapMs;
+    feedGapMs = Math.max(0, nowMs - start);
+    record({ startMs: start, endMs: nowMs, cause: plan.cause === "kill" ? "crash" : (plan.cause ?? "uncovered") });
   }
-  const acquired = await tryAcquire(opts.kv, opts.self, opts.deadlineMs, opts.nowMs);
+  const acquired = await tryAcquire(opts.kv, opts.self, opts.deadlineMs, nowMs);
   if (!acquired) {
     return { action: "duplicate", applied: [], socketGap: false, feedGapMs: 0, cause: "duplicate", holder: lease?.holder ?? null };
   }
   const applied = await opts.holder.applyDueBars();
   let sampled = false;
-  if (opts.holder.sampleUntil && opts.nowMs < opts.deadlineMs - HANDOVER_MARGIN_MS) {
+  if (opts.holder.sampleUntil && nowMs < opts.deadlineMs - HANDOVER_MARGIN_MS) {
     try {
       await opts.holder.sampleUntil(opts.deadlineMs - HANDOVER_MARGIN_MS);
       sampled = true;
     } catch (error) {
       opts.holder.releaseDeadline();
-      await releaseLease(opts.kv, opts.self, "crash", opts.nowMs);
-      record({ startMs: opts.nowMs, endMs: opts.nowMs, cause: "crash" });
+      const failedAt = opts.clock ? opts.clock() : nowMs;
+      const savedAt = decodeLease(await opts.kv.get(LEASE_META_KEY))?.savedAtMs ?? nowMs;
+      await releaseLease(opts.kv, opts.self, "crash", failedAt);
+      record({ startMs: savedAt, endMs: Math.max(savedAt, failedAt), cause: "crash" });
       await opts.holder.persist?.();
       throw error;
     }
@@ -272,10 +349,11 @@ export async function runInvocation(opts: {
     await releaseLease(opts.kv, opts.self, "deadline", at);
     record({ startMs: at, endMs: at, cause: "handover" });
     await opts.holder.persist?.();
-    return { action: "handover", applied, socketGap: false, feedGapMs: plan.feedGapMs, cause: plan.cause ?? "handover", holder: null };
+    return { action: "handover", applied, socketGap: false, feedGapMs, cause: plan.cause ?? "handover", holder: null };
   }
   await opts.holder.persist?.();
-  return { action: "hold", applied, socketGap: plan.socketGap, feedGapMs: plan.feedGapMs, cause: plan.cause, holder: opts.self };
+  await noteLeaseSave(opts.kv, nowMs);
+  return { action: "hold", applied, socketGap: plan.socketGap, feedGapMs, cause: plan.cause, holder: opts.self };
 }
 
 export function cronAuthorized(header: string | null, secret: string | undefined): boolean {
@@ -424,15 +502,19 @@ export function redisKvFromUrl(url: string): Kv {
       socket.on("error", (error: Error) => finish(error));
       socket.on("data", (chunk: Buffer) => {
         buf += chunk.toString("utf8");
-        for (;;) {
-          if (pending.length === 0) return;
-          const taken = takeReply(buf);
-          if (!taken) return;
-          buf = taken.rest;
-          const want = pending.shift();
-          if (want === "auth") continue;
-          finish(null, taken.reply);
-          return;
+        try {
+          for (;;) {
+            if (pending.length === 0) return;
+            const taken = takeReply(buf);
+            if (!taken) return;
+            buf = taken.rest;
+            const want = pending.shift();
+            if (want === "auth") continue;
+            finish(null, taken.reply);
+            return;
+          }
+        } catch (error) {
+          finish(error);
         }
       });
       socket.on("connect", () => {
