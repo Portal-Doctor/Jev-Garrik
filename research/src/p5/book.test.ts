@@ -40,6 +40,22 @@ test("a fourth name in one cluster is blocked", () => {
   });
   expect(result.taken).toBe(3);
   expect(result.hits.cluster).toBe(1);
+  expect(result.maxOpen).toBe(3);
+});
+
+test("the registered cluster cap of 2 blocks the third name", () => {
+  const quiet = new Map([[0, bar(0, 100, 99, 100)]]);
+  const result = runBook({
+    pairs: ["A", "B", "C", "D"].map((id) => pair(id, quiet, "same")),
+    candidates: ["A", "B", "C", "D"].map((id) => ({ classId: "B" as const, productId: id, signalDate: "1970-01-01", entryTs: 0, stopDistance: 10 })),
+    ruleExitTs: () => null,
+    sBtBps: 5,
+    endTs: 900,
+    clusterMaxOpen: 2,
+  });
+  expect(result.taken).toBe(2);
+  expect(result.hits.cluster).toBe(2);
+  expect(result.maxOpen).toBe(2);
 });
 
 test("a low between the stop and the worsened fill still stops", () => {

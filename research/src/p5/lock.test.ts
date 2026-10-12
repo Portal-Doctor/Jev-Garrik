@@ -100,6 +100,26 @@ test("the registered capped run keeps its results hash", () => {
   expect(report.results.blocked.officialBase.hits.slotA).toBe(32);
 });
 
+test("the v3.1 approval cites the fingerprint and leaves the registration bytes", () => {
+  const registration = sha256(join(reports, "p5-v31-registration.json"));
+  expect(registration).toBe("f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d");
+  expect(readFileSync(join(reports, "p5-v31-registration.sha256"), "utf8")).toBe(
+    "f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d  research/data/reports/p5-v31-registration.json\n",
+  );
+  const approval = JSON.parse(readFileSync(join(reports, "p5-v31-approval.json"), "utf8")) as {
+    registrationSha256: string;
+    approvedBy: string;
+    approvedAt: string;
+    commit: string;
+    commitSha: string;
+  };
+  expect(approval.registrationSha256).toBe(registration);
+  expect(approval.approvedBy).toBe("Brian");
+  expect(approval.approvedAt).toBe("2026-10-12T00:22:00Z");
+  expect(approval.commit).toBe("95d0203e6fec1e8fba0938f7fdc36aa214be6580");
+  expect(approval.commitSha).toBe("95d0203e6fec1e8fba0938f7fdc36aa214be6580");
+});
+
 test("the v3.1 registration is unapproved and cites the frozen bases", () => {
   const path = join(reports, "p5-v31-registration.json");
   expect(sha256(path)).toBe("f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d");

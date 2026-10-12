@@ -70,7 +70,9 @@ import type { PxBar } from "./walk";
 import {
   concentration,
   dateOfTs,
+  monthKey,
   monthlyClusters,
+  registeredSingleLinkageClusters,
   runBook,
   trailingReturns,
   type BookCandidate,
@@ -79,7 +81,7 @@ import {
   type ClosedTrade,
   type ClosePoint,
 } from "./book";
-import { breadthByEntryDate, breadthIncludes, type BreadthLabel } from "./guards";
+import { breadthByEntryDate, breadthIncludes, breadthNetRSplit, type BreadthLabel } from "./guards";
 import { RESOLVED_DEFAULTS } from "./questions";
 import { alignedBeta, assignBetas, sizingCostBps } from "./risk";
 
@@ -411,6 +413,138 @@ function memberFn(rows: readonly { date: string; names: string[] }[]): (productI
   };
 }
 
+function breadthOfTrades(rows: readonly TradeRow[]) {
+  const labeled: { breadth: BreadthLabel; netR: number }[] = [];
+  let unlabeled = 0;
+  for (const row of rows) {
+    const value = netR(row.netUsd, row.entryRiskUsd);
+    if (value == null || (row.breadth !== "on" && row.breadth !== "off")) {
+      unlabeled += 1;
+      continue;
+    }
+    labeled.push({ breadth: row.breadth, netR: value });
+  }
+  return { unlabeled, ...breadthNetRSplit(labeled) };
+}
+
+function dropTopGross(rows: readonly TradeRow[], n: number): TradeRow[] {
+  const ranked = [...rows].sort((a, b) => b.grossUsd - a.grossUsd || a.entryTs - b.entryTs || a.productId.localeCompare(b.productId));
+  const drop = new Set(ranked.slice(0, Math.min(n, ranked.length)));
+  return rows.filter((row) => !drop.has(row));
+}
+
+function scoreBooks(ran: Map<string, { result: BookResult; trades: TradeRow[] }>) {
+  const folds = historicalFolds();
+  const isFold = folds[0]!;
+  const oosFolds = folds.filter((fold) => fold.sample === "OOS");
+  const isWeeks = mondayWeeks(isFold.start, isFold.end);
+  const oosWeeks = mondayWeeks(oosFolds[0]!.start, oosFolds[oosFolds.length - 1]!.end);
+  const configRows = A_CONFIGS.map((config) => {
+    const base = ran.get(`${config.id}|base`)!;
+    const stress = ran.get(`${config.id}|stress`)!;
+    const baseA = base.trades.filter((row) => row.classId === "A");
+    const stressA = stress.trades.filter((row) => row.classId === "A");
+    return {
+      config: config.id,
+      classId: "A" as const,
+      lookback: config.lookback,
+      k: config.k,
+      taken: { base: base.result.taken, stress: stress.result.taken },
+      maxOpen: { base: base.result.maxOpen, stress: stress.result.maxOpen },
+      base: { is: summarize(baseA, "IS", isWeeks), oos: summarize(baseA, "OOS", oosWeeks) },
+      stress: { is: summarize(stressA, "IS", isWeeks), oos: summarize(stressA, "OOS", oosWeeks) },
+      blocked: { base: base.result.hitsByClass.A, stress: stress.result.hitsByClass.A },
+    };
+  });
+  const foldList = expandingFolds();
+  const l80Of = (trades: readonly { entryDate: string; netUsd: number }[], fold: (typeof foldList)[number]) => {
+    const weeks = mondayWeeks(fold.isStart, fold.isEnd);
+    const bound = oneSided80(weeklyValues(trades.map((trade) => ({ week: weekKey(trade.entryDate), value: trade.netUsd })), weeks), { scale: WEEKS_PER_MONTH });
+    return bound?.l80 ?? -1_000_000_000;
+  };
+  const picks = selectByFold(
+    configRows,
+    foldList,
+    (row) => ran.get(`${row.config}|base`)!.trades.filter((trade) => trade.classId === "A"),
+    l80Of,
+    (trades) => trades.reduce((sum, trade) => sum + trade.netUsd, 0),
+  );
+  const stitch = (path: "base" | "stress", classId: "A" | "B") => picks.flatMap((pick) => oosSlice(ran.get(`${pick.chosen.config}|${path}`)!.trades.filter((trade) => trade.classId === classId), pick.fold));
+  const stitchedA = stitch("base", "A");
+  const stitchedB = stitch("base", "B");
+  const stitchedAStress = stitch("stress", "A");
+  const stitchedBStress = stitch("stress", "B");
+  const classARow = { base: summarize(stitchedA, "OOS", oosWeeks), stress: summarize(stitchedAStress, "OOS", oosWeeks) };
+  const classBRow = { base: summarize(stitchedB, "OOS", oosWeeks), stress: summarize(stitchedBStress, "OOS", oosWeeks) };
+  const classBExTop3 = {
+    base: summarize(dropTopGross(stitchedB, 3), "OOS", oosWeeks),
+    stress: summarize(dropTopGross(stitchedBStress, 3), "OOS", oosWeeks),
+  };
+  const streamOf = (rows: readonly TradeRow[]) => {
+    const values = rows.map((row) => netR(row.netUsd, row.entryRiskUsd)).filter((value): value is number => value != null);
+    const stream = netRStreamP(values);
+    return { id: "", n: stream.n, p: stream.p, status: stream.status };
+  };
+  const historicalStreams = [
+    { ...streamOf(stitchedA), id: "A" },
+    { ...streamOf(stitchedB), id: "B" },
+  ];
+  const historicalStressStreams = [
+    { ...streamOf(stitchedAStress), id: "A" },
+    { ...streamOf(stitchedBStress), id: "B" },
+  ];
+  const trades = [...ran.values()].flatMap((book) => book.trades);
+  trades.sort((a, b) => a.book.localeCompare(b.book) || a.path.localeCompare(b.path) || a.classId.localeCompare(b.classId) || a.entryDate.localeCompare(b.entryDate) || a.productId.localeCompare(b.productId));
+  const droppedOnFolds = picks.reduce((sum, pick) => {
+    const book = ran.get(`${pick.chosen.config}|base`)!.trades;
+    return sum + book.filter((trade) => purgedAtBoundary(trade.entryDate, trade.exitDate, pick.fold.oosStart)).length;
+  }, 0);
+  const foldPicks = picks.map((pick) => {
+    const kept = isPrefix(ran.get(`${pick.chosen.config}|base`)!.trades.filter((trade) => trade.classId === "A"), pick.fold);
+    const l80 = l80Of(kept, pick.fold);
+    const total = kept.reduce((sum, trade) => sum + trade.netUsd, 0);
+    return { fold: pick.fold.id, config: pick.chosen.config, isN: kept.length, l80NetUsdPerMonth: l80, totalNetUsd: total, l80Cents: cents(l80), totalCents: cents(total) };
+  });
+  const gateHits = A_CONFIGS.map((config) => ({
+    config: config.id,
+    base: ran.get(`${config.id}|base`)!.result.hits,
+    stress: ran.get(`${config.id}|stress`)!.result.hits,
+    taken: { base: ran.get(`${config.id}|base`)!.result.taken, stress: ran.get(`${config.id}|stress`)!.result.taken },
+    maxOpen: { base: ran.get(`${config.id}|base`)!.result.maxOpen, stress: ran.get(`${config.id}|stress`)!.result.maxOpen },
+  }));
+  return {
+    folds,
+    configRows,
+    classARow,
+    classBRow,
+    classBExTop3,
+    historicalStreams,
+    historicalStressStreams,
+    trades,
+    droppedOnFolds,
+    foldPicks,
+    gateHits,
+    concentration: {
+      dollarShare: "share of the sum of gross dollars on the stitched OOS",
+      A: concentration(stitchedA),
+      B: concentration(stitchedB),
+      stressA: concentration(stitchedAStress),
+      stressB: concentration(stitchedBStress),
+    },
+    breadth: {
+      label: "diagnostic, no selection" as const,
+      selects: false,
+      base: { A: breadthOfTrades(stitchedA), B: breadthOfTrades(stitchedB), book: breadthOfTrades([...stitchedA, ...stitchedB]) },
+      stress: { A: breadthOfTrades(stitchedAStress), B: breadthOfTrades(stitchedBStress), book: breadthOfTrades([...stitchedAStress, ...stitchedBStress]) },
+    },
+    windowMarks: {
+      base: [...stitchedA, ...stitchedB].filter((row) => row.windowMark).length,
+      stress: [...stitchedAStress, ...stitchedBStress].filter((row) => row.windowMark).length,
+    },
+    maxOpen: Math.max(0, ...gateHits.flatMap((row) => [row.maxOpen.base, row.maxOpen.stress])),
+  };
+}
+
 export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<string, unknown> {
   const paths = dataPaths(dataDir);
   const registrationBytes = readFileSync(join(paths.reports, "p4-registration.json"));
@@ -581,72 +715,46 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
     clusterOf: (entryDate) => clusterAsOf(state.productId, entryDate),
   }));
   const classB = ordered.flatMap((state) => bCandidates(state, weeks, veto));
-  const ran = new Map<string, { result: BookResult; trades: TradeRow[] }>();
-  for (const config of A_CONFIGS) {
-    const candidates = [...ordered.flatMap((state) => aCandidates(state, config.lookback, config.k)), ...classB];
-    for (const path of ["base", "stress"] as const) {
-      log(`p5 book ${config.id} ${path} candidates ${candidates.length}`);
-      const result = runBook({
-        pairs: bookPairs,
-        candidates,
-        ruleExitTs: (candidate, rawEntry, initialStop) => ruleExitTs(states.get(candidate.productId)!, weeks, candidate, rawEntry, initialStop),
-        sBtBps: path === "base" ? 5 : 10,
-        endTs: WINDOW_END_TS,
-        betaOf,
-        breadthOf: (entryDate) => breadthLabels.get(entryDate) ?? "on",
-      });
-      ran.set(`${config.id}|${path}`, { result, trades: result.trades.map((trade) => tagTrade(path, config.id, trade)) });
+  const runConfigs = (pairs: readonly BookPair[], clusterMaxOpen: number) => {
+    const out = new Map<string, { result: BookResult; trades: TradeRow[] }>();
+    for (const config of A_CONFIGS) {
+      const candidates = [...ordered.flatMap((state) => aCandidates(state, config.lookback, config.k)), ...classB];
+      for (const path of ["base", "stress"] as const) {
+        log(`p5 book ${config.id} ${path} clusterMax ${clusterMaxOpen} candidates ${candidates.length}`);
+        const result = runBook({
+          pairs,
+          candidates,
+          ruleExitTs: (candidate, rawEntry, initialStop) => ruleExitTs(states.get(candidate.productId)!, weeks, candidate, rawEntry, initialStop),
+          sBtBps: path === "base" ? 5 : 10,
+          endTs: WINDOW_END_TS,
+          betaOf,
+          breadthOf: (entryDate) => breadthLabels.get(entryDate) ?? "on",
+          clusterMaxOpen,
+        });
+        out.set(`${config.id}|${path}`, { result, trades: result.trades.map((trade) => tagTrade(path, config.id, trade)) });
+      }
     }
-  }
-  const folds = historicalFolds();
-  const isFold = folds[0]!;
-  const oosFolds = folds.filter((fold) => fold.sample === "OOS");
-  const isWeeks = mondayWeeks(isFold.start, isFold.end);
-  const oosWeeks = mondayWeeks(oosFolds[0]!.start, oosFolds[oosFolds.length - 1]!.end);
-  const configRows = A_CONFIGS.map((config) => {
-    const base = ran.get(`${config.id}|base`)!;
-    const stress = ran.get(`${config.id}|stress`)!;
-    const baseA = base.trades.filter((row) => row.classId === "A");
-    const stressA = stress.trades.filter((row) => row.classId === "A");
-    return {
-      config: config.id,
-      classId: "A" as const,
-      lookback: config.lookback,
-      k: config.k,
-      base: { is: summarize(baseA, "IS", isWeeks), oos: summarize(baseA, "OOS", oosWeeks) },
-      stress: { is: summarize(stressA, "IS", isWeeks), oos: summarize(stressA, "OOS", oosWeeks) },
-      blocked: { base: base.result.hitsByClass.A, stress: stress.result.hitsByClass.A },
-    };
-  });
-  const foldList = expandingFolds();
-  const l80Of = (trades: readonly { entryDate: string; netUsd: number }[], fold: (typeof foldList)[number]) => {
-    const weeks = mondayWeeks(fold.isStart, fold.isEnd);
-    const bound = oneSided80(weeklyValues(trades.map((trade) => ({ week: weekKey(trade.entryDate), value: trade.netUsd })), weeks), { scale: WEEKS_PER_MONTH });
-    return bound?.l80 ?? -1_000_000_000;
+    return out;
   };
-  const picks = selectByFold(
-    configRows,
-    foldList,
-    (row) => ran.get(`${row.config}|base`)!.trades.filter((trade) => trade.classId === "A"),
-    l80Of,
-    (trades) => trades.reduce((sum, trade) => sum + trade.netUsd, 0),
+  const ran = runConfigs(bookPairs, 3);
+  const registeredMaps = registeredSingleLinkageClusters(
+    ordered.map((state) => ({
+      productId: state.productId,
+      flags: state.flags,
+      days: state.ohlc.filter((row) => row.date >= WINDOW_START && row.close > 0).map((row) => ({ date: row.date, close: row.close })),
+    })),
+    months,
   );
-  const stitch = (path: "base" | "stress", classId: "A" | "B") => picks.flatMap((pick) => oosSlice(ran.get(`${pick.chosen.config}|${path}`)!.trades.filter((trade) => trade.classId === classId), pick.fold));
-  const stitchedA = stitch("base", "A");
-  const stitchedB = stitch("base", "B");
-  const stitchedAStress = stitch("stress", "A");
-  const stitchedBStress = stitch("stress", "B");
-  const classARow = { base: summarize(stitchedA, "OOS", oosWeeks), stress: summarize(stitchedAStress, "OOS", oosWeeks) };
-  const classBRow = { base: summarize(stitchedB, "OOS", oosWeeks), stress: summarize(stitchedBStress, "OOS", oosWeeks) };
-  const streamOf = (rows: readonly TradeRow[]) => {
-    const values = rows.map((row) => netR(row.netUsd, row.entryRiskUsd)).filter((value): value is number => value != null);
-    const stream = netRStreamP(values);
-    return { id: "", n: stream.n, p: stream.p, status: stream.status };
-  };
-  const historicalStreams = [
-    { ...streamOf(stitchedA), id: "A" },
-    { ...streamOf(stitchedB), id: "B" },
-  ];
+  const registeredPairs: BookPair[] = ordered.map((state) => ({
+    productId: state.productId,
+    bars: new Map(state.bars.map((bar) => [bar.ts, bar])),
+    daily: state.daily,
+    atr1h: (ts) => atrAt(state.hourAtr, ts),
+    clusterOf: (entryDate) => registeredMaps.get(monthKey(entryDate))?.get(state.productId) ?? state.productId,
+  }));
+  const ranRegistered = runConfigs(registeredPairs, 2);
+  const official = scoreBooks(ran);
+  const registeredCluster = scoreBooks(ranRegistered);
   const withDecision = (rows: { id: string; n: number; p: number; status: string }[], promotes: boolean) => {
     const holm = holmAdjusted(rows.map((row) => ({ id: row.id, p: row.p })));
     const bh = bhAdjusted(rows.map((row) => ({ id: row.id, p: row.p })));
@@ -660,6 +768,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
         status: source.status,
         p: row.p,
         holmAdjusted: row.adjusted,
+        belowAlpha: pass,
         decision: promotes ? (pass ? "pass" : "fail") : "reported",
         bhAdjusted: bhRow.adjusted,
         bhAt010: source.status === "not testable" ? "not testable" : bhRow.adjusted < 0.1 ? "below" : "not below",
@@ -675,21 +784,30 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
     const linked = [...groups.values()].filter((size) => size > 1);
     return { month, multiNameClusters: linked.length, namesInMultiNameClusters: linked.reduce((sum, size) => sum + size, 0) };
   });
-  const trades = [...ran.values()].flatMap((book) => book.trades);
-  trades.sort((a, b) => a.book.localeCompare(b.book) || a.path.localeCompare(b.path) || a.classId.localeCompare(b.classId) || a.entryDate.localeCompare(b.entryDate) || a.productId.localeCompare(b.productId));
-  const droppedOnFolds = picks.reduce((sum, pick) => {
-    const book = ran.get(`${pick.chosen.config}|base`)!.trades;
-    return sum + book.filter((trade) => purgedAtBoundary(trade.entryDate, trade.exitDate, pick.fold.oosStart)).length;
-  }, 0);
-  const foldPicks = picks.map((pick) => {
-    const trades = isPrefix(ran.get(`${pick.chosen.config}|base`)!.trades.filter((trade) => trade.classId === "A"), pick.fold);
-    const l80 = l80Of(trades, pick.fold);
-    const total = trades.reduce((sum, trade) => sum + trade.netUsd, 0);
-    return { fold: pick.fold.id, config: pick.chosen.config, isN: trades.length, l80NetUsdPerMonth: l80, totalNetUsd: total, l80Cents: cents(l80), totalCents: cents(total) };
-  });
+  const comparison = {
+    label: "CONTAMINATED" as const,
+    reason: "The R1 cluster rule was chosen after the capped P5 results were seen. This historical book is exploratory. Forward paper after the v3.1 hash is the evidence.",
+    clusterRule: "average linkage, rho >= 0.80, members only, fewer than 60 return days stay alone, max 3 open, recomputed on month starts and fold starts",
+    registeredClusterRule: "single linkage, rho >= 0.80 on 60 shared in-window return dates, max 2 open, recomputed on month starts. A boundary-saved name with fewer than 60 in-window days stays alone. The rest of the engine is the same v3.1 book.",
+    g2: { maxOpen: official.maxOpen, byConfig: official.gateHits.map((row) => ({ config: row.config, maxOpen: row.maxOpen })) },
+    breadth: official.breadth,
+    classBExcludingTop3Trades: official.classBExTop3,
+    registeredCluster: {
+      maxOpen: registeredCluster.maxOpen,
+      taken: registeredCluster.gateHits.map((row) => ({ config: row.config, taken: row.taken })),
+      blocked: registeredCluster.gateHits.map((row) => ({ config: row.config, base: row.base, stress: row.stress })),
+      folds: registeredCluster.foldPicks,
+      classA: registeredCluster.classARow,
+      classB: registeredCluster.classBRow,
+      classBExcludingTop3Trades: registeredCluster.classBExTop3,
+      concentration: registeredCluster.concentration,
+      windowMarks: registeredCluster.windowMarks,
+      breadth: registeredCluster.breadth,
+    },
+  };
   const results = {
     label: registration.validation.label,
-    role: "v3.1 code path, not run",
+    role: "CONTAMINATED",
     v3HurdleBps: KILL_HURDLE_BPS,
     sBt: { baseBps: 5, stressBps: 10 },
     feeBps: { entry: 90, exit: 90, note: "X1 and the rule, stop, or window-end exit are taker legs. Dollar net uses the same bps, charged on entry notional." },
@@ -707,15 +825,12 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       interpolation: "linear, index (n-1)*p",
       bounds: "U80 is p80 and L80 is p20",
     },
-    folds,
+    folds: official.folds,
     purge: {
       rule: "A trade belongs to its entry fold. IS trades open at the OOS boundary are dropped from both and counted. OOS trades are scored to their real exit. A trade open at the window end is marked to the last 15m close and flagged. Embargo is 0.",
       embargoDays: 0,
-      droppedOnFolds,
-      windowMarks: {
-        base: [...stitchedA, ...stitchedB].filter((row) => row.windowMark).length,
-        stress: [...stitchedAStress, ...stitchedBStress].filter((row) => row.windowMark).length,
-      },
+      droppedOnFolds: official.droppedOnFolds,
+      windowMarks: official.windowMarks,
     },
     geometry: {
       C: { ...scan.signalCounts.C, distinctUtcDays: scan.projectedOos.classC.distinctUtcDays, meetsRule: scan.projectedOos.classC.meetsRule, returns: null },
@@ -726,23 +841,15 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       statistic: "highest L80 of the expanding IS mean net dollars per month at fixed caps",
       tieBreak: "higher IS total net dollars after rounding to $0.01, then registration order",
       registrationOrder: A_CONFIGS.map((row) => row.id),
-      folds: foldPicks,
+      folds: official.foldPicks,
     },
-    configs: configRows,
-    classA: classARow,
-    classB: classBRow,
-    concentration: {
-      dollarShare: "share of the sum of gross dollars on the stitched OOS",
-      A: concentration(stitchedA),
-      B: concentration(stitchedB),
-    },
+    configs: official.configRows,
+    classA: official.classARow,
+    classB: official.classBRow,
+    concentration: official.concentration,
     blocked: {
       note: "A rejected attempt increments every gate that failed. Hits belong to each config's full-window book. Beta weight is max(beta, 0). A missing beta is 1 and the cap is applied.",
-      configs: A_CONFIGS.map((config) => ({
-        config: config.id,
-        base: ran.get(`${config.id}|base`)!.result.hits,
-        stress: ran.get(`${config.id}|stress`)!.result.hits,
-      })),
+      configs: official.gateHits.map((row) => ({ config: row.config, base: row.base, stress: row.stress })),
     },
     clusters: clusterMonths,
     holm: {
@@ -750,7 +857,8 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       historicalFamily: ["A", "B"],
       historicalFirstStep: HOLM_FAMILIES.historical.firstStep,
       historicalPromotes: HOLM_FAMILIES.historical.promotes,
-      historical: withDecision(historicalStreams, false),
+      historical: withDecision(official.historicalStreams, false),
+      historicalStress: withDecision(official.historicalStressStreams, false),
       classFamily: forward.map((row) => row.id),
       classFirstStep: HOLM_FAMILIES.classFamily.firstStep,
       classStreams: withDecision(forward, true),
@@ -770,10 +878,10 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       governingTrials: N_CUM_V31,
       registeredTrials: DSR_TRIALS_REGISTERED,
       sensitivityTrials: N_CUM_SENSITIVITY,
-      A: { dsrAt157: classARow.base.dsrAt157, dsrAt135: classARow.base.dsrAt135, dsrAt154: classARow.base.dsrAt154 },
-      B: { dsrAt157: classBRow.base.dsrAt157, dsrAt135: classBRow.base.dsrAt135, dsrAt154: classBRow.base.dsrAt154 },
-      stressA: { dsrAt157: classARow.stress.dsrAt157, dsrAt135: classARow.stress.dsrAt135, dsrAt154: classARow.stress.dsrAt154 },
-      stressB: { dsrAt157: classBRow.stress.dsrAt157, dsrAt135: classBRow.stress.dsrAt135, dsrAt154: classBRow.stress.dsrAt154 },
+      A: { dsrAt157: official.classARow.base.dsrAt157, dsrAt135: official.classARow.base.dsrAt135, dsrAt154: official.classARow.base.dsrAt154 },
+      B: { dsrAt157: official.classBRow.base.dsrAt157, dsrAt135: official.classBRow.base.dsrAt135, dsrAt154: official.classBRow.base.dsrAt154 },
+      stressA: { dsrAt157: official.classARow.stress.dsrAt157, dsrAt135: official.classARow.stress.dsrAt135, dsrAt154: official.classARow.stress.dsrAt154 },
+      stressB: { dsrAt157: official.classBRow.stress.dsrAt157, dsrAt135: official.classBRow.stress.dsrAt135, dsrAt154: official.classBRow.stress.dsrAt154 },
     },
     registeredFlags: {
       source: "p4-registration.json barAccess.names",
@@ -782,8 +890,13 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
       conflicts: flagBook.conflicts,
     },
     resolvedDefaults: RESOLVED_DEFAULTS.map((row) => ({ ...row })),
-    breadthReview: { label: "diagnostic, no selection", selects: false },
-    trades,
+    breadthReview: official.breadth,
+    comparison,
+    registeredClusterHolm: {
+      historical: withDecision(registeredCluster.historicalStreams, false),
+      historicalStress: withDecision(registeredCluster.historicalStressStreams, false),
+    },
+    trades: official.trades,
   };
   return {
     commitSha: stamp.commitSha,
@@ -791,6 +904,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
     createdAt: stamp.createdAt,
     phaseId: stamp.phaseId,
     registrationSha256: REGISTRATION_SHA,
+    v31RegistrationSha256: "f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d",
     amendmentSha256: sha256(readFileSync(join(paths.reports, "p4-amendment-1.json"))),
     geometryScanSha256: SCAN_SHA,
     jevCalls: 0,

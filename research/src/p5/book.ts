@@ -7,7 +7,8 @@
  */
 
 import { TAKER_FEE_BPS } from "../../vendor/87b35d0/config.ts";
-import { CLUSTER_CORR_DAYS, type GroupFlags } from "../p3/bar-access";
+import { CLUSTER_CORR_DAYS, clusterKey, type GroupFlags } from "../p3/bar-access";
+import { WINDOW_START } from "../p3/f5";
 import {
   BACKSTOP_BOOK_USD,
   BACKSTOP_DAILY_USD,
@@ -19,7 +20,7 @@ import {
   onePerPairAllows,
   openRiskAllows,
   grossNotionalAllows,
-  clusterAllows,
+  CLUSTER_MAX_OPEN,
   reentryAllowed,
   stopFillPrice,
   x1FillPrice,
@@ -119,6 +120,8 @@ export interface BookResult {
   betaApplied: boolean;
   betaUnresolved: number;
   breadthLog: { productId: string; entryTs: number; taken: boolean; breadth: BreadthLabel | null; notionalUsd: number; riskUsd: number }[];
+  /** Highest open-position count observed while this book was running. */
+  maxOpen: number;
 }
 
 interface Position {
@@ -232,6 +235,8 @@ export function runBook(opts: {
   costBps?: number;
   betaOf?: (productId: string, entryDate: string) => number | null;
   breadthOf?: (entryDate: string) => BreadthLabel;
+  /** Open names allowed in one cluster. The v3.1 book uses 3. The registered comparison uses 2. */
+  clusterMaxOpen?: number;
 }): BookResult {
   const pairs = new Map(opts.pairs.map((pair) => [pair.productId, pair]));
   const costBps = opts.costBps ?? sizingCostBps(opts.sBtBps);
@@ -265,6 +270,8 @@ export function runBook(opts: {
   const breadthLog: BookResult["breadthLog"] = [];
   const classUsdPeak = { A: 0, B: 0 };
   const classKilled = { A: false, B: false };
+  const clusterMax = opts.clusterMaxOpen ?? CLUSTER_MAX_OPEN;
+  let maxOpen = 0;
   let dayKey = "";
   let dayStart = 0;
   let weekStartKey = "";
@@ -356,7 +363,8 @@ export function runBook(opts: {
       if (candidate.classId === "A" && classOpen >= SLOT_CAPS.A) failed.push("slotA");
       if (candidate.classId === "B" && classOpen >= SLOT_CAPS.B) failed.push("slotB");
       if (open.length >= MAX_POSITIONS) failed.push("bookSlots");
-      if (!clusterAllows(open.filter((pos) => pos.cluster === cluster).length)) failed.push("cluster");
+      const openInCluster = open.filter((pos) => pos.cluster === cluster).length;
+      if (openInCluster >= clusterMax) failed.push("cluster");
       if (!openRiskAllows(openRisk, addRisk)) failed.push("openRisk");
       if (!grossNotionalAllows(gross, notional)) failed.push("grossNotional");
       if (opts.betaOf) {
@@ -383,6 +391,7 @@ export function runBook(opts: {
         continue;
       }
       taken += 1;
+      maxOpen = Math.max(maxOpen, open.length + 1);
       const ruleExit = ruleExitOf(opts.ruleExitTs(candidate, rawEntry, initialStop));
       open.push({
         classId: candidate.classId,
@@ -442,7 +451,7 @@ export function runBook(opts: {
     drop(pos, "window", pos.lastBar.close, x1FillPrice(pos.lastBar.close, "sell", opts.sBtBps), true);
   }
   trades.sort((a, b) => a.entryTs - b.entryTs || (a.productId < b.productId ? -1 : 1) || (a.classId < b.classId ? -1 : 1));
-  return { trades, attempts, taken, noBar, invalidStop, hits, hitsByClass, betaApplied: opts.betaOf != null, betaUnresolved, breadthLog };
+  return { trades, attempts, taken, noBar, invalidStop, hits, hitsByClass, betaApplied: opts.betaOf != null, betaUnresolved, breadthLog, maxOpen };
 }
 
 export interface ClosePoint {
@@ -543,6 +552,40 @@ export function monthlyClusters(
     for (const name of active) {
       const own = (returns.get(name.productId)?.size ?? 0) < CLUSTER_CORR_DAYS;
       clusters.set(name.productId, own ? name.productId : assigned.get(name.productId) ?? name.productId);
+    }
+    out.set(month, clusters);
+  }
+  return out;
+}
+
+/**
+ * The registered v3 cluster rule. Single linkage, rho at least 0.80 on 60 shared
+ * in-window return dates, recomputed on the first UTC day of the month.
+ * A boundary-saved name with fewer than 60 in-window days stays alone.
+ */
+export function registeredSingleLinkageClusters(names: readonly ClusterName[], months: readonly string[]): Map<string, Map<string, string>> {
+  const out = new Map<string, Map<string, string>>();
+  for (const month of months) {
+    const returns = new Map(names.map((name) => [name.productId, trailingReturns(name.days, month)]));
+    const linked: [string, string][] = [];
+    for (let i = 0; i < names.length; i += 1) {
+      for (let j = i + 1; j < names.length; j += 1) {
+        const left = names[i]!;
+        const right = names[j]!;
+        const a = returns.get(left.productId)!;
+        const b = returns.get(right.productId)!;
+        const dates = [...a.keys()].filter((date) => b.has(date)).sort();
+        if (dates.length < CLUSTER_CORR_DAYS) continue;
+        const used = dates.slice(-CLUSTER_CORR_DAYS);
+        const rho = pearson(used.map((date) => a.get(date)!), used.map((date) => b.get(date)!));
+        if (rho != null && rho >= 0.8) linked.push([left.productId, right.productId]);
+      }
+    }
+    const assigned = singleLinkage(names.map((name) => name.productId), linked);
+    const clusters = new Map<string, string>();
+    for (const name of names) {
+      const inWindowDays = name.days.filter((row) => row.date >= WINDOW_START && row.date < month).length;
+      clusters.set(name.productId, clusterKey(name.flags, inWindowDays, name.productId, assigned.get(name.productId) ?? name.productId));
     }
     out.set(month, clusters);
   }

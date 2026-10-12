@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { monthlyClusters, runBook, type BookPair } from "./book";
+import { monthlyClusters, registeredSingleLinkageClusters, runBook, type BookPair } from "./book";
 import { classAChaseSkip, classATenDayExit, openRiskAllows } from "../p3/design-rules";
 import { expandingFolds, purgedAtBoundary, selectByFold } from "./stats";
 
@@ -160,6 +160,34 @@ test("average linkage keeps non-members and short histories out of the cluster",
   expect(month.get("AAA")).toBe(month.get("BBB"));
   expect(month.get("SHORT")).toBe("SHORT");
   expect(month.get("SHORT")).not.toBe(month.get("AAA"));
+});
+
+test("the registered single-linkage rule links a pair and leaves a short boundary-saved name alone", () => {
+  const build = (n: number) => {
+    const days = [{ date: "2025-10-11", close: 100 }];
+    for (let i = 1; i <= n; i += 1) {
+      const prev = days[days.length - 1]!.close;
+      days.push({
+        date: new Date(Date.parse("2025-10-11T00:00:00.000Z") + i * 86_400_000).toISOString().slice(0, 10),
+        close: prev * (1 + ((i % 5) - 2) * 0.01),
+      });
+    }
+    return days;
+  };
+  const days = build(80);
+  const open = { priceGroupPasses: true, volumeGroupPasses: true, boundarySaved: false };
+  const saved = { priceGroupPasses: false, volumeGroupPasses: true, boundarySaved: true };
+  const map = registeredSingleLinkageClusters(
+    [
+      { productId: "AAA", flags: open, days },
+      { productId: "BBB", flags: open, days },
+      { productId: "SAVED", flags: saved, days: build(20) },
+    ],
+    ["2026-01-01"],
+  );
+  const month = map.get("2026-01-01")!;
+  expect(month.get("AAA")).toBe(month.get("BBB"));
+  expect(month.get("SAVED")).toBe("SAVED");
 });
 
 test("breadth state is logged and does not change an entry or a size", () => {

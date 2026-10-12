@@ -15,7 +15,8 @@
  *   bun run research/src/cli.ts refresh-reports
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { boot } from "./index";
 import { assertCleanWorkTree, stampFromGit, type ArtifactStamp } from "./manifest";
@@ -591,7 +592,9 @@ function p5(): void {
   const out = join(paths.reports, P5_V31_RESULTS);
   assertP5OutputPath(out);
   writeJson(out, report);
-  console.log(`p5 v31 ${String(report.resultsHash)}`);
+  const fileHash = createHash("sha256").update(readFileSync(out)).digest("hex");
+  writeFileSync(`${out}.sha256`, `${fileHash}  research/data/reports/${P5_V31_RESULTS}\n`);
+  console.log(`p5 v31 ${fileHash}`);
 }
 
 async function writeJevSmoke(): Promise<void> {
