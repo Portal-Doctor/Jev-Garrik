@@ -1,0 +1,25 @@
+{
+  "commitSha": "63276947cbf78c52375bc34e2267aa82efb4326e",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T02:55:30.584Z",
+  "phaseId": "P6",
+  "approvedBy": "Brian",
+  "approvedAt": "2026-10-12T02:24:00Z",
+  "confirmedBy": [
+    "Quant",
+    "Trader",
+    "Architect"
+  ],
+  "approvalOf": "wording",
+  "rule": "Rule (a): block only that pair. P&L is cumulative from forward bar 1 (realized net + open mark including the taker exit). (1) Once tripped it latches, and the pair takes no new entries in any class even if the mark recovers. (2) It clears only on Brian's explicit, logged re-enable. (3) Open positions on the pair run to their normal exit. (4) Log the trip time and the pair's realized and marked P&L. (5) On re-enable it re-arms at -$500 from the pair's cumulative P&L at that moment.",
+  "registrationSha256": "f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d",
+  "amendment1Sha256": "e0948e26f2bbe2ec7c113d23db8b4dbb9daed70a9d2cef0e3f0a0c49f70d7760",
+  "amendment2Sha256": "bfa6efb2e0e4b12034e34e8481256bb26b6c36a24e3e3a92c5300be9eaf496eb",
+  "amendment2aSha256": "99cab8986102bfddb9dd6579fcb99ffd83ed89f065c009811633e19bd59283a0",
+  "bindsToFileHash": false,
+  "note": "Brian approved the wording. This record does not bind that approval to a file hash he has not seen.",
+  "registrationEdited": false,
+  "amendment1Edited": false,
+  "amendment2Edited": false,
+  "amendment2aEdited": false
+}
