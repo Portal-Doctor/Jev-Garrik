@@ -1,0 +1,10 @@
+{
+  "calls": 1,
+  "synthetic": true,
+  "modelId": "jev-1.13.0",
+  "inputTokens": 591,
+  "outputTokens": 137,
+  "totalTokens": 728,
+  "costUsd": 0.000030576,
+  "capUsd": 5
+}
