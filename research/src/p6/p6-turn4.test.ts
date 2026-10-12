@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "bun:test";
 import { classATrigger, classBScore, type DailyBar } from "../p3/classes";
 import { x1FillPrice } from "../p3/design-rules";
@@ -218,6 +220,8 @@ test("a throwaway worktree cannot write through the guarded writer", () => {
   expect(P6_STAMP_COMMANDS).toContain("p6-stamp-kelly-status");
   expect(() => stampP6Record("p6-stamp-amendment-2")).toThrow(/refusing to overwrite/);
   expect(() => stampP6Record("p6-stamp-kelly-ruling")).toThrow(/refusing to overwrite/);
+  expect(() => stampP6Record("p6-stamp-amendment-2b")).toThrow(/refusing to overwrite/);
+  expect(() => stampP6Record("p6-stamp-amendment-2b-approval")).toThrow(/refusing to overwrite/);
   expect(() => stampP6Record("p6-stamp-jev-spend" as "p6-stamp-amendment-2")).toThrow();
 });
 
@@ -236,6 +240,25 @@ test("amendment 2b cites the frozen parents and the approval is of the wording",
   expect(approval.bindsToFileHash).toBe(false);
   expect(approval.rule).toBe(AMENDMENT_2B_RULE);
   expect(JSON.stringify(approval).includes("amendment2bSha")).toBe(false);
+  for (const name of ["p6-amendment-2b", "p6-amendment-2b-approval"] as const) {
+    const raw = readFileSync(fileURLToPath(new URL(`../../data/reports/${name}.json`, import.meta.url)));
+    const hash = createHash("sha256").update(raw).digest("hex");
+    const side = readFileSync(fileURLToPath(new URL(`../../data/reports/${name}.sha256`, import.meta.url)), "utf8");
+    expect(side).toBe(`${hash}  research/data/reports/${name}.json\n`);
+    const filed = JSON.parse(raw.toString()) as { rule: string };
+    expect(filed.rule).toBe(AMENDMENT_2B_RULE);
+  }
+  const filedApproval = JSON.parse(readFileSync(fileURLToPath(new URL("../../data/reports/p6-amendment-2b-approval.json", import.meta.url)), "utf8")) as {
+    approvedBy: string;
+    approvedAt: string;
+    approvalOf: string;
+    bindsToFileHash: boolean;
+  };
+  expect(filedApproval.approvedBy).toBe("Brian");
+  expect(filedApproval.approvedAt).toBe("2026-10-12T02:24:00Z");
+  expect(filedApproval.approvalOf).toBe("wording");
+  expect(filedApproval.bindsToFileHash).toBe(false);
+  expect(JSON.stringify(filedApproval).includes("amendment2bSha")).toBe(false);
 });
 
 function dayGrid(productId: string, date: string, close: number, volume = 10): FifteenBar[] {
