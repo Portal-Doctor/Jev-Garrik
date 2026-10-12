@@ -4,15 +4,15 @@
  * the cluster id from entry.
  */
 
+import { correlationCloses, type GroupFlags, type SourceDay } from "../p3/bar-access";
 import { foldStartDates } from "../p3/schedule";
 import { monthlyClusters, trailingReturns, type ClosePoint } from "../p5/book";
 import { alignedBeta, assignBetas } from "../p5/risk";
 
-const FLAGS = { priceGroupPasses: true, volumeGroupPasses: true, boundarySaved: false };
-
 export interface MemberCloses {
   productId: string;
-  days: readonly ClosePoint[];
+  flags: GroupFlags;
+  days: readonly SourceDay[];
 }
 
 export function clusterSchedule(through = "2030-12-01"): string[] {
@@ -42,12 +42,16 @@ export function forwardClusterBeta(
   asOf: string,
   memberOn?: (productId: string, date: string) => boolean,
 ): { clusters: Map<string, string>; betas: Map<string, number> } {
-  const names = members.map((member) => ({ productId: member.productId, flags: FLAGS, days: member.days }));
+  const names = members.map((member) => ({
+    productId: member.productId,
+    flags: member.flags,
+    days: correlationCloses(member.flags, member.days),
+  }));
   const clusters = monthlyClusters(names, [asOf], memberOn).get(asOf) ?? new Map<string, string>();
   const active = members.filter((member) => memberOn == null || memberOn(member.productId, asOf));
   const rows = active.map((member) => ({
     id: member.productId,
-    beta: alignedBeta(member.days, btc, asOf, trailingReturns),
+    beta: alignedBeta(correlationCloses(member.flags, member.days), btc, asOf, trailingReturns),
   }));
   return { clusters, betas: assignBetas(rows) };
 }

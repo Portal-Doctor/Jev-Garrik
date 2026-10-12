@@ -18,6 +18,8 @@ export const ANCHORED_IS_START = "2025-11-10";
 /** First forward bar. The anchored IS ends on the previous completed day. */
 export const FORWARD_BAR_1 = "2026-10-10T00:00:00.000Z";
 export const FORWARD_PICK_FILE = "p6-forward-a.json";
+/** Bytes of research/data/reports/p6-forward-a.json. A matching sidecar with any other hash is refused. */
+export const FORWARD_PICK_SHA256 = "5d6196ac314cb0744612126bb3d6d3c6e1ee2b3a36d87b03a54fe469cc907962";
 
 export const A_REGISTRATION = [
   { id: "A20-k2", lookback: 20, k: 2 },
@@ -173,6 +175,7 @@ export function readForwardPick(root = repoRoot()): APick {
   const sidecar = readFileSync(path.replace(/\.json$/, ".sha256"), "utf8").trim().split(/\s+/)[0] ?? "";
   const actual = createHash("sha256").update(bytes).digest("hex");
   if (actual !== sidecar) throw new Error(`forward A pick hash ${actual} does not match ${sidecar || "missing sidecar"}`);
+  if (actual !== FORWARD_PICK_SHA256) throw new Error(`forward A pick hash ${actual} is not ${FORWARD_PICK_SHA256}`);
   const body = JSON.parse(bytes.toString("utf8")) as {
     chosen: string;
     isEnd: string;

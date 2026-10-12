@@ -15,9 +15,9 @@ export interface MinuteBar {
 
 export type PublicEvent =
   | { kind: "candle"; productId: string; startSec: number; open: number; high: number; low: number; close: number; volume: number }
-  | { kind: "l2-snapshot"; productId: string; bids: readonly (readonly [string, string])[]; asks: readonly (readonly [string, string])[] }
-  | { kind: "l2-update"; productId: string; side: "bid" | "ask"; price: string; size: string }
-  | { kind: "trade"; productId: string; price: number; size: number }
+  | { kind: "l2-snapshot"; productId: string; bids: readonly (readonly [string, string])[]; asks: readonly (readonly [string, string])[]; sequence?: number }
+  | { kind: "l2-update"; productId: string; side: "bid" | "ask"; price: string; size: string; sequence?: number }
+  | { kind: "trade"; productId: string; price: number; size: number; time?: string; side?: string }
   | { kind: "heartbeat" };
 
 export interface FeedGap {
@@ -180,10 +180,13 @@ export function parsePublicMessage(raw: unknown): PublicEvent[] {
         const size = num(trade.size);
         const productId = typeof trade.product_id === "string" ? trade.product_id : "";
         if (price == null || size == null || !productId) continue;
-        out.push({ kind: "trade", productId, price, size });
+        const time = typeof trade.time === "string" ? trade.time : undefined;
+        const side = trade.side === "BUY" || trade.side === "SELL" ? trade.side : undefined;
+        out.push({ kind: "trade", productId, price, size, ...(time ? { time } : {}), ...(side ? { side } : {}) });
       }
     }
   }
+  const sequence = num(msg.sequence_num);
   if (channel === "level2" || channel === "l2_data") {
     for (const event of events) {
       const row = event as { type?: string; product_id?: string; updates?: { side?: string; price_level?: string; new_quantity?: string }[] };
@@ -197,12 +200,12 @@ export function parsePublicMessage(raw: unknown): PublicEvent[] {
           const side = update.side === "offer" || update.side === "ask" ? asks : bids;
           side.push([update.price_level, update.new_quantity]);
         }
-        out.push({ kind: "l2-snapshot", productId, bids, asks });
+        out.push({ kind: "l2-snapshot", productId, bids, asks, ...(sequence != null ? { sequence } : {}) });
       } else {
         for (const update of row.updates) {
           if (!update.price_level || update.new_quantity == null || !update.side) continue;
           const side = update.side === "offer" || update.side === "ask" ? "ask" : "bid";
-          out.push({ kind: "l2-update", productId, side, price: update.price_level, size: update.new_quantity });
+          out.push({ kind: "l2-update", productId, side, price: update.price_level, size: update.new_quantity, ...(sequence != null ? { sequence } : {}) });
         }
       }
     }

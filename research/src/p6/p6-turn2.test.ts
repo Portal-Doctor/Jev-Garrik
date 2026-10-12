@@ -263,6 +263,7 @@ test("the paper book trades at $20 until a Monday review, then holds Kelly, and 
     bookTsMs: wednesday,
     sendTsMs: wednesday + 5,
     decisionMid: 100.05,
+    aConfig: "A55-k3",
   };
   const early = replayInjected([{ kind: "clock", tsMs: wednesday }, x1]);
   expect(early.positions[0]?.riskUsd).toBe(20);
@@ -331,6 +332,7 @@ test("stops, maker orders, halts, packets, and the kill switch run on injected e
     bookTsMs: wednesday,
     sendTsMs: wednesday,
     decisionMid: 100,
+    aConfig: "A55-k3",
   });
   expect(book.positions).toHaveLength(1);
   applyForward(book, { kind: "mark", productId: "ETH-USD", price: 50 });
@@ -376,7 +378,7 @@ test("stops, maker orders, halts, packets, and the kill switch run on injected e
     stop: 90,
     bid: 101,
     ask: 101.1,
-    bookTsMs: wednesday,
+    bookTsMs: wednesday + 2 * 86_400_000,
     decisionMid: 101,
   });
   expect(book.working).toHaveLength(1);
@@ -395,7 +397,7 @@ test("stops, maker orders, halts, packets, and the kill switch run on injected e
     stop: 90,
     bid: 101,
     ask: 101.1,
-    bookTsMs: wednesday,
+    bookTsMs: wednesday + 2 * 86_400_000,
     decisionMid: 101,
   });
   applyForward(book, { kind: "minute", productId: "ETH-USD", tsMs: wednesday + 2 * 86_400_000 + 1_000, open: 101, high: 102, low: 100, close: 101, volume: 4 });
@@ -435,8 +437,8 @@ test("stops, maker orders, halts, packets, and the kill switch run on injected e
     atr1h: 0.1,
     bid: 10,
     ask: 10.01,
-    bookTsMs: monday,
-    sendTsMs: monday,
+    bookTsMs: Date.parse("2026-03-03T00:01:00.000Z"),
+    sendTsMs: Date.parse("2026-03-03T00:01:00.000Z"),
     decisionMid: 10,
   });
   expect(halted.positions.some((position) => position.id === "next-day")).toBe(true);
@@ -471,6 +473,7 @@ test("a fourth name in one cluster is blocked by the book itself", () => {
       bookTsMs: wednesday,
       sendTsMs: wednesday,
       decisionMid: 100,
+      ...(classes[i] === "A" ? { aConfig: "A55-k3" } : {}),
     });
   }
   expect(book.positions.map((position) => position.productId)).toEqual(["ETH-USD", "BTC-USD", "SOL-USD"]);

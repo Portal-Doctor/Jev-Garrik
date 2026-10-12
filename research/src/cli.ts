@@ -615,11 +615,25 @@ function stampP6(command: string): void {
 
 async function runPaper(): Promise<void> {
   const args = process.argv.slice(3);
-  const products = args.filter((arg) => !arg.startsWith("--"));
+  if (args.includes("--listen")) throw new Error("monitoring is files under data/runtime");
+  const valued = new Set(["--status-dir", "--for-ms", "--log"]);
+  const products: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (valued.has(arg)) {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--")) continue;
+    products.push(arg);
+  }
   const dirFlag = args.indexOf("--status-dir");
   const statusDir = dirFlag >= 0 && args[dirFlag + 1] ? args[dirFlag + 1]! : join(realDataDir(), "runtime", "p6-paper");
-  const listen = args.includes("--listen") ? "127.0.0.1" : null;
-  await runPublicPaper({ products, statusDir, listen });
+  const forFlag = args.indexOf("--for-ms");
+  const forMs = forFlag >= 0 ? Number(args[forFlag + 1]) : undefined;
+  const logFlag = args.indexOf("--log");
+  const logPath = logFlag >= 0 ? args[logFlag + 1] : undefined;
+  await runPublicPaper({ products, statusDir, forMs, logPath });
 }
 
 function p6Replay(): void {

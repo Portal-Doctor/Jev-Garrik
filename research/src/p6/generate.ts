@@ -14,6 +14,7 @@ import { classDCandidates } from "../p3/d-geometry";
 import { classCSetups, classEEntries, type BarOHLC } from "../p3/signals";
 import { wilderAtr } from "../p2/indicators";
 import type { Ohlcv } from "../../vendor/87b35d0/indicators.ts";
+import { isDayCloseBar } from "../p5/book";
 import { collectA, isMondayCloseBar, weekSelection, x1EntryTs } from "../p5/run";
 import type { ClassId } from "../p3/portfolio";
 import type { ClassBRow } from "../p3/design-rules";
@@ -73,6 +74,11 @@ export interface GenerateInput {
   /** Daily bars before the 15m window. In-window days stay on the 15m derivation. */
   earlierDays?: ReadonlyMap<string, readonly SourceDay[]>;
   /**
+   * Daily history loaded before the first live bar. Unlike earlierDays, this is
+   * not cut at 2025-10-11. A prebuilt `products` book ignores it.
+   */
+  warmupDays?: ReadonlyMap<string, readonly SourceDay[]>;
+  /**
    * Prebuilt class bars. When set, these replace 15m derivation so the series
    * matches loadPair, including empty days and the listing date.
    */
@@ -120,7 +126,7 @@ interface DerivedBook {
   quarter: BarOHLC[];
 }
 
-function deriveProduct(bars: readonly FifteenBar[], nowSec: number): DerivedBook | null {
+export function deriveForwardBook(bars: readonly FifteenBar[], nowSec: number): DerivedBook | null {
   const minutes = minutesOf(bars, nowSec);
   if (minutes.length === 0) return null;
   const start = minutes[0]!.minuteSec;
@@ -193,7 +199,7 @@ export function generateForward(input: GenerateInput): GenerateResult {
   const aConfig = registeredAConfig(lookback, k);
   const memberOn = input.memberOn ?? (() => true);
   const veto = input.veto ?? (() => false);
-  const ids = [...new Set([...(input.products?.keys() ?? []), ...input.bars.map((bar) => bar.productId)])].sort();
+  const ids = [...new Set([...(input.products?.keys() ?? []), ...(input.warmupDays?.keys() ?? []), ...input.bars.map((bar) => bar.productId)])].sort();
   const books = new Map<string, DerivedBook>();
   for (const id of ids) {
     const prepared = input.products?.get(id);
@@ -201,8 +207,9 @@ export function generateForward(input: GenerateInput): GenerateResult {
       books.set(id, { days: [...prepared.days], hour: [...prepared.hour], four: [...prepared.four], quarter: [...prepared.quarter] });
       continue;
     }
-    const derived = deriveProduct(input.bars.filter((bar) => bar.productId === id), input.nowSec);
+    const derived = deriveForwardBook(input.bars.filter((bar) => bar.productId === id), input.nowSec);
     if (derived) books.set(id, derived);
+    else if ((input.warmupDays?.get(id)?.length ?? 0) > 0) books.set(id, { days: [], hour: [], four: [], quarter: [] });
   }
   const out: GeneratedEntry[] = [];
   const bRows: { id: string; date: string; score: number; member: boolean }[] = [];
@@ -211,8 +218,12 @@ export function generateForward(input: GenerateInput): GenerateResult {
     const book = books.get(id);
     if (!book) continue;
     const first = book.days[0]?.date ?? "9999-99-99";
-    const prior = input.products?.has(id) ? [] : (input.earlierDays?.get(id) ?? []).filter((row) => row.date < "2025-10-11" && row.date < first);
-    const days = [...prior, ...book.days].filter((row, index, all) => all.findIndex((item) => item.date === row.date) === index);
+    const fromProducts = input.products?.has(id) === true;
+    const warmup = fromProducts ? [] : (input.warmupDays?.get(id) ?? []).filter((row) => row.date < first);
+    const prior = fromProducts ? [] : (input.earlierDays?.get(id) ?? []).filter((row) => row.date < "2025-10-11" && row.date < first);
+    const merged = new Map<string, SourceDay>();
+    for (const row of [...warmup, ...prior, ...book.days]) merged.set(row.date, row);
+    const days = [...merged.values()];
     days.sort((a, b) => (a.date < b.date ? -1 : 1));
     const listed = days.find((row) => !row.empty)?.date ?? null;
     const young = input.young ? input.young(id) : p5Young(days);
@@ -336,6 +347,37 @@ export function generateForward(input: GenerateInput): GenerateResult {
   out.sort((a, b) => a.tsMs - b.tsMs || (a.productId < b.productId ? -1 : 1) || (a.classId < b.classId ? -1 : 1));
   const weeks = [...byWeek.keys()].sort().map((date) => ({ date, rows: byWeek.get(date)! }));
   return { entries: out, weeks, atrByProduct };
+}
+
+/** Wilder ATR of the derived 1h bars, using only hours that have already closed. */
+export function hourAtrAt(hour: readonly BarOHLC[], ts: number): number {
+  if (hour.length === 0) return 0;
+  const series = wilderAtr(hour.map((bar) => bar.high), hour.map((bar) => bar.low), hour.map((bar) => bar.close), 14);
+  let value = 0;
+  for (let index = 0; index < hour.length; index += 1) {
+    const bar = hour[index]!;
+    if (bar.ts + 3_600 <= ts) value = series[index] ?? 0;
+    else break;
+  }
+  return value > 0 ? value : 0;
+}
+
+/** Fields a live 15m bar carries into the engine: 1h ATR, daily ATR, B scores, and the day-close flag. */
+export function forwardBarAnnotation(
+  generated: GenerateResult,
+  hour: readonly BarOHLC[],
+  productId: string,
+  startSec: number,
+): { atr1h: number; dailyAtr: number; bScores: ClassBRow[] | undefined; dailyClose: boolean } {
+  const date = new Date(startSec * 1000).toISOString().slice(0, 10);
+  let bScores: ClassBRow[] | undefined;
+  for (const week of generated.weeks) if (week.date <= date) bScores = week.rows;
+  return {
+    atr1h: hourAtrAt(hour, startSec),
+    dailyAtr: generated.atrByProduct.get(productId)?.get(date) ?? 0,
+    bScores,
+    dailyClose: isDayCloseBar(startSec),
+  };
 }
 
 export function generateEntries(input: GenerateInput): GeneratedEntry[] {

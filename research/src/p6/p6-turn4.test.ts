@@ -31,6 +31,7 @@ function enter(book: ReturnType<typeof freshBook>, id: string, productId: string
     bookTsMs: tsMs,
     sendTsMs: tsMs,
     decisionMid: nextOpen,
+    aConfig: "A55-k3",
   });
 }
 

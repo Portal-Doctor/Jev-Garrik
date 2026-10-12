@@ -188,6 +188,7 @@ test("bars before the entry and forming bars do not stop, and the trail, ten-day
     decisionMid: 100,
     dailyAtr: 2,
     priorDailyCloses: Array(10).fill(100),
+    aConfig: "A55-k3",
   });
   applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec: start, nowSec: start + 100, open: 110, high: 112, low: 80, close: 110 });
   expect(book.positions).toHaveLength(1);
@@ -356,9 +357,10 @@ test("class B disaster and a momentum crash block new B entries", () => {
     atr1h: 0.2,
     bid: 10,
     ask: 10.02,
-    bookTsMs: wednesday,
-    sendTsMs: wednesday,
+    bookTsMs: wednesday + 86_400_000 + 2_000,
+    sendTsMs: wednesday + 86_400_000 + 2_000,
     decisionMid: 10,
+    aConfig: "A55-k3",
   });
   expect(book.positions.some((position) => position.id === "a-ok")).toBe(true);
 });
@@ -383,6 +385,7 @@ test("a non-member does not join a member cluster, and an open tag survives the 
       bookTsMs: wednesday,
       sendTsMs: wednesday,
       decisionMid: 100,
+      aConfig: "A55-k3",
     });
   book = enter("eth", "ETH-USD");
   book = enter("sol", "SOL-USD");

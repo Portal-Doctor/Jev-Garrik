@@ -5,6 +5,9 @@
  * inside cost.
  */
 
+/** A level2 snapshot older than this is not a live book. Same window as a missed heartbeat. */
+export const STALE_QUOTE_MS = 15_000;
+
 export interface LegLog {
   id: string;
   productId: string;
@@ -21,6 +24,8 @@ export interface LegLog {
   fillPrice: number;
   units: number;
   feesUsd: number;
+  /** The snapshot was missing or older than STALE_QUOTE_MS. The fill is still the fill. */
+  stale?: boolean;
 }
 
 /** Decision-to-arrival drift in bps. GREY, and not part of cost. */

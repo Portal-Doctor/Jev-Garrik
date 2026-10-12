@@ -7,23 +7,32 @@ import { expect, test } from "bun:test";
 import { monthlyClusters, trailingReturns } from "../p5/book";
 import { alignedBeta, assignBetas } from "../p5/risk";
 import { addDays } from "../p5/stats";
+import type { SourceDay } from "../p3/bar-access";
 import { latestClusterDate } from "./clusters";
-import { assertDailyInventory, dailyByteHash } from "./daily";
+import { assertDailyInventory, dailyByteHash, verifyDailyStore } from "./daily";
 import { applyForward, freshBook } from "./engine";
-import { entriesToEvents, registeredAConfig, type GeneratedEntry } from "./generate";
+import { entriesToEvents, forwardBarAnnotation, hourAtrAt, registeredAConfig, type GeneratedEntry } from "./generate";
 import { kellyRulingBody, kellyRulingSupersededBody } from "./kelly";
-import { readForwardPick } from "./select";
+import { FORWARD_PICK_SHA256, readForwardPick } from "./select";
 import { barFromExchangeCandles } from "./rest-bars";
+import { parsePublicMessage } from "./feed";
 import {
   acceptRestBar,
   applyPublic,
+  armShard,
   considerHeartbeatGap,
   dueRest,
   fallbackTradesBar,
+  framesForShard,
+  l2SequenceOk,
+  loadPaperState,
+  noteRest429,
   noteRestMiss,
   observeHeartbeat,
+  onSocketClosed,
   readOnlyResponse,
   restAction,
+  savePaperState,
   startPaperHost,
   writeHostFiles,
 } from "./paper-host";
@@ -74,11 +83,18 @@ test("the forward pick is refused when its sidecar does not match the bytes", ()
   const actual = createHash("sha256").update(bytes).digest("hex");
   writeFileSync(join(reports, "p6-forward-a.sha256"), `${actual}  research/data/reports/p6-forward-a.json\n`);
   expect(readForwardPick(root).config).toBe("A55-k3");
+  const fake = Buffer.from("{\"chosen\":\"A20-k2\"}");
+  const fakeHash = createHash("sha256").update(fake).digest("hex");
+  writeFileSync(join(reports, "p6-forward-a.json"), fake);
+  writeFileSync(join(reports, "p6-forward-a.sha256"), `${fakeHash}  research/data/reports/p6-forward-a.json\n`);
+  expect(FORWARD_PICK_SHA256).toBe("5d6196ac314cb0744612126bb3d6d3c6e1ee2b3a36d87b03a54fe469cc907962");
+  expect(() => readForwardPick(root)).toThrow(/5d6196ac/);
 });
 
 test("the engine loads the stamped A pick and tags every A entry with that config", () => {
   const engine = readFileSync(fileURLToPath(new URL("./engine.ts", import.meta.url)), "utf8");
   expect(engine.includes("ruleExitTs")).toBe(false);
+  expect(() => freshBook({ aPick: null })).toThrow(/refusing a book with no A pick/);
   const book = freshBook({ members: ["ETH-USD", "SOL-USD"] });
   expect(book.aPick?.config).toBe("A55-k3");
   expect(book.aPick?.lookback).toBe(55);
@@ -86,6 +102,23 @@ test("the engine loads the stamped A pick and tags every A entry with that confi
   expect(book.config.monthlyASelect).toBe(false);
   const ts = Date.parse("2026-10-15T01:00:00.000Z");
   applyForward(book, { kind: "clock", tsMs: ts });
+  applyForward(book, {
+    kind: "x1",
+    id: "untagged",
+    classId: "A",
+    productId: "ETH-USD",
+    tsMs: ts,
+    nextOpen: 100,
+    stop: 90,
+    atr1h: 1,
+    bid: 100,
+    ask: 100.1,
+    bookTsMs: ts,
+    sendTsMs: ts,
+    decisionMid: 100,
+  });
+  expect(book.rejected.some((row) => row.id === "untagged" && row.reason === "a-config")).toBe(true);
+  expect(book.positions).toHaveLength(0);
   applyForward(book, {
     kind: "x1",
     id: "tagged",
@@ -100,6 +133,7 @@ test("the engine loads the stamped A pick and tags every A entry with that confi
     bookTsMs: ts,
     sendTsMs: ts,
     decisionMid: 100,
+    aConfig: "A55-k3",
   });
   expect(book.positions.find((position) => position.id === "tagged")?.aConfig).toBe("A55-k3");
   applyForward(book, {
@@ -185,13 +219,15 @@ test("forward clusters and betas match P5 for one month and recompute at the fol
       { id: "ETH-USD", beta: alignedBeta(ethDays, btcDays, asOf, trailingReturns) },
       { id: "SOL-USD", beta: alignedBeta(solDays, btcDays, asOf, trailingReturns) },
     ]);
+  const asDays = (rows: { date: string; close: number }[]): SourceDay[] =>
+    rows.map((row) => ({ date: row.date, ts: Date.parse(`${row.date}T00:00:00.000Z`) / 1000, open: row.close, high: row.close, low: row.close, close: row.close, volume: 1, empty: false }));
   const book = freshBook({
     members: ["BTC-USD", "ETH-USD", "SOL-USD"],
-    aPick: null,
+    aPick: { config: "A55-k3", lookback: 55, k: 3, at: "2026-03-05", stats: [] },
     memberCloses: [
-      { productId: "BTC-USD", days: btcDays },
-      { productId: "ETH-USD", days: ethDays },
-      { productId: "SOL-USD", days: solDays },
+      { productId: "BTC-USD", flags, days: asDays(btcDays) },
+      { productId: "ETH-USD", flags, days: asDays(ethDays) },
+      { productId: "SOL-USD", flags, days: asDays(solDays) },
     ],
     btcCloses: btcDays,
   });
@@ -212,6 +248,7 @@ test("forward clusters and betas match P5 for one month and recompute at the fol
       bookTsMs: ts,
       sendTsMs: ts,
       decisionMid: 100,
+      aConfig: "A55-k3",
     });
   };
   enter("eth", "ETH-USD", "2026-03-05");
@@ -275,12 +312,201 @@ test("the public paper host shards, reconnects on a heartbeat gap, and falls bac
   acceptRestBar(host, rest!);
   expect(host.book.marks["ETH-USD"]).toBe(2.5);
 
-  const dir = mkdtempSync(join(tmpdir(), "p6-host-"));
+  expect(() => writeHostFiles(mkdtempSync(join(tmpdir(), "p6-host-")), host)).toThrow(/data\/runtime/);
+  const dir = join(fileURLToPath(new URL("../../data/runtime", import.meta.url)), `p6-host-${process.pid}`);
   writeHostFiles(dir, host);
   expect(existsSync(join(dir, "status.json"))).toBe(true);
   expect(existsSync(join(dir, "book.json"))).toBe(true);
+  rmSync(dir, { recursive: true, force: true });
   expect(readOnlyResponse(host, "GET", "/status").status).toBe(200);
   expect(readOnlyResponse(host, "GET", "/book").status).toBe(200);
   expect(readOnlyResponse(host, "POST", "/book").status).toBe(405);
   expect(JSON.parse(readOnlyResponse(host, "GET", "/status").body).orderChannel).toBe(false);
+});
+
+test("a shard with no heartbeat reconnects, and silence after that reconnects again", () => {
+  const host = startPaperHost(["ETH-USD"], {});
+  armShard(host, 0, 0);
+  expect(considerHeartbeatGap(host, 0, 16_000)).toBe(true);
+  expect(considerHeartbeatGap(host, 0, 17_000)).toBe(false);
+  expect(considerHeartbeatGap(host, 0, 32_000)).toBe(true);
+  expect(host.reconnects).toBe(2);
+  expect(host.gapOpen[0]).toBe(false);
+  onSocketClosed(host, 0);
+  expect(host.book.incidents.some((row) => row.includes("closed"))).toBe(true);
+  expect(considerHeartbeatGap(host, 0, 32_000)).toBe(true);
+  expect(l2SequenceOk(null, 4)).toBe(true);
+  expect(l2SequenceOk(4, 5)).toBe(true);
+  expect(l2SequenceOk(4, 6)).toBe(false);
+  applyPublic(host, 0, [{ kind: "l2-update", productId: "ETH-USD", side: "bid", price: "1", size: "1", sequence: 1 }], 1);
+  applyPublic(host, 0, [{ kind: "l2-update", productId: "ETH-USD", side: "bid", price: "1", size: "2", sequence: 3 }], 2);
+  expect(host.l2Gaps).toBe(1);
+  expect(host.needsReconnect[0]).toBe(true);
+  const sent = framesForShard(host, 0);
+  expect(sent.length).toBe(3);
+  expect(sent.every((frame) => host.frames.includes(frame))).toBe(true);
+});
+
+test("REST backs off on 429, drops a late bar, and backfills a bounded gap", () => {
+  const host = startPaperHost(["ETH-USD", "SOL-USD"], {});
+  const due = dueRest(host, 915_000);
+  expect(due).toHaveLength(2);
+  const slot = due[0]!.slot;
+  const attempts = slot.attempts;
+  noteRest429(slot, 915_000, 30_000);
+  expect(slot.attempts).toBe(attempts);
+  expect(restAction(slot, 920_000)).toBe("wait");
+  expect(restAction(slot, 1_035_000)).toBe("fetch");
+  expect(restAction(slot, 1_035_000 + 30_000)).toBe("fallback");
+  host.trades.push({ productId: "ETH-USD", tsSec: 10, price: 4, size: 1 });
+  fallbackTradesBar(host, host.rest.get("ETH-USD:0")!);
+  const late = acceptRestBar(host, { productId: "ETH-USD", startSec: 0, open: 9, high: 9, low: 9, close: 9, volume: 1 });
+  expect(late).toBe("drop-late");
+  expect(host.book.marks["ETH-USD"]).toBe(4);
+  const later = startPaperHost(["ETH-USD"], {});
+  dueRest(later, 915_000);
+  dueRest(later, 915_000 + 12 * 900_000);
+  const starts = [...later.rest.values()].map((row) => row.barStartSec).sort((a, b) => a - b);
+  expect(starts[0]).toBe(0);
+  expect(starts).toHaveLength(9);
+  expect(starts[starts.length - 1]).toBe(7_200);
+});
+
+test("trades use the exchange time and the maker side", () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  const [trade] = parsePublicMessage({
+    channel: "market_trades",
+    events: [{ trades: [{ product_id: "BTC-USD", price: "10", size: "2", time: "2026-10-12T00:00:30.000Z", side: "SELL" }] }],
+  });
+  expect(trade?.kind === "trade" && trade.side).toBe("SELL");
+  applyPublic(host, 0, [trade!], Date.parse("2026-10-12T00:05:00.000Z"));
+  expect(host.trades[0]?.tsSec).toBe(Date.parse("2026-10-12T00:00:30.000Z") / 1000);
+  const [bare] = parsePublicMessage({ channel: "market_trades", events: [{ trades: [{ product_id: "BTC-USD", price: "9.9", size: "4" }] }] });
+  expect(bare?.kind === "trade" && bare.side).toBeUndefined();
+  applyPublic(host, 0, [bare!], 1_000);
+  expect(host.book.legs.filter((leg) => leg.side === "entry")).toHaveLength(0);
+});
+
+test("a stale level2 snapshot rejects the entry and the exit leg records it", () => {
+  const book = freshBook({ members: ["ETH-USD"] });
+  const ts = Date.parse("2026-10-15T01:00:00.000Z");
+  applyForward(book, { kind: "clock", tsMs: ts });
+  applyForward(book, {
+    kind: "x1",
+    id: "stale",
+    classId: "A",
+    productId: "ETH-USD",
+    tsMs: ts,
+    nextOpen: 100,
+    stop: 90,
+    atr1h: 1,
+    bid: 100,
+    ask: 100.1,
+    bookTsMs: ts - 20_000,
+    sendTsMs: ts,
+    decisionMid: 100,
+    aConfig: "A55-k3",
+  });
+  expect(book.rejected.some((row) => row.id === "stale" && row.reason === "stale-book")).toBe(true);
+  applyForward(book, {
+    kind: "x1",
+    id: "fresh",
+    classId: "B",
+    productId: "ETH-USD",
+    tsMs: ts,
+    nextOpen: 100,
+    stop: 90,
+    atr1h: 1,
+    bid: 100,
+    ask: 100.1,
+    bookTsMs: ts,
+    sendTsMs: ts,
+    decisionMid: 100,
+  });
+  const start = Math.floor(ts / 1000) + 86_400;
+  applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec: start, nowSec: start + 900, open: 80, high: 81, low: 70, close: 80 });
+  const exit = book.legs.find((leg) => leg.side === "exit");
+  expect(exit?.stale).toBe(true);
+  expect(book.closed[0]?.exitKind).toBe("stop");
+});
+
+test("the book reloads from the runtime file and ignores a mutated pick", () => {
+  const host = startPaperHost(["ETH-USD"], {});
+  const ts = Date.parse("2026-10-15T01:00:00.000Z");
+  applyForward(host.book, { kind: "clock", tsMs: ts });
+  applyForward(host.book, {
+    kind: "x1",
+    id: "kept",
+    classId: "A",
+    productId: "ETH-USD",
+    tsMs: ts,
+    nextOpen: 100,
+    stop: 90,
+    atr1h: 1,
+    bid: 100,
+    ask: 100.1,
+    bookTsMs: ts,
+    sendTsMs: ts,
+    decisionMid: 100,
+    aConfig: "A55-k3",
+  });
+  const dir = join(fileURLToPath(new URL("../../data/runtime", import.meta.url)), `p6-state-${process.pid}`);
+  savePaperState(dir, host);
+  const next = startPaperHost(["ETH-USD"], {});
+  expect(loadPaperState(dir, next)).toBe(true);
+  expect(next.book.positions[0]?.id).toBe("kept");
+  expect(next.book.aPick?.config).toBe("A55-k3");
+  const saved = JSON.parse(readFileSync(join(dir, "state.json"), "utf8")) as { aPickConfig: string };
+  saved.aPickConfig = "A20-k2";
+  writeFileSync(join(dir, "state.json"), JSON.stringify(saved));
+  const reloaded = startPaperHost(["ETH-USD"], {});
+  loadPaperState(dir, reloaded);
+  expect(reloaded.book.aPick?.config).toBe("A55-k3");
+  expect(reloaded.book.incidents.some((row) => row.includes("saved A pick"))).toBe(true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("a 15m bar carries 1h ATR, daily ATR, and the day-close flag", () => {
+  const hour = Array.from({ length: 20 }, (_, index) => ({
+    ts: index * 3_600,
+    open: 100,
+    high: 100 + index,
+    low: 99,
+    close: 100 + index * 0.1,
+    volume: 1,
+  }));
+  expect(hourAtrAt(hour, 20 * 3_600)).toBeGreaterThan(0);
+  const dayClose = 86_400 - 900;
+  const note = forwardBarAnnotation({ entries: [], weeks: [{ date: "1970-01-01", rows: [{ id: "ETH-USD", score: 1, member: true }] }], atrByProduct: new Map([["ETH-USD", new Map([["1970-01-01", 2]])]]) }, hour, "ETH-USD", dayClose);
+  expect(note.dailyClose).toBe(true);
+  expect(note.dailyAtr).toBe(2);
+  expect(note.bScores?.[0]?.id).toBe("ETH-USD");
+  expect(note.atr1h).toBeGreaterThan(0);
+});
+
+test("daily bytes can be checked for a member subset, and a corrupt or extra file still throws", () => {
+  const dir = mkdtempSync(join(tmpdir(), "p6-members-"));
+  const rels = ["candles/BTC-USD/2024-01.sqlite", "candles/ETH-USD/2024-01.sqlite", "candles/SOL-USD/2024-06.sqlite"];
+  const files = rels.map((path) => {
+    mkdirSync(join(dir, path.split("/").slice(0, -1).join("/")), { recursive: true });
+    writeFileSync(join(dir, path), `bytes ${path}`);
+    return { path, sha256: createHash("sha256").update(`bytes ${path}`).digest("hex"), bytes: `bytes ${path}`.length };
+  });
+  writeFileSync(join(dir, "data-manifest.json"), JSON.stringify({ files }));
+  const full = verifyDailyStore(dir);
+  expect(full.mode).toBe("full");
+  expect(full.files).toBe(3);
+  rmSync(join(dir, rels[2]!));
+  const subset = verifyDailyStore(dir, ["ETH-USD"]);
+  expect(subset.mode).toBe("members");
+  expect(subset.files).toBe(2);
+  expect(() => verifyDailyStore(dir, ["SOL-USD"])).toThrow(/missing data file/);
+  writeFileSync(join(dir, rels[2]!), `bytes ${rels[2]}`);
+  writeFileSync(join(dir, rels[0]!), "nope");
+  expect(() => verifyDailyStore(dir, ["ETH-USD"])).toThrow(/do not match/);
+  writeFileSync(join(dir, rels[0]!), `bytes ${rels[0]}`);
+  const extra = "candles/DOGE-USD/2024-01.sqlite";
+  mkdirSync(join(dir, "candles/DOGE-USD"), { recursive: true });
+  writeFileSync(join(dir, extra), "extra");
+  expect(() => verifyDailyStore(dir, ["ETH-USD"])).toThrow(/not in the manifest/);
 });

@@ -9,16 +9,14 @@ import { join } from "node:path";
 import { rootHash } from "../data/hash";
 import { scanCandleFiles } from "../data/manifest-file";
 import { readPairMonth } from "../data/store";
-import { correlationCloses, type SourceDay } from "../p3/bar-access";
+import type { SourceDay } from "../p3/bar-access";
 import { loadPair } from "../p3/geometry-run";
-import { foldStartDates } from "../p3/schedule";
 import { btcVeto, type BarOHLC, type BtcDay } from "../p3/signals";
 import { ema, wilderAtr } from "../p2/indicators";
 import { daysBetween } from "../p5/stats";
-import { assertDailyInventory } from "./daily";
+import { verifyDailyStore } from "./daily";
 import { A_REGISTRATION, type APick } from "./select";
 import { registeredFlags, type RegistrationFlagSource } from "../p5/flags";
-import { monthlyClusters } from "../p5/book";
 import { applyForward, freshBook, type Book, type ForwardEvent } from "./engine";
 import { generateForward, type FifteenBar, type GeneratedEntry } from "./generate";
 
@@ -223,11 +221,11 @@ export function replayFrozenWindow(opts: ReplayOpts = {}): { diffs: ParityDiff[]
   const k = opts.k ?? 2;
   const bookId = opts.book ?? `A${lookback}-k${k}`;
   const root = dataDir();
-  assertDailyInventory(join(root, "daily"));
   const registration = JSON.parse(readFileSync(join(root, "reports/p4-registration.json"), "utf8")) as RegistrationFlagSource;
   const membership = JSON.parse(readFileSync(join(root, "reports/universe-membership.json"), "utf8")) as { members: { date: string; names: string[] }[] };
   const isMember = memberFn(membership.members);
   const names = [...new Set(membership.members.flatMap((row) => row.names))].filter((id) => opts.allNames || isMember(id, "2025-11-16") || isMember(id, "2025-11-10"));
+  verifyDailyStore(join(root, "daily"), names);
   const flags = registeredFlags(registration, names);
   const candleRoot = join(root, "candles");
   const dailyRoot = join(root, "daily", "candles");
@@ -348,39 +346,19 @@ export function replayFrozenWindow(opts: ReplayOpts = {}): { diffs: ParityDiff[]
     if (ta !== tb) return ta - tb;
     return order(a) - order(b);
   });
-  const clusterNames = [...products.keys()].filter((id) => flags.byId.has(id)).sort().map((id) => ({
+  const memberCloses = [...products.keys()].filter((id) => flags.byId.has(id)).sort().map((id) => ({
     productId: id,
     flags: flags.byId.get(id)!,
-    days: correlationCloses(flags.byId.get(id)!, products.get(id)?.days ?? []),
+    days: products.get(id)?.days ?? [],
   }));
-  const months: string[] = [];
-  for (let year = 2025, month = 11; ; ) {
-    const key = `${year}-${String(month).padStart(2, "0")}-01`;
-    if (key > "2026-10-01") break;
-    months.push(key);
-    month += 1;
-    if (month === 13) {
-      month = 1;
-      year += 1;
-    }
-  }
-  const clusterMaps = monthlyClusters(clusterNames, [...new Set([...months, ...foldStartDates()])].sort(), (productId, date) => isMember(productId, date));
+  const btcCloses = (products.get("BTC-USD")?.days ?? []).filter((row) => !row.empty && row.close > 0).map((row) => ({ date: row.date, close: row.close }));
   const book = freshBook({
     members: [...traded],
     parity: { riskUsd: 60, sBtBps: 5 },
     aPick: parityAPick(bookId, lookback, k),
-    clusterOf: (productId, tsMs) => {
-      const entryDate = dayOf(Math.floor(tsMs / 1000));
-      let chosen = productId;
-      let asOf = "";
-      for (const [date, map] of clusterMaps) {
-        if (date <= entryDate && date >= asOf) {
-          asOf = date;
-          chosen = map.get(productId) ?? productId;
-        }
-      }
-      return chosen;
-    },
+    memberCloses,
+    btcCloses,
+    clusterMemberOn: (productId, date) => isMember(productId, date),
   });
   for (const event of events) applyForward(book, event);
   const diffs: ParityDiff[] = [];
