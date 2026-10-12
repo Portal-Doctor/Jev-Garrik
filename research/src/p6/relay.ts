@@ -499,7 +499,11 @@ export function redisKvFromUrl(url: string): Kv {
     const tls = endpoint.tls ? await import("node:tls") : null;
     return new Promise((resolve, reject) => {
       const socket = tls
-        ? tls.connect({ host: endpoint.host, port: endpoint.port, servername: endpoint.host })
+        ? tls.connect({
+            host: endpoint.host,
+            port: endpoint.port,
+            ...(net.isIP(endpoint.host) === 0 ? { servername: endpoint.host } : {}),
+          })
         : net.connect({ host: endpoint.host, port: endpoint.port });
       socket.setTimeout(endpoint.timeoutMs);
       const pending: string[] = [];
