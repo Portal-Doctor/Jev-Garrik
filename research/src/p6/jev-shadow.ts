@@ -16,13 +16,13 @@ export interface ShadowPacket {
 
 const FIFTEEN_SEC = 900;
 
-export function isCompleted15m(startSec: number): boolean {
-  return startSec % FIFTEEN_SEC === 0;
+export function isCompleted15m(startSec: number, nowSec: number): boolean {
+  return startSec % FIFTEEN_SEC === 0 && nowSec >= startSec + FIFTEEN_SEC;
 }
 
-/** Packets for a completed 15m bar. An incomplete bar returns none. Nothing is called. */
-export function shadowPackets(opts: { members: readonly string[]; barStartSec: number; warming: boolean }): ShadowPacket[] {
-  if (!isCompleted15m(opts.barStartSec)) return [];
+/** Packets for a completed 15m bar. A forming bar, including one whose start is aligned, returns none. Nothing is called. */
+export function shadowPackets(opts: { members: readonly string[]; barStartSec: number; nowSec: number; warming: boolean }): ShadowPacket[] {
+  if (!isCompleted15m(opts.barStartSec, opts.nowSec)) return [];
   return feedProducts(opts.members).map((pair) => ({
     pair,
     position: 0 as const,

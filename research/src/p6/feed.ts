@@ -131,16 +131,27 @@ function lastCompleted(state: FeedState, productId: string): MinuteBar | null {
   return null;
 }
 
-/** A UTC day is complete once a candle from a later UTC date has arrived. */
-export function completedDailyDates(bars: readonly { startSec: number }[]): string[] {
-  const dates = new Set<string>();
-  let newest = "";
+/**
+ * A product's UTC day is complete only when that same product has a bar on a
+ * later UTC date. One product rolling forward does not complete the others.
+ */
+export function completedProductDays(bars: readonly { productId: string; startSec: number }[]): { productId: string; date: string }[] {
+  const newest = new Map<string, string>();
+  const dates = new Map<string, Set<string>>();
   for (const bar of bars) {
     const date = new Date(bar.startSec * 1000).toISOString().slice(0, 10);
-    if (date > newest) newest = date;
-    dates.add(date);
+    const seen = dates.get(bar.productId) ?? new Set<string>();
+    seen.add(date);
+    dates.set(bar.productId, seen);
+    const prior = newest.get(bar.productId) ?? "";
+    if (date > prior) newest.set(bar.productId, date);
   }
-  return [...dates].filter((date) => date < newest).sort();
+  const out: { productId: string; date: string }[] = [];
+  for (const [productId, seen] of dates) {
+    const latest = newest.get(productId) ?? "";
+    for (const date of seen) if (date < latest) out.push({ productId, date });
+  }
+  return out.sort((a, b) => a.productId.localeCompare(b.productId) || a.date.localeCompare(b.date));
 }
 
 function num(value: unknown): number | null {
@@ -158,20 +169,8 @@ export function parsePublicMessage(raw: unknown): PublicEvent[] {
   const events = Array.isArray(msg.events) ? msg.events : [];
   const out: PublicEvent[] = [];
   if (channel === "candles") {
-    for (const event of events) {
-      const candles = Array.isArray((event as { candles?: unknown }).candles) ? (event as { candles: Record<string, unknown>[] }).candles : [];
-      for (const candle of candles) {
-        const startSec = num(candle.start);
-        const open = num(candle.open);
-        const high = num(candle.high);
-        const low = num(candle.low);
-        const close = num(candle.close);
-        const volume = num(candle.volume) ?? 0;
-        const productId = typeof candle.product_id === "string" ? candle.product_id : "";
-        if (startSec == null || open == null || high == null || low == null || close == null || !productId) continue;
-        out.push({ kind: "candle", productId, startSec, open, high, low, close, volume });
-      }
-    }
+    // Five-minute buckets. They are not 1m bars and they are not ingested.
+    return out;
   }
   if (channel === "market_trades") {
     for (const event of events) {

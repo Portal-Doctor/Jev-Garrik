@@ -2,15 +2,17 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "bun:test";
 import { classBScore } from "../p3/classes";
-import { collectA, isMondayCloseBar, x1EntryTs } from "../p5/run";
+import { isMondayCloseBar, x1EntryTs } from "../p5/run";
 import { addDays } from "../p5/stats";
-import { applyEvent, completedDailyDates, freshFeed, parsePublicMessage, rebuildFeed, finishWarmup } from "./feed";
+import { applyEvent, completedProductDays, freshFeed, parsePublicMessage, rebuildFeed, finishWarmup } from "./feed";
 import { shadowPackets, warmupLabel } from "./jev-shadow";
 import { OPEN_QUESTIONS } from "./open-questions";
 import { empiricalQuantile } from "./percentile";
 import { placeboExitIndexes } from "./placebo";
 import { candleBackfillUrl, feedProducts, missingMinutes, subscribeFrames } from "./public-ws";
-import { replaySignals, type ReplayDay } from "./replay";
+import { classATrigger } from "../p3/classes";
+import { classBarInputs } from "../p3/bar-access";
+import { emaPoints, replaySignals, scanForwardA, type ReplayDay } from "./replay";
 import { forwardReview } from "./review";
 import {
   classBlockers,
@@ -50,20 +52,21 @@ test("stitched base B is sized at $60 open risk and the $1,500 cap does not bind
   expect(report.rows).toHaveLength(check.rows.length);
 });
 
-test("a public subscribe carries candles, L2, and trades, and refuses keys and order channels", () => {
+test("a public subscribe carries L2, trades, and heartbeats, and refuses keys and order channels", () => {
   const products = feedProducts(["ETH-USD"]);
   expect(products).toEqual(["ETH-USD", "BTC-USD"]);
   const frames = subscribeFrames(products, undefined, { PATH: "/usr/bin" });
-  expect(frames).toHaveLength(4);
+  expect(frames).toHaveLength(3);
   for (const frame of frames) {
     expect(frame).not.toContain("signature");
     expect(frame).not.toContain("secret");
     const body = JSON.parse(frame) as { channel: string; product_ids: string[] };
-    expect(["heartbeats", "candles", "level2", "market_trades"]).toContain(body.channel);
+    expect(["heartbeats", "level2", "market_trades"]).toContain(body.channel);
+    expect(body.channel).not.toBe("candles");
     expect(body.product_ids).toContain("BTC-USD");
   }
   expect(() => subscribeFrames(["BTC-USD"], undefined, { COINBASE_API_KEY: "present" })).toThrow(/order-capable/);
-  expect(() => JSON.parse(`{"type":"subscribe","channel":"user"}`) && subscribeFrames(["BTC-USD"], ["user" as "candles"], {})).toThrow(/channel/);
+  expect(() => subscribeFrames(["BTC-USD"], ["user" as "level2"], {})).toThrow(/channel/);
   expect(() => parsePublicMessage({ channel: "orders", events: [] })).toThrow(/order channel/);
 });
 
@@ -99,24 +102,28 @@ test("restart rebuilds completed bars and marks the feed warming until warmup fi
   expect(applyEvent(state, { kind: "heartbeat" }).warming).toBe(false);
 });
 
-test("a UTC day is acted on only after a later date arrives", () => {
+test("a UTC day completes per product, and only after that product prints a later date", () => {
   const day = 1_736_035_200;
-  expect(completedDailyDates([{ startSec: day }, { startSec: day + 60 }])).toEqual([]);
-  expect(completedDailyDates([{ startSec: day }, { startSec: day + 86_400 }])).toEqual(["2025-01-05"]);
+  expect(completedProductDays([{ productId: "ETH-USD", startSec: day }, { productId: "ETH-USD", startSec: day + 60 }])).toEqual([]);
+  expect(completedProductDays([
+    { productId: "ETH-USD", startSec: day },
+    { productId: "BTC-USD", startSec: day + 86_400 },
+  ])).toEqual([]);
+  expect(completedProductDays([
+    { productId: "ETH-USD", startSec: day },
+    { productId: "ETH-USD", startSec: day + 86_400 },
+    { productId: "BTC-USD", startSec: day },
+  ])).toEqual([{ productId: "ETH-USD", date: "2025-01-05" }]);
 });
 
-test("public envelopes become candles, trades, and an L2 book", () => {
+test("public envelopes become trades and an L2 book, and a 5m candle is not a 1m bar", () => {
   const state = freshFeed();
   const candles = parsePublicMessage({
     channel: "candles",
     events: [{ candles: [{ product_id: "BTC-USD", start: "0", open: "1", high: "2", low: "1", close: "2", volume: "3" }] }],
   });
-  applyEvent(state, candles[0]!);
-  applyEvent(state, parsePublicMessage({
-    channel: "candles",
-    events: [{ candles: [{ product_id: "BTC-USD", start: "60", open: "2", high: "2", low: "2", close: "2", volume: "1" }] }],
-  })[0]!);
-  expect(state.completed).toHaveLength(1);
+  expect(candles).toEqual([]);
+  expect(state.completed).toHaveLength(0);
   const [trade] = parsePublicMessage({ channel: "market_trades", events: [{ trades: [{ product_id: "BTC-USD", price: "9.9", size: "4" }] }] });
   applyEvent(state, trade!);
   expect(state.trades[0]?.price).toBe(9.9);
@@ -129,39 +136,45 @@ test("public envelopes become candles, trades, and an L2 book", () => {
   expect(state.books.get("BTC-USD")?.asks.get("11")).toBe("2");
 });
 
-test("X2 fills on a trade-through, goes indeterminate on a gap, and class D takes no fill", () => {
+test("X2 fills on a trade-through, goes indeterminate on a gap, and class D reports its indeterminate count", () => {
   const working = openShadow({ id: "1", mode: "X2", classId: "A", productId: "ETH-USD", limit: 10, tick: 0.01 });
   expect(onPublicTrade(working, 9.995, 4).status).toBe("working");
   const filled = onPublicTrade(working, 9.9, 4);
   expect(filled).toEqual({ ...working, status: "filled", filledVolume: 2 });
   expect(onFeedGap(working).status).toBe("indeterminate");
-  expect(openShadow({ id: "d", mode: "X3", classId: "D", productId: "ETH-USD", limit: 10, tick: 0.01 }).status).toBe("no-fill");
+  const maker = openShadow({ id: "d", mode: "X3", classId: "D", productId: "ETH-USD", limit: 10, tick: 0.01 });
+  expect(maker.status).toBe("working");
+  const dGap = onFeedGap(maker);
+  expect(dGap.status).toBe("indeterminate");
   const share = indeterminateShare([
     { ...working, status: "indeterminate", filledVolume: 0 },
     filled,
-    openShadow({ id: "d", mode: "X3", classId: "D", productId: "ETH-USD", limit: 10, tick: 0.01 }),
+    dGap,
   ]);
-  expect(share.resolved).toBe(2);
+  expect(share.submitted).toBe(3);
+  expect(share.classDIndeterminate).toBe(1);
   expect(share.flagged).toBe(true);
 });
 
 test("breadth is logged and does not change size, pauses shrink, and kills latch", () => {
-  const full = paperDecision({ classId: "A", blockers: [], stopBps: 500, breadthPaused: false });
-  const logged = paperDecision({ classId: "A", blockers: ["pause-2a"], stopBps: 500, breadthPaused: true });
+  const full = paperDecision({ classId: "A", blockers: [], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 });
+  const logged = paperDecision({ classId: "A", blockers: ["pause-2a"], stopBps: 500, breadthPaused: true, scheduledRiskUsd: 20 });
   expect(logged.entries).toBe(full.entries);
-  expect(logged.riskUsd).toBe(60);
+  expect(logged.riskUsd).toBe(20);
   expect(logged.notionalUsd).toBe(full.notionalUsd);
-  expect(logged.openRiskUsd).toBeCloseTo(60, 8);
+  expect(logged.openRiskUsd).toBeCloseTo(20, 8);
   expect(logged.breadth).toBe("off");
   expect(full.breadth).toBe("on");
   expect(full.entry).toBe("X1");
   expect(full.addedByJev).toBe(false);
-  const shrunk = paperDecision({ classId: "C", blockers: ["pause-1b"], stopBps: 500, breadthPaused: false });
+  const shrunk = paperDecision({ classId: "C", blockers: ["pause-1b"], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 75 });
   expect(shrunk.entries).toBe(true);
   expect(shrunk.riskUsd).toBe(20);
-  expect(paperDecision({ classId: "D", blockers: [], stopBps: 500, breadthPaused: false }).riskUsd).toBe(20);
-  expect(paperDecision({ classId: "E", blockers: [], stopBps: 500, breadthPaused: false }).riskUsd).toBe(60);
-  const blocked = paperDecision({ classId: "B", blockers: ["pause-2b"], stopBps: 500, breadthPaused: false });
+  expect(paperDecision({ classId: "D", blockers: [], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 }).riskUsd).toBe(20);
+  expect(paperDecision({ classId: "D", blockers: [], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 }).entry).toBe("maker");
+  expect(paperDecision({ classId: "D", blockers: [], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 }).costBps).toBe(50);
+  expect(paperDecision({ classId: "E", blockers: [], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 }).riskUsd).toBe(20);
+  const blocked = paperDecision({ classId: "B", blockers: ["pause-2b"], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 });
   expect(blocked.entries).toBe(false);
   expect(blocked.riskUsd).toBe(20);
   let curve = freshClassCurve();
@@ -171,7 +184,7 @@ test("breadth is logged and does not change size, pauses shrink, and kills latch
   expect(curve.curve.killed).toBe(true);
   const blockers = classBlockers("A", curve, { halt: false, backstop: false, momentumBlocked: false, killSwitch: false });
   expect(blockers).toContain("r-kill");
-  expect(paperDecision({ classId: "A", blockers, stopBps: 500, breadthPaused: false }).entries).toBe(false);
+  expect(paperDecision({ classId: "A", blockers, stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 }).entries).toBe(false);
   const bleed = freshClassCurve();
   const values = Array.from({ length: 20 }, () => -0.25);
   let rolled = bleed;
@@ -247,8 +260,8 @@ test("an outage adds no trade and a firing guard does not change the position", 
 });
 
 test("S1 packets are one unread Fallback B call per member plus BTC on a completed 15m bar", () => {
-  expect(shadowPackets({ members: ["ETH-USD"], barStartSec: 60, warming: false })).toEqual([]);
-  const packets = shadowPackets({ members: ["ETH-USD"], barStartSec: 900, warming: true });
+  expect(shadowPackets({ members: ["ETH-USD"], barStartSec: 900, nowSec: 900, warming: false })).toEqual([]);
+  const packets = shadowPackets({ members: ["ETH-USD"], barStartSec: 900, nowSec: 1800, warming: true });
   expect(packets.map((row) => row.pair)).toEqual(["ETH-USD", "BTC-USD"]);
   expect(packets.every((row) => row.position === 0 && row.called === false && row.label === "warming")).toBe(true);
   expect(warmupLabel(6)).toBe("log-only");
@@ -258,44 +271,44 @@ test("S1 packets are one unread Fallback B call per member plus BTC on a complet
   expect(placeboExitIndexes([2, 0.2, 3, 0], 5, () => 0).every((index) => [0.2, 0][0] === 0.2 && index !== 0 && index !== 2)).toBe(true);
 });
 
-test("completed synthetic days match the P5 signal functions and an incomplete day does not", () => {
+test("the forward scan uses the D1 bar path and an incomplete day does not", () => {
   const days: ReplayDay[] = [];
-  let date = "2025-11-01";
+  let date = "2025-08-01";
   for (let i = 0; i < 80; i += 1) {
-    const close = 100 + i;
-    days.push({ date, high: close + 1, low: close - 1, close, volume: 1, complete: i < 79 });
+    const close = 100 + i * 0.2;
+    days.push({ date, high: close, low: close - 0.2, close, volume: 1, complete: true });
     date = addDays(date, 1);
   }
   const atrByDate = new Map(days.map((day) => [day.date, 1]));
   const hour = days.map((day) => ({ ts: x1EntryTs(day.date), open: day.close }));
-  const forward = replaySignals({ productId: "ETH-USD", days, atrByDate, hour, young: true });
-  const complete = days.filter((day) => day.complete);
-  const p5 = collectA("ETH-USD", {
-    ema: complete,
-    ohlc: complete,
-    closeLookback: complete,
-    volume: complete,
-    classC: [],
-    swing: [],
-    bias: [],
-    dHistoryStart: complete[0]!.date,
-    listingProxySource: "first-in-window-15m",
-    listingProxyDate: complete[0]!.date,
-  }, atrByDate, hour, () => true, true, () => false);
-  expect(forward.a.map((row) => `${row.date}:${row.lookback}`)).toEqual(p5.map((row) => `${row.date}:${row.lookback}`));
-  const withLast = collectA("ETH-USD", {
-    ema: days,
-    ohlc: days,
-    closeLookback: days,
-    volume: days,
-    classC: [],
-    swing: [],
-    bias: [],
-    dHistoryStart: days[0]!.date,
-    listingProxySource: "first-in-window-15m",
-    listingProxyDate: days[0]!.date,
-  }, atrByDate, hour, () => true, true, () => false);
-  expect(withLast.length).toBeGreaterThan(forward.a.length);
+  const boundary = { priceGroupPasses: false, volumeGroupPasses: false, boundarySaved: true };
+  const forward = scanForwardA({ flags: boundary, days, firstD1Date: days[0]!.date, atrByDate, hour, young: true });
+  const inputs = classBarInputs(boundary, days.map((day) => ({
+    date: day.date,
+    ts: Date.parse(`${day.date}T00:00:00.000Z`) / 1000,
+    open: day.close,
+    high: day.high,
+    low: day.low,
+    close: day.close,
+    volume: day.volume,
+    empty: false,
+  })), days[0]!.date);
+  const points = emaPoints(inputs);
+  const oracle = inputs.closeLookback.flatMap((bar, index) => {
+    const point = points.get(bar.date);
+    if (!point) return [];
+    return ([20, 55] as const).filter((lookback) => classATrigger(inputs.closeLookback, index, lookback, true, undefined, point)).map((lookback) => `${bar.date}:${lookback}`);
+  });
+  expect(forward.map((row) => `${row.date}:${row.lookback}`)).toEqual(oracle);
+  const early = days.find((day) => day.date >= "2025-10-11");
+  expect(early).toBeTruthy();
+  const earlyHits = forward.filter((row) => row.date < addDays("2025-10-11", 20));
+  expect(earlyHits).toEqual([]);
+  const rawBars = days.map((day) => ({ date: day.date, high: day.high, low: day.low, close: day.close, volume: day.volume }));
+  const rawIndex = rawBars.findIndex((bar) => bar.date === addDays("2025-10-11", 8));
+  expect(rawIndex).toBeGreaterThan(20);
+  expect(classATrigger(rawBars, rawIndex, 20, true)).toBe(true);
+  expect(forward.some((row) => row.date === rawBars[rawIndex]!.date)).toBe(false);
   const sunday = days.find((day, index) => index >= 31 && isMondayCloseBar(day.date));
   expect(sunday).toBeTruthy();
   const index = days.findIndex((day) => day.date === sunday!.date);
@@ -306,21 +319,21 @@ test("completed synthetic days match the P5 signal functions and an incomplete d
     { id: "BBB-USD", date: sunday!.date, score: 0.1, member: true, complete: true },
     { id: "CCC-USD", date: sunday!.date, score: -1, member: true, complete: false },
   ];
-  const weeks = replaySignals({ productId: "ETH-USD", days: complete, atrByDate, hour, young: true, scores });
+  const weeks = replaySignals({ productId: "ETH-USD", days, atrByDate, hour, young: true, scores });
   expect(weeks.weeks[0]?.selected).toEqual(["AAA-USD"]);
   expect(weeks.weeks[0]?.held).not.toContain("CCC-USD");
 });
 
 test("the forward review reports the 5-stream Holm and the Jev family of 2 at p = 1", () => {
   const trades = [
-    { classId: "A" as const, productId: "ETH-USD", netR: 1, grossUsd: 10, netUsd: 8, entryDate: "2026-03-02", breadth: "on" as const },
-    { classId: "A" as const, productId: "ETH-USD", netR: -0.5, grossUsd: -2, netUsd: -3, entryDate: "2026-03-03", breadth: "off" as const },
+    { classId: "A" as const, productId: "ETH-USD", netR: 1, grossUsd: 10, netUsd: 8, costUsd: 2, riskUsd: 20, notionalUsd: 100, entryDate: "2026-03-02", breadth: "on" as const },
+    { classId: "A" as const, productId: "ETH-USD", netR: -0.5, grossUsd: -2, netUsd: -3, costUsd: 1, riskUsd: 20, notionalUsd: 100, entryDate: "2026-03-03", breadth: "off" as const },
   ];
-  const report = forwardReview({ classId: "A", trades, weeks: ["2026-03-02"], l80UsdPerMonth: null });
+  const report = forwardReview({ classId: "A", trades, weeks: ["2026-03-02"], reps: 20 });
   expect(report.n).toBe(2);
-  expect(report.wilson).toBeNull();
-  expect(report.costDrag).toBeNull();
-  expect(report.payoffBreakEven).toBeNull();
+  expect(report.payoff.pHat).toBe(0.5);
+  expect(report.cost.status).toBe("ok");
+  expect(report.cost.cd).toBeCloseTo(0.3, 8);
   expect(report.sprt.pauses).toBe(false);
   expect(report.sprt.reportOnly).toBe(true);
   expect(report.holm.family).toBe("5-stream");
@@ -330,8 +343,9 @@ test("the forward review reports the 5-stream Holm and the Jev family of 2 at p 
   expect(report.jevGuards.streams.map((row) => row.p)).toEqual([1, 1]);
   expect(report.breadth.selects).toBe(false);
   expect(report.breadth.label).toBe("diagnostic, no selection");
-  expect(OPEN_QUESTIONS.map((row) => row.id)).toContain("wilson");
-  expect(OPEN_QUESTIONS.map((row) => row.id)).toContain("amendment-1");
+  expect(report.gates.coloursDoNotPromote).toBe(true);
+  expect(OPEN_QUESTIONS.map((row) => row.id)).toContain("default-13");
+  expect(OPEN_QUESTIONS.map((row) => row.id)).not.toContain("wilson");
 });
 
 describe("sizing identity", () => {

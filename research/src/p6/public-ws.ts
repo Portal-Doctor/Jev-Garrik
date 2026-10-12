@@ -6,10 +6,14 @@
 import { candlesUrl } from "../data/public";
 import { assertSafeToStart } from "../safety";
 
-/** See open question ws-host. Public Advanced Trade market data, no credentials. */
+/**
+ * Public Advanced Trade market data, no credentials.
+ * The candles channel is five-minute, so it is not subscribed. 1m bars are
+ * built from level2 mids. Strategy bars come from REST 15-minute candles.
+ */
 export const PUBLIC_WS_URL = "wss://advanced-trade-ws.coinbase.com";
 
-export const PUBLIC_CHANNELS = ["heartbeats", "candles", "level2", "market_trades"] as const;
+export const PUBLIC_CHANNELS = ["heartbeats", "level2", "market_trades"] as const;
 
 export type PublicChannel = (typeof PUBLIC_CHANNELS)[number];
 

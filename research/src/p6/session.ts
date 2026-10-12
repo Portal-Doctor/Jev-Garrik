@@ -4,6 +4,7 @@
  * An outage logs nothing and adds no trade.
  */
 
+import { MAKER_FEE_BPS } from "../../vendor/87b35d0/config.ts";
 import {
   backstopTripped,
   betaAllows,
@@ -12,49 +13,82 @@ import {
   haltTripped,
   onePerPairAllows,
   openRiskAllows,
+  PAPER_MINIMUM_USD,
   reentryAllowed,
 } from "../p3/design-rules";
 import { MAX_POSITIONS, notionalUsd, SLOT_CAPS, type ClassId } from "../p3/portfolio";
-import { entryOpenRiskUsd, sizingCostBps } from "../p5/risk";
+import { CLASS_DOLLAR_BACKSTOP_USD, entryOpenRiskUsd, sizingCostBps } from "../p5/risk";
 import {
   breadthLabel,
   btcPauseFires,
-  entryDecision,
   exitGuardFires,
-  freshRCurve,
   momentumBlocked,
   momentumCrashOn,
-  rolling20Paused,
-  stepRCurve,
   twinExit,
   type Blocker,
   type BreadthLabel,
   type RCurve,
 } from "../p5/guards";
+import { acceptBrianOk, freshBleed, stepBleed, type BleedState } from "./bleed";
+import { freshClassPause, stepClassPause, type ClassPause } from "./rearm";
 
 export interface ClassCurve {
   netR: number[];
+  netUsd: number[];
+  pause: ClassPause;
+  bleed: BleedState;
+  cumUsd: number;
+  peakUsd: number;
   curve: RCurve;
 }
 
-export function freshClassCurve(): ClassCurve {
-  return { netR: [], curve: freshRCurve() };
+function pauseView(pause: ClassPause): RCurve {
+  return { peak: pause.peak, trough: pause.trough, paused: pause.paused, killed: pause.killed };
 }
 
-/** The 20R kill stays latched after it fires. Later trades do not clear it. */
-export function stepClass(state: ClassCurve, netR: number): ClassCurve {
+export function freshClassCurve(): ClassCurve {
+  const pause = freshClassPause();
+  return { netR: [], netUsd: [], pause, bleed: freshBleed(), cumUsd: 0, peakUsd: 0, curve: pauseView(pause) };
+}
+
+/**
+ * Closed-trade step. The 10R pause is the confirmed re-arm rule. The 20R kill
+ * latches. The $1,200 backstop is the closed-trade dollar drawdown from the
+ * class peak. `minSize` counts toward the rolling-20 resume.
+ */
+export function stepClass(state: ClassCurve, netR: number, netUsd = 0, minSize = true): ClassCurve {
   const values = [...state.netR, netR];
+  const dollars = [...state.netUsd, netUsd];
   const cum = values.reduce((sum, value) => sum + value, 0);
-  return { netR: values, curve: stepRCurve(state.curve, cum) };
+  const cumUsd = state.cumUsd + netUsd;
+  const peakUsd = Math.max(state.peakUsd, cumUsd);
+  const pause = stepClassPause(state.pause, cum);
+  return {
+    netR: values,
+    netUsd: dollars,
+    pause,
+    bleed: stepBleed(state.bleed, state.netR, netR, minSize),
+    cumUsd,
+    peakUsd,
+    curve: pauseView(pause),
+  };
+}
+
+export function markBrianOk(state: ClassCurve): ClassCurve {
+  return { ...state, bleed: acceptBrianOk(state.bleed) };
+}
+
+export function classDollarBackstop(state: ClassCurve): boolean {
+  return state.peakUsd - state.cumUsd >= CLASS_DOLLAR_BACKSTOP_USD;
 }
 
 export function classBlockers(classId: ClassId, state: ClassCurve, opts: { halt: boolean; backstop: boolean; momentumBlocked: boolean; killSwitch: boolean }): Blocker[] {
   const blockers: Blocker[] = [];
   if (opts.halt) blockers.push("halt");
-  if (opts.backstop) blockers.push("backstop");
+  if (opts.backstop || classDollarBackstop(state)) blockers.push("backstop");
   if (state.curve.killed) blockers.push("r-kill");
   if (opts.killSwitch) blockers.push("kill-switch");
-  if (rolling20Paused(state.netR)) blockers.push("pause-1b");
+  if (state.bleed.paused) blockers.push("pause-1b");
   if (state.curve.paused && !state.curve.killed) blockers.push("pause-1c");
   if (classId === "B" && opts.momentumBlocked) blockers.push("pause-2b");
   return blockers;
@@ -66,13 +100,16 @@ export interface PaperDecision {
   notionalUsd: number;
   openRiskUsd: number;
   breadth: BreadthLabel;
-  entry: "X1";
+  entry: "X1" | "maker";
+  costBps: number;
   addedByJev: false;
 }
 
 /**
- * A and B use the registered $60 unless a pause or a kill says otherwise.
- * D is the registered $20 class. C and E use $60 until a pause shrinks them.
+ * Forward risk is the scheduled amount: $20 until a class is promoted, then
+ * the forward Kelly size. A 1b or 1c pause shrinks a larger schedule to $20
+ * and does not raise a schedule that is already under $20. Kills stop entries.
+ * Class D is sized with the maker fee, not the 190 bps taker round trip.
  * Breadth is logged and is not a blocker.
  */
 export function paperDecision(opts: {
@@ -81,18 +118,25 @@ export function paperDecision(opts: {
   stopBps: number;
   sBtBps?: number;
   breadthPaused: boolean;
+  scheduledRiskUsd: number;
 }): PaperDecision {
-  const decision = entryDecision(opts.blockers, opts.classId === "D");
-  const costBps = sizingCostBps(opts.sBtBps ?? 5);
-  const notional = decision.entries ? notionalUsd(opts.stopBps, costBps, decision.riskUsd) : 0;
-  const openRisk = decision.entries ? entryOpenRiskUsd(notional, opts.stopBps, costBps) : 0;
+  const kill = opts.blockers.some((item) => item === "halt" || item === "backstop" || item === "r-kill" || item === "kill-switch");
+  const shrink = opts.blockers.some((item) => item === "pause-1b" || item === "pause-1c");
+  const blockB = opts.blockers.includes("pause-2b");
+  const entries = !kill && !blockB;
+  const riskUsd = shrink || blockB ? Math.min(opts.scheduledRiskUsd, PAPER_MINIMUM_USD) : opts.scheduledRiskUsd;
+  const maker = opts.classId === "D";
+  const costBps = maker ? MAKER_FEE_BPS : sizingCostBps(opts.sBtBps ?? 5);
+  const notional = entries ? notionalUsd(opts.stopBps, costBps, riskUsd) : 0;
+  const openRisk = entries ? entryOpenRiskUsd(notional, opts.stopBps, costBps) : 0;
   return {
-    entries: decision.entries,
-    riskUsd: decision.riskUsd,
+    entries,
+    riskUsd,
     notionalUsd: notional,
     openRiskUsd: openRisk,
     breadth: breadthLabel(opts.breadthPaused),
-    entry: "X1",
+    entry: maker ? "maker" : "X1",
+    costBps,
     addedByJev: false,
   };
 }

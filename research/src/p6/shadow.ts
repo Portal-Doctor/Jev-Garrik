@@ -1,6 +1,7 @@
 /**
  * X2 and X3 stay off the wire. A public trade at least one tick through the limit fills half the displayed volume.
- * A gap while the order is working is indeterminate. Class D takes no fill.
+ * A gap while the order is working is indeterminate. Class D is a maker order:
+ * indeterminate is no fill, and the count is still reported.
  */
 
 import { tradeThroughFill } from "../p3/design-rules";
@@ -20,7 +21,6 @@ export interface ShadowOrder {
 }
 
 export function openShadow(order: Omit<ShadowOrder, "status" | "filledVolume">): ShadowOrder {
-  if (order.classId === "D") return { ...order, status: "no-fill", filledVolume: 0 };
   return { ...order, status: "working", filledVolume: 0 };
 }
 
@@ -38,13 +38,20 @@ export function onFeedGap(order: ShadowOrder): ShadowOrder {
 }
 
 /**
- * Share of resolved X2/X3 orders that are indeterminate.
- * The denominator is an open question (gap-share). Class D no-fills are not in it.
+ * M7. The denominator is every submitted order in the set, including
+ * indeterminate ones. Class D's indeterminate count is always reported.
+ * A class with no trade-through orders is n/a.
  */
-export function indeterminateShare(orders: readonly ShadowOrder[]): { indeterminate: number; resolved: number; share: number | null; flagged: boolean } {
-  const resolved = orders.filter((order) => order.status === "filled" || order.status === "indeterminate");
-  const indeterminate = resolved.filter((order) => order.status === "indeterminate").length;
-  if (resolved.length === 0) return { indeterminate: 0, resolved: 0, share: null, flagged: false };
-  const share = indeterminate / resolved.length;
-  return { indeterminate, resolved: resolved.length, share, flagged: share > 0.1 };
+export function indeterminateShare(orders: readonly ShadowOrder[]): {
+  indeterminate: number;
+  submitted: number;
+  share: number | null;
+  flagged: boolean;
+  classDIndeterminate: number;
+} {
+  const classDIndeterminate = orders.filter((order) => order.classId === "D" && order.status === "indeterminate").length;
+  if (orders.length === 0) return { indeterminate: 0, submitted: 0, share: null, flagged: false, classDIndeterminate };
+  const indeterminate = orders.filter((order) => order.status === "indeterminate").length;
+  const share = indeterminate / orders.length;
+  return { indeterminate, submitted: orders.length, share, flagged: share > 0.1, classDIndeterminate };
 }

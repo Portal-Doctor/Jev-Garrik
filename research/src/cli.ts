@@ -47,6 +47,7 @@ import { assertScanSchema } from "./p3/scan-schema";
 import { survivorshipReport } from "./p3/survivorship";
 import { buildP5Report } from "./p5/run";
 import { assertP5OutputPath, P5_V31_RESULTS } from "./p5/output";
+import { assertNoLiveEndpoint, replayInjected, type ForwardEvent } from "./p6/engine";
 
 const started = boot();
 if (!started.ok) {
@@ -121,6 +122,9 @@ async function main(): Promise<void> {
     case "p5":
       p5();
       return;
+    case "p6-replay":
+      p6Replay();
+      return;
     case "jev-smoke":
       await writeJevSmoke();
       return;
@@ -130,7 +134,7 @@ async function main(): Promise<void> {
       return;
     default:
       throw new Error(
-        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | p5 | jev-smoke",
+        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | p5 | jev-smoke | p6-replay",
       );
   }
 }
@@ -583,6 +587,16 @@ function writeGeometry(): void {
     writeJson(join(paths.reports, name), body);
   }
   console.log(`geometry names ${scan.warmup.names} fifteen ${fifteen.dataRootHash} daily ${daily.dataRootHash}`);
+}
+
+function p6Replay(): void {
+  const file = process.argv[3];
+  if (!file) throw new Error("usage: p6-replay <events.json>");
+  const text = readFileSync(file, "utf8");
+  assertNoLiveEndpoint(text);
+  const events = JSON.parse(text) as ForwardEvent[];
+  const book = replayInjected(events);
+  console.log(JSON.stringify({ closed: book.closed.length, open: book.positions.length, packets: book.packets.length, rejected: book.rejected.length }));
 }
 
 function p5(): void {
