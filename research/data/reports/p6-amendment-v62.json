@@ -1,0 +1,14 @@
+{
+  "commitSha": "793e34dff4e56058962cd1fcdea001e238131a45",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T23:14:30.192Z",
+  "phaseId": "P6",
+  "amendmentV61Sha256": "bb0c02bda3a8acab7f4f2127462b78b9e63792a88155c2ea08eba054e7bd0af1",
+  "amendmentV61File": "research/data/reports/p6-amendment-v61.json",
+  "amendmentV61Edited": false,
+  "amendmentV6Edited": false,
+  "registrationEdited": false,
+  "rule": "This rewords the V6.1 handover rule. The V6.1 files are not edited. A handover is handover_micro, covered and excluded from the 1% weekly gap cap, only when all of the following hold. The incoming instance's own socket for each product ran with no sequence_num hole from at least 60 seconds before the outgoing instance's last frame until after takeover. Proof of that run is the incoming instance's own socket. Sequence numbers are not compared across sockets. The writer switch took under 1 second. The buffer did not overflow. The engine resumes on the incoming stream at the first event after the last event the outgoing writer processed. That cut is matched by exchange identifiers, trade_id per product, or exchange time plus price plus size, and never by socket sequence_num. Events before the cut are skipped as duplicates. Every event after the cut is evaluated for stops and trade-through. If the cut cannot be matched without ambiguity, the handover is uncovered. The handover_micro count is logged per week. The incoming instance may also record whether it saw an event timestamped before the outgoing instance's last frame. That check does not by itself change the covered result.",
+  "live": true,
+  "featureFlag": false
+}
