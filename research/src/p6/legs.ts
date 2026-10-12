@@ -24,8 +24,10 @@ export interface LegLog {
   fillPrice: number;
   units: number;
   feesUsd: number;
-  /** The snapshot was missing or older than STALE_QUOTE_MS. The fill is still the fill. */
+  /** The snapshot was missing, older than STALE_QUOTE_MS, or a flagged REST product-book fallback. The fill is still the fill. */
   stale?: boolean;
+  /** l2 is the live book. rest is the V6 product-book fallback. */
+  source?: "l2" | "rest";
 }
 
 /** Decision-to-arrival drift in bps. GREY, and not part of cost. */

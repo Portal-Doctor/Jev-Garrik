@@ -155,6 +155,7 @@ interface Working {
   notionalUsd: number;
   stopBps: number;
   filledUnits: number;
+  quoteSource?: "l2" | "rest";
 }
 
 export interface Book {
@@ -195,6 +196,11 @@ export interface Book {
   aPicks: APickLog[];
   incidents: string[];
   pairs: Record<string, PairBackstop>;
+  /** V6. Packets offered to Jev, and packets skipped because a 1m bar was missing. */
+  jevPackets: number;
+  jevSkipped: number;
+  /** V6. Stops filled from the first price after a gap. */
+  gapFills: number;
 }
 
 export type ForwardEvent =
@@ -224,6 +230,8 @@ export type ForwardEvent =
       priorDailyCloses?: number[];
       /** Registered A config that produced this entry. */
       aConfig?: string;
+      /** V6. The bid and ask are a REST product-book snapshot, flagged on the leg. */
+      quoteFallback?: boolean;
     }
   | {
       kind: "d-order";
@@ -241,6 +249,8 @@ export type ForwardEvent =
       decisionMid: number;
       tick?: number;
       target?: number;
+      /** V6. The bid and ask are a REST product-book snapshot. */
+      quoteFallback?: boolean;
     }
   | { kind: "minute"; productId: string; tsMs: number; open: number; high: number; low: number; close: number; volume: number }
   | {
@@ -258,10 +268,14 @@ export type ForwardEvent =
       bScores?: ClassBRow[];
       /** gap runs before entries. rest runs after. all is both, for injected tests. */
       phase?: "gap" | "rest" | "all";
+      /** V6. A 1m bar is missing in this window, so Jev is not called. */
+      missing1m?: boolean;
+      /** V6. This bar is the first price after a feed gap. */
+      feedGap?: boolean;
     }
   | { kind: "btc"; tsMs: number; return60: number; return10: number }
   | { kind: "rho"; a: string; b: string; rho: number; month?: string }
-  | { kind: "gap"; productId: string }
+  | { kind: "gap"; productId: string; startMs?: number; endMs?: number }
   | { kind: "trade"; productId: string; price: number; size: number; makerSide: string; tsMs?: number }
   | { kind: "shadow"; id: string; mode: "X2" | "X3"; classId: ClassId; productId: string; limit: number; tick: number }
   | {
@@ -335,6 +349,9 @@ export function freshBook(config: Partial<BookConfig> = {}): Book {
     aPicks: aPick ? [{ ...aPick, reason: "forward-bar-1" }] : [],
     incidents: [],
     pairs: {},
+    jevPackets: 0,
+    jevSkipped: 0,
+    gapFills: 0,
   };
 }
 
@@ -664,6 +681,7 @@ function tryEnter(book: Book, opts: {
   tick?: number;
   rawEntry?: number;
   aConfig?: string | null;
+  quoteFallback?: boolean;
 }): boolean {
   reviewKnownPairs(book, opts.tsMs);
   if (pairEntryBlocked(book, opts.productId)) {
@@ -724,7 +742,8 @@ function tryEnter(book: Book, opts: {
     fillPrice: opts.fillPrice,
     units,
     feesUsd: entryFeeUsd,
-    stale: false,
+    stale: opts.quoteFallback === true,
+    source: opts.quoteFallback ? "rest" : "l2",
   });
   book.positions.push({
     id: opts.id,
@@ -1025,6 +1044,10 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
     book.shadows = book.shadows.map((order) => (order.productId === event.productId ? onFeedGap(order) : order));
     book.working = book.working.filter((order) => {
       if (order.order.pair !== event.productId || order.status !== "working") return true;
+      if (event.startMs != null && event.endMs != null) {
+        const touches = order.order.placedTs <= event.endMs && order.order.expireTs >= event.startMs;
+        if (!touches) return true;
+      }
       order.status = "indeterminate";
       book.indeterminateByClass[order.classId] += 1;
       return false;
@@ -1081,6 +1104,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       priorDailyCloses: event.priorDailyCloses ?? [],
       rawEntry: event.nextOpen,
       aConfig: event.classId === "A" ? (event.aConfig ?? null) : null,
+      quoteFallback: event.quoteFallback === true,
     });
     return book;
   }
@@ -1151,6 +1175,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       notionalUsd: decision.notionalUsd,
       stopBps,
       filledUnits: 0,
+      quoteSource: event.quoteFallback ? "rest" : "l2",
     });
     return book;
   }
@@ -1166,7 +1191,14 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       touchTime(book, event.startSec * 1000);
     } else if (closed) {
       book.marks[event.productId] = event.close;
-      book.packets.push(...shadowPackets({ members: book.config.members, barStartSec: event.startSec, nowSec: event.nowSec, warming: false }));
+      const packets = shadowPackets({ members: book.config.members, barStartSec: event.startSec, nowSec: event.nowSec, warming: false });
+      book.jevPackets += packets.length;
+      if (event.missing1m) {
+        book.jevSkipped += packets.length;
+        book.incidents.push(`jev skip ${event.productId} ${event.startSec}`);
+      } else {
+        book.packets.push(...packets);
+      }
       touchTime(book, (event.startSec + 900) * 1000);
       reviewPair(book, event.productId, (event.startSec + 900) * 1000);
     }
@@ -1182,6 +1214,10 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
         const gap = event.open <= stop;
         if (phase === "gap" && !gap) continue;
         const fill = gap ? event.open : stopFillPrice(stop, position.rawEntry, position.sLiveBps, event.atr1h ?? position.atr1h);
+        if (event.feedGap) {
+          book.gapFills += 1;
+          book.incidents.push(`gap fill ${position.id}`);
+        }
         closePosition(book, position, { tsMs: barTs, fill, kind: "stop", triggerBarTs: barTs, decisionMid: event.close });
         continue;
       }

@@ -9,6 +9,7 @@ import { stampFromGit, repoRoot, type ArtifactStamp } from "../manifest";
 import { amendment2Body } from "./amendment2";
 import { amendment2aBody } from "./amendment2a";
 import { amendment2bApprovalBody, amendment2bBody } from "./amendment2b";
+import { amendmentV6ApprovalBody, amendmentV6Body } from "./amendment-v6";
 import { d1ParityBody } from "./daily";
 import { kellyRulingBody, kellyRulingSupersededBody, kellyStatusBody, kellySupersedingBody } from "./kelly";
 import { forwardPickBody } from "./select";
@@ -23,6 +24,8 @@ export const P6_STAMP_COMMANDS = [
   "p6-stamp-kelly-status",
   "p6-stamp-amendment-2b",
   "p6-stamp-amendment-2b-approval",
+  "p6-stamp-amendment-v6",
+  "p6-stamp-amendment-v6-approval",
   "p6-stamp-kelly-superseding",
   "p6-stamp-forward-a",
   "p6-stamp-wide-parity",
@@ -69,6 +72,10 @@ function bodyOf(command: P6StampCommand, root = repoRoot()): { file: string; bod
       return { file: "p6-amendment-2b.json", body: { ...amendment2bBody() } };
     case "p6-stamp-amendment-2b-approval":
       return { file: "p6-amendment-2b-approval.json", body: { ...amendment2bApprovalBody() } };
+    case "p6-stamp-amendment-v6":
+      return { file: "p6-amendment-v6.json", body: { ...amendmentV6Body() } };
+    case "p6-stamp-amendment-v6-approval":
+      return { file: "p6-amendment-v6-approval.json", body: { ...amendmentV6ApprovalBody() } };
     case "p6-stamp-kelly-superseding":
       return { file: "p6-kelly-superseding.json", body: { ...kellySupersedingBody() } };
     case "p6-stamp-forward-a":

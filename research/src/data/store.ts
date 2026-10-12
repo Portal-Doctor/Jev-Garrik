@@ -1,8 +1,33 @@
-import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import type { MinuteRow } from "./candles";
+
+const requireSqlite = createRequire(import.meta.url);
+
+interface SqlStatement {
+  run(...args: unknown[]): unknown;
+  all(...args: unknown[]): unknown[];
+  get(...args: unknown[]): unknown;
+}
+
+/** The candle files are Bun sqlite. The import is deferred so a Node route can load the engine without opening one. */
+export interface SqliteDb {
+  exec(sql: string): void;
+  prepare(sql: string): SqlStatement;
+  query(sql: string): SqlStatement;
+  transaction(fn: () => void): () => void;
+  close(): void;
+}
+
+function openDatabase(path: string, opts?: { readonly?: boolean }): SqliteDb {
+  const specifier = ["bun", "sqlite"].join(":");
+  const loaded = requireSqlite(specifier) as {
+    Database: new (path: string, opts?: { readonly?: boolean }) => SqliteDb;
+  };
+  return new loaded.Database(path, opts);
+}
 
 export const WRITER_VERSION = "1" as const;
 
@@ -45,7 +70,7 @@ const MINUTE_DDL = `
 export function writePairMonth(path: string, meta: PairMonthMeta, rows: readonly MinuteRow[]): void {
   rmSync(path, { force: true });
   mkdirSync(dirname(path), { recursive: true });
-  const db = new Database(path);
+  const db = openDatabase(path);
   try {
     db.exec("PRAGMA page_size = 4096;");
     db.exec("PRAGMA journal_mode = DELETE;");
@@ -84,7 +109,7 @@ export function writePairMonth(path: string, meta: PairMonthMeta, rows: readonly
 }
 
 export function readPairMonth(path: string): { meta: PairMonthMeta; rows: MinuteRow[] } {
-  const db = new Database(path, { readonly: true });
+  const db = openDatabase(path, { readonly: true });
   try {
     const metaRows = db.query("SELECT key, value FROM file_meta ORDER BY key").all() as MetaRow[];
     const metaMap = new Map(metaRows.map((row) => [row.key, row.value]));
@@ -108,7 +133,7 @@ export function readPairMonth(path: string): { meta: PairMonthMeta; rows: Minute
 }
 
 export function minuteCount(path: string): number {
-  const db = new Database(path, { readonly: true });
+  const db = openDatabase(path, { readonly: true });
   try {
     const row = db.query("SELECT COUNT(*) AS n FROM minutes").get() as { n: number };
     return row.n;
@@ -133,9 +158,9 @@ export function sha256File(path: string): string {
   return hash.digest("hex");
 }
 
-export function openPartial(path: string): Database {
+export function openPartial(path: string): SqliteDb {
   mkdirSync(dirname(path), { recursive: true });
-  const db = new Database(path);
+  const db = openDatabase(path);
   db.exec("PRAGMA journal_mode = DELETE;");
   db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
   db.exec(`CREATE TABLE IF NOT EXISTS minutes (${MINUTE_DDL});`);
@@ -143,12 +168,12 @@ export function openPartial(path: string): Database {
   return db;
 }
 
-export function partialHasChunk(db: Database, index: number): boolean {
+export function partialHasChunk(db: SqliteDb, index: number): boolean {
   const row = db.query("SELECT chunk_index FROM chunks WHERE chunk_index = ?").get(index) as { chunk_index: number } | null;
   return row != null;
 }
 
-export function writePartialChunk(db: Database, index: number, rows: readonly MinuteRow[]): void {
+export function writePartialChunk(db: SqliteDb, index: number, rows: readonly MinuteRow[]): void {
   const ins = db.prepare(
     "INSERT INTO minutes (minute_ts, open, high, low, close, volume, empty) VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
@@ -163,7 +188,7 @@ export function writePartialChunk(db: Database, index: number, rows: readonly Mi
   tx();
 }
 
-export function readPartialMinutes(db: Database): MinuteRow[] {
+export function readPartialMinutes(db: SqliteDb): MinuteRow[] {
   const sqlRows = db.query("SELECT minute_ts, open, high, low, close, volume, empty FROM minutes ORDER BY minute_ts").all() as SqlMinute[];
   return sqlRows.map(toMinute);
 }

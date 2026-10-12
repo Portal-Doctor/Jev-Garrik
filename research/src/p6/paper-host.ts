@@ -24,7 +24,7 @@ import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
 import { deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
 import { STALE_QUOTE_MS } from "./legs";
-import { HEARTBEAT_GAP_MS, heartbeatMustReconnect } from "./mid-feed";
+import { HEARTBEAT_GAP_MS, heartbeatMustReconnect, type MidBar } from "./mid-feed";
 import { PUBLIC_CHANNELS, PUBLIC_WS_URL, subscribeFrames } from "./public-ws";
 import {
   barFromExchangeCandles,
@@ -84,6 +84,8 @@ export interface PaperHost {
   restFallback: number;
   lastL2Seq: Map<string, number>;
   trades: TradePrint[];
+  /** REST product-book snapshots used when the live book is stale. V6 flags the leg. */
+  restQuotes: Map<string, { bid: number; ask: number; tsMs: number }>;
   rest: Map<string, RestSlot>;
   restCursor: Map<string, number>;
   /** Highest applied 15m start per product. The resume point is this plus 900. */
@@ -108,6 +110,8 @@ export interface PaperHost {
   emitted: Set<string>;
   context: HostContext | null;
   status: "live" | "reconnecting";
+  /** Set when this instance is leaving at the function deadline. The socket close is not a gap. */
+  deadlineRelease: boolean;
   lastBar: { productId: string; atr1h: number; dailyAtr: number; dailyClose: boolean; bScores: number } | null;
 }
 
@@ -256,6 +260,7 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     restFallback: 0,
     lastL2Seq: new Map(),
     trades: [],
+    restQuotes: new Map(),
     rest: new Map(),
     restCursor: new Map(),
     appliedThrough: new Map(),
@@ -280,6 +285,7 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     context,
     status: "live",
     lastBar: null,
+    deadlineRelease: false,
   };
 }
 
@@ -609,8 +615,16 @@ export function flushEntries(host: PaperHost, nowMs: number): void {
       continue;
     }
     const stored = host.books.get(entry.productId);
-    const top = stored ? touch(stored) : null;
-    const quoted = host.book.quotes[entry.productId];
+    let top = stored ? touch(stored) : null;
+    let quoted = host.book.quotes[entry.productId];
+    let quoteFallback = false;
+    const rest = host.restQuotes.get(entry.productId);
+    const restFresh = rest != null && nowMs - rest.tsMs <= STALE_QUOTE_MS;
+    if ((!top || !quoted || nowMs - quoted.tsMs > STALE_QUOTE_MS) && restFresh && rest) {
+      top = { bid: rest.bid, ask: rest.ask };
+      quoted = { bid: rest.bid, ask: rest.ask, tsMs: rest.tsMs };
+      quoteFallback = true;
+    }
     if (!top || !quoted || nowMs - quoted.tsMs > STALE_QUOTE_MS) {
       host.emitted.add(id);
       host.book.rejected.push({ id, reason: "stale-book" });
@@ -649,6 +663,7 @@ export function flushEntries(host: PaperHost, nowMs: number): void {
         decisionMid: nextOpen,
         tick,
         target: entry.target ?? undefined,
+        quoteFallback,
       });
       continue;
     }
@@ -670,6 +685,7 @@ export function flushEntries(host: PaperHost, nowMs: number): void {
       dailyAtr: entry.dailyAtr,
       priorDailyCloses: entry.priorDailyCloses,
       ...(entry.aConfig ? { aConfig: entry.aConfig } : {}),
+      quoteFallback,
     });
   }
 }
@@ -898,6 +914,11 @@ export interface PaperStateBody {
   hourWarm: [string, BarOHLC[]][];
   weeks: [string, { date: string; rows: ClassBRow[] }[]][];
   queued: GeneratedEntry[];
+  rings: MidBar[];
+  tape: TradePrint[];
+  jevPackets: number;
+  jevSkipped: number;
+  gapFills: number;
 }
 
 /** Persistence for the book and the last processed bar. The driver does not choose the store. */
@@ -934,6 +955,11 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     hourWarm: [...host.hourWarm.entries()],
     weeks: [...host.weeks.entries()],
     queued: [...host.queued.values()],
+    rings: host.book.mids.completed,
+    tape: host.trades,
+    jevPackets: host.book.jevPackets,
+    jevSkipped: host.book.jevSkipped,
+    gapFills: host.book.gapFills,
   };
 }
 
@@ -965,6 +991,11 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   if (body.hourWarm) host.hourWarm = new Map(body.hourWarm);
   if (body.weeks) host.weeks = new Map(body.weeks);
   if (body.queued) host.queued = new Map(body.queued.map((entry) => [entryId(entry), entry]));
+  if (body.rings) host.book.mids.completed = body.rings;
+  if (body.tape) host.trades = body.tape;
+  if (body.jevPackets != null) host.book.jevPackets = body.jevPackets;
+  if (body.jevSkipped != null) host.book.jevSkipped = body.jevSkipped;
+  if (body.gapFills != null) host.book.gapFills = body.gapFills;
   if (body.appliedThrough) {
     for (const productId of host.products) {
       const resumed = resumeRestCursor(host.restCursor.get(productId), host.appliedThrough.get(productId));
@@ -1068,6 +1099,12 @@ export function ingestSocketMessage(host: PaperHost, shardIndex: number, raw: un
   applyPublic(host, shardIndex, parsePublicMessage(raw), nowMs);
 }
 
+/** The function deadline is closing the socket. That close is not a reconnect and not a gap. */
+export function releaseForDeadline(host: PaperHost): void {
+  host.deadlineRelease = true;
+  host.replacing = host.replacing.map(() => true);
+}
+
 /** A close from the socket we just replaced clears the flag and does not reconnect. */
 export function noteSocketClose(host: PaperHost, shardIndex: number, gen: number): void {
   if (host.socketGen[shardIndex] !== gen) {
@@ -1125,6 +1162,8 @@ export async function runPublicPaper(opts: {
   listen?: string | null;
   port?: number;
   forMs?: number;
+  /** Wall-clock deadline. The socket close at this time is a handover, not a gap. */
+  untilMs?: number;
   logPath?: string;
 }): Promise<void> {
   if (opts.listen) throw new Error("monitoring is files under data/runtime");
@@ -1192,10 +1231,56 @@ export async function runPublicPaper(opts: {
       publish();
     }
   }, REST_PACE_MS);
+  if (opts.untilMs != null) {
+    const wait = opts.untilMs - Date.now();
+    setTimeout(() => {
+      releaseForDeadline(host);
+      stop();
+    }, Math.max(0, wait));
+  }
   if (opts.forMs != null && opts.forMs > 0) setTimeout(stop, opts.forMs);
   let resolve: () => void = () => {};
   await new Promise<void>((done) => {
     resolve = done;
     process.on("SIGINT", stop);
+  });
+}
+
+/** Sample on an existing host until `untilMs`, then close the sockets as a deadline handover. */
+export async function driveHost(host: PaperHost, untilMs: number): Promise<void> {
+  const sockets = host.shards.map((_, index) => openShard(host, index, PUBLIC_WS_URL));
+  await new Promise<void>((resolve) => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      flushEntries(host, now);
+      host.shards.forEach((_, index) => {
+        if (!considerHeartbeatGap(host, index, now)) return;
+        replaceShard(host, sockets, index, PUBLIC_WS_URL);
+      });
+      const due = nextRest(host, now);
+      if (due?.action === "fetch") {
+        due.slot.inflight = true;
+        host.nextRestMs = now + REST_PACE_MS;
+        void fetchRestBar(due.slot.productId, due.slot.barStartSec)
+          .then((result) => {
+            if (result.status === 429) {
+              noteRest429(due.slot, Date.now(), result.retryAfterMs);
+              return;
+            }
+            noteRestMiss(host, due.slot);
+            if (result.bar) acceptRestBar(host, result.bar);
+          })
+          .catch(() => {
+            due.slot.inflight = false;
+            noteRestMiss(host, due.slot);
+          });
+      } else if (due?.action === "fallback") fallbackTradesBar(host, due.slot);
+      if (now >= untilMs) {
+        clearInterval(timer);
+        releaseForDeadline(host);
+        for (const socket of sockets) socket.close();
+        resolve();
+      }
+    }, REST_PACE_MS);
   });
 }

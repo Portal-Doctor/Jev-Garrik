@@ -134,6 +134,8 @@ async function main(): Promise<void> {
     case "p6-stamp-kelly-status":
     case "p6-stamp-amendment-2b":
     case "p6-stamp-amendment-2b-approval":
+    case "p6-stamp-amendment-v6":
+    case "p6-stamp-amendment-v6-approval":
     case "p6-stamp-kelly-superseding":
     case "p6-stamp-forward-a":
     case "p6-stamp-wide-parity":
