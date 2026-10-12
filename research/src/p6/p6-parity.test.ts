@@ -1,8 +1,14 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "bun:test";
 import { replayFrozenWindow } from "./parity";
 
-test("seven frozen P5 days match the A20-k2 base book at $60", () => {
+const candleRoot = fileURLToPath(new URL("../../data/candles", import.meta.url));
+const dailyRoot = fileURLToPath(new URL("../../data/daily", import.meta.url));
+/** 15m and daily bytes are gitignored. A checkout without them cannot claim parity. */
+const frozenStore = existsSync(candleRoot) && existsSync(dailyRoot);
+
+test.skipIf(!frozenStore)("seven frozen P5 days match the A20-k2 base book at $60", () => {
   const manifest = JSON.parse(readFileSync(new URL("../../data/data-manifest.json", import.meta.url), "utf8")) as { dataRootHash: string };
   expect(manifest.dataRootHash).toBe("1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8");
   const { diffs, published } = replayFrozenWindow();
@@ -15,3 +21,12 @@ test("seven frozen P5 days match the A20-k2 base book at $60", () => {
   ]);
   expect(diffs).toEqual([]);
 }, 60_000);
+
+test("a checkout without the gitignored candle store does not invent a parity result", () => {
+  const ignore = readFileSync(fileURLToPath(new URL("../../.gitignore", import.meta.url)), "utf8");
+  expect(ignore).toContain("data/candles/");
+  expect(ignore).toContain("data/daily/");
+  if (!frozenStore) {
+    expect(existsSync(candleRoot)).toBe(false);
+  }
+});
