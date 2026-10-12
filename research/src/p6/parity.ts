@@ -6,12 +6,18 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { rootHash } from "../data/hash";
+import { scanCandleFiles } from "../data/manifest-file";
 import { readPairMonth } from "../data/store";
-import type { SourceDay } from "../p3/bar-access";
-import { btcVeto, type BtcDay } from "../p3/signals";
+import { correlationCloses, type SourceDay } from "../p3/bar-access";
+import { loadPair } from "../p3/geometry-run";
+import { foldStartDates } from "../p3/schedule";
+import { btcVeto, type BarOHLC, type BtcDay } from "../p3/signals";
 import { ema, wilderAtr } from "../p2/indicators";
+import { daysBetween } from "../p5/stats";
+import { A_REGISTRATION } from "./select";
 import { registeredFlags, type RegistrationFlagSource } from "../p5/flags";
-import { dateOfTs, isDayCloseBar } from "../p5/book";
+import { monthlyClusters } from "../p5/book";
 import { applyForward, freshBook, type Book, type ForwardEvent } from "./engine";
 import { generateForward, type FifteenBar, type GeneratedEntry } from "./generate";
 
@@ -19,6 +25,19 @@ const WINDOW_ENTRY_START = "2025-11-11";
 const WINDOW_ENTRY_END = "2025-11-18";
 const FIFTEEN_FROM = "2025-10-11";
 const WALK_THROUGH = "2025-12-16";
+
+export interface ReplayOpts {
+  book?: string;
+  lookback?: 20 | 55;
+  k?: number;
+  entryStart?: string;
+  entryEnd?: string;
+  fifteenFrom?: string;
+  walkThrough?: string;
+  /** Full membership. The 7-day replay keeps the November cohort. */
+  allNames?: boolean;
+  signalsOnly?: boolean;
+}
 
 export interface PublishedTrade {
   classId: "A" | "B";
@@ -78,10 +97,21 @@ function dayOf(ts: number): string {
 
 function readMonths(root: string, productId: string, names: readonly string[]): { ts: number; open: number; high: number; low: number; close: number; volume: number; empty: boolean }[] {
   const folder = join(root, productId);
+  if (!existsSync(folder)) throw new Error(`missing data file ${folder}`);
+  const present = readdirSync(folder).filter((name) => name.endsWith(".sqlite")).map((name) => name.slice(0, 7)).sort();
+  if (present.length > 0) {
+    const first = present[0]!;
+    const last = present[present.length - 1]!;
+    for (const name of names) {
+      if (name < first || name > last) continue;
+      if (!present.includes(name)) throw new Error(`missing data file ${join(folder, `${name}.sqlite`)}`);
+    }
+  }
   const out: { ts: number; open: number; high: number; low: number; close: number; volume: number; empty: boolean }[] = [];
   for (const name of names) {
     const path = join(folder, `${name}.sqlite`);
-    if (!existsSync(path)) throw new Error(`missing data file ${path}`);
+    if (!existsSync(folder)) throw new Error(`missing data file ${folder}`);
+    if (!existsSync(path)) continue;
     const rows = readPairMonth(path).rows;
     for (const row of rows) {
       if (row.empty || row.open == null || row.high == null || row.low == null || row.close == null) {
@@ -103,41 +133,14 @@ function readMonths(root: string, productId: string, names: readonly string[]): 
   return out;
 }
 
-function earlierDays(productId: string, dailyRoot: string): SourceDay[] {
-  const folder = join(dailyRoot, productId);
-  let files: string[] = [];
-  try {
-    files = readdirSync(folder).filter((name) => name.endsWith(".sqlite"));
-  } catch {
-    return [];
-  }
-  const rows = readMonths(dailyRoot, productId, files.map((name) => name.slice(0, 7)));
-  return rows
-    .filter((row) => dayOf(row.ts) < FIFTEEN_FROM)
-    .map((row) => ({
-      date: dayOf(row.ts),
-      ts: row.ts,
-      open: row.open,
-      high: row.high,
-      low: row.low,
-      close: row.close,
-      volume: row.volume,
-      empty: row.empty || !(row.close > 0),
-    }));
-}
-
-function fifteenBars(productId: string, candleRoot: string): FifteenBar[] {
-  const rows = readMonths(candleRoot, productId, months("2025-10", "2025-12"));
+function fifteenBars(productId: string, candleRoot: string, from: string, through: string): FifteenBar[] {
+  const rows = readMonths(candleRoot, productId, months(from.slice(0, 7), through.slice(0, 7)));
   const out: FifteenBar[] = [];
   for (const row of rows) {
-    if (row.empty || !(row.open > 0) || dayOf(row.ts) < FIFTEEN_FROM || dayOf(row.ts) > WALK_THROUGH) continue;
+    if (row.empty || !(row.open > 0) || dayOf(row.ts) < from || dayOf(row.ts) > through) continue;
     out.push({ productId, startSec: row.ts, open: row.open, high: row.high, low: row.low, close: row.close, volume: row.volume });
   }
   return out;
-}
-
-function pxBars(productId: string, candleRoot: string): PxBar[] {
-  return fifteenBars(productId, candleRoot).map((bar) => ({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close }));
 }
 
 function memberFn(rows: readonly { date: string; names: string[] }[]): (productId: string, date: string) => boolean {
@@ -194,140 +197,73 @@ function atrAt(series: readonly { ts: number; atr: number | null }[], ts: number
   return value > 0 ? value : 0;
 }
 
-function hourAtr(bars: readonly PxBar[]): { ts: number; atr: number | null }[] {
-  const hour = new Map<number, PxBar>();
-  for (const bar of bars) {
-    const open = bar.ts - (bar.ts % 3600);
-    const slot = hour.get(open);
-    if (!slot) hour.set(open, { ts: open, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
-    else {
-      slot.high = Math.max(slot.high, bar.high);
-      slot.low = Math.min(slot.low, bar.low);
-      slot.close = bar.close;
-    }
-  }
-  const ordered = [...hour.values()].sort((a, b) => a.ts - b.ts);
-  const atr = wilderAtr(ordered.map((bar) => bar.high), ordered.map((bar) => bar.low), ordered.map((bar) => bar.close), 14);
-  return ordered.map((bar, index) => ({ ts: bar.ts, atr: atr[index] ?? null }));
-}
-
-function dailyAtr(bars: readonly PxBar[]): Map<string, number> {
-  const days = new Map<string, PxBar>();
-  for (const bar of bars) {
-    const date = dayOf(bar.ts);
-    const slot = days.get(date);
-    if (!slot) days.set(date, { ts: bar.ts, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
-    else {
-      slot.high = Math.max(slot.high, bar.high);
-      slot.low = Math.min(slot.low, bar.low);
-      slot.close = bar.close;
-    }
-  }
-  const ordered = [...days.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
-  const atr = wilderAtr(
-    ordered.map((row) => row[1].high),
-    ordered.map((row) => row[1].low),
-    ordered.map((row) => row[1].close),
-    14,
+export function publishedTrades(opts: ReplayOpts = {}): (PublishedTrade & { windowMark?: boolean })[] {
+  const book = opts.book ?? "A20-k2";
+  const entryStart = opts.entryStart ?? WINDOW_ENTRY_START;
+  const entryEnd = opts.entryEnd ?? WINDOW_ENTRY_END;
+  const doc = JSON.parse(readFileSync(join(dataDir(), "reports/p5-v31-results.json"), "utf8")) as {
+    results: { trades: (PublishedTrade & { book: string; path: string; windowMark?: boolean })[] };
+  };
+  return doc.results.trades.filter(
+    (trade) => trade.book === book && trade.path === "base" && trade.entryDate >= entryStart && trade.entryDate < entryEnd,
   );
-  const out = new Map<string, number>();
-  ordered.forEach((row, index) => {
-    const value = atr[index];
-    if (value != null && value > 0) out.set(row[0], value);
-  });
-  return out;
 }
 
 export function publishedA20Trades(): PublishedTrade[] {
-  const doc = JSON.parse(readFileSync(join(dataDir(), "reports/p5-v31-results.json"), "utf8")) as {
-    results: { trades: (PublishedTrade & { book: string; path: string })[] };
-  };
-  return doc.results.trades.filter(
-    (trade) => trade.book === "A20-k2" && trade.path === "base" && trade.entryDate >= WINDOW_ENTRY_START && trade.entryDate < WINDOW_ENTRY_END,
-  );
+  return publishedTrades();
 }
 
-export function replayFrozenWindow(): { diffs: ParityDiff[]; published: PublishedTrade[]; engine: Book["closed"] } {
+export function replayFrozenWindow(opts: ReplayOpts = {}): { diffs: ParityDiff[]; published: PublishedTrade[]; engine: Book["closed"]; entries: GeneratedEntry[]; weeks: { date: string; rows: { id: string; score: number; member: boolean }[] }[] } {
+  const entryStart = opts.entryStart ?? WINDOW_ENTRY_START;
+  const entryEnd = opts.entryEnd ?? WINDOW_ENTRY_END;
+  const fifteenFrom = opts.fifteenFrom ?? FIFTEEN_FROM;
+  const walkThrough = opts.walkThrough ?? WALK_THROUGH;
+  const lookback = opts.lookback ?? 20;
+  const k = opts.k ?? 2;
+  const bookId = opts.book ?? `A${lookback}-k${k}`;
   const root = dataDir();
   const registration = JSON.parse(readFileSync(join(root, "reports/p4-registration.json"), "utf8")) as RegistrationFlagSource;
   const membership = JSON.parse(readFileSync(join(root, "reports/universe-membership.json"), "utf8")) as { members: { date: string; names: string[] }[] };
   const isMember = memberFn(membership.members);
-  const names = [...new Set(membership.members.flatMap((row) => row.names))].filter((id) => isMember(id, "2025-11-16") || isMember(id, "2025-11-10"));
+  const names = [...new Set(membership.members.flatMap((row) => row.names))].filter((id) => opts.allNames || isMember(id, "2025-11-16") || isMember(id, "2025-11-10"));
   const flags = registeredFlags(registration, names);
   const candleRoot = join(root, "candles");
   const dailyRoot = join(root, "daily", "candles");
-  const bars: FifteenBar[] = [];
-  const earlier = new Map<string, SourceDay[]>();
   const px = new Map<string, PxBar[]>();
-  for (const id of ["BTC-USD", ...names.filter((id) => id !== "BTC-USD")]) {
-    const prior = earlierDays(id, dailyRoot);
-    const fifteen = fifteenBars(id, candleRoot);
-    if (id === "BTC-USD") {
-      earlier.set(id, prior);
-      px.set(id, fifteen.map((bar) => ({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close })));
-      continue;
-    }
-    if (!flags.byId.get(id)) continue;
-    earlier.set(id, prior);
-    bars.push(...fifteen);
+  const products = new Map<string, { days: SourceDay[]; hour: BarOHLC[]; four: BarOHLC[]; quarter: BarOHLC[] }>();
+  const atr1h = new Map<string, { ts: number; atr: number | null }[]>();
+  for (const id of ["BTC-USD", ...names.filter((name) => name !== "BTC-USD")]) {
+    const pair = loadPair(id, dailyRoot, candleRoot);
+    if (!pair) throw new Error(`missing data file ${join(candleRoot, id)}`);
+    if (id !== "BTC-USD" && !flags.byId.get(id)) continue;
+    products.set(id, { days: pair.days, hour: pair.hour, four: pair.four, quarter: pair.quarter });
+    const series = wilderAtr(pair.hour.map((bar) => bar.high), pair.hour.map((bar) => bar.low), pair.hour.map((bar) => bar.close), 14);
+    atr1h.set(id, pair.hour.map((bar, index) => ({ ts: bar.ts, atr: series[index] ?? null })));
+    const fifteen = fifteenBars(id, candleRoot, fifteenFrom, walkThrough);
     px.set(id, fifteen.map((bar) => ({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close })));
   }
-  const btcPrior = earlier.get("BTC-USD") ?? [];
-  const btcPx = px.get("BTC-USD") ?? [];
-  const btcDaily = [
-    ...btcPrior,
-    ...(() => {
-      const days = new Map<string, SourceDay>();
-      for (const bar of btcPx) {
-        const date = dayOf(bar.ts);
-        const slot = days.get(date);
-        if (!slot) days.set(date, { date, ts: bar.ts, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: 0, empty: false });
-        else {
-          slot.high = Math.max(slot.high, bar.high);
-          slot.low = Math.min(slot.low, bar.low);
-          slot.close = bar.close;
-        }
-      }
-      return [...days.values()];
-    })(),
-  ];
-  const hour = new Map<number, PxBar>();
-  for (const bar of btcPx) {
-    const open = bar.ts - (bar.ts % 14400);
-    const slot = hour.get(open);
-    if (!slot) hour.set(open, { ...bar, ts: open });
-    else {
-      slot.high = Math.max(slot.high, bar.high);
-      slot.low = Math.min(slot.low, bar.low);
-      slot.close = bar.close;
-    }
-  }
-  const vetoDays = btcDays(btcDaily, [...hour.values()].sort((a, b) => a.ts - b.ts));
+  const btc = products.get("BTC-USD");
+  if (!btc) throw new Error(`missing data file ${join(candleRoot, "BTC-USD")}`);
+  const vetoDays = btcDays(btc.days, btc.four);
   const veto = (date: string) => btcVeto(vetoDays.get(date));
   const generated = generateForward({
-    bars,
-    nowSec: Date.parse(`${WALK_THROUGH}T00:00:00.000Z`) / 1000,
+    bars: [],
+    nowSec: Date.parse(`${walkThrough}T00:00:00.000Z`) / 1000,
     flags: { priceGroupPasses: true, volumeGroupPasses: true, boundarySaved: false },
     flagsByProduct: flags.byId,
-    earlierDays: earlier,
+    products,
     memberOn: (productId, date) => isMember(productId, date),
     veto,
-    lookback: 20,
-    k: 2,
+    lookback,
+    k,
   });
   let entries: GeneratedEntry[] = generated.entries;
+  if (opts.signalsOnly) return { diffs: [], published: [], engine: [], entries, weeks: generated.weeks };
   entries = entries.filter((entry) => {
     const date = dayOf(Math.floor(entry.tsMs / 1000));
-    return (entry.classId === "A" || entry.classId === "B") && date >= WINDOW_ENTRY_START && date < WINDOW_ENTRY_END;
+    return (entry.classId === "A" || entry.classId === "B") && date >= entryStart && date < entryEnd;
   });
   entries.sort((a, b) => a.tsMs - b.tsMs || (a.classId < b.classId ? -1 : 1) || (a.productId < b.productId ? -1 : 1));
-  const atr1h = new Map<string, { ts: number; atr: number | null }[]>();
-  const atrDay = new Map<string, Map<string, number>>();
-  for (const id of new Set(entries.map((entry) => entry.productId))) {
-    const barsFor = px.get(id) ?? [];
-    atr1h.set(id, hourAtr(barsFor));
-    atrDay.set(id, dailyAtr(barsFor));
-  }
   const events: ForwardEvent[] = [];
   const byTs = new Map<number, GeneratedEntry[]>();
   let lastTs = 0;
@@ -338,7 +274,7 @@ export function replayFrozenWindow(): { diffs: ParityDiff[]; published: Publishe
     const exit = Math.floor(entry.tsMs / 1000) + 40 * 86_400;
     if (exit > lastTs) lastTs = exit;
   }
-  const published = publishedA20Trades();
+  const published = publishedTrades({ book: bookId, entryStart, entryEnd });
   for (const trade of published) if (trade.exitTs + 900 > lastTs) lastTs = trade.exitTs + 900;
   const firstTs = entries.reduce((min, entry) => Math.min(min, Math.floor(entry.tsMs / 1000)), lastTs);
   const traded = new Set(entries.map((entry) => entry.productId));
@@ -357,8 +293,23 @@ export function replayFrozenWindow(): { diffs: ParityDiff[]; published: Publishe
         low: bar.low,
         close: bar.close,
         atr1h: atrAt(atr1h.get(id) ?? [], bar.ts),
-        dailyAtr: generated.atrByProduct.get(id)?.get(date) ?? (isDayCloseBar(bar.ts) ? atrDay.get(id)?.get(date) : undefined),
+        dailyAtr: generated.atrByProduct.get(id)?.get(date),
         bScores: week?.rows,
+        phase: "gap",
+      });
+      events.push({
+        kind: "bar15",
+        productId: id,
+        startSec: bar.ts,
+        nowSec: bar.ts + 900,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        atr1h: atrAt(atr1h.get(id) ?? [], bar.ts),
+        dailyAtr: generated.atrByProduct.get(id)?.get(date),
+        bScores: week?.rows,
+        phase: "rest",
       });
     }
   }
@@ -387,19 +338,51 @@ export function replayFrozenWindow(): { diffs: ParityDiff[]; published: Publishe
       });
     }
   }
+  const order = (event: ForwardEvent) => (event.kind === "bar15" && event.phase === "gap" ? 0 : event.kind === "x1" ? 1 : 2);
   events.sort((a, b) => {
     const ta = a.kind === "x1" ? a.tsMs : a.kind === "bar15" ? a.startSec * 1000 : 0;
     const tb = b.kind === "x1" ? b.tsMs : b.kind === "bar15" ? b.startSec * 1000 : 0;
     if (ta !== tb) return ta - tb;
-    if (a.kind === "x1" && b.kind !== "x1") return -1;
-    if (b.kind === "x1" && a.kind !== "x1") return 1;
-    return 0;
+    return order(a) - order(b);
   });
-  const book = freshBook({ members: [...traded], parity: { riskUsd: 60, sBtBps: 5 } });
+  const clusterNames = [...products.keys()].filter((id) => flags.byId.has(id)).sort().map((id) => ({
+    productId: id,
+    flags: flags.byId.get(id)!,
+    days: correlationCloses(flags.byId.get(id)!, products.get(id)?.days ?? []),
+  }));
+  const months: string[] = [];
+  for (let year = 2025, month = 11; ; ) {
+    const key = `${year}-${String(month).padStart(2, "0")}-01`;
+    if (key > "2026-10-01") break;
+    months.push(key);
+    month += 1;
+    if (month === 13) {
+      month = 1;
+      year += 1;
+    }
+  }
+  const clusterMaps = monthlyClusters(clusterNames, [...new Set([...months, ...foldStartDates()])].sort(), (productId, date) => isMember(productId, date));
+  const book = freshBook({
+    members: [...traded],
+    parity: { riskUsd: 60, sBtBps: 5 },
+    clusterOf: (productId, tsMs) => {
+      const entryDate = dayOf(Math.floor(tsMs / 1000));
+      let chosen = productId;
+      let asOf = "";
+      for (const [date, map] of clusterMaps) {
+        if (date <= entryDate && date >= asOf) {
+          asOf = date;
+          chosen = map.get(productId) ?? productId;
+        }
+      }
+      return chosen;
+    },
+  });
   for (const event of events) applyForward(book, event);
   const diffs: ParityDiff[] = [];
   const used = new Set<number>();
   for (const trade of published) {
+    if (trade.windowMark) continue;
     const match = book.closed.findIndex(
       (row, index) => !used.has(index) && row.productId === trade.productId && row.classId === trade.classId && Math.abs(row.exitTs / 1000 - trade.exitTs) < 1,
     );
@@ -422,11 +405,88 @@ export function replayFrozenWindow(): { diffs: ParityDiff[]; published: Publishe
     compare("exitTs", trade.exitTs, row.exitTs / 1000, 0);
     if (trade.reason !== row.exitKind) diffs.push({ productId: trade.productId, classId: trade.classId, entryTs: trade.entryTs, field: "reason", published: trade.reason, engine: row.exitKind });
   }
+  const windowed = new Set(published.filter((trade) => trade.windowMark).map((trade) => `${trade.classId}|${trade.productId}|${trade.entryDate}`));
   book.closed.forEach((row, index) => {
     if (used.has(index)) return;
-    if (row.entryDate >= WINDOW_ENTRY_START && row.entryDate < WINDOW_ENTRY_END) {
+    if (windowed.has(`${row.classId}|${row.productId}|${row.entryDate}`)) return;
+    if (row.entryDate >= entryStart && row.entryDate < entryEnd) {
       diffs.push({ productId: row.productId, classId: row.classId, entryTs: row.exitTs / 1000, field: "extra", published: null, engine: row.exitKind });
     }
   });
-  return { diffs, published, engine: book.closed };
+  return { diffs, published, engine: book.closed, entries, weeks: generated.weeks };
+}
+
+const WIDE = { entryStart: "2025-11-11", entryEnd: "2026-10-06", fifteenFrom: "2025-10-11", walkThrough: "2026-10-11", allNames: true };
+
+interface RichTrade extends PublishedTrade {
+  windowMark?: boolean;
+  stopBps: number;
+  rawEntry: number;
+  rawExit: number;
+  exitDate: string;
+}
+
+function exitClass(trade: RichTrade): string {
+  const initial = trade.rawEntry * (1 - trade.stopBps / 10_000);
+  if (trade.reason === "stop" && (trade.fillExit === trade.rawExit || trade.rawExit < initial - 1e-8)) return "gap-fill stop";
+  if (trade.classId === "A" && trade.reason === "stop" && trade.rawExit > initial + 1e-8) return "A trail stop";
+  if (trade.classId === "A" && trade.reason === "stop") return "A stop";
+  if (trade.classId === "A" && trade.reason === "rule" && daysBetween(trade.entryDate, trade.exitDate) >= 30) return "A 30-day";
+  if (trade.classId === "A" && trade.reason === "rule") return "A 10-day";
+  if (trade.classId === "B" && trade.reason === "rule") return "B held-set";
+  if (trade.classId === "B" && trade.reason === "stop") return "B disaster stop";
+  return trade.reason;
+}
+
+/** All six A books plus B, from 2025-11-11 through 2026-10-05. The store hash is the candle bytes. */
+export function wideParityReport(): Record<string, unknown> {
+  const books = A_REGISTRATION.map((config) => {
+    const result = replayFrozenWindow({ ...WIDE, book: config.id, lookback: config.lookback, k: config.k });
+    const comparable = (result.published as RichTrade[]).filter((trade) => !trade.windowMark);
+    const exits: Record<string, number> = {};
+    let aCovered = 0;
+    let aPublished = 0;
+    for (const trade of result.published as RichTrade[]) {
+      if (trade.classId !== "A") continue;
+      aPublished += 1;
+      const entry = result.entries.find((row) => row.classId === "A" && row.productId === trade.productId && new Date(row.tsMs).toISOString().slice(0, 10) === trade.entryDate);
+      const bps = entry ? ((entry.nextOpen - entry.stop) / entry.nextOpen) * 10_000 : null;
+      if (bps != null && Math.abs(bps - trade.stopBps) < 1e-6) aCovered += 1;
+    }
+    for (const trade of comparable) {
+      const label = exitClass(trade);
+      exits[label] = (exits[label] ?? 0) + 1;
+    }
+    return {
+      book: config.id,
+      published: result.published.length,
+      windowMarked: result.published.length - comparable.length,
+      comparable: comparable.length,
+      matched: comparable.length - result.diffs.filter((diff) => diff.field === "missing").length - new Set(result.diffs.filter((diff) => diff.field !== "missing" && diff.field !== "extra").map((diff) => `${diff.productId}|${diff.classId}|${diff.entryTs}`)).size,
+      diffs: result.diffs.length,
+      aPublished,
+      aCovered,
+      exits,
+    };
+  });
+  const files = scanCandleFiles(dataDir());
+  const storeHash = rootHash(files);
+  const exits: Record<string, number> = {};
+  for (const book of books) {
+    for (const [label, count] of Object.entries(book.exits)) exits[label] = (exits[label] ?? 0) + count;
+  }
+  const comparable = books.reduce((sum, book) => sum + book.comparable, 0);
+  const diffCount = books.reduce((sum, book) => sum + book.diffs, 0);
+  return {
+    span: "2025-11-11 through 2026-10-05",
+    storeHash,
+    storeHashFiles: files.length,
+    storeHashInput: "sha256 of each candles sqlite, then rootHash of sorted path TAB sha256 lines",
+    comparable,
+    diffs: diffCount,
+    matched: comparable - diffCount,
+    exits,
+    gapFillStops: exits["gap-fill stop"] ?? 0,
+    books,
+  };
 }

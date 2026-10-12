@@ -1,7 +1,8 @@
 /**
  * Architect's forward sizing ruling, relayed by Jimmy. It is not amendment 2.
- * It deviates from the registered $60: every class A–E starts at $20, and a
- * promoted class is sized from its own forward net R. P5 rows are not an input.
+ * Forward paper starts every class A–E at $20. A promoted class is sized from
+ * its own forward net R. The registered comparison book stays $60 and is not
+ * a forward size. P5 rows are not an input.
  *
  * The bankroll is the fixed $8,000 reference. The Kelly fraction uses the
  * lower-80% bound of forward net R, not the sample mean. Promotion also needs
@@ -75,6 +76,45 @@ export function kellyRulingBody(): {
     text: KELLY_RULING_TEXT,
     default13Parameter: "default13Usd",
     default13Applied: false,
+  };
+}
+
+/** Supersedes p6-kelly-status.json. The forward size is $20; $60 is not restated. */
+export function kellySupersedingBody(): {
+  role: "label";
+  supersedes: string;
+  supersedesSha256: string;
+  rulingFile: string;
+  rulingSha256: string;
+  text: string;
+  unpromotedRiskUsd: 20;
+  bankrollUsd: 8000;
+  kellyInput: "L80";
+  promotionMinDays: 90;
+  promotionMinN: 30;
+  default13: string;
+  registrationEdited: false;
+  amendment2Edited: false;
+  kellyRulingEdited: false;
+  kellyStatusEdited: false;
+} {
+  return {
+    role: "label",
+    supersedes: "research/data/reports/p6-kelly-status.json",
+    supersedesSha256: "162131821d358c2caf8faf21ebe58005dee875a8e7d7023b33c8324bcea584ba",
+    rulingFile: "research/data/reports/p6-kelly-ruling.json",
+    rulingSha256: "e099c0223e35712e78e4b7f0ef19f72d8f312a539a75e4d7f397816f57cd8e48",
+    text: KELLY_STATUS_TEXT,
+    unpromotedRiskUsd: UNPROMOTED_RISK_USD,
+    bankrollUsd: PAPER_BANKROLL_USD,
+    kellyInput: "L80",
+    promotionMinDays: PROMOTION_MIN_DAYS,
+    promotionMinN: PROMOTION_MIN_N,
+    default13: "resolved default 13: a null or non-positive lower-80% bound sizes at $20",
+    registrationEdited: false,
+    amendment2Edited: false,
+    kellyRulingEdited: false,
+    kellyStatusEdited: false,
   };
 }
 

@@ -344,6 +344,7 @@ test("stops, maker orders, halts, packets, and the kill switch run on injected e
   applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec, nowSec: startSec + 900, open: 90, high: 91, low: 89, close: 90 });
   expect(book.positions).toHaveLength(0);
   expect(book.closed[0]?.exitKind).toBe("stop");
+  expect(book.legs.find((leg) => leg.side === "exit")?.fillPrice).toBe(90);
   expect(book.legs.some((leg) => leg.side === "exit" && leg.triggerBarTs != null)).toBe(true);
 
   applyForward(book, { kind: "kill-switch", on: true });
@@ -515,6 +516,13 @@ test("features.ts is the cb accumulator byte for byte, and the amendment record 
   expect(() => assertP6Target("research/data/reports/p6-jev-spend.json")).toThrow(/refusing/);
   expect(() => assertP6Target("research/data/reports/p6-amendment-2b.json")).toThrow(/refusing/);
   expect(() => assertP6Target("research/data/reports/p6-amendment-2b-approval.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/reports/universe-membership.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/reports/p4-approval.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/reports/p5-v31-approval.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/reports/geometry-scan.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/reports/p1-report.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/reports/owner-decision.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/reports/derived-roots.json")).toThrow(/refusing/);
   expect(() => assertP6Target("research/data/data-manifest.json")).toThrow(/refusing/);
   expect(() => assertP6Target("research/data/registration-sources/p6-metric-definitions.md")).toThrow(/refusing/);
   const dir = mkdtempSync(join(tmpdir(), "p6-"));

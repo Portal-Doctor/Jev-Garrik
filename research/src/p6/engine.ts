@@ -27,7 +27,8 @@ import { dateOfTs, isDayCloseBar, TRAIL_ATR } from "../p5/book";
 import { netBps } from "../p5/walk";
 import { momentumBlocked, momentumCrashOn } from "../p5/guards";
 import { isMondayCloseBar, x1EntryTs } from "../p5/run";
-import { assignBetas, averageLinkage, betaWeight } from "../p5/risk";
+import { assignBetas, averageLinkage, betaWeight, openRiskAfterMove } from "../p5/risk";
+import type { APick, APickLog } from "./select";
 import { daysBetween, weekKey } from "../p5/stats";
 import { shadowPackets, type ShadowPacket } from "./jev-shadow";
 import { bookPanel, parity7d, weeklyHaltsInLast6, type BookPanel } from "./review";
@@ -54,6 +55,14 @@ export interface BookConfig {
   members: string[];
   /** P5 historical book: fixed risk and s_bt, Jev guards off. */
   parity?: { riskUsd: number; sBtBps: number } | null;
+  /** P5 monthly cluster id. When set, rho events are not used. */
+  clusterOf?: (productId: string, tsMs: number) => string;
+  /** Step-1 A config. Stays frozen unless monthlyASelect is on. */
+  aPick?: APick | null;
+  /** Off until Quant, Trader, and Brian approve monthly re-selection. */
+  monthlyASelect?: boolean;
+  /** Scores the expanded IS. Called at 00:00 UTC on the 1st when the flag is on. */
+  aReselect?: (asOf: string) => APick | null;
 }
 
 export interface PairBackstopLog {
@@ -104,6 +113,8 @@ export interface Position {
   highestClose: number | null;
   clusterId: string;
   tick: number;
+  /** A config at entry. A later pick does not change it. */
+  aConfig: string | null;
 }
 
 export interface ClosedTrade {
@@ -171,6 +182,8 @@ export interface Book {
   momentumDates: string[];
   haltWeeks: string[];
   clusterMonth: string | null;
+  aPick: APick | null;
+  aPicks: APickLog[];
   incidents: string[];
   pairs: Record<string, PairBackstop>;
 }
@@ -201,6 +214,8 @@ export type ForwardEvent =
       dailyAtr?: number;
       priorDailyCloses?: number[];
       ruleExitTs?: number;
+      /** Registered A config that produced this entry. */
+      aConfig?: string;
     }
   | {
       kind: "d-order";
@@ -231,6 +246,8 @@ export type ForwardEvent =
       dailyClose?: boolean;
       dailyAtr?: number;
       bScores?: ClassBRow[];
+      /** gap runs before entries. rest runs after. all is both, for injected tests. */
+      phase?: "gap" | "rest" | "all";
     }
   | { kind: "btc"; tsMs: number; return60: number; return10: number }
   | { kind: "rho"; a: string; b: string; rho: number; month?: string }
@@ -259,8 +276,16 @@ function emptyClasses(): Record<ClassId, ClassCurve> {
 }
 
 export function freshBook(config: Partial<BookConfig> = {}): Book {
+  const aPick = config.aPick ?? null;
   return {
-    config: { members: config.members ?? [], parity: config.parity ?? null },
+    config: {
+      members: config.members ?? [],
+      parity: config.parity ?? null,
+      clusterOf: config.clusterOf,
+      aPick,
+      monthlyASelect: config.monthlyASelect === true,
+      aReselect: config.aReselect,
+    },
     nowMs: 0,
     day: null,
     week: null,
@@ -290,6 +315,8 @@ export function freshBook(config: Partial<BookConfig> = {}): Book {
     momentumDates: [],
     haltWeeks: [],
     clusterMonth: null,
+    aPick,
+    aPicks: aPick ? [{ ...aPick, reason: "forward-bar-1" }] : [],
     incidents: [],
     pairs: {},
   };
@@ -312,6 +339,11 @@ export function forwardBookPanel(book: Book, replayNetUsd: number | null): BookP
     bookDrawdownUsd: Math.max(0, book.peakEquity - equity),
     parity7d: parity7d(book.realizedUsd, replayNetUsd),
   });
+}
+
+/** Forward report block. Every A pick is logged with the six IS statistics. */
+export function forwardSessionReport(book: Book, replayNetUsd: number | null): BookPanel & { aPicks: APickLog[] } {
+  return { ...forwardBookPanel(book, replayNetUsd), aPicks: book.aPicks };
 }
 
 export function bookRoundTrip(book: Book): Book {
@@ -424,8 +456,17 @@ function rollClock(book: Book, tsMs: number): void {
   const week = weekKey(day);
   const equity = book.realizedUsd + openMtm(book);
   if (book.day === null || day > book.day) {
+    const previous = book.day;
     book.day = day;
     book.dayStartEquity = equity;
+    if (book.config.monthlyASelect && previous != null && day.endsWith("-01") && book.config.aReselect) {
+      const next = book.config.aReselect(day);
+      if (next) {
+        book.aPick = next;
+        book.config.aPick = next;
+        book.aPicks.push({ ...next, at: day, reason: "month" });
+      }
+    }
   }
   if (book.week === null || week > book.week) {
     book.week = week;
@@ -489,7 +530,8 @@ function clusterIds(book: Book, productId: string): string[] {
   return book.config.members.includes(productId) ? book.config.members : [productId];
 }
 
-function clusterOf(book: Book, productId: string): string {
+function clusterOf(book: Book, productId: string, tsMs = book.nowMs): string {
+  if (book.config.clusterOf) return book.config.clusterOf(productId, tsMs);
   const ids = clusterIds(book, productId);
   const groups = averageLinkage(ids, (left, right) => {
     if (left === right) return 1;
@@ -499,9 +541,15 @@ function clusterOf(book: Book, productId: string): string {
   return groups.get(productId) ?? productId;
 }
 
-function clusterOpen(book: Book, productId: string): number {
-  const cluster = clusterOf(book, productId);
+function clusterOpen(book: Book, productId: string, tsMs = book.nowMs): number {
+  const cluster = clusterOf(book, productId, tsMs);
   return book.positions.filter((position) => position.clusterId === cluster).length;
+}
+
+/** P5 keeps entry risk until the stop moves, then prices the distance from the fill. */
+function liveOpenRisk(book: Book, position: Position): number {
+  if (!book.config.parity || !(position.stop > position.initialStop)) return position.riskUsd;
+  return openRiskAfterMove(position.units, position.fillPrice, position.stop, position.sLiveBps);
 }
 
 function betaAdd(book: Book, productId: string, notional: number): number {
@@ -550,6 +598,7 @@ function tryEnter(book: Book, opts: {
   tick?: number;
   rawEntry?: number;
   ruleExitTs?: number | null;
+  aConfig?: string | null;
 }): boolean {
   reviewKnownPairs(book, opts.tsMs);
   if (pairEntryBlocked(book, opts.productId)) {
@@ -569,7 +618,7 @@ function tryEnter(book: Book, opts: {
     book.rejected.push({ id: opts.id, reason: blockers.join(",") || "blocked" });
     return false;
   }
-  const openRisk = book.positions.reduce((sum, position) => sum + position.riskUsd, 0);
+  const openRisk = book.positions.reduce((sum, position) => sum + liveOpenRisk(book, position), 0);
   const gross = book.positions.reduce((sum, position) => sum + position.notionalUsd, 0);
   const failed = entryGates({
     openPairs: book.positions.map((position) => position.productId),
@@ -577,7 +626,7 @@ function tryEnter(book: Book, opts: {
     classId: opts.classId,
     classOpen: book.positions.filter((position) => position.classId === opts.classId).length,
     bookOpen: book.positions.length,
-    openInCluster: clusterOpen(book, opts.productId),
+    openInCluster: clusterOpen(book, opts.productId, opts.tsMs),
     openRiskUsd: openRisk,
     addRiskUsd: decision.openRiskUsd,
     grossUsd: gross,
@@ -635,8 +684,9 @@ function tryEnter(book: Book, opts: {
     rawEntry: opts.rawEntry ?? opts.fillPrice,
     initialStop: opts.stop,
     highestClose: null,
-    clusterId: clusterOf(book, opts.productId),
+    clusterId: clusterOf(book, opts.productId, opts.tsMs),
     tick: opts.tick ?? 0.01,
+    aConfig: opts.aConfig ?? null,
   });
   book.submittedByClass[opts.classId] += 1;
   return true;
@@ -764,6 +814,7 @@ function addDFill(book: Book, working: Working, units: number, tsMs: number): vo
     highestClose: null,
     clusterId: clusterOf(book, working.order.pair),
     tick: working.tick,
+    aConfig: null,
   });
 }
 
@@ -914,6 +965,10 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
   }
   if (event.kind === "x1") {
     touchTime(book, event.tsMs);
+    if (event.classId === "A" && book.aPick && event.aConfig && event.aConfig !== book.aPick.config) {
+      book.rejected.push({ id: event.id, reason: "a-config" });
+      return book;
+    }
     const sLive = spreadBps(book, event.bid, event.ask);
     if (sLive == null) {
       book.rejected.push({ id: event.id, reason: "no-book" });
@@ -950,6 +1005,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       priorDailyCloses: event.priorDailyCloses ?? [],
       rawEntry: event.nextOpen,
       ruleExitTs: event.ruleExitTs ?? null,
+      aConfig: event.classId === "A" ? (event.aConfig ?? book.aPick?.config ?? null) : null,
     });
     return book;
   }
@@ -984,8 +1040,8 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       classId: "D",
       classOpen: book.positions.filter((position) => position.classId === "D").length,
       bookOpen: book.positions.length,
-      openInCluster: clusterOpen(book, event.productId),
-      openRiskUsd: book.positions.reduce((sum, position) => sum + position.riskUsd, 0),
+      openInCluster: clusterOpen(book, event.productId, event.placedTs),
+      openRiskUsd: book.positions.reduce((sum, position) => sum + liveOpenRisk(book, position), 0),
       addRiskUsd: decision.openRiskUsd,
       grossUsd: book.positions.reduce((sum, position) => sum + position.notionalUsd, 0),
       addNotionalUsd: decision.notionalUsd,
@@ -1025,8 +1081,11 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
     return book;
   }
   if (event.kind === "bar15") {
+    const phase = event.phase ?? "all";
     const closed = strategyBarClosed(event.startSec, event.nowSec);
-    if (closed) {
+    if (closed && phase === "gap") {
+      touchTime(book, event.startSec * 1000);
+    } else if (closed) {
       book.marks[event.productId] = event.close;
       book.packets.push(...shadowPackets({ members: book.config.members, barStartSec: event.startSec, nowSec: event.nowSec, warming: false }));
       touchTime(book, (event.startSec + 900) * 1000);
@@ -1042,10 +1101,12 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       const hit = intrabarFill(bar, stop, Number.POSITIVE_INFINITY);
       if (hit.kind === "stop" && hit.price != null) {
         const gap = event.open <= stop;
+        if (phase === "gap" && !gap) continue;
         const fill = gap ? event.open : stopFillPrice(stop, position.rawEntry, position.sLiveBps, event.atr1h ?? position.atr1h);
         closePosition(book, position, { tsMs: barTs, fill, kind: "stop", triggerBarTs: barTs, decisionMid: event.close });
         continue;
       }
+      if (phase === "gap") continue;
       const openFill = () => takerSell(event.open, position.sLiveBps);
       if (position.ruleExitTs != null && event.startSec === position.ruleExitTs) {
         closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: "rule", triggerBarTs: barTs, decisionMid: event.close });

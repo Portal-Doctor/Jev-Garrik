@@ -362,7 +362,7 @@ test("completed 15m bars produce the expected A and B event stream", () => {
   }
   const nowSec = Date.parse("2026-03-21T00:00:00.000Z") / 1000;
   const flags = { priceGroupPasses: true, volumeGroupPasses: true, boundarySaved: false };
-  const entries = generateEntries({ bars, nowSec, flags, young: () => true });
+  const entries = generateEntries({ bars, nowSec, flags, young: () => true, lookback: 20, k: 2 });
   const expectedA = daily.flatMap((bar, index) => (classATrigger(daily, index, 20, true) ? [x1EntryTs(bar.date) * 1000] : []));
   const aGot = entries.filter((entry) => entry.classId === "A").map((entry) => entry.tsMs);
   expect(aGot).toEqual(expectedA.filter((ts) => ts < nowSec * 1000));
@@ -451,6 +451,8 @@ test("a completed crash path emits the class C entry at the next 4h close", () =
     nowSec: start + 40 * 86_400,
     flags: { priceGroupPasses: true, volumeGroupPasses: true, boundarySaved: false },
     young: () => true,
+    lookback: 20,
+    k: 2,
   }).filter((entry) => entry.classId === "C");
   expect(entries.map((entry) => `${entry.classId} ${entry.kind} ${new Date(entry.tsMs).toISOString()} ${entry.nextOpen} ${entry.stop} ${entry.target}`)).toEqual([
     "C x1 2026-02-06T04:00:00.000Z 100 93.53571428571429 117",
@@ -497,6 +499,8 @@ test("a completed 1h shock emits the class E entry on the 15m close", () => {
     nowSec: 30 * 3600,
     flags: { priceGroupPasses: true, volumeGroupPasses: true, boundarySaved: false },
     young: () => true,
+    lookback: 20,
+    k: 2,
   });
   expect(entries.map((entry) => `${entry.classId} ${entry.kind} ${new Date(entry.tsMs).toISOString()} ${entry.nextOpen} ${entry.stop}`)).toEqual([
     "E x1 1970-01-02T02:30:00.000Z 103 95.44",
@@ -536,6 +540,8 @@ test("completed 15m bars emit the class D limit at the 4h decision", () => {
     nowSec: origin + 270 * 86_400,
     flags: { priceGroupPasses: true, volumeGroupPasses: true, boundarySaved: false },
     young: () => false,
+    lookback: 20,
+    k: 2,
   }).filter((entry) => entry.classId === "D");
   expect(entries.length).toBe(179);
   expect(entries.slice(0, 3).map((entry) => `${entry.kind} ${new Date(entry.tsMs).toISOString()} ${entry.nextOpen} ${entry.stop} ${entry.target}`)).toEqual([

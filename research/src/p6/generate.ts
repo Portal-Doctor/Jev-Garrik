@@ -19,6 +19,7 @@ import type { ClassId } from "../p3/portfolio";
 import type { ClassBRow } from "../p3/design-rules";
 import { WINDOW_START } from "../p3/f5";
 import type { ForwardEvent } from "./engine";
+import { readForwardPick, type ALookback } from "./select";
 
 export interface FifteenBar {
   productId: string;
@@ -59,11 +60,21 @@ export interface GenerateInput {
   memberOn?: (productId: string, date: string) => boolean;
   young?: (productId: string) => boolean;
   veto?: (date: string) => boolean;
-  /** Official book is A20-k2. */
-  lookback?: 20 | 55;
+  /**
+   * A config under test. The forward book omits both and reads the stamped pick.
+   * There is no built-in config.
+   */
+  lookback?: ALookback;
   k?: number;
+  /** Overrides the stamped pick when lookback and k are omitted. */
+  pick?: { lookback: ALookback; k: number };
   /** Daily bars before the 15m window. In-window days stay on the 15m derivation. */
   earlierDays?: ReadonlyMap<string, readonly SourceDay[]>;
+  /**
+   * Prebuilt class bars. When set, these replace 15m derivation so the series
+   * matches loadPair, including empty days and the listing date.
+   */
+  products?: ReadonlyMap<string, { days: readonly SourceDay[]; hour: readonly BarOHLC[]; four: readonly BarOHLC[]; quarter: readonly BarOHLC[] }>;
 }
 
 function completed(bars: readonly FifteenBar[], nowSec: number): FifteenBar[] {
@@ -167,13 +178,19 @@ export function p5Young(days: readonly SourceDay[]): boolean {
 }
 
 export function generateForward(input: GenerateInput): GenerateResult {
-  const lookback = input.lookback ?? 20;
-  const k = input.k ?? 2;
+  const chosen = input.lookback != null && input.k != null ? { lookback: input.lookback, k: input.k } : (input.pick ?? readForwardPick());
+  const lookback = chosen.lookback;
+  const k = chosen.k;
   const memberOn = input.memberOn ?? (() => true);
   const veto = input.veto ?? (() => false);
-  const ids = [...new Set(input.bars.map((bar) => bar.productId))].sort();
+  const ids = [...new Set([...(input.products?.keys() ?? []), ...input.bars.map((bar) => bar.productId)])].sort();
   const books = new Map<string, DerivedBook>();
   for (const id of ids) {
+    const prepared = input.products?.get(id);
+    if (prepared) {
+      books.set(id, { days: [...prepared.days], hour: [...prepared.hour], four: [...prepared.four], quarter: [...prepared.quarter] });
+      continue;
+    }
     const derived = deriveProduct(input.bars.filter((bar) => bar.productId === id), input.nowSec);
     if (derived) books.set(id, derived);
   }
@@ -184,7 +201,7 @@ export function generateForward(input: GenerateInput): GenerateResult {
     const book = books.get(id);
     if (!book) continue;
     const first = book.days[0]?.date ?? "9999-99-99";
-    const prior = (input.earlierDays?.get(id) ?? []).filter((row) => row.date < "2025-10-11" && row.date < first);
+    const prior = input.products?.has(id) ? [] : (input.earlierDays?.get(id) ?? []).filter((row) => row.date < "2025-10-11" && row.date < first);
     const days = [...prior, ...book.days].filter((row, index, all) => all.findIndex((item) => item.date === row.date) === index);
     days.sort((a, b) => (a.date < b.date ? -1 : 1));
     const listed = days.find((row) => !row.empty)?.date ?? null;

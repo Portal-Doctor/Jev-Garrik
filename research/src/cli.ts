@@ -133,6 +133,9 @@ async function main(): Promise<void> {
     case "p6-stamp-kelly-status":
     case "p6-stamp-amendment-2b":
     case "p6-stamp-amendment-2b-approval":
+    case "p6-stamp-kelly-superseding":
+    case "p6-stamp-forward-a":
+    case "p6-stamp-wide-parity":
       stampP6(command);
       return;
     case "jev-smoke":
