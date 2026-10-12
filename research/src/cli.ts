@@ -48,6 +48,7 @@ import { survivorshipReport } from "./p3/survivorship";
 import { buildP5Report } from "./p5/run";
 import { assertP5OutputPath, P5_V31_RESULTS } from "./p5/output";
 import { assertNoLiveEndpoint, replayInjected, type ForwardEvent } from "./p6/engine";
+import { runPublicPaper } from "./p6/paper-host";
 import { P6_STAMP_COMMANDS, stampP6Record, type P6StampCommand } from "./p6/stamp-records";
 
 const started = boot();
@@ -136,7 +137,12 @@ async function main(): Promise<void> {
     case "p6-stamp-kelly-superseding":
     case "p6-stamp-forward-a":
     case "p6-stamp-wide-parity":
+    case "p6-stamp-d1-parity":
+    case "p6-stamp-kelly-ruling-superseded":
       stampP6(command);
+      return;
+    case "p6-paper":
+      await runPaper();
       return;
     case "jev-smoke":
       await writeJevSmoke();
@@ -147,7 +153,7 @@ async function main(): Promise<void> {
       return;
     default:
       throw new Error(
-        `usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | p5 | jev-smoke | p6-replay | ${P6_STAMP_COMMANDS.join(" | ")}`,
+        `usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | p5 | jev-smoke | p6-replay | p6-paper | ${P6_STAMP_COMMANDS.join(" | ")}`,
       );
   }
 }
@@ -605,6 +611,15 @@ function writeGeometry(): void {
 function stampP6(command: string): void {
   const written = stampP6Record(command as P6StampCommand, repoDataDir());
   console.log(`${command} ${written.sha256}`);
+}
+
+async function runPaper(): Promise<void> {
+  const args = process.argv.slice(3);
+  const products = args.filter((arg) => !arg.startsWith("--"));
+  const dirFlag = args.indexOf("--status-dir");
+  const statusDir = dirFlag >= 0 && args[dirFlag + 1] ? args[dirFlag + 1]! : join(realDataDir(), "runtime", "p6-paper");
+  const listen = args.includes("--listen") ? "127.0.0.1" : null;
+  await runPublicPaper({ products, statusDir, listen });
 }
 
 function p6Replay(): void {

@@ -526,6 +526,8 @@ test("features.ts is the cb accumulator byte for byte, and the amendment record 
   expect(() => assertP6Target("research/data/reports/p6-forward-a.json")).toThrow(/refusing/);
   expect(() => assertP6Target("research/data/reports/p6-kelly-superseding.json")).toThrow(/refusing/);
   expect(() => assertP6Target("research/data/reports/p6-wide-parity.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/products/exchange-products.raw.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/products/usd-spot.json")).toThrow(/refusing/);
   expect(() => assertP6Target("research/data/data-manifest.json")).toThrow(/refusing/);
   expect(() => assertP6Target("research/data/registration-sources/p6-metric-definitions.md")).toThrow(/refusing/);
   const dir = mkdtempSync(join(tmpdir(), "p6-"));

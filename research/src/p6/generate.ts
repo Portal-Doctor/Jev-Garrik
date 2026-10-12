@@ -19,7 +19,7 @@ import type { ClassId } from "../p3/portfolio";
 import type { ClassBRow } from "../p3/design-rules";
 import { WINDOW_START } from "../p3/f5";
 import type { ForwardEvent } from "./engine";
-import { readForwardPick, type ALookback } from "./select";
+import { A_REGISTRATION, readForwardPick, type ALookback } from "./select";
 
 export interface FifteenBar {
   productId: string;
@@ -43,6 +43,8 @@ export interface GeneratedEntry {
   /** Ten daily closes strictly before the entry date. The engine rolls the 10-day exit from these. */
   priorDailyCloses: number[];
   signalDate: string;
+  /** Registered A config that produced this entry. Other classes leave it unset. */
+  aConfig?: string;
 }
 
 export interface GenerateResult {
@@ -170,6 +172,13 @@ function priorCloses(ohlc: readonly { date: string; close: number }[], entryDate
   return slice.map((row) => row.close).filter((close) => Number.isFinite(close));
 }
 
+/** Registered id for the lookback and k that produced a class A entry. */
+export function registeredAConfig(lookback: ALookback, k: number): string {
+  const row = A_REGISTRATION.find((item) => item.lookback === lookback && item.k === k);
+  if (!row) throw new Error(`unregistered A config ${lookback} ${k}`);
+  return row.id;
+}
+
 /** P5 young-listing flag: a known first print and fewer than 200 nonempty days before the universe date. */
 export function p5Young(days: readonly SourceDay[]): boolean {
   const listed = days.some((row) => !row.empty);
@@ -181,6 +190,7 @@ export function generateForward(input: GenerateInput): GenerateResult {
   const chosen = input.lookback != null && input.k != null ? { lookback: input.lookback, k: input.k } : (input.pick ?? readForwardPick());
   const lookback = chosen.lookback;
   const k = chosen.k;
+  const aConfig = registeredAConfig(lookback, k);
   const memberOn = input.memberOn ?? (() => true);
   const veto = input.veto ?? (() => false);
   const ids = [...new Set([...(input.products?.keys() ?? []), ...input.bars.map((bar) => bar.productId)])].sort();
@@ -232,6 +242,7 @@ export function generateForward(input: GenerateInput): GenerateResult {
         dailyAtr: signal.atr,
         priorDailyCloses: priorCloses(inputs.ohlc, new Date(signal.entryTs * 1000).toISOString().slice(0, 10)),
         signalDate: signal.date,
+        aConfig,
       });
     }
     inputs.closeLookback.forEach((bar, index) => {
@@ -375,6 +386,7 @@ export function entriesToEvents(entries: readonly GeneratedEntry[]): ForwardEven
       target: entry.target ?? undefined,
       dailyAtr: entry.dailyAtr,
       priorDailyCloses: entry.priorDailyCloses,
+      ...(entry.aConfig ? { aConfig: entry.aConfig } : {}),
     };
   });
 }

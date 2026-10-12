@@ -7,6 +7,7 @@
  * registration order.
  */
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoRoot } from "../manifest";
@@ -167,7 +168,12 @@ export function forwardPickBody(root = repoRoot()): Record<string, unknown> {
 }
 
 export function readForwardPick(root = repoRoot()): APick {
-  const body = JSON.parse(readFileSync(join(root, "research/data/reports", FORWARD_PICK_FILE), "utf8")) as {
+  const path = join(root, "research/data/reports", FORWARD_PICK_FILE);
+  const bytes = readFileSync(path);
+  const sidecar = readFileSync(path.replace(/\.json$/, ".sha256"), "utf8").trim().split(/\s+/)[0] ?? "";
+  const actual = createHash("sha256").update(bytes).digest("hex");
+  if (actual !== sidecar) throw new Error(`forward A pick hash ${actual} does not match ${sidecar || "missing sidecar"}`);
+  const body = JSON.parse(bytes.toString("utf8")) as {
     chosen: string;
     isEnd: string;
     configs: AIsStat[];

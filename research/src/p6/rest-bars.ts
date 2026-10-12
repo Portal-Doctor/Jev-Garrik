@@ -122,6 +122,22 @@ export function tradesBuilt15m(trades: readonly TradePrint[], bucketSec = REST_G
   return out.sort((a, b) => a.startSec - b.startSec);
 }
 
+/**
+ * Exchange candle rows are [time, low, high, open, close, volume].
+ * The row whose time is the 15m start is the strategy bar. Nothing is fetched.
+ */
+export function barFromExchangeCandles(productId: string, startSec: number, rows: readonly number[][]): OhlcvBar | null {
+  const row = rows.find((item) => item[0] === startSec);
+  if (!row || row.length < 6) return null;
+  const open = row[3]!;
+  const high = row[2]!;
+  const low = row[1]!;
+  const close = row[4]!;
+  const volume = row[5]!;
+  if (!(open > 0) || !(high > 0) || !(low > 0) || !(close > 0)) return null;
+  return { productId, startSec, open, high, low, close, volume };
+}
+
 /** Close-to-close divergence in bps. Null when either close is not positive. */
 export function closeDivergenceBps(restClose: number, tradeClose: number): number | null {
   if (!(restClose > 0) || !(tradeClose > 0)) return null;

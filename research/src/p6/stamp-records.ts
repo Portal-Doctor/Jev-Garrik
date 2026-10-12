@@ -9,7 +9,8 @@ import { stampFromGit, repoRoot, type ArtifactStamp } from "../manifest";
 import { amendment2Body } from "./amendment2";
 import { amendment2aBody } from "./amendment2a";
 import { amendment2bApprovalBody, amendment2bBody } from "./amendment2b";
-import { kellyRulingBody, kellyStatusBody, kellySupersedingBody } from "./kelly";
+import { d1ParityBody } from "./daily";
+import { kellyRulingBody, kellyRulingSupersededBody, kellyStatusBody, kellySupersedingBody } from "./kelly";
 import { forwardPickBody } from "./select";
 import { wideParityReport } from "./parity";
 import { assertInsideRepo, assertP6Target, writeP6 } from "./write";
@@ -25,6 +26,8 @@ export const P6_STAMP_COMMANDS = [
   "p6-stamp-kelly-superseding",
   "p6-stamp-forward-a",
   "p6-stamp-wide-parity",
+  "p6-stamp-d1-parity",
+  "p6-stamp-kelly-ruling-superseded",
 ] as const;
 
 export type P6StampCommand = (typeof P6_STAMP_COMMANDS)[number];
@@ -72,6 +75,10 @@ function bodyOf(command: P6StampCommand, root = repoRoot()): { file: string; bod
       return { file: "p6-forward-a.json", body: forwardPickBody(root) };
     case "p6-stamp-wide-parity":
       return { file: "p6-wide-parity.json", body: wideParityReport() };
+    case "p6-stamp-d1-parity":
+      return { file: "p6-d1-parity.json", body: d1ParityBody(root) };
+    case "p6-stamp-kelly-ruling-superseded":
+      return { file: "p6-kelly-ruling-superseded.json", body: { ...kellyRulingSupersededBody() } };
     default: {
       const never: never = command;
       throw new Error(`unknown P6 stamp ${never}`);

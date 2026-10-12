@@ -28,7 +28,8 @@ import { netBps } from "../p5/walk";
 import { momentumBlocked, momentumCrashOn } from "../p5/guards";
 import { isMondayCloseBar, x1EntryTs } from "../p5/run";
 import { assignBetas, averageLinkage, betaWeight, openRiskAfterMove } from "../p5/risk";
-import type { APick, APickLog } from "./select";
+import { forwardClusterBeta, latestClusterDate, type MemberCloses } from "./clusters";
+import { readForwardPick, type APick, type APickLog } from "./select";
 import { daysBetween, weekKey } from "../p5/stats";
 import { shadowPackets, type ShadowPacket } from "./jev-shadow";
 import { bookPanel, parity7d, weeklyHaltsInLast6, type BookPanel } from "./review";
@@ -63,6 +64,10 @@ export interface BookConfig {
   monthlyASelect?: boolean;
   /** Scores the expanded IS. Called at 00:00 UTC on the 1st when the flag is on. */
   aReselect?: (asOf: string) => APick | null;
+  /** Daily closes for the forward cluster and beta schedule. Parity passes clusterOf instead. */
+  memberCloses?: readonly MemberCloses[];
+  btcCloses?: readonly { date: string; close: number }[];
+  clusterMemberOn?: (productId: string, date: string) => boolean;
 }
 
 export interface PairBackstopLog {
@@ -103,8 +108,6 @@ export interface Position {
   pendingExit: string | null;
   /** Monday 01:00 (or another open) the held-set exit fills at. Unix seconds. */
   pendingExitTs: number | null;
-  /** Injected rule-exit open, unix seconds. Live and parity entries leave this empty. */
-  ruleExitTs: number | null;
   /** Bar open before the entry spread. Stop deduction and the 30-day R use this. */
   rawEntry: number;
   /** Stop at entry, before the trail. The 30-day unrealized R uses rawEntry minus this. */
@@ -182,6 +185,9 @@ export interface Book {
   momentumDates: string[];
   haltWeeks: string[];
   clusterMonth: string | null;
+  /** Latest month start or fold start whose 60-day clusters are on the book. */
+  clusterAsOf: string | null;
+  forwardClusters: Record<string, string>;
   aPick: APick | null;
   aPicks: APickLog[];
   incidents: string[];
@@ -213,7 +219,6 @@ export type ForwardEvent =
       target?: number;
       dailyAtr?: number;
       priorDailyCloses?: number[];
-      ruleExitTs?: number;
       /** Registered A config that produced this entry. */
       aConfig?: string;
     }
@@ -276,7 +281,7 @@ function emptyClasses(): Record<ClassId, ClassCurve> {
 }
 
 export function freshBook(config: Partial<BookConfig> = {}): Book {
-  const aPick = config.aPick ?? null;
+  const aPick = config.aPick !== undefined ? config.aPick : config.parity ? null : readForwardPick();
   return {
     config: {
       members: config.members ?? [],
@@ -285,6 +290,9 @@ export function freshBook(config: Partial<BookConfig> = {}): Book {
       aPick,
       monthlyASelect: config.monthlyASelect === true,
       aReselect: config.aReselect,
+      memberCloses: config.memberCloses,
+      btcCloses: config.btcCloses,
+      clusterMemberOn: config.clusterMemberOn,
     },
     nowMs: 0,
     day: null,
@@ -315,6 +323,8 @@ export function freshBook(config: Partial<BookConfig> = {}): Book {
     momentumDates: [],
     haltWeeks: [],
     clusterMonth: null,
+    clusterAsOf: null,
+    forwardClusters: {},
     aPick,
     aPicks: aPick ? [{ ...aPick, reason: "forward-bar-1" }] : [],
     incidents: [],
@@ -459,6 +469,7 @@ function rollClock(book: Book, tsMs: number): void {
     const previous = book.day;
     book.day = day;
     book.dayStartEquity = equity;
+    refreshForwardClusters(book, day);
     if (book.config.monthlyASelect && previous != null && day.endsWith("-01") && book.config.aReselect) {
       const next = book.config.aReselect(day);
       if (next) {
@@ -530,8 +541,28 @@ function clusterIds(book: Book, productId: string): string[] {
   return book.config.members.includes(productId) ? book.config.members : [productId];
 }
 
+function refreshForwardClusters(book: Book, day: string): void {
+  const closes = book.config.memberCloses;
+  if (!closes || closes.length === 0 || book.config.clusterOf) return;
+  const asOf = latestClusterDate(day);
+  if (!asOf || asOf === book.clusterAsOf) return;
+  const computed = forwardClusterBeta(closes, book.config.btcCloses ?? [], asOf, book.config.clusterMemberOn);
+  const clusters: Record<string, string> = {};
+  for (const [id, cluster] of computed.clusters) clusters[id] = cluster;
+  book.forwardClusters = clusters;
+  book.clusterAsOf = asOf;
+  const betas: Record<string, number | null> = {};
+  for (const [id, beta] of computed.betas) betas[id] = beta;
+  book.betas = betas;
+}
+
 function clusterOf(book: Book, productId: string, tsMs = book.nowMs): string {
   if (book.config.clusterOf) return book.config.clusterOf(productId, tsMs);
+  if (book.config.memberCloses && book.config.memberCloses.length > 0) {
+    const day = tsMs > 0 ? new Date(tsMs).toISOString().slice(0, 10) : book.day;
+    if (day) refreshForwardClusters(book, day);
+    return book.forwardClusters[productId] ?? productId;
+  }
   const ids = clusterIds(book, productId);
   const groups = averageLinkage(ids, (left, right) => {
     if (left === right) return 1;
@@ -597,7 +628,6 @@ function tryEnter(book: Book, opts: {
   priorDailyCloses?: number[];
   tick?: number;
   rawEntry?: number;
-  ruleExitTs?: number | null;
   aConfig?: string | null;
 }): boolean {
   reviewKnownPairs(book, opts.tsMs);
@@ -680,7 +710,6 @@ function tryEnter(book: Book, opts: {
     priorDailyCloses: opts.priorDailyCloses ?? [],
     pendingExit: null,
     pendingExitTs: null,
-    ruleExitTs: opts.ruleExitTs ?? null,
     rawEntry: opts.rawEntry ?? opts.fillPrice,
     initialStop: opts.stop,
     highestClose: null,
@@ -808,7 +837,6 @@ function addDFill(book: Book, working: Working, units: number, tsMs: number): vo
     priorDailyCloses: [],
     pendingExit: null,
     pendingExitTs: null,
-    ruleExitTs: null,
     rawEntry: fillPrice,
     initialStop: working.stop,
     highestClose: null,
@@ -1004,7 +1032,6 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       dailyAtr: event.dailyAtr ?? 0,
       priorDailyCloses: event.priorDailyCloses ?? [],
       rawEntry: event.nextOpen,
-      ruleExitTs: event.ruleExitTs ?? null,
       aConfig: event.classId === "A" ? (event.aConfig ?? book.aPick?.config ?? null) : null,
     });
     return book;
@@ -1108,10 +1135,6 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       }
       if (phase === "gap") continue;
       const openFill = () => takerSell(event.open, position.sLiveBps);
-      if (position.ruleExitTs != null && event.startSec === position.ruleExitTs) {
-        closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: "rule", triggerBarTs: barTs, decisionMid: event.close });
-        continue;
-      }
       if (position.pendingExitTs != null && event.startSec >= position.pendingExitTs) {
         closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: "rule", triggerBarTs: barTs, decisionMid: event.close });
         continue;
@@ -1141,7 +1164,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
         }
         const barDate = dateOfTs(event.startSec);
         const entryDate = utcDay(position.entryTs);
-        if (position.ruleExitTs == null && barDate > entryDate) {
+        if (barDate > entryDate) {
           const heldDays = daysBetween(entryDate, barDate);
           const distance = position.rawEntry - position.initialStop;
           const unrealizedR = distance > 0 ? (event.close - position.rawEntry) / distance : 0;

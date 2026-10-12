@@ -392,14 +392,19 @@ test("completed 15m bars produce the expected A and B event stream", () => {
     "A x1 2026-02-14T01:00:00.000Z SYN-USD",
   ]);
   expect(stream).toContain("B x1 2026-03-02T01:00:00.000Z SYN-USD");
+  expect(entries.find((entry) => entry.classId === "A")?.aConfig).toBe("A20-k2");
   const quote = quoteAt(100);
   expect(halfSpreadBps(quote.bid, quote.ask)).toBeCloseTo(5, 8);
-  const book = freshBook({ members: ["SYN-USD"] });
+  const book = freshBook({
+    members: ["SYN-USD"],
+    aPick: { config: "A20-k2", lookback: 20, k: 2, at: "2026-02-11", stats: [] },
+  });
   const first = entriesToEvents(entries.filter((entry) => entry.classId === "A").slice(0, 1))[0];
   if (first && first.kind === "x1") {
     applyForward(book, { kind: "clock", tsMs: first.tsMs });
     applyForward(book, first);
     expect(book.positions[0]?.classId).toBe("A");
+    expect(book.positions[0]?.aConfig).toBe("A20-k2");
     expect(book.positions[0]?.fillPrice).toBeCloseTo(x1FillPrice(first.nextOpen, "buy", halfSpreadBps(first.bid, first.ask)!), 8);
   }
 });

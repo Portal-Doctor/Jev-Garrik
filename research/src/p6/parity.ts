@@ -15,7 +15,8 @@ import { foldStartDates } from "../p3/schedule";
 import { btcVeto, type BarOHLC, type BtcDay } from "../p3/signals";
 import { ema, wilderAtr } from "../p2/indicators";
 import { daysBetween } from "../p5/stats";
-import { A_REGISTRATION } from "./select";
+import { assertDailyInventory } from "./daily";
+import { A_REGISTRATION, type APick } from "./select";
 import { registeredFlags, type RegistrationFlagSource } from "../p5/flags";
 import { monthlyClusters } from "../p5/book";
 import { applyForward, freshBook, type Book, type ForwardEvent } from "./engine";
@@ -222,6 +223,7 @@ export function replayFrozenWindow(opts: ReplayOpts = {}): { diffs: ParityDiff[]
   const k = opts.k ?? 2;
   const bookId = opts.book ?? `A${lookback}-k${k}`;
   const root = dataDir();
+  assertDailyInventory(join(root, "daily"));
   const registration = JSON.parse(readFileSync(join(root, "reports/p4-registration.json"), "utf8")) as RegistrationFlagSource;
   const membership = JSON.parse(readFileSync(join(root, "reports/universe-membership.json"), "utf8")) as { members: { date: string; names: string[] }[] };
   const isMember = memberFn(membership.members);
@@ -335,6 +337,7 @@ export function replayFrozenWindow(opts: ReplayOpts = {}): { diffs: ParityDiff[]
         decisionMid: nextOpen,
         dailyAtr: entry.dailyAtr,
         priorDailyCloses: entry.priorDailyCloses,
+        ...(entry.classId === "A" ? { aConfig: bookId } : {}),
       });
     }
   }
@@ -365,6 +368,7 @@ export function replayFrozenWindow(opts: ReplayOpts = {}): { diffs: ParityDiff[]
   const book = freshBook({
     members: [...traded],
     parity: { riskUsd: 60, sBtBps: 5 },
+    aPick: parityAPick(bookId, lookback, k),
     clusterOf: (productId, tsMs) => {
       const entryDate = dayOf(Math.floor(tsMs / 1000));
       let chosen = productId;
@@ -414,6 +418,22 @@ export function replayFrozenWindow(opts: ReplayOpts = {}): { diffs: ParityDiff[]
     }
   });
   return { diffs, published, engine: book.closed, entries, weeks: generated.weeks };
+}
+
+function parityAPick(bookId: string, lookback: 20 | 55, k: number): APick {
+  return {
+    config: bookId,
+    lookback,
+    k,
+    at: "parity",
+    stats: A_REGISTRATION.map((row) => ({
+      config: row.id,
+      l80NetUsdPerMonth: 0,
+      totalNetUsd: 0,
+      kept: 0,
+      purgedOpen: 0,
+    })),
+  };
 }
 
 const WIDE = { entryStart: "2025-11-11", entryEnd: "2026-10-06", fifteenFrom: "2025-10-11", walkThrough: "2026-10-11", allNames: true };

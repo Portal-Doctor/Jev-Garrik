@@ -87,6 +87,8 @@ const FROZEN = new Set([
   "p6-kelly-superseding.sha256",
   "p6-wide-parity.json",
   "p6-wide-parity.sha256",
+  "exchange-products.raw.json",
+  "usd-spot.json",
   "data-manifest.json",
   "derived-manifest.json",
 ]);

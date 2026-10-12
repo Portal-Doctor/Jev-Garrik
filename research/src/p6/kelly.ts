@@ -79,6 +79,34 @@ export function kellyRulingBody(): {
   };
 }
 
+/**
+ * Marks p6-kelly-ruling.json superseded. The ruling file is not edited.
+ * Its registeredRiskUsd 60 line is not the forward size.
+ */
+export function kellyRulingSupersededBody(): {
+  role: "supersession";
+  supersedes: string;
+  supersedesSha256: string;
+  superseded: true;
+  supersededLine: string;
+  text: string;
+  rulingFileEdited: false;
+  unpromotedRiskUsd: 20;
+  bankrollUsd: 8000;
+} {
+  return {
+    role: "supersession",
+    supersedes: "research/data/reports/p6-kelly-ruling.json",
+    supersedesSha256: "e099c0223e35712e78e4b7f0ef19f72d8f312a539a75e4d7f397816f57cd8e48",
+    superseded: true,
+    supersededLine: "registeredRiskUsd: 60",
+    text: "p6-kelly-ruling.json (e099c022) is superseded. Its registeredRiskUsd 60 line is not the forward size. Forward paper stays at $20 until promotion. The ruling file is not edited.",
+    rulingFileEdited: false,
+    unpromotedRiskUsd: UNPROMOTED_RISK_USD,
+    bankrollUsd: PAPER_BANKROLL_USD,
+  };
+}
+
 /** Supersedes p6-kelly-status.json. The forward size is $20; $60 is not restated. */
 export function kellySupersedingBody(): {
   role: "label";
