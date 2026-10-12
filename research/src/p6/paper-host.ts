@@ -74,6 +74,8 @@ export interface PaperHost {
   reconnects: number;
   gapEvents: number;
   l2Gaps: number;
+  restAccepted: number;
+  restFallback: number;
   lastL2Seq: Map<string, number>;
   trades: TradePrint[];
   rest: Map<string, RestSlot>;
@@ -208,6 +210,8 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     reconnects: 0,
     gapEvents: 0,
     l2Gaps: 0,
+    restAccepted: 0,
+    restFallback: 0,
     lastL2Seq: new Map(),
     trades: [],
     rest: new Map(),
@@ -600,6 +604,7 @@ export function acceptRestBar(host: PaperHost, bar: OhlcvBar): "accepted" | "dro
     slot.inflight = false;
     slot.fallback = false;
   }
+  host.restAccepted += 1;
   pushBar(host, bar);
   return "accepted";
 }
@@ -614,6 +619,7 @@ export function fallbackTradesBar(host: PaperHost, slot: RestSlot): OhlcvBar | n
   slot.done = true;
   slot.fallback = true;
   slot.inflight = false;
+  host.restFallback += 1;
   const prints = host.trades.filter((trade) => trade.productId === slot.productId && trade.tsSec >= slot.barStartSec && trade.tsSec < slot.barStartSec + 900);
   const built = tradesBuilt15m(prints).find((bar) => bar.startSec === slot.barStartSec) ?? null;
   const decision = restOrTrades({ restOk: false, deadlinePassed: true });
@@ -639,6 +645,11 @@ export function hostStatus(host: PaperHost): Record<string, unknown> {
     incidents: host.book.incidents.length,
     incidentLines: host.book.incidents.slice(-20),
     completedMidBars: host.book.mids.completed.length,
+    quotedProducts: Object.keys(host.book.quotes).length,
+    restAccepted: host.restAccepted,
+    restFallback: host.restFallback,
+    trades: host.trades.length,
+    lastBar: host.lastBar,
     open: host.book.positions.length,
     closed: host.book.closed.length,
   };

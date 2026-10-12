@@ -25,6 +25,7 @@ import {
   dueRest,
   fallbackTradesBar,
   framesForShard,
+  hostStatus,
   l2SequenceOk,
   loadPaperState,
   noteRest429,
@@ -381,6 +382,7 @@ test("socket sequence counts subscriptions, heartbeats, and trades, not only lev
   expect(host.needsReconnect[0]).toBe(false);
   expect(host.book.quotes["BTC-USD"]?.bid).toBe(1.5);
   expect(host.book.quotes["BTC-USD"]?.ask).toBe(3);
+  expect(hostStatus(host).quotedProducts).toBe(2);
   frame(7, "l2_data", [{ type: "update", product_id: "ETH-USD", updates: [{ side: "bid", price_level: "9", new_quantity: "2" }] }]);
   expect(host.l2Gaps).toBe(1);
 });
