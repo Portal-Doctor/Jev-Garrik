@@ -1,0 +1,21 @@
+{
+  "commitSha": "1931d12ec5de2a4baa9aa65f9a97958b49f55e89",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T20:57:06.778Z",
+  "phaseId": "P6",
+  "approvedBy": "Brian",
+  "approvedAt": "2026-10-12T18:35:00Z",
+  "confirmedBy": [
+    "Quant",
+    "Trader"
+  ],
+  "approvalOf": "wording",
+  "bindsToFileHash": false,
+  "amendmentV61Sha256": "bb0c02bda3a8acab7f4f2127462b78b9e63792a88155c2ea08eba054e7bd0af1",
+  "amendmentV61File": "research/data/reports/p6-amendment-v61.json",
+  "priorApprovalSha256": "f20ca24a4935b5ae36b01bd6a9ceee5eba57c8434757aedda536725e19ac663d",
+  "priorApprovalFile": "research/data/reports/p6-amendment-v61-approval.json",
+  "priorApprovalEdited": false,
+  "amendmentV6Edited": false,
+  "note": "Wording-only. Cites the stamped V6.1 record bb0c02bd. Does not edit the earlier approval f20ca24a, and does not bind the approval to a file hash."
+}

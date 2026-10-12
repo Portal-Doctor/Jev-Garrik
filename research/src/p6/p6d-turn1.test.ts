@@ -332,6 +332,7 @@ test("V6.1 is a new wording record and does not edit V6", () => {
   expect(approval.confirmedBy).toEqual(["Quant", "Trader"]);
   expect(() => stampP6Record("p6-stamp-amendment-v61")).toThrow(/refusing to overwrite/);
   expect(() => stampP6Record("p6-stamp-amendment-v61-approval")).toThrow(/refusing to overwrite/);
+  expect(() => stampP6Record("p6-stamp-amendment-v61-cite")).toThrow(/refusing to overwrite/);
   expect(() => stampP6Record("p6-stamp-amendment-v6")).toThrow(/refusing to overwrite/);
 });
 

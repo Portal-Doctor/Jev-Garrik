@@ -47,6 +47,8 @@ const FROZEN = new Set([
   "p6-amendment-v61.sha256",
   "p6-amendment-v61-approval.json",
   "p6-amendment-v61-approval.sha256",
+  "p6-amendment-v61-cite.json",
+  "p6-amendment-v61-cite.sha256",
   "p4-approval.json",
   "p4-approval.sha256",
   "p5-v31-approval.json",
