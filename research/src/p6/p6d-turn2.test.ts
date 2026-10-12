@@ -40,6 +40,7 @@ import {
 import { readFileSync } from "node:fs";
 import type { Book } from "./engine";
 import { decodeLease, HOT_KEY, LEASE_KEY, LEASE_META_KEY, memoryKv, renewLease, runInvocation, tryAcquire } from "./relay";
+import { stampP6Record } from "./stamp-records";
 import { hostHolder, LEASE_POLL_MS, persistRun } from "./vercel-live";
 
 test("a failed save keeps the lease, and a lost lease stops the holder", async () => {
@@ -538,6 +539,8 @@ test("the reworded handover is a new wording record", () => {
   expect(approval.bindsToFileHash).toBe(false);
   expect(approval.confirmedBy).toEqual(["Quant", "Trader"]);
   expect(approval.amendmentV61Edited).toBe(false);
+  expect(() => stampP6Record("p6-stamp-amendment-v62")).toThrow(/refusing to overwrite/);
+  expect(() => stampP6Record("p6-stamp-amendment-v62-approval")).toThrow(/refusing to overwrite/);
 });
 
 test("the next holder records a failed final save as an uncovered gap", async () => {
