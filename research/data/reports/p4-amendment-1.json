@@ -1,0 +1,40 @@
+{
+  "commitSha": "1550a0cfe2cbf2307002c16f6675162b12abe1db",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-11T19:55:02.584Z",
+  "phaseId": "P5",
+  "registrationSha256": "49bc506092114e2dec3e3ec73faa1adad4afdf04b0941d4c7b01bd22cd2317f3",
+  "approvedBy": "Brian",
+  "approvedAt": "2026-10-11T19:45:00Z",
+  "registrationEdited": false,
+  "note": "Post-hash amendments approved by Brian. The registration file was not edited. None of these change rules, grids, or N.",
+  "amendments": [
+    {
+      "id": "a",
+      "subject": "A in-sample tie-break",
+      "text": "If two of A configs tie on the in-sample selection statistic, take the higher IS total net $, then the earlier config in registration order.",
+      "precision": "A tie means equal after rounding to $0.01. That rounding applies to the selection statistic and to the IS total net $.",
+      "registrationOrder": [
+        "A20-k2",
+        "A20-k2.5",
+        "A20-k3",
+        "A55-k2",
+        "A55-k2.5",
+        "A55-k3"
+      ],
+      "registrationOrderNote": "The registration names the grid as A20 then A55 and does not list the six ids. This order is lookback 20 then 55, and within each lookback the stop multiple 2, then 2.5, then 3."
+    },
+    {
+      "id": "b",
+      "subject": "Forward 5-stream Holm",
+      "text": "A stream without a valid forward p enters the forward 5-stream Holm with p = 1, so the family stays 5.",
+      "precision": "A stream with n < 30 enters with p = 1 and is reported not testable."
+    },
+    {
+      "id": "c",
+      "subject": "80 percent bounds",
+      "text": "Every 80 percent bound is one-sided. U80 is the 80th percentile and L80 is the 20th percentile.",
+      "precision": "Use 2,000 draws of non-overlapping 7-day blocks aligned to Monday 00:00 UTC, resampled with replacement. Zero-trade weeks count as $0. Percentiles use linear interpolation. The seed and the draw count are recorded with the result."
+    }
+  ]
+}

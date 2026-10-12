@@ -1,7 +1,7 @@
 /**
  * Design rules that the geometry scan and the registration both need.
  * Numbers come from trading-design §1, §3 and §6, the addendum, and the P3 review.
- * The $20 paper minimum when the Kelly bound is non-positive is Brian's choice and is not applied here.
+ * A non-positive Kelly bound trades at the $20 paper minimum.
  */
 
 import { perTradeFloor } from "../../vendor/87b35d0/fees.ts";
@@ -24,8 +24,10 @@ export const NO_REENTRY_MS = 24 * 3_600_000;
 export const CLASS_B_MAX_NAMES = 4;
 /** Disaster stop is entry minus 3 × daily ATR. k = 4 is the name cap, not this multiple. */
 export const CLASS_B_DISASTER_ATR = 3;
-/** At most two open positions in one correlation cluster. */
-export const CLUSTER_MAX_OPEN = 2;
+/** At most three open positions in one correlation cluster. */
+export const CLUSTER_MAX_OPEN = 3;
+/** A non-positive Kelly bound uses this paper size. */
+export const PAPER_MINIMUM_USD = 20;
 /** BTC-beta-weighted notional cap, in dollars. */
 export const BETA_WEIGHTED_NOTIONAL_CAP_USD = 6_000;
 /** Risk fraction ceiling: min(0.75%, half Kelly). */
@@ -37,13 +39,13 @@ export interface FeeProfile {
   takerBps: number | null;
 }
 
-/** Section 1 profiles. The Coinbase tier is Brian's placeholder and is not a number. */
+/** Section 1 profiles. Coinbase Advanced Trade Intro is maker 50 and taker 90. */
 export const FEE_PROFILES: readonly FeeProfile[] = [
   { id: "zero", makerBps: 0, takerBps: 0 },
   { id: "10-10", makerBps: 10, takerBps: 10 },
   { id: "25-40", makerBps: 25, takerBps: 40 },
   { id: "kraken-40-80", makerBps: 40, takerBps: 80 },
-  { id: "coinbase-at-brian-tier", makerBps: null, takerBps: null },
+  { id: "coinbase-at-brian-tier", makerBps: 50, takerBps: 90 },
 ];
 
 /**
@@ -62,12 +64,19 @@ export function section1HurdleBps(costBps: number, stopBps: number): number {
   return costBps + Math.max(25, 0.15 * stopBps);
 }
 
-export function classAChaseSkip(close: number, priorHigh: number, atr: number): boolean {
-  return atr > 0 && close - priorHigh > 0.5 * atr;
+/** Skip when the X1 entry, the next 1h open, is above the signal close plus half a daily ATR. */
+export function classAChaseSkip(entryPrice: number, signalClose: number, atr: number): boolean {
+  return atr > 0 && entryPrice > signalClose + 0.5 * atr;
 }
 
-export function classAExit(close: number, prior10DayLow: number, heldDays: number, unrealizedR: number): boolean {
-  if (close < prior10DayLow) return true;
+/** True when ten prior daily closes exist and this close is strictly below the lowest of them. */
+export function classATenDayExit(close: number, priorCloses: readonly number[]): boolean {
+  if (priorCloses.length < 10) return false;
+  return close < Math.min(...priorCloses.slice(-10));
+}
+
+export function classAExit(close: number, prior10DayClose: number, heldDays: number, unrealizedR: number): boolean {
+  if (close < prior10DayClose) return true;
   return heldDays >= 30 && unrealizedR < 1;
 }
 
@@ -238,8 +247,9 @@ export function betaAllows(betaWeightedNotionalUsd: number): boolean {
   return betaWeightedNotionalUsd <= BETA_WEIGHTED_NOTIONAL_CAP_USD;
 }
 
-export function haltTripped(dailyLossUsd: number, weeklyLossUsd: number, bookPnlUsd: number): boolean {
-  return dailyLossUsd >= DAILY_HALT_USD || weeklyLossUsd >= WEEKLY_HALT_USD || bookPnlUsd <= BOOK_HALT_USD;
+/** The book argument is drawdown from peak equity, in dollars. */
+export function haltTripped(dailyLossUsd: number, weeklyLossUsd: number, bookDrawdownUsd: number): boolean {
+  return dailyLossUsd >= DAILY_HALT_USD || weeklyLossUsd >= WEEKLY_HALT_USD || bookDrawdownUsd >= -BOOK_HALT_USD;
 }
 
 export function backstopTripped(dailyLossUsd: number, pairLossUsd: number, bookDrawdownUsd: number): boolean {
@@ -248,8 +258,9 @@ export function backstopTripped(dailyLossUsd: number, pairLossUsd: number, bookD
 
 /**
  * Kelly = E/Var on the lower 80% bound of realized net R, then half of that, capped at 0.75%.
- * A non-positive bound or a non-positive variance returns null, so the hook adds no size.
- * Whether a non-positive bound trades at the $20 paper minimum is open (Brian's choice).
+ * A non-positive bound or a non-positive variance returns null.
+ * kellyRiskUsd turns a null or non-positive lower-80% bound into the $20 paper minimum.
+ * A small positive fraction may size below $20. A non-positive bankroll does not raise it.
  */
 export function kellyFraction(meanNetR: number, variance: number): number | null {
   if (!(meanNetR > 0) || !(variance > 0)) return null;
@@ -259,7 +270,7 @@ export function kellyFraction(meanNetR: number, variance: number): number | null
 }
 
 export function kellyRiskUsd(riskUsd: number, fraction: number | null, bankrollUsd: number): number {
-  if (fraction == null || !(bankrollUsd > 0)) return 0;
+  if (fraction == null || !(fraction > 0)) return PAPER_MINIMUM_USD;
   return Math.min(riskUsd, fraction * bankrollUsd);
 }
 

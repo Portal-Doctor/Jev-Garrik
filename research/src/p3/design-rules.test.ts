@@ -6,6 +6,7 @@ import {
   betaAllows,
   classAChaseSkip,
   classAExit,
+  classATenDayExit,
   classBDisasterStop,
   classBHeld,
   classBSelected,
@@ -34,9 +35,12 @@ import {
   x1FillPrice,
 } from "./design-rules";
 
-test("class A skips a chase beyond half an ATR and exits on the 10-day low or a 30-day sub-1R hold", () => {
-  expect(classAChaseSkip(104, 100, 10)).toBe(false);
-  expect(classAChaseSkip(106, 100, 10)).toBe(true);
+test("class A skips a 1h open above the signal close plus half an ATR, and exits on the prior 10 closes", () => {
+  expect(classAChaseSkip(105, 100, 10)).toBe(false);
+  expect(classAChaseSkip(105.01, 100, 10)).toBe(true);
+  expect(classATenDayExit(9, Array(10).fill(10))).toBe(true);
+  expect(classATenDayExit(10, Array(10).fill(10))).toBe(false);
+  expect(classATenDayExit(9, Array(9).fill(10))).toBe(false);
   expect(classAExit(9, 10, 1, 2)).toBe(true);
   expect(classAExit(11, 10, 30, 0.9)).toBe(true);
   expect(classAExit(11, 10, 29, 0.9)).toBe(false);
@@ -114,7 +118,7 @@ test("section 1 costs, one name, 24h, and the dollar caps", () => {
   const row = stressRow(40);
   expect(row).toEqual({ baseBps: 15, stressBps: 30 });
   expect(FEE_PROFILES.map((profile) => profile.id)).toEqual(["zero", "10-10", "25-40", "kraken-40-80", "coinbase-at-brian-tier"]);
-  expect(FEE_PROFILES.find((profile) => profile.id === "coinbase-at-brian-tier")?.takerBps).toBeNull();
+  expect(FEE_PROFILES.find((profile) => profile.id === "coinbase-at-brian-tier")).toEqual({ id: "coinbase-at-brian-tier", makerBps: 50, takerBps: 90 });
   expect(section1CostBps(0, 10)).toBe(150);
   expect(section1CostBps(1, 10)).toBe(100);
   expect(section1HurdleBps(100, 200)).toBe(130);
@@ -129,22 +133,23 @@ test("section 1 costs, one name, 24h, and the dollar caps", () => {
 });
 
 test("clusters, beta, halts, backstops, Kelly, and class kills", () => {
-  expect(clusterAllows(1)).toBe(true);
-  expect(clusterAllows(2)).toBe(false);
+  expect(clusterAllows(2)).toBe(true);
+  expect(clusterAllows(3)).toBe(false);
   expect(betaAllows(6_000)).toBe(true);
   expect(betaAllows(6_001)).toBe(false);
   expect(haltTripped(240, 0, 0)).toBe(true);
   expect(haltTripped(0, 480, 0)).toBe(true);
-  expect(haltTripped(0, 0, -1_600)).toBe(true);
-  expect(haltTripped(239, 479, -1_599)).toBe(false);
+  expect(haltTripped(0, 0, 1_600)).toBe(true);
+  expect(haltTripped(239, 479, 1_599)).toBe(false);
   expect(backstopTripped(900, 0, 0)).toBe(true);
   expect(backstopTripped(0, 500, 0)).toBe(true);
   expect(backstopTripped(0, 0, 8_000)).toBe(true);
   expect(kellyFraction(0.2, 1)).toBeCloseTo(0.0075, 8);
   expect(kellyFraction(0.01, 1)).toBeCloseTo(0.005, 8);
   expect(kellyFraction(0, 1)).toBeNull();
-  expect(kellyRiskUsd(60, null, 10_000)).toBe(0);
+  expect(kellyRiskUsd(60, null, 10_000)).toBe(20);
   expect(kellyRiskUsd(60, 0.005, 1_000)).toBe(5);
+  expect(kellyRiskUsd(60, 0.005, 0)).toBe(0);
   expect(classKill({ n: 10, meanGrossBps: -1, upper80Bps: -1, hurdleBps: 1 })).toBe("insufficient");
   expect(classKill({ n: 30, meanGrossBps: -1, upper80Bps: 0, hurdleBps: 1 })).toBe("kill");
   expect(classKill({ n: 30, meanGrossBps: 1, upper80Bps: 2, hurdleBps: 1 })).toBe("keep");

@@ -15,7 +15,8 @@
  *   bun run research/src/cli.ts refresh-reports
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { boot } from "./index";
 import { assertCleanWorkTree, stampFromGit, type ArtifactStamp } from "./manifest";
@@ -44,6 +45,8 @@ import { loadPair, scanTwoPass } from "./p3/geometry-run";
 import { jevSmoke } from "./p3/jev";
 import { assertScanSchema } from "./p3/scan-schema";
 import { survivorshipReport } from "./p3/survivorship";
+import { buildP5Report } from "./p5/run";
+import { assertP5OutputPath, P5_V31_RESULTS } from "./p5/output";
 
 const started = boot();
 if (!started.ok) {
@@ -115,6 +118,9 @@ async function main(): Promise<void> {
     case "geometry":
       writeGeometry();
       return;
+    case "p5":
+      p5();
+      return;
     case "jev-smoke":
       await writeJevSmoke();
       return;
@@ -124,7 +130,7 @@ async function main(): Promise<void> {
       return;
     default:
       throw new Error(
-        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | jev-smoke",
+        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | p5 | jev-smoke",
       );
   }
 }
@@ -577,6 +583,19 @@ function writeGeometry(): void {
     writeJson(join(paths.reports, name), body);
   }
   console.log(`geometry names ${scan.warmup.names} fifteen ${fifteen.dataRootHash} daily ${daily.dataRootHash}`);
+}
+
+function p5(): void {
+  requireFrozenWrites();
+  const artifact = stamp("P5");
+  const report = buildP5Report(artifact, realDataDir());
+  const out = join(paths.reports, P5_V31_RESULTS);
+  assertP5OutputPath(out);
+  writeJson(out, report);
+  const fileHash = createHash("sha256").update(readFileSync(out)).digest("hex");
+  const sidecar = join(paths.reports, "p5-v31-results.sha256");
+  writeFileSync(sidecar, `${fileHash}  research/data/reports/${P5_V31_RESULTS}\n`);
+  console.log(`p5 v31 ${fileHash}`);
 }
 
 async function writeJevSmoke(): Promise<void> {

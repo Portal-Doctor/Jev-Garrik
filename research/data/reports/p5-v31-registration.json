@@ -1,0 +1,229 @@
+{
+  "commitSha": "65d90fee8a26996e77a1719bec64c0c299673f38",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-11T21:44:48.538Z",
+  "phaseId": "P5",
+  "approved": false,
+  "supersedesSha256": "40f8120ef2b418b48d0e9f9788025aacc5469f29722cac4c21a674f2ffdf7c98",
+  "baseRegistrationSha256": "49bc506092114e2dec3e3ec73faa1adad4afdf04b0941d4c7b01bd22cd2317f3",
+  "amendmentSha256": "e0948e26f2bbe2ec7c113d23db8b4dbb9daed70a9d2cef0e3f0a0c49f70d7760",
+  "baseRegistrationEdited": false,
+  "amendmentEdited": false,
+  "note": "Brian approved v3.1 items 1 through 7 at 2026-10-11T20:33:00Z. This revision supersedes 40f8120ef2b418b48d0e9f9788025aacc5469f29722cac4c21a674f2ffdf7c98, which was never approved. Its own hash is not approved. Re-hash before the first forward bar. The historical book was not re-run. qa-pr31-notes.md stays 2554b6ef. qa-pr31-notes-turn3.md is 3e465bc1. Default 15 is the SPRT sigma rule. S1-S6, R1-R13, F1-F10, and the section 5 rulings are bound by the frozen delta hash.",
+  "rulesBoundBy": {
+    "path": "research/data/registration-sources/v3.1-registration-delta.md",
+    "sha256": "4ace3c484a9a919f6d319b4582367e0b13b03d55d4b8cadd6f26cc08bf509c15",
+    "binds": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "R1",
+      "R2",
+      "R3",
+      "R4",
+      "R5",
+      "R6",
+      "R7",
+      "R8",
+      "R9",
+      "R10",
+      "R11",
+      "R12",
+      "R13",
+      "F1",
+      "F2",
+      "F3",
+      "F4",
+      "F5",
+      "F6",
+      "F7",
+      "F8",
+      "F9",
+      "F10",
+      "section5"
+    ]
+  },
+  "geometryPath": "research/data/reports/p5-v31-geometry.json",
+  "geometrySha256": "f492f3634b665e9d0173b6ff35120f9f03eb953b94ca821d69df1c484873e5cf",
+  "breadth": {
+    "entryDays": 334,
+    "pausedDays": 222,
+    "flag": true
+  },
+  "breadthDecision": {
+    "option": "c",
+    "chosenAt": "2026-10-11T21:13:00Z",
+    "effect": "report-only",
+    "blocksEntries": false,
+    "resizes": false,
+    "marketBlock": "BTC veto",
+    "reportLabel": "diagnostic, no selection",
+    "futureUse": "Any future use of breadth needs a new registration."
+  },
+  "momentumConditionDates": [],
+  "clusters": {
+    "monthCount": 11,
+    "monthsAbove60": 1,
+    "flag": false
+  },
+  "maxOpen": null,
+  "maxOpenNote": "G2 concurrency measured in the post-hash rerun",
+  "boundarySavedCorrelation": {
+    "names": [
+      "AVNT-USD",
+      "FIL-USD",
+      "IP-USD",
+      "LIGHTER-USD",
+      "TRUMP-USD",
+      "VVV-USD",
+      "WIF-USD"
+    ],
+    "wifIncluded": true,
+    "reason": "D1 ruling rule 3 names seven boundary-saved names and WIF-USD is the seventh. Jimmy listed the other six. Correlation and beta for these seven use in-window closes only."
+  },
+  "resultsPath": "research/data/reports/p5-v31-results.json",
+  "v3ResultsPath": "research/data/reports/p5-registered.json",
+  "v3ResultsPreserved": true,
+  "sources": [
+    {
+      "sourceName": "design/v3.1-bear-guards.md",
+      "path": "research/data/registration-sources/v3.1-bear-guards.md",
+      "sha256": "7dbf08776ebd7a3e7601b4bd0506080e74ea4da43e82eec4005174ebd67e42d9"
+    },
+    {
+      "sourceName": "architect/p5-gap-rulings.md",
+      "path": "research/data/registration-sources/p5-gap-rulings.md",
+      "sha256": "65b64dab138b848a30c9471bf75b4b0006d1c240b22e7e75378c8c0d5acaafaa"
+    },
+    {
+      "sourceName": "architect/p5-capped-rulings.md",
+      "path": "research/data/registration-sources/p5-capped-rulings.md",
+      "sha256": "e212f68fef714d08c2dd7188fb78ef387b12dcbb89018c43ae6c292bc51c7255"
+    },
+    {
+      "sourceName": "architect/p6-guards-feasibility.md",
+      "path": "research/data/registration-sources/p6-guards-feasibility.md",
+      "sha256": "002d04227b1017b753be4686f1322998e648dae4e20a874a290b0cb4237a2611"
+    },
+    {
+      "sourceName": "qa-pr31-notes.md",
+      "path": "research/data/registration-sources/qa-pr31-notes.md",
+      "sha256": "2554b6ef1237ac34462a17400a178a3345b65c0b94ef0d4075570ce77740d458"
+    },
+    {
+      "sourceName": "v3.1-registration-delta.md",
+      "path": "research/data/registration-sources/v3.1-registration-delta.md",
+      "sha256": "4ace3c484a9a919f6d319b4582367e0b13b03d55d4b8cadd6f26cc08bf509c15"
+    },
+    {
+      "sourceName": "ruling-d1-scope.md",
+      "path": "research/data/registration-sources/ruling-d1-scope.md",
+      "sha256": "aa0276da30aa85dbb8618dcdaf2a88821fe4e554a9e0eb49ce897a4370abea67"
+    },
+    {
+      "sourceName": "v3.1-prehash-rulings.md",
+      "path": "research/data/registration-sources/v3.1-prehash-rulings.md",
+      "sha256": "df6c139749c9592f4d231d998b069d63f8a768a3ffa129ccb2eca20cc214d616"
+    },
+    {
+      "sourceName": "qa-pr31-notes-turn3.md",
+      "path": "research/data/registration-sources/qa-pr31-notes-turn3.md",
+      "sha256": "3e465bc145b93d008b6f582f095034351374aa62de9009ee6439a586979fe512"
+    }
+  ],
+  "resolvedDefaults": [
+    {
+      "id": 1,
+      "status": "corrected",
+      "text": "The 30-day sub-1R exit fills at the next 00:00 UTC open minus s_bt."
+    },
+    {
+      "id": 2,
+      "status": "ratified",
+      "text": "The 10-day exit's next open is the 15m bar that opens at 00:00 UTC."
+    },
+    {
+      "id": 3,
+      "status": "ratified",
+      "text": "B's signal is the Sunday-dated daily bar that closes Monday 00:00. The entry is Monday 01:00."
+    },
+    {
+      "id": 4,
+      "status": "corrected",
+      "text": "B's held-set exit fills at the Monday 01:00 open minus s_bt."
+    },
+    {
+      "id": 5,
+      "status": "ratified",
+      "text": "A's 10-day exit is first evaluated at the first daily close after the entry date. The lookback still uses the prior 10 daily closes, including days before the entry."
+    },
+    {
+      "id": 6,
+      "status": "corrected",
+      "text": "Beta-weighted notional is the sum of max(beta, 0) times notional. A negative beta does not offset long exposure."
+    },
+    {
+      "id": 7,
+      "status": "corrected",
+      "text": "A name with fewer than 60 return days takes that month's highest signed member beta. If no member has a beta, the fallback is 1. The cap is never skipped."
+    },
+    {
+      "id": 8,
+      "status": "ratified",
+      "text": "After the stop moves, exit cost is one taker leg, 90 plus s_bt, on units times the current stop."
+    },
+    {
+      "id": 9,
+      "status": "corrected",
+      "text": "The $1,200 class backstop is the drawdown from the class peak cumulative net dollars, alongside the 20R kill."
+    },
+    {
+      "id": 10,
+      "status": "ratified",
+      "text": "The pair backstop is that pair's equity, realized net plus the open mark, at or below -$500."
+    },
+    {
+      "id": 11,
+      "status": "ratified",
+      "text": "Daily and weekly halt losses are the drop from equity at the UTC day start and at Monday 00:00."
+    },
+    {
+      "id": 12,
+      "status": "ratified",
+      "text": "Average linkage merges two clusters only when every member pair has a 60-day rho and the mean is at least 0.80. An equal mean merges the lexicographically earliest pair of cluster ids."
+    },
+    {
+      "id": 13,
+      "status": "ratified",
+      "text": "The $20 paper minimum applies to a null or non-positive lower-80% Kelly bound. A small positive fraction may size below $20."
+    },
+    {
+      "id": 14,
+      "status": "corrected",
+      "text": "Pauses may shrink a class to $20 and, for 2b, block new entries. The 1d kill, the 20R kill, and the dollar backstops stop the class at any size. Flag-only at $20 applies to pauses only. Breadth does not resize or block."
+    },
+    {
+      "id": 15,
+      "status": "corrected",
+      "text": "sigma = 1.5R until 20 forward trades, then frozen at the realized SD of net R over trades 1-20; Wald +/- ln 4, H0 +0.25R vs H1 0, report-only. Report both LLR paths (the frozen-realized path and the fixed 1.5R path)."
+    },
+    {
+      "id": 16,
+      "status": "ratified",
+      "text": "The 2b block is 14 calendar dates beginning on the condition date."
+    },
+    {
+      "id": 17,
+      "status": "ratified",
+      "text": "G2 concurrency is measured in the post-hash rerun. The pre-hash field stays empty."
+    },
+    {
+      "id": 18,
+      "status": "ratified",
+      "text": "Breadth state uses entry-day membership, the prior close, and hysteresis. It starts off. A share from 25 percent through 35 percent keeps the prior state. Option (c) logs the state and does not use it."
+    }
+  ]
+}

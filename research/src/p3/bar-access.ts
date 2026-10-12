@@ -100,6 +100,17 @@ export function listingProxySource(flags: GroupFlags): "first-d1-candle" | "firs
   return "first-in-window-15m";
 }
 
+/**
+ * Closes the 60-day correlation and beta may read.
+ * A price-group pass keeps pre-window closes. A boundary-saved name does not:
+ * rule 3 of the D1 ruling keeps that correlation in-window, including WIF-USD.
+ */
+export function correlationCloses(flags: GroupFlags, days: readonly SourceDay[]): { date: string; close: number }[] {
+  return dailyBarsFor(flags, days, "closeLookback")
+    .filter((row) => row.close > 0)
+    .map((row) => ({ date: row.date, close: row.close }));
+}
+
 /** Boundary-saved names stay in their own cluster until 60 in-window days exist. */
 export function clusterKey(flags: GroupFlags, inWindowDays: number, productId: string, assigned: string): string {
   if (flags.boundarySaved && inWindowDays < CLUSTER_CORR_DAYS) return productId;
