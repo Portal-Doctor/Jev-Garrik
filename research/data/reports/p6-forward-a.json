@@ -1,0 +1,78 @@
+{
+  "commitSha": "21405bdacf647575d82ffea42883565ce9bdccf2",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T03:58:51.571Z",
+  "phaseId": "P6",
+  "registrationSha256": "f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d",
+  "engine": "v3.1 capped book, base path, class A",
+  "isStart": "2025-11-10",
+  "isEnd": "2026-10-09",
+  "forwardBar1": "2026-10-10T00:00:00.000Z",
+  "purge": "count trades that exited before forward bar 1; drop and count trades still open",
+  "monthlyReselect": false,
+  "chosen": "A55-k3",
+  "lookback": 55,
+  "k": 3,
+  "kept": 14,
+  "purgedOpen": 2,
+  "l80NetUsdPerMonth": 13.096771949793467,
+  "totalNetUsd": 678.9185737419817,
+  "l80Cents": 1310,
+  "totalCents": 67892,
+  "configs": [
+    {
+      "config": "A20-k2",
+      "lookback": 20,
+      "k": 2,
+      "kept": 22,
+      "purgedOpen": 2,
+      "l80NetUsdPerMonth": -12.647152348823958,
+      "totalNetUsd": 1146.0630346588523
+    },
+    {
+      "config": "A20-k2.5",
+      "lookback": 20,
+      "k": 2.5,
+      "kept": 21,
+      "purgedOpen": 2,
+      "l80NetUsdPerMonth": -6.6532912015532535,
+      "totalNetUsd": 979.7897971848423
+    },
+    {
+      "config": "A20-k3",
+      "lookback": 20,
+      "k": 3,
+      "kept": 21,
+      "purgedOpen": 2,
+      "l80NetUsdPerMonth": 0.7012768814603708,
+      "totalNetUsd": 895.5226318240516
+    },
+    {
+      "config": "A55-k2",
+      "lookback": 55,
+      "k": 2,
+      "kept": 14,
+      "purgedOpen": 2,
+      "l80NetUsdPerMonth": 12.585965874581497,
+      "totalNetUsd": 913.2897695858534
+    },
+    {
+      "config": "A55-k2.5",
+      "lookback": 55,
+      "k": 2.5,
+      "kept": 14,
+      "purgedOpen": 2,
+      "l80NetUsdPerMonth": 7.878677543605962,
+      "totalNetUsd": 721.938313751818
+    },
+    {
+      "config": "A55-k3",
+      "lookback": 55,
+      "k": 3,
+      "kept": 14,
+      "purgedOpen": 2,
+      "l80NetUsdPerMonth": 13.096771949793467,
+      "totalNetUsd": 678.9185737419817
+    }
+  ]
+}
