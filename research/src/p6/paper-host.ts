@@ -69,6 +69,8 @@ export interface PaperHost {
   gapOpen: boolean[];
   needsReconnect: boolean[];
   replacing: boolean[];
+  /** Messages from an older socket are ignored after a reconnect. */
+  socketGen: number[];
   reconnects: number;
   gapEvents: number;
   l2Gaps: number;
@@ -202,6 +204,7 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     gapOpen: shards.map(() => false),
     needsReconnect: shards.map(() => false),
     replacing: shards.map(() => false),
+    socketGen: shards.map(() => 0),
     reconnects: 0,
     gapEvents: 0,
     l2Gaps: 0,
@@ -279,9 +282,10 @@ export function onSocketError(host: PaperHost, shardIndex: number): void {
 }
 
 /**
- * A snapshot may reset the sequence. One message carries one sequence_num and
- * many price levels, so the same number again is that message, not a gap.
- * The next message is the previous number plus one.
+ * sequence_num is per connection and counts every channel: subscriptions,
+ * heartbeats, level2, and market_trades. A snapshot does not reset it.
+ * One message carries one number and many price levels, so the same number
+ * again is that message, not a gap. The next message is the previous plus one.
  */
 export function l2SequenceOk(last: number | null, next: number): boolean {
   if (last == null) return true;
@@ -353,8 +357,9 @@ function noteSequence(host: PaperHost, shardIndex: number, sequence: number | un
 export function applyPublic(host: PaperHost, shardIndex: number, events: readonly PublicEvent[], nowMs: number): void {
   const sequenced = events.find((event) => (event.kind === "l2-snapshot" || event.kind === "l2-update") && event.sequence != null);
   if (sequenced && (sequenced.kind === "l2-snapshot" || sequenced.kind === "l2-update")) {
-    noteSequence(host, shardIndex, sequenced.sequence, sequenced.kind === "l2-snapshot");
+    noteSequence(host, shardIndex, sequenced.sequence, false);
   }
+  const dirty = new Set<string>();
   for (const event of events) {
     if (event.kind === "heartbeat") {
       observeHeartbeat(host, shardIndex, nowMs);
@@ -374,16 +379,19 @@ export function applyPublic(host: PaperHost, shardIndex: number, events: readonl
       for (const [price, size] of event.bids) applyLevel(book, "bid", price, size);
       for (const [price, size] of event.asks) applyLevel(book, "ask", price, size);
       host.books.set(event.productId, book);
-      const top = touch(book);
-      if (top) applyForward(host.book, { kind: "mid", tsMs: nowMs, productId: event.productId, bid: top.bid, ask: top.ask });
+      dirty.add(event.productId);
       continue;
     }
     if (event.kind === "l2-update") {
       const book = levelsOf(host, event.productId);
       applyLevel(book, event.side, event.price, event.size);
-      const top = touch(book);
-      if (top) applyForward(host.book, { kind: "mid", tsMs: nowMs, productId: event.productId, bid: top.bid, ask: top.ask });
+      dirty.add(event.productId);
     }
+  }
+  for (const productId of dirty) {
+    const book = host.books.get(productId);
+    const top = book ? touch(book) : null;
+    if (top) applyForward(host.book, { kind: "mid", tsMs: nowMs, productId, bid: top.bid, ask: top.ask });
   }
   boundHost(host);
 }
@@ -760,23 +768,48 @@ export async function fetchRestBar(productId: string, startSec: number): Promise
   }
 }
 
+function envelopeSequence(raw: unknown): number | null {
+  if (raw == null || typeof raw !== "object") return null;
+  const value = (raw as { sequence_num?: unknown }).sequence_num;
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** One socket frame. The envelope sequence covers every channel, then the book updates. */
+export function ingestSocketMessage(host: PaperHost, shardIndex: number, raw: unknown, nowMs: number): void {
+  const sequence = envelopeSequence(raw);
+  if (sequence != null) noteSequence(host, shardIndex, sequence, false);
+  applyPublic(host, shardIndex, parsePublicMessage(raw), nowMs);
+}
+
 function openShard(host: PaperHost, shardIndex: number, url: string): WebSocket {
+  host.socketGen[shardIndex] = (host.socketGen[shardIndex] ?? 0) + 1;
+  const gen = host.socketGen[shardIndex]!;
   const ws = new WebSocket(url);
   ws.addEventListener("open", () => {
+    if (host.socketGen[shardIndex] !== gen) return;
+    host.lastL2Seq.delete(String(shardIndex));
     armShard(host, shardIndex, Date.now());
     for (const frame of framesForShard(host, shardIndex)) ws.send(frame);
   });
   ws.addEventListener("message", (event) => {
+    if (host.socketGen[shardIndex] !== gen) return;
     let parsed: unknown;
     try {
       parsed = JSON.parse(String(event.data));
     } catch {
       return;
     }
-    applyPublic(host, shardIndex, parsePublicMessage(parsed), Date.now());
+    ingestSocketMessage(host, shardIndex, parsed, Date.now());
   });
-  ws.addEventListener("close", () => onSocketClosed(host, shardIndex));
-  ws.addEventListener("error", () => onSocketError(host, shardIndex));
+  ws.addEventListener("close", () => {
+    if (host.socketGen[shardIndex] !== gen) return;
+    onSocketClosed(host, shardIndex);
+  });
+  ws.addEventListener("error", () => {
+    if (host.socketGen[shardIndex] !== gen) return;
+    onSocketError(host, shardIndex);
+  });
   return ws;
 }
 

@@ -19,6 +19,7 @@ import { parsePublicMessage } from "./feed";
 import {
   acceptRestBar,
   applyPublic,
+  ingestSocketMessage,
   armShard,
   considerHeartbeatGap,
   dueRest,
@@ -350,6 +351,38 @@ test("a shard with no heartbeat reconnects, and silence after that reconnects ag
   const sent = framesForShard(host, 0);
   expect(sent.length).toBe(3);
   expect(sent.every((frame) => host.frames.includes(frame))).toBe(true);
+});
+
+test("socket sequence counts subscriptions, heartbeats, and trades, not only level2", () => {
+  const host = startPaperHost(["BTC-USD", "ETH-USD"], {});
+  const frame = (sequence_num: number, channel: string, events: unknown[]) =>
+    ingestSocketMessage(host, 0, { sequence_num, channel, events }, sequence_num);
+  frame(0, "subscriptions", []);
+  frame(1, "l2_data", [{
+    type: "snapshot",
+    product_id: "BTC-USD",
+    updates: [
+      { side: "bid", price_level: "1", new_quantity: "2" },
+      { side: "offer", price_level: "3", new_quantity: "4" },
+    ],
+  }]);
+  frame(2, "heartbeats", []);
+  frame(3, "l2_data", [{
+    type: "update",
+    product_id: "BTC-USD",
+    updates: [
+      { side: "bid", price_level: "1", new_quantity: "5" },
+      { side: "bid", price_level: "1.5", new_quantity: "1" },
+    ],
+  }]);
+  frame(4, "market_trades", [{ trades: [{ product_id: "BTC-USD", price: "2", size: "1", side: "BUY", time: "2026-10-12T00:00:00.000Z" }] }]);
+  frame(5, "l2_data", [{ type: "snapshot", product_id: "ETH-USD", updates: [{ side: "bid", price_level: "9", new_quantity: "1" }, { side: "offer", price_level: "10", new_quantity: "1" }] }]);
+  expect(host.l2Gaps).toBe(0);
+  expect(host.needsReconnect[0]).toBe(false);
+  expect(host.book.quotes["BTC-USD"]?.bid).toBe(1.5);
+  expect(host.book.quotes["BTC-USD"]?.ask).toBe(3);
+  frame(7, "l2_data", [{ type: "update", product_id: "ETH-USD", updates: [{ side: "bid", price_level: "9", new_quantity: "2" }] }]);
+  expect(host.l2Gaps).toBe(1);
 });
 
 test("REST backs off on 429, drops a late bar, and backfills a bounded gap", () => {
