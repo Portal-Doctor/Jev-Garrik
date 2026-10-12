@@ -16,12 +16,13 @@ import {
   redisEndpoint,
   releaseLease,
   runInvocation,
+  saveState,
   STATE_KEY,
   takeReply,
   tryAcquire,
   WARMUP_KEY,
 } from "./relay";
-import { capturePaperState, driveHost, ensureSendQuote, flushEntries, noteSocketClose, prepareExitQuotes, releaseForDeadline, sendDueEntries, startPaperHost, volHoursFromFifteens, warmSeriesFromRest } from "./paper-host";
+import { capturePaperState, driveHost, ensureSendQuote, flushEntries, noteSocketClose, prepareExitQuotes, releaseForDeadline, SAVE_HEARTBEAT_MS, sendDueEntries, startPaperHost, volHoursFromFifteens, warmSeriesFromRest } from "./paper-host";
 import { handleEngineRequest, hostHolder, loadDashboard, persistRun } from "./vercel-live";
 import type { GeneratedEntry } from "./generate";
 
@@ -161,8 +162,9 @@ test("a bar key is idempotent and holds the book, orders, bars, weeks, rings, ta
   const body = capturePaperState(host);
   host.warmup.set("ZZ-RELAY", [{ date: "2026-10-01", ts: 0, open: 1, high: 1, low: 1, close: 1, volume: 1, empty: false }]);
   const withWarmup = capturePaperState(host);
-  expect(await commitBar(kv, "ZZ-RELAY", 900, withWarmup)).toBe("applied");
-  expect(await commitBar(kv, "ZZ-RELAY", 900, withWarmup)).toBe("duplicate");
+  await saveState(kv, withWarmup, { writeWarmup: false });
+  expect(await commitBar(kv, "ZZ-RELAY", 900)).toBe("applied");
+  expect(await commitBar(kv, "ZZ-RELAY", 900)).toBe("duplicate");
   const marker = await kv.get(barKey("ZZ-RELAY", 900));
   expect(marker).toBe(barMarker("ZZ-RELAY", 900));
   expect(marker).not.toContain("warmup");
@@ -177,6 +179,7 @@ test("a bar key is idempotent and holds the book, orders, bars, weeks, rings, ta
   expect(parsed.jevPackets).toBe(4);
   expect(parsed.jevSkipped).toBe(1);
   expect(parsed.warmup).toBeUndefined();
+  expect(parsed.memberCloses).toBeUndefined();
   const next = startPaperHost(["ZZ-RELAY"], {});
   await hostHolder(next, kv, []).warm();
   expect(next.fifteen).toHaveLength(1);
@@ -389,13 +392,17 @@ test("a stale live book falls back to the REST product book and is flagged", () 
 
 test("the book, member closes, gaps, and D counts survive a run that has no injected bars", async () => {
   const kv = memoryKv();
+  let stateWrites = 0;
+  const set = kv.set.bind(kv);
+  kv.set = async (key, value, opts) => {
+    if (key === "p6:state") stateWrites += 1;
+    return set(key, value, opts);
+  };
+  const flags = { priceGroupPasses: true, volumeGroupPasses: false, boundarySaved: false };
   const host = startPaperHost(["ZZ-LIVE"], {});
   host.book.realizedUsd = 7;
-  host.book.config.memberCloses = [{
-    productId: "ZZ-LIVE",
-    flags: { priceGroupPasses: true, volumeGroupPasses: false, boundarySaved: false },
-    days: [{ date: "2026-10-10", ts: 0, open: 1, high: 1, low: 1, close: 2, volume: 1, empty: false }],
-  }];
+  host.warmup.set("ZZ-LIVE", [{ date: "2026-10-10", ts: 0, open: 1, high: 1, low: 1, close: 2, volume: 1, empty: false }]);
+  host.context = { flags, byProduct: new Map([["ZZ-LIVE", flags]]), memberOn: () => true };
   host.fifteen.push({ productId: "ZZ-LIVE", startSec: 1_700_000_100, open: 1, high: 1.2, low: 0.9, close: 1.1, volume: 1 });
   host.book.submittedByClass.D = 4;
   host.book.indeterminateByClass.D = 1;
@@ -403,11 +410,14 @@ test("the book, member closes, gaps, and D counts survive a run that has no inje
   await driveHost(host, 0, { persist: () => persistRun(kv, host) });
   const saved = await kv.get("p6:state");
   expect(saved).toBeTruthy();
+  expect(saved).not.toContain("memberCloses");
+  expect(stateWrites).toBe(1);
   expect(await kv.get("p6:bar:ZZ-LIVE:1700000100")).toBeTruthy();
   const next = startPaperHost(["ZZ-LIVE"], {});
+  next.context = host.context;
   await hostHolder(next, kv, []).warm();
   expect(next.book.realizedUsd).toBe(7);
-  expect(next.book.config.memberCloses?.[0]?.days[0]?.date).toBe("2026-10-10");
+  expect(next.book.config.memberCloses?.find((row) => row.productId === "ZZ-LIVE")?.days.some((row) => row.date === "2026-10-10")).toBe(true);
   expect(next.book.submittedByClass.D).toBe(4);
   expect(next.book.indeterminateByClass.D).toBe(1);
   expect(next.gaps[0]?.cause).toBe("missed-cron");
@@ -856,4 +866,107 @@ test("a stale book is priced by one awaited REST snapshot, and a 429 is not retr
   expect(limited.queued.has("y")).toBe(true);
   await prepareExitQuotes(limited, "BTC-USD", 1, now + 1_000, throttle);
   expect(limitedCalls).toBe(1);
+});
+
+test("a successor reloads the outgoing book after the lease, so an A to D chain keeps every gap", async () => {
+  const kv = memoryKv();
+  const T = Date.parse("2026-10-12T17:01:00Z");
+  const fill = {
+    id: "fill-a",
+    classId: "C" as const,
+    productId: "ZZ-HAND",
+    netR: 1,
+    netUsd: 4,
+    grossUsd: 4,
+    costUsd: 0,
+    riskUsd: 20,
+    notionalUsd: 100,
+    entryDate: "2026-10-12",
+    exitTs: T,
+    exitKind: "target",
+  };
+  expect(await tryAcquire(kv, "A", T + 29 * 60_000, T)).toBe(true);
+  const seed = startPaperHost(["ZZ-HAND"], {});
+  seed.book.realizedUsd = 3;
+  seed.book.submittedByClass.D = 2;
+  seed.book.indeterminateByClass.D = 1;
+  seed.book.closed.push(fill);
+  seed.gaps.push({ startMs: 1, endMs: 2, cause: "seed" });
+  await persistRun(kv, seed);
+
+  const step = async (prev: string, next: string, now: number, cause: string, usd: number, dCount: number) => {
+    const incoming = startPaperHost(["ZZ-HAND"], {});
+    const holder = hostHolder(incoming, kv);
+    await holder.warm();
+    const outgoing = startPaperHost(["ZZ-HAND"], {});
+    await hostHolder(outgoing, kv).warm();
+    outgoing.book.realizedUsd = usd;
+    outgoing.book.submittedByClass.D = dCount;
+    outgoing.gaps.push({ startMs: now, endMs: now + 589, cause });
+    await persistRun(kv, outgoing);
+    await runInvocation({
+      kv,
+      self: next,
+      nowMs: now + 15 * 60_000,
+      deadlineMs: now + 45 * 60_000,
+      lastCronMs: now,
+      holder: {
+        async warm() {},
+        async watchUntil() {
+          await releaseLease(kv, prev, "deadline", now + 29 * 60_000 - 60_000);
+        },
+        reload: () => holder.reload(),
+        async applyDueBars() {
+          return [];
+        },
+        releaseDeadline() {},
+        recordGap(gap) {
+          incoming.gaps.push(gap);
+        },
+        persist: () => holder.persist(),
+      },
+    });
+  };
+
+  await step("A", "B", T, "from-A", 11, 4);
+  await step("B", "C", T + 15 * 60_000, "from-B", 21, 6);
+  await step("C", "D", T + 30 * 60_000, "from-C", 31, 8);
+  const saved = JSON.parse((await kv.get(STATE_KEY)) ?? "{}") as {
+    realizedUsd: number;
+    dSubmitted: number;
+    dIndeterminate: number;
+    gaps: { cause: string }[];
+    closed: { id: string }[];
+    memberCloses?: unknown;
+  };
+  expect(saved.realizedUsd).toBe(31);
+  expect(saved.dSubmitted).toBe(8);
+  expect(saved.dIndeterminate).toBe(1);
+  expect(saved.closed.map((row) => row.id)).toEqual(["fill-a"]);
+  expect(saved.memberCloses).toBeUndefined();
+  for (const cause of ["seed", "from-A", "from-B", "from-C"]) {
+    expect(saved.gaps.some((gap) => gap.cause === cause)).toBe(true);
+  }
+});
+
+test("the save heartbeat moves the crash clock without a bar", async () => {
+  const host = startPaperHost(["ZZ-BEAT"], {});
+  host.shards = [];
+  host.openSockets = [];
+  let now = 1_000;
+  host.clock = () => now;
+  let beats = 0;
+  const pending = driveHost(host, now + 10_000_000, {
+    applyBars: false,
+    heartbeat: () => {
+      beats += 1;
+    },
+    stopWhen: () => beats >= 1,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  now += SAVE_HEARTBEAT_MS;
+  await pending;
+  expect(beats).toBeGreaterThanOrEqual(1);
+  expect(SAVE_HEARTBEAT_MS).toBeGreaterThanOrEqual(60_000);
+  expect(SAVE_HEARTBEAT_MS).toBeLessThanOrEqual(120_000);
 });

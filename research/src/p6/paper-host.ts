@@ -22,7 +22,7 @@ import { readDailyHistory } from "./daily";
 import { applyForward, freshBook, forwardBookPanel, noteMemberDay, type Book } from "./engine";
 import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
-import { deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
+import { completedDays, deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
 import { MISSED_SEND_STALE_QUOTE, STALE_QUOTE_MS } from "./legs";
 import type { VolHour } from "./amendment-v6";
 import { HEARTBEAT_GAP_MS, heartbeatMustReconnect, type MidBar } from "./mid-feed";
@@ -48,6 +48,8 @@ const MAX_REST_SLOTS = 64;
 const MAX_SEEN_TRADES = 100_000;
 export const REST_BACKFILL_BARS = 8;
 export const REST_PACE_MS = 200;
+/** Lower bound of the 60–120s save heartbeat. Crash gaps start at this save, not at the previous bar. */
+export const SAVE_HEARTBEAT_MS = 60_000;
 
 export interface RestSlot {
   productId: string;
@@ -577,8 +579,9 @@ function mergedScores(host: PaperHost, date: string): ClassBRow[] | undefined {
 /** The same generator the offline book uses: every member, the registered flags, and the BTC veto. */
 export function universeEntries(host: PaperHost, nowSec: number): ReturnType<typeof generateForward> | null {
   if (!host.context || !host.book.aPick) return null;
-  const btcDays = host.warmup.get("BTC-USD") ?? [];
-  const btcFour = deriveForwardBook(host.fifteen.filter((bar) => bar.productId === "BTC-USD"), nowSec)?.four ?? [];
+  const btcBars = host.fifteen.filter((bar) => bar.productId === "BTC-USD");
+  const btcDays = completedDays(host.warmup.get("BTC-USD") ?? [], btcBars, nowSec);
+  const btcFour = deriveForwardBook(btcBars, nowSec)?.four ?? [];
   const generated = generateForward({
     bars: host.fifteen,
     nowSec,
@@ -1109,6 +1112,26 @@ export function volHoursFromFifteens(
   return hours;
 }
 
+/** Rebuild cluster closes from warmup plus 15m days. They are not stored on p6:state. */
+export function attachMemberCloses(host: PaperHost): void {
+  if (!host.context) return;
+  const nowSec = Math.floor(host.clock() / 1000);
+  const rows = [...host.warmup.entries()].flatMap(([productId, days]) => {
+    const flags = host.context?.byProduct.get(productId);
+    if (!flags || days.length === 0) return [];
+    const bars = host.fifteen.filter((bar) => bar.productId === productId);
+    return [{ productId, flags, days: completedDays(days, bars, nowSec) }];
+  });
+  if (rows.length > 0) host.book.config.memberCloses = rows;
+  const btc = completedDays(
+    host.warmup.get("BTC-USD") ?? [],
+    host.fifteen.filter((bar) => bar.productId === "BTC-USD"),
+    nowSec,
+  );
+  const closes = btc.filter((row) => !row.empty && row.close > 0).map((row) => ({ date: row.date, close: row.close }));
+  if (closes.length > 0) host.book.config.btcCloses = closes;
+}
+
 export function capturePaperState(host: PaperHost): PaperStateBody {
   const book = host.book;
   return {
@@ -1447,6 +1470,8 @@ export interface DriveHooks {
   /** Writes the book, member closes, gaps, and new bars. Called when the run ends and after each applied bar. */
   persist?: () => Promise<void> | void;
   onBar?: (bar: OhlcvBar) => Promise<void> | void;
+  /** Lease save clock. The holder passes this. An overlap watch does not. */
+  heartbeat?: () => Promise<void> | void;
   /** False while the next instance is overlapping and does not yet hold the lease. */
   applyBars?: boolean;
   /** Overlap ends when this returns true, leaving the sockets up for the lease holder. */
@@ -1464,12 +1489,17 @@ export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHo
   host.openSockets = sockets;
   await new Promise<void>((resolve) => {
     let busy = false;
+    let lastBeat = host.clock();
     const timer = setInterval(() => {
       if (busy) return;
       busy = true;
       void (async () => {
         try {
           const now = host.clock();
+          if (hooks.heartbeat && now - lastBeat >= SAVE_HEARTBEAT_MS) {
+            lastBeat = now;
+            await hooks.heartbeat();
+          }
           if (apply) await sendDueEntries(host, now);
           host.shards.forEach((_, index) => {
             if (!considerHeartbeatGap(host, index, now)) return;

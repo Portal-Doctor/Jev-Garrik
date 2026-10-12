@@ -4,8 +4,10 @@
  * Only the lease holder applies a bar, and each bar key is written once.
  */
 
-import type { PaperStateBody } from "./paper-host";
 import { GAP_MAX_MS, gapWeekReport, type VolHour } from "./amendment-v6";
+import { SAVE_HEARTBEAT_MS, type PaperStateBody } from "./paper-host";
+
+export { SAVE_HEARTBEAT_MS };
 
 export const CRON_EVERY_MS = 15 * 60 * 1000;
 export const MAX_DURATION_MS = 1_800_000;
@@ -104,7 +106,8 @@ export function markerBytesPerDay(products: number, example = barMarker("BTC-USD
 }
 
 export async function saveState(kv: Kv, body: PaperStateBody, opts?: { writeWarmup?: boolean }): Promise<void> {
-  const { warmup, ...live } = body;
+  const { warmup, memberCloses, ...live } = body;
+  void memberCloses;
   await kv.set(STATE_KEY, JSON.stringify(live));
   if (opts?.writeWarmup === false || !warmup) return;
   if (await kv.get(WARMUP_KEY)) return;
@@ -122,11 +125,10 @@ export async function loadState(kv: Kv): Promise<PaperStateBody | null> {
   return body;
 }
 
-export async function commitBar(kv: Kv, productId: string, startSec: number, body: PaperStateBody): Promise<"applied" | "duplicate"> {
+/** Idempotent marker only. The book is one state write, from the run's persist, not from the marker. */
+export async function commitBar(kv: Kv, productId: string, startSec: number): Promise<"applied" | "duplicate"> {
   const wrote = await kv.set(barKey(productId, startSec), barMarker(productId, startSec), { nx: true });
-  if (!wrote) return "duplicate";
-  await saveState(kv, body, { writeWarmup: false });
-  return "applied";
+  return wrote ? "applied" : "duplicate";
 }
 
 export interface AsyncPaperStore {
@@ -265,6 +267,8 @@ export async function runInvocation(opts: {
     watchUntil?(untilMs: number): Promise<void>;
     persist?(): Promise<void>;
     recordGap?(gap: { startMs: number; endMs: number; cause: string }): void;
+    /** Load p6:state after this instance owns the lease, before it records or saves. */
+    reload?(): Promise<void>;
   };
   /** Wall clock after an overlap watch. Injected runs keep `nowMs` unless this is set. */
   clock?: () => number;
@@ -275,17 +279,22 @@ export async function runInvocation(opts: {
   const lastCronMs = opts.lastCronMs !== undefined ? opts.lastCronMs : storedCron == null ? null : Number(storedCron);
   await opts.kv.set(CRON_KEY, String(nowMs));
   let plan = planRelay({ nowMs, deadlineMs: opts.deadlineMs, self: opts.self, lease: lease0, lastCronMs });
-  const record = (gap: { startMs: number; endMs: number; cause: string }) => {
-    opts.holder.recordGap?.(gap);
+  const staged: { startMs: number; endMs: number; cause: string }[] = [];
+  const stage = (gap: { startMs: number; endMs: number; cause: string }) => {
+    staged.push(gap);
+  };
+  const flushStaged = () => {
+    for (const gap of staged) opts.holder.recordGap?.(gap);
+    staged.length = 0;
   };
   if (plan.action === "duplicate") {
     return { ...plan, applied: [], holder: lease0?.holder ?? null };
   }
   if (plan.action === "handover") {
+    opts.holder.recordGap?.({ startMs: nowMs, endMs: nowMs, cause: "handover" });
+    await opts.holder.persist?.();
     opts.holder.releaseDeadline();
     await releaseLease(opts.kv, opts.self, "deadline", nowMs);
-    record({ startMs: nowMs, endMs: nowMs, cause: "handover" });
-    await opts.holder.persist?.();
     return { ...plan, applied: [], holder: null };
   }
   await opts.holder.warm();
@@ -308,12 +317,12 @@ export async function runInvocation(opts: {
     const start = meta.savedAtMs ?? nowMs;
     const end = Math.max(start, nowMs);
     feedGapMs = end - start;
-    record({ startMs: start, endMs: end, cause: "crash" });
+    stage({ startMs: start, endMs: end, cause: "crash" });
   } else if (meta?.release === "deadline" && meta.holder !== opts.self) {
     const width = Math.max(0, nowMs - meta.untilMs);
     feedGapMs = width;
     const missed = lastCronMs != null && nowMs - lastCronMs > CRON_EVERY_MS + 60_000;
-    record({
+    stage({
       startMs: width === 0 ? nowMs : meta.untilMs,
       endMs: width === 0 ? nowMs : nowMs,
       cause: width === 0 ? "handover" : missed ? "missed-cron" : "uncovered",
@@ -321,12 +330,14 @@ export async function runInvocation(opts: {
   } else if (plan.feedGapMs > 0) {
     const start = lease?.untilMs ?? nowMs - plan.feedGapMs;
     feedGapMs = Math.max(0, nowMs - start);
-    record({ startMs: start, endMs: nowMs, cause: plan.cause === "kill" ? "crash" : (plan.cause ?? "uncovered") });
+    stage({ startMs: start, endMs: nowMs, cause: plan.cause === "kill" ? "crash" : (plan.cause ?? "uncovered") });
   }
   const acquired = await tryAcquire(opts.kv, opts.self, opts.deadlineMs, nowMs);
   if (!acquired) {
     return { action: "duplicate", applied: [], socketGap: false, feedGapMs: 0, cause: "duplicate", holder: lease?.holder ?? null };
   }
+  await opts.holder.reload?.();
+  flushStaged();
   const applied = await opts.holder.applyDueBars();
   let sampled = false;
   if (opts.holder.sampleUntil && nowMs < opts.deadlineMs - HANDOVER_MARGIN_MS) {
@@ -337,18 +348,21 @@ export async function runInvocation(opts: {
       opts.holder.releaseDeadline();
       const failedAt = opts.clock ? opts.clock() : nowMs;
       const savedAt = decodeLease(await opts.kv.get(LEASE_META_KEY))?.savedAtMs ?? nowMs;
-      await releaseLease(opts.kv, opts.self, "crash", failedAt);
-      record({ startMs: savedAt, endMs: Math.max(savedAt, failedAt), cause: "crash" });
-      await opts.holder.persist?.();
+      opts.holder.recordGap?.({ startMs: savedAt, endMs: Math.max(savedAt, failedAt), cause: "crash" });
+      try {
+        await opts.holder.persist?.();
+      } finally {
+        await releaseLease(opts.kv, opts.self, "crash", failedAt);
+      }
       throw error;
     }
   }
   if (sampled) {
     const at = opts.deadlineMs - HANDOVER_MARGIN_MS;
+    opts.holder.recordGap?.({ startMs: at, endMs: at, cause: "handover" });
+    await opts.holder.persist?.();
     opts.holder.releaseDeadline();
     await releaseLease(opts.kv, opts.self, "deadline", at);
-    record({ startMs: at, endMs: at, cause: "handover" });
-    await opts.holder.persist?.();
     return { action: "handover", applied, socketGap: false, feedGapMs, cause: plan.cause ?? "handover", holder: null };
   }
   await opts.holder.persist?.();

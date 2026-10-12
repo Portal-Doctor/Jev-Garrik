@@ -3,7 +3,7 @@
  * Redis is a Kv. This file does not choose a Marketplace vendor.
  */
 
-import { acceptRestBar, capturePaperState, catchUpHistory, driveHost, installPaperState, releaseForDeadline, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
+import { acceptRestBar, attachMemberCloses, capturePaperState, catchUpHistory, driveHost, installPaperState, releaseForDeadline, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
 import type { OhlcvBar } from "./rest-bars";
 import {
   commitBar,
@@ -21,7 +21,7 @@ import {
   type Kv,
 } from "./relay";
 
-/** State, member closes, gaps, vol hours, and D counts. New 15m bars also get an idempotent bar key. */
+/** One state write. Member closes stay off this blob. Markers are only for bars this process has not already written. */
 export async function persistRun(kv: Kv, host: PaperHost): Promise<void> {
   const body = capturePaperState(host);
   await kvPaperStore(kv).save(body);
@@ -31,9 +31,13 @@ export async function persistRun(kv: Kv, host: PaperHost): Promise<void> {
     const key = `${bar.productId}:${bar.startSec}`;
     if (seen.has(key) || host.persistedBars.has(key)) continue;
     seen.add(key);
-    const result = await commitBar(kv, bar.productId, bar.startSec, body);
+    const result = await commitBar(kv, bar.productId, bar.startSec);
     if (result === "applied" || result === "duplicate") host.persistedBars.add(key);
   }
+}
+
+function rememberPersistedBars(host: PaperHost): void {
+  for (const bar of host.fifteen) host.persistedBars.add(`${bar.productId}:${bar.startSec}`);
 }
 
 export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = []): {
@@ -42,6 +46,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
   releaseDeadline(): void;
   persist(): Promise<void>;
   recordGap(gap: { startMs: number; endMs: number; cause: string }): void;
+  reload(): Promise<void>;
   sampleUntil(untilMs: number): Promise<void>;
   watchUntil(untilMs: number): Promise<void>;
 } {
@@ -49,10 +54,19 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
     async warm() {
       const saved = await kvPaperStore(kv).load();
       if (saved) installPaperState(host, saved);
+      rememberPersistedBars(host);
       if (host.restWarm && (host.warmup.size === 0 || [...host.products].some((id) => (host.hourWarm.get(id)?.length ?? 0) === 0))) {
         await warmSeriesFromRest(host);
       }
       if (!saved || host.restWarm) await catchUpHistory(host);
+      attachMemberCloses(host);
+    },
+    async reload() {
+      const saved = await kvPaperStore(kv).load();
+      if (!saved) return;
+      installPaperState(host, saved);
+      rememberPersistedBars(host);
+      attachMemberCloses(host);
     },
     async applyDueBars() {
       const applied: string[] = [];
@@ -61,8 +75,11 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
         const status = host.fifteen.some((row) => row.productId === bar.productId && row.startSec === bar.startSec) ? "already" : "new";
         if (status === "new") acceptRestBar(host, bar);
         if (host.fifteen.length === before && status === "new") continue;
-        const result = await commitBar(kv, bar.productId, bar.startSec, capturePaperState(host));
-        if (result === "applied") applied.push(`${bar.productId}:${bar.startSec}`);
+        const result = await commitBar(kv, bar.productId, bar.startSec);
+        if (result === "applied") {
+          host.persistedBars.add(`${bar.productId}:${bar.startSec}`);
+          applied.push(`${bar.productId}:${bar.startSec}`);
+        }
       }
       return applied;
     },
@@ -79,8 +96,10 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       return driveHost(host, untilMs, {
         persist: () => persistRun(kv, host),
         onBar: async (bar) => {
-          await commitBar(kv, bar.productId, bar.startSec, capturePaperState(host));
+          const result = await commitBar(kv, bar.productId, bar.startSec);
+          if (result === "applied" || result === "duplicate") host.persistedBars.add(`${bar.productId}:${bar.startSec}`);
         },
+        heartbeat: () => noteLeaseSave(kv, host.clock()),
       });
     },
     watchUntil(untilMs: number) {
@@ -142,6 +161,7 @@ export async function handleEngineRequest(
       watchUntil?(untilMs: number): Promise<void>;
       persist?(): Promise<void>;
       recordGap?(gap: { startMs: number; endMs: number; cause: string }): void;
+      reload?(): Promise<void>;
     };
   },
 ): Promise<Response> {

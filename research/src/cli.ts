@@ -49,6 +49,7 @@ import { buildP5Report } from "./p5/run";
 import { assertP5OutputPath, P5_V31_RESULTS } from "./p5/output";
 import { assertNoLiveEndpoint, replayInjected, type ForwardEvent } from "./p6/engine";
 import { runPublicPaper } from "./p6/paper-host";
+import { startDateReport } from "./p6/select";
 import { P6_STAMP_COMMANDS, stampP6Record, type P6StampCommand } from "./p6/stamp-records";
 
 const started = boot();
@@ -146,6 +147,9 @@ async function main(): Promise<void> {
     case "p6-paper":
       await runPaper();
       return;
+    case "p6-start-date":
+      p6StartDate();
+      return;
     case "jev-smoke":
       await writeJevSmoke();
       return;
@@ -155,7 +159,7 @@ async function main(): Promise<void> {
       return;
     default:
       throw new Error(
-        `usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | p5 | jev-smoke | p6-replay | p6-paper | ${P6_STAMP_COMMANDS.join(" | ")}`,
+        `usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | p5 | jev-smoke | p6-replay | p6-paper | p6-start-date | ${P6_STAMP_COMMANDS.join(" | ")}`,
       );
   }
 }
@@ -636,6 +640,12 @@ async function runPaper(): Promise<void> {
   const logFlag = args.indexOf("--log");
   const logPath = logFlag >= 0 ? args[logFlag + 1] : undefined;
   await runPublicPaper({ products, statusDir, forMs, logPath });
+}
+
+function p6StartDate(): void {
+  const goLive = process.argv[3];
+  if (!goLive || !/^\d{4}-\d{2}-\d{2}/.test(goLive)) throw new Error("usage: p6-start-date <YYYY-MM-DD>");
+  console.log(JSON.stringify(startDateReport(goLive)));
 }
 
 function p6Replay(): void {

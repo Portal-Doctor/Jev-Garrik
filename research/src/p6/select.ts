@@ -169,6 +169,44 @@ export function forwardPickBody(root = repoRoot()): Record<string, unknown> {
   };
 }
 
+/**
+ * The frozen forward bar 1 is the end of the P5 window, not the paper start.
+ * Days from that bar through the day before go-live are neither in-sample nor forward.
+ * This does not write the stamped pick.
+ */
+export function paperWindow(goLive: string): {
+  inSample: { from: string; through: string };
+  neither: { from: string; through: string } | null;
+  forwardFrom: string;
+} {
+  const live = goLive.slice(0, 10);
+  const from = FORWARD_BAR_1.slice(0, 10);
+  const through = addDays(live, -1);
+  return {
+    inSample: { from: ANCHORED_IS_START, through: anchoredIsEnd() },
+    neither: through >= from ? { from, through } : null,
+    forwardFrom: live,
+  };
+}
+
+/** Re-run the step-1 A pick and classify the gap before go-live. Does not write a report. */
+export function startDateReport(goLive: string, root = repoRoot()): Record<string, unknown> {
+  const body = forwardPickBody(root);
+  const window = paperWindow(goLive);
+  return {
+    chosen: body.chosen,
+    lookback: body.lookback,
+    k: body.k,
+    monthlyReselect: false,
+    isStart: body.isStart,
+    isEnd: body.isEnd,
+    frozenForwardBar1: FORWARD_BAR_1,
+    goLive: goLive.slice(0, 10),
+    neitherInSampleNorForward: window.neither,
+    forwardFrom: window.forwardFrom,
+  };
+}
+
 export function readForwardPick(root = repoRoot()): APick {
   const path = join(root, "research/data/reports", FORWARD_PICK_FILE);
   const bytes = readFileSync(path);

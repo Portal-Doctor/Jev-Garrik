@@ -216,6 +216,20 @@ export function lastCompletedDailyAtr(atrByDate: ReadonlyMap<string, number>, da
   return value;
 }
 
+/**
+ * Completed days for the veto and the cluster inputs.
+ * Static warmup, plus days derived from 15m bars. A derived day replaces that date.
+ * The in-progress UTC day is left out, the same rule as the daily REST warmup.
+ */
+export function completedDays(warmup: readonly SourceDay[], bars: readonly FifteenBar[], nowSec: number): SourceDay[] {
+  const today = new Date(nowSec * 1000).toISOString().slice(0, 10);
+  const derived = (deriveForwardBook(bars, nowSec)?.days ?? []).filter((day) => day.date < today);
+  const byDate = new Map<string, SourceDay>();
+  for (const day of warmup) byDate.set(day.date, day);
+  for (const day of derived) byDate.set(day.date, day);
+  return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
 /** The registered BTC veto, from daily closes and 4h closes. */
 export function vetoFromBtc(days: readonly SourceDay[], four: readonly BarOHLC[]): (date: string) => boolean {
   const filled = days.filter((row) => !row.empty && row.close > 0);
