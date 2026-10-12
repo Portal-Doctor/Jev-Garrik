@@ -1,0 +1,15 @@
+{
+  "commitSha": "d35d36ed029935abb06e43e7c71459e7fec681b3",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T11:30:35.034Z",
+  "phaseId": "P6",
+  "role": "supersession",
+  "supersedes": "research/data/reports/p6-kelly-ruling.json",
+  "supersedesSha256": "e099c0223e35712e78e4b7f0ef19f72d8f312a539a75e4d7f397816f57cd8e48",
+  "superseded": true,
+  "supersededLine": "registeredRiskUsd: 60",
+  "text": "p6-kelly-ruling.json (e099c022) is superseded. Its registeredRiskUsd 60 line is not the forward size. Forward paper stays at $20 until promotion. The ruling file is not edited.",
+  "rulingFileEdited": false,
+  "unpromotedRiskUsd": 20,
+  "bankrollUsd": 8000
+}
