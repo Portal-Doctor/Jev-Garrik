@@ -278,10 +278,14 @@ export function onSocketError(host: PaperHost, shardIndex: number): void {
   host.book.incidents.push(`socket ${shardIndex} error`);
 }
 
-/** A snapshot may reset the sequence. An update must be the previous number plus one. */
+/**
+ * A snapshot may reset the sequence. One message carries one sequence_num and
+ * many price levels, so the same number again is that message, not a gap.
+ * The next message is the previous number plus one.
+ */
 export function l2SequenceOk(last: number | null, next: number): boolean {
   if (last == null) return true;
-  return next === last + 1;
+  return next === last || next === last + 1;
 }
 
 /** Subscribe frames whose product_ids are exactly this shard. The socket sends these strings. */
@@ -333,19 +337,24 @@ function applyLevel(book: { bids: Map<string, number>; asks: Map<string, number>
   else levels.set(price, qty);
 }
 
-function noteSequence(host: PaperHost, shardIndex: number, productId: string, sequence: number | undefined, reset: boolean): void {
+function noteSequence(host: PaperHost, shardIndex: number, sequence: number | undefined, reset: boolean): void {
   if (sequence == null) return;
-  const last = host.lastL2Seq.get(productId) ?? null;
+  const key = String(shardIndex);
+  const last = host.lastL2Seq.get(key) ?? null;
   if (!reset && !l2SequenceOk(last, sequence)) {
     host.l2Gaps += 1;
-    host.book.incidents.push(`l2 sequence ${productId} ${String(last)} -> ${sequence}`);
+    host.book.incidents.push(`l2 sequence shard ${shardIndex} ${String(last)} -> ${sequence}`);
     host.needsReconnect[shardIndex] = true;
   }
-  host.lastL2Seq.set(productId, sequence);
+  host.lastL2Seq.set(key, sequence);
 }
 
 /** Public messages for one socket. Trade time and maker side come from the exchange. */
 export function applyPublic(host: PaperHost, shardIndex: number, events: readonly PublicEvent[], nowMs: number): void {
+  const sequenced = events.find((event) => (event.kind === "l2-snapshot" || event.kind === "l2-update") && event.sequence != null);
+  if (sequenced && (sequenced.kind === "l2-snapshot" || sequenced.kind === "l2-update")) {
+    noteSequence(host, shardIndex, sequenced.sequence, sequenced.kind === "l2-snapshot");
+  }
   for (const event of events) {
     if (event.kind === "heartbeat") {
       observeHeartbeat(host, shardIndex, nowMs);
@@ -361,7 +370,6 @@ export function applyPublic(host: PaperHost, shardIndex: number, events: readonl
       continue;
     }
     if (event.kind === "l2-snapshot") {
-      noteSequence(host, shardIndex, event.productId, event.sequence, true);
       const book = { bids: new Map<string, number>(), asks: new Map<string, number>() };
       for (const [price, size] of event.bids) applyLevel(book, "bid", price, size);
       for (const [price, size] of event.asks) applyLevel(book, "ask", price, size);
@@ -371,7 +379,6 @@ export function applyPublic(host: PaperHost, shardIndex: number, events: readonl
       continue;
     }
     if (event.kind === "l2-update") {
-      noteSequence(host, shardIndex, event.productId, event.sequence, false);
       const book = levelsOf(host, event.productId);
       applyLevel(book, event.side, event.price, event.size);
       const top = touch(book);
@@ -808,7 +815,7 @@ export async function runPublicPaper(opts: {
   };
   publish();
   const sockets = host.shards.map((_, index) => openShard(host, index, PUBLIC_WS_URL));
-  let lastLog = 0;
+  let lastLog = Date.now();
   let lastPublish = 0;
   let stopped = false;
   const stop = () => {

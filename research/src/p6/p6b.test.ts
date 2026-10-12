@@ -336,9 +336,14 @@ test("a shard with no heartbeat reconnects, and silence after that reconnects ag
   expect(host.book.incidents.some((row) => row.includes("closed"))).toBe(true);
   expect(considerHeartbeatGap(host, 0, 32_000)).toBe(true);
   expect(l2SequenceOk(null, 4)).toBe(true);
+  expect(l2SequenceOk(4, 4)).toBe(true);
   expect(l2SequenceOk(4, 5)).toBe(true);
   expect(l2SequenceOk(4, 6)).toBe(false);
-  applyPublic(host, 0, [{ kind: "l2-update", productId: "ETH-USD", side: "bid", price: "1", size: "1", sequence: 1 }], 1);
+  applyPublic(host, 0, [
+    { kind: "l2-update", productId: "ETH-USD", side: "bid", price: "1", size: "1", sequence: 1 },
+    { kind: "l2-update", productId: "ETH-USD", side: "bid", price: "2", size: "1", sequence: 1 },
+  ], 1);
+  expect(host.l2Gaps).toBe(0);
   applyPublic(host, 0, [{ kind: "l2-update", productId: "ETH-USD", side: "bid", price: "1", size: "2", sequence: 3 }], 2);
   expect(host.l2Gaps).toBe(1);
   expect(host.needsReconnect[0]).toBe(true);
