@@ -28,6 +28,7 @@ import { netBps } from "../p5/walk";
 import { momentumBlocked, momentumCrashOn } from "../p5/guards";
 import { isMondayCloseBar, x1EntryTs } from "../p5/run";
 import { assignBetas, averageLinkage, betaWeight, openRiskAfterMove } from "../p5/risk";
+import type { SourceDay } from "../p3/bar-access";
 import { forwardClusterBeta, latestClusterDate, type MemberCloses } from "./clusters";
 import { readForwardPick, type APick, type APickLog } from "./select";
 import { daysBetween, weekKey } from "../p5/stats";
@@ -235,6 +236,8 @@ export type ForwardEvent =
       bid: number;
       ask: number;
       bookTsMs: number;
+      /** Wall-clock time the order is sent. Staleness is measured from this, not from the signal time. */
+      sendTsMs?: number;
       decisionMid: number;
       tick?: number;
       target?: number;
@@ -542,6 +545,29 @@ function noteQuote(book: Book, productId: string, bid: number, ask: number, tsMs
 function clusterIds(book: Book, productId: string): string[] {
   if (book.config.members.length === 0) return [...new Set([...book.positions.map((position) => position.productId), productId])];
   return book.config.members.includes(productId) ? book.config.members : [productId];
+}
+
+/** Fold one completed daily close into the live cluster inputs. The month schedule still decides when betas change. */
+export function noteMemberDay(book: Book, productId: string, day: SourceDay): void {
+  const members = book.config.memberCloses;
+  if (members) {
+    const row = members.find((member) => member.productId === productId);
+    if (row) {
+      const days = row.days as SourceDay[];
+      const at = days.findIndex((item) => item.date === day.date);
+      if (at >= 0) days[at] = day;
+      else days.push(day);
+      days.sort((a, b) => (a.date < b.date ? -1 : 1));
+    }
+  }
+  if (productId === "BTC-USD" && !day.empty && day.close > 0 && book.config.btcCloses) {
+    const closes = book.config.btcCloses as { date: string; close: number }[];
+    const at = closes.findIndex((item) => item.date === day.date);
+    const point = { date: day.date, close: day.close };
+    if (at >= 0) closes[at] = point;
+    else closes.push(point);
+    closes.sort((a, b) => (a.date < b.date ? -1 : 1));
+  }
 }
 
 function refreshForwardClusters(book: Book, day: string): void {
@@ -1015,7 +1041,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       book.rejected.push({ id: event.id, reason: "a-config" });
       return book;
     }
-    if (event.tsMs - event.bookTsMs > STALE_QUOTE_MS) {
+    if (event.sendTsMs - event.bookTsMs > STALE_QUOTE_MS) {
       book.rejected.push({ id: event.id, reason: "stale-book" });
       return book;
     }
@@ -1060,7 +1086,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
   }
   if (event.kind === "d-order") {
     touchTime(book, event.placedTs);
-    if (event.placedTs - event.bookTsMs > STALE_QUOTE_MS) {
+    if ((event.sendTsMs ?? event.placedTs) - event.bookTsMs > STALE_QUOTE_MS) {
       book.rejected.push({ id: event.id, reason: "stale-book" });
       return book;
     }

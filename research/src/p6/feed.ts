@@ -17,7 +17,7 @@ export type PublicEvent =
   | { kind: "candle"; productId: string; startSec: number; open: number; high: number; low: number; close: number; volume: number }
   | { kind: "l2-snapshot"; productId: string; bids: readonly (readonly [string, string])[]; asks: readonly (readonly [string, string])[]; sequence?: number }
   | { kind: "l2-update"; productId: string; side: "bid" | "ask"; price: string; size: string; sequence?: number }
-  | { kind: "trade"; productId: string; price: number; size: number; time?: string; side?: string }
+  | { kind: "trade"; productId: string; price: number; size: number; time?: string; side?: string; tradeId?: string }
   | { kind: "heartbeat" };
 
 export interface FeedGap {
@@ -181,8 +181,11 @@ export function parsePublicMessage(raw: unknown): PublicEvent[] {
         const productId = typeof trade.product_id === "string" ? trade.product_id : "";
         if (price == null || size == null || !productId) continue;
         const time = typeof trade.time === "string" ? trade.time : undefined;
+        // Coinbase: side is the maker side (BUY or SELL), not the taker.
+        // https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/websocket/market-trades
         const side = trade.side === "BUY" || trade.side === "SELL" ? trade.side : undefined;
-        out.push({ kind: "trade", productId, price, size, ...(time ? { time } : {}), ...(side ? { side } : {}) });
+        const tradeId = typeof trade.trade_id === "string" || typeof trade.trade_id === "number" ? String(trade.trade_id) : undefined;
+        out.push({ kind: "trade", productId, price, size, ...(time ? { time } : {}), ...(side ? { side } : {}), ...(tradeId ? { tradeId } : {}) });
       }
     }
   }

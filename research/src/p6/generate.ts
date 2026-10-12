@@ -11,11 +11,12 @@ import { classBarInputs, type GroupFlags, type SourceDay } from "../p3/bar-acces
 import { classBScore } from "../p3/classes";
 import { CLASS_B_DISASTER_ATR } from "../p3/design-rules";
 import { classDCandidates } from "../p3/d-geometry";
-import { classCSetups, classEEntries, type BarOHLC } from "../p3/signals";
-import { wilderAtr } from "../p2/indicators";
+import { btcVeto, classCSetups, classEEntries, type BarOHLC, type BtcDay } from "../p3/signals";
+import { ema, wilderAtr } from "../p2/indicators";
 import type { Ohlcv } from "../../vendor/87b35d0/indicators.ts";
 import { isDayCloseBar } from "../p5/book";
 import { collectA, isMondayCloseBar, weekSelection, x1EntryTs } from "../p5/run";
+import { addDays } from "../p5/stats";
 import type { ClassId } from "../p3/portfolio";
 import type { ClassBRow } from "../p3/design-rules";
 import { WINDOW_START } from "../p3/f5";
@@ -46,6 +47,8 @@ export interface GeneratedEntry {
   signalDate: string;
   /** Registered A config that produced this entry. Other classes leave it unset. */
   aConfig?: string;
+  /** True when the next open is not in the series yet. The host fills it at the entry time. */
+  fillAtOpen?: boolean;
 }
 
 export interface GenerateResult {
@@ -172,6 +175,67 @@ export function deriveForwardBook(bars: readonly FifteenBar[], nowSec: number): 
   };
 }
 
+/** A missing calendar day stays in the series as an explicit empty day. */
+export function withExplicitGaps(days: readonly SourceDay[]): SourceDay[] {
+  if (days.length === 0) return [];
+  const sorted = days.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  const out: SourceDay[] = [];
+  for (let index = 0; index < sorted.length; index += 1) {
+    const row = sorted[index]!;
+    if (index > 0) {
+      let date = addDays(sorted[index - 1]!.date, 1);
+      while (date < row.date) {
+        out.push({ date, ts: Date.parse(`${date}T00:00:00.000Z`) / 1000, open: 0, high: 0, low: 0, close: 0, volume: 0, empty: true });
+        date = addDays(date, 1);
+      }
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/**
+ * ATR of the latest completed day. An intraday bar uses the previous day.
+ * The day-close bar may use that day's own ATR, which is complete at the close.
+ */
+export function lastCompletedDailyAtr(atrByDate: ReadonlyMap<string, number>, date: string, includeDate = false): number {
+  let best = "";
+  let value = 0;
+  for (const [day, atr] of atrByDate) {
+    if ((includeDate ? day <= date : day < date) && atr > 0 && (best === "" || day > best)) {
+      best = day;
+      value = atr;
+    }
+  }
+  return value;
+}
+
+/** The registered BTC veto, from daily closes and 4h closes. */
+export function vetoFromBtc(days: readonly SourceDay[], four: readonly BarOHLC[]): (date: string) => boolean {
+  const filled = days.filter((row) => !row.empty && row.close > 0);
+  const closes = filled.map((row) => row.close);
+  const ema50 = ema(closes, 50);
+  const level = ema(four.map((bar) => bar.close), 50);
+  const fourBelow = new Map<string, boolean>();
+  four.forEach((bar, index) => {
+    const value = level[index];
+    if (value == null) return;
+    fourBelow.set(new Date(bar.ts * 1000).toISOString().slice(0, 10), bar.close < value);
+  });
+  const byDate = new Map<string, BtcDay>();
+  filled.forEach((row, index) => {
+    const prev = filled[index - 1];
+    byDate.set(row.date, {
+      date: row.date,
+      close: row.close,
+      ema50: ema50[index] ?? null,
+      dailyMove: prev && prev.close > 0 ? (row.close - prev.close) / prev.close : null,
+      below4hEma: fourBelow.get(row.date) ?? false,
+    });
+  });
+  return (date) => btcVeto(byDate.get(date));
+}
+
 function priorCloses(ohlc: readonly { date: string; close: number }[], entryDate: string): number[] {
   const end = ohlc.findIndex((row) => row.date >= entryDate);
   const slice = ohlc.slice(0, end < 0 ? ohlc.length : end).slice(-10);
@@ -223,8 +287,7 @@ export function generateForward(input: GenerateInput): GenerateResult {
     const prior = fromProducts ? [] : (input.earlierDays?.get(id) ?? []).filter((row) => row.date < "2025-10-11" && row.date < first);
     const merged = new Map<string, SourceDay>();
     for (const row of [...warmup, ...prior, ...book.days]) merged.set(row.date, row);
-    const days = [...merged.values()];
-    days.sort((a, b) => (a.date < b.date ? -1 : 1));
+    const days = fromProducts ? [...merged.values()].sort((a, b) => (a.date < b.date ? -1 : 1)) : withExplicitGaps([...merged.values()]);
     const listed = days.find((row) => !row.empty)?.date ?? null;
     const young = input.young ? input.young(id) : p5Young(days);
     const inputs = classBarInputs(input.flagsByProduct?.get(id) ?? input.flags, days, listed ?? WINDOW_START);
@@ -239,7 +302,25 @@ export function generateForward(input: GenerateInput): GenerateResult {
     for (const signal of collectA(id, inputs, atrByDate, hour, (date) => memberOn(id, date), young, veto)) {
       if (signal.lookback !== lookback) continue;
       const open = hour.find((bar) => bar.ts === signal.entryTs)?.open;
-      if (open == null) continue;
+      if (open == null) {
+        if (signal.entryTs >= input.nowSec) {
+          out.push({
+            kind: "x1",
+            classId: "A",
+            productId: id,
+            tsMs: signal.entryTs * 1000,
+            nextOpen: 0,
+            stop: 0,
+            target: null,
+            dailyAtr: signal.atr,
+            priorDailyCloses: priorCloses(inputs.ohlc, new Date(signal.entryTs * 1000).toISOString().slice(0, 10)),
+            signalDate: signal.date,
+            aConfig,
+            fillAtOpen: true,
+          });
+        }
+        continue;
+      }
       const stop = open - k * signal.atr;
       if (!(stop > 0) || !(stop < open)) continue;
       out.push({
@@ -374,7 +455,7 @@ export function forwardBarAnnotation(
   for (const week of generated.weeks) if (week.date <= date) bScores = week.rows;
   return {
     atr1h: hourAtrAt(hour, startSec),
-    dailyAtr: generated.atrByProduct.get(productId)?.get(date) ?? 0,
+    dailyAtr: lastCompletedDailyAtr(generated.atrByProduct.get(productId) ?? new Map(), date, isDayCloseBar(startSec)),
     bScores,
     dailyClose: isDayCloseBar(startSec),
   };

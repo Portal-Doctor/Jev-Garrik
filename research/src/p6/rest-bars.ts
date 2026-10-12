@@ -126,6 +126,29 @@ export function tradesBuilt15m(trades: readonly TradePrint[], bucketSec = REST_G
  * Exchange candle rows are [time, low, high, open, close, volume].
  * The row whose time is the 15m start is the strategy bar. Nothing is fetched.
  */
+/** Every 15m row in an exchange candle response. Rows that are not 15m starts are dropped. */
+export function barsFromExchangeCandles(productId: string, rows: readonly number[][]): OhlcvBar[] {
+  const out: OhlcvBar[] = [];
+  for (const row of rows) {
+    if (!Array.isArray(row) || row.length < 6 || typeof row[0] !== "number") continue;
+    const bar = barFromExchangeCandles(productId, row[0], [row]);
+    if (bar) out.push(bar);
+  }
+  return out.sort((a, b) => a.startSec - b.startSec);
+}
+
+/** Candle spans of at most `spanBars` from the day after the daily store through the last closed bar. */
+export function planHistorySpans(fromSec: number, throughSec: number, spanBars = 300): { startSec: number; endSec: number }[] {
+  if (!(fromSec >= 0) || throughSec < fromSec) return [];
+  const out: { startSec: number; endSec: number }[] = [];
+  const width = Math.max(1, spanBars) * REST_GRANULARITY_15M;
+  for (let start = fromSec; start <= throughSec; start += width) {
+    const end = Math.min(throughSec, start + width - REST_GRANULARITY_15M);
+    out.push({ startSec: start, endSec: end });
+  }
+  return out;
+}
+
 export function barFromExchangeCandles(productId: string, startSec: number, rows: readonly number[][]): OhlcvBar | null {
   const row = rows.find((item) => item[0] === startSec);
   if (!row || row.length < 6) return null;
