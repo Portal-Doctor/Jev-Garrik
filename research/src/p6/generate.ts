@@ -14,9 +14,10 @@ import { classDCandidates } from "../p3/d-geometry";
 import { classCSetups, classEEntries, type BarOHLC } from "../p3/signals";
 import { wilderAtr } from "../p2/indicators";
 import type { Ohlcv } from "../../vendor/87b35d0/indicators.ts";
-import { aRuleDate, bHeldExitTs, collectA, isMondayCloseBar, weekSelection, x1EntryTs } from "../p5/run";
-import { addDays } from "../p5/stats";
+import { collectA, isMondayCloseBar, weekSelection, x1EntryTs } from "../p5/run";
 import type { ClassId } from "../p3/portfolio";
+import type { ClassBRow } from "../p3/design-rules";
+import { WINDOW_START } from "../p3/f5";
 import type { ForwardEvent } from "./engine";
 
 export interface FifteenBar {
@@ -38,8 +39,16 @@ export interface GeneratedEntry {
   stop: number;
   target: number | null;
   dailyAtr: number;
-  ruleExitTs: number | null;
+  /** Ten daily closes strictly before the entry date. The engine rolls the 10-day exit from these. */
+  priorDailyCloses: number[];
   signalDate: string;
+}
+
+export interface GenerateResult {
+  entries: GeneratedEntry[];
+  /** One row per Monday-close week. Scores are known at that week's close bar. */
+  weeks: { date: string; rows: ClassBRow[] }[];
+  atrByProduct: Map<string, Map<string, number>>;
 }
 
 export interface GenerateInput {
@@ -144,21 +153,23 @@ function deriveProduct(bars: readonly FifteenBar[], nowSec: number): DerivedBook
   };
 }
 
-function dayTs(date: string): number {
-  return Date.parse(`${date}T00:00:00.000Z`) / 1000;
+function priorCloses(ohlc: readonly { date: string; close: number }[], entryDate: string): number[] {
+  const end = ohlc.findIndex((row) => row.date >= entryDate);
+  const slice = ohlc.slice(0, end < 0 ? ohlc.length : end).slice(-10);
+  return slice.map((row) => row.close).filter((close) => Number.isFinite(close));
 }
 
-function aRuleTs(ohlc: readonly { date: string; low: number; close: number }[], entryDate: string, entry: number, stop: number): number | null {
-  const rule = aRuleDate(ohlc, entryDate, entry, stop);
-  if (rule == null) return null;
-  return dayTs(addDays(rule.date, 1));
+/** P5 young-listing flag: a known first print and fewer than 200 nonempty days before the universe date. */
+export function p5Young(days: readonly SourceDay[]): boolean {
+  const listed = days.some((row) => !row.empty);
+  const before = days.filter((row) => !row.empty && row.date < "2025-11-10").length;
+  return listed && before < 200;
 }
 
-export function generateEntries(input: GenerateInput): GeneratedEntry[] {
+export function generateForward(input: GenerateInput): GenerateResult {
   const lookback = input.lookback ?? 20;
   const k = input.k ?? 2;
   const memberOn = input.memberOn ?? (() => true);
-  const young = input.young ?? (() => true);
   const veto = input.veto ?? (() => false);
   const ids = [...new Set(input.bars.map((bar) => bar.productId))].sort();
   const books = new Map<string, DerivedBook>();
@@ -173,9 +184,12 @@ export function generateEntries(input: GenerateInput): GeneratedEntry[] {
     const book = books.get(id);
     if (!book) continue;
     const first = book.days[0]?.date ?? "9999-99-99";
-    const prior = (input.earlierDays?.get(id) ?? []).filter((row) => row.date < first);
+    const prior = (input.earlierDays?.get(id) ?? []).filter((row) => row.date < "2025-10-11" && row.date < first);
     const days = [...prior, ...book.days].filter((row, index, all) => all.findIndex((item) => item.date === row.date) === index);
-    const inputs = classBarInputs(input.flagsByProduct?.get(id) ?? input.flags, days, days.find((row) => !row.empty)?.date ?? "1970-01-01");
+    days.sort((a, b) => (a.date < b.date ? -1 : 1));
+    const listed = days.find((row) => !row.empty)?.date ?? null;
+    const young = input.young ? input.young(id) : p5Young(days);
+    const inputs = classBarInputs(input.flagsByProduct?.get(id) ?? input.flags, days, listed ?? WINDOW_START);
     const atrOn = wilderAtr(inputs.ohlc.map((row) => row.high), inputs.ohlc.map((row) => row.low), inputs.ohlc.map((row) => row.close), 14);
     const atrByDate = new Map<string, number>();
     inputs.ohlc.forEach((row, index) => {
@@ -184,7 +198,7 @@ export function generateEntries(input: GenerateInput): GeneratedEntry[] {
     });
     atrByProduct.set(id, atrByDate);
     const hour = book.hour.map((bar) => ({ ts: bar.ts, open: bar.open }));
-    for (const signal of collectA(id, inputs, atrByDate, hour, (date) => memberOn(id, date), young(id), veto)) {
+    for (const signal of collectA(id, inputs, atrByDate, hour, (date) => memberOn(id, date), young, veto)) {
       if (signal.lookback !== lookback) continue;
       const open = hour.find((bar) => bar.ts === signal.entryTs)?.open;
       if (open == null) continue;
@@ -199,7 +213,7 @@ export function generateEntries(input: GenerateInput): GeneratedEntry[] {
         stop,
         target: null,
         dailyAtr: signal.atr,
-        ruleExitTs: aRuleTs(inputs.ohlc, signal.entryDate, open, stop),
+        priorDailyCloses: priorCloses(inputs.ohlc, new Date(signal.entryTs * 1000).toISOString().slice(0, 10)),
         signalDate: signal.date,
       });
     }
@@ -225,7 +239,7 @@ export function generateEntries(input: GenerateInput): GeneratedEntry[] {
         stop,
         target,
         dailyAtr: atrByDate.get(setup.date) ?? 0,
-        ruleExitTs: null,
+        priorDailyCloses: [],
         signalDate: setup.date,
       });
     }
@@ -240,7 +254,7 @@ export function generateEntries(input: GenerateInput): GeneratedEntry[] {
         stop: signal.stop,
         target: signal.target,
         dailyAtr: 0,
-        ruleExitTs: null,
+        priorDailyCloses: [],
         signalDate: new Date(signal.barTs).toISOString().slice(0, 10),
       });
     }
@@ -254,7 +268,7 @@ export function generateEntries(input: GenerateInput): GeneratedEntry[] {
         stop: signal.stop,
         target: signal.target,
         dailyAtr: 0,
-        ruleExitTs: null,
+        priorDailyCloses: [],
         signalDate: signal.date,
       });
     }
@@ -277,15 +291,6 @@ export function generateEntries(input: GenerateInput): GeneratedEntry[] {
       if (open == null || !(open > 0)) continue;
       const stop = open - CLASS_B_DISASTER_ATR * atr;
       if (!(stop > 0)) continue;
-      let ruleExitTs: number | null = null;
-      for (const later of [...byWeek.keys()].sort()) {
-        if (later <= date) continue;
-        const held = weekSelection(later, byWeek.get(later)!).held;
-        if (!held.has(id)) {
-          ruleExitTs = bHeldExitTs(later).ts;
-          break;
-        }
-      }
       out.push({
         kind: "x1",
         classId: "B",
@@ -295,13 +300,18 @@ export function generateEntries(input: GenerateInput): GeneratedEntry[] {
         stop,
         target: null,
         dailyAtr: atr,
-        ruleExitTs,
+        priorDailyCloses: [],
         signalDate: date,
       });
     }
   }
   out.sort((a, b) => a.tsMs - b.tsMs || (a.productId < b.productId ? -1 : 1) || (a.classId < b.classId ? -1 : 1));
-  return out;
+  const weeks = [...byWeek.keys()].sort().map((date) => ({ date, rows: byWeek.get(date)! }));
+  return { entries: out, weeks, atrByProduct };
+}
+
+export function generateEntries(input: GenerateInput): GeneratedEntry[] {
+  return generateForward(input).entries;
 }
 
 /** Bid/ask whose half spread is 5 bps, so a non-parity fill matches s_bt base. */
@@ -312,12 +322,12 @@ export function quoteAt(price: number): { bid: number; ask: number } {
 }
 
 export function entriesToEvents(entries: readonly GeneratedEntry[]): ForwardEvent[] {
-  return entries.map((entry, index) => {
+  return entries.map((entry) => {
     const quote = quoteAt(entry.nextOpen);
     if (entry.kind === "d-order") {
       return {
         kind: "d-order" as const,
-        id: `${entry.classId}-${entry.productId}-${index}`,
+        id: `${entry.classId}-${entry.productId}-${entry.tsMs}`,
         productId: entry.productId,
         limit: entry.nextOpen,
         units: 1,
@@ -333,7 +343,7 @@ export function entriesToEvents(entries: readonly GeneratedEntry[]): ForwardEven
     }
     return {
       kind: "x1" as const,
-      id: `${entry.classId}-${entry.productId}-${index}`,
+      id: `${entry.classId}-${entry.productId}-${entry.tsMs}`,
       classId: entry.classId,
       productId: entry.productId,
       tsMs: entry.tsMs,
@@ -347,7 +357,7 @@ export function entriesToEvents(entries: readonly GeneratedEntry[]): ForwardEven
       decisionMid: entry.nextOpen,
       target: entry.target ?? undefined,
       dailyAtr: entry.dailyAtr,
-      ruleExitTs: entry.ruleExitTs ?? undefined,
+      priorDailyCloses: entry.priorDailyCloses,
     };
   });
 }

@@ -4,8 +4,7 @@
  * C, D, and E have no P5 historical trades.
  */
 
-import { readdirSync } from "node:fs";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readPairMonth } from "../data/store";
 import type { SourceDay } from "../p3/bar-access";
@@ -14,7 +13,7 @@ import { ema, wilderAtr } from "../p2/indicators";
 import { registeredFlags, type RegistrationFlagSource } from "../p5/flags";
 import { dateOfTs, isDayCloseBar } from "../p5/book";
 import { applyForward, freshBook, type Book, type ForwardEvent } from "./engine";
-import { generateEntries, type FifteenBar, type GeneratedEntry } from "./generate";
+import { generateForward, type FifteenBar, type GeneratedEntry } from "./generate";
 
 const WINDOW_ENTRY_START = "2025-11-11";
 const WINDOW_ENTRY_END = "2025-11-18";
@@ -82,12 +81,8 @@ function readMonths(root: string, productId: string, names: readonly string[]): 
   const out: { ts: number; open: number; high: number; low: number; close: number; volume: number; empty: boolean }[] = [];
   for (const name of names) {
     const path = join(folder, `${name}.sqlite`);
-    let rows: ReturnType<typeof readPairMonth>["rows"] = [];
-    try {
-      rows = readPairMonth(path).rows;
-    } catch {
-      continue;
-    }
+    if (!existsSync(path)) throw new Error(`missing data file ${path}`);
+    const rows = readPairMonth(path).rows;
     for (const row of rows) {
       if (row.empty || row.open == null || row.high == null || row.low == null || row.close == null) {
         out.push({ ts: row.minuteSec, open: 0, high: 0, low: 0, close: 0, volume: 0, empty: true });
@@ -309,24 +304,18 @@ export function replayFrozenWindow(): { diffs: ParityDiff[]; published: Publishe
   }
   const vetoDays = btcDays(btcDaily, [...hour.values()].sort((a, b) => a.ts - b.ts));
   const veto = (date: string) => btcVeto(vetoDays.get(date));
-  const youngOf = (productId: string) => {
-    const prior = (earlier.get(productId) ?? []).filter((row) => !row.empty && row.date < "2025-11-10").length;
-    const inside = new Set((px.get(productId) ?? []).filter((bar) => dayOf(bar.ts) < "2025-11-10").map((bar) => dayOf(bar.ts)));
-    const count = prior + inside.size;
-    return count > 0 && count < 200;
-  };
-  let entries: GeneratedEntry[] = generateEntries({
+  const generated = generateForward({
     bars,
     nowSec: Date.parse(`${WALK_THROUGH}T00:00:00.000Z`) / 1000,
     flags: { priceGroupPasses: true, volumeGroupPasses: true, boundarySaved: false },
     flagsByProduct: flags.byId,
     earlierDays: earlier,
     memberOn: (productId, date) => isMember(productId, date),
-    young: youngOf,
     veto,
     lookback: 20,
     k: 2,
   });
+  let entries: GeneratedEntry[] = generated.entries;
   entries = entries.filter((entry) => {
     const date = dayOf(Math.floor(entry.tsMs / 1000));
     return (entry.classId === "A" || entry.classId === "B") && date >= WINDOW_ENTRY_START && date < WINDOW_ENTRY_END;
@@ -346,7 +335,7 @@ export function replayFrozenWindow(): { diffs: ParityDiff[]; published: Publishe
     const list = byTs.get(entry.tsMs) ?? [];
     list.push(entry);
     byTs.set(entry.tsMs, list);
-    const exit = (entry.ruleExitTs ?? Math.floor(entry.tsMs / 1000)) + 86_400;
+    const exit = Math.floor(entry.tsMs / 1000) + 40 * 86_400;
     if (exit > lastTs) lastTs = exit;
   }
   const published = publishedA20Trades();
@@ -357,6 +346,7 @@ export function replayFrozenWindow(): { diffs: ParityDiff[]; published: Publishe
     for (const bar of px.get(id) ?? []) {
       if (bar.ts < firstTs || bar.ts > lastTs) continue;
       const date = dayOf(bar.ts);
+      const week = [...generated.weeks].reverse().find((row) => row.date <= date);
       events.push({
         kind: "bar15",
         productId: id,
@@ -367,19 +357,20 @@ export function replayFrozenWindow(): { diffs: ParityDiff[]; published: Publishe
         low: bar.low,
         close: bar.close,
         atr1h: atrAt(atr1h.get(id) ?? [], bar.ts),
-        dailyAtr: isDayCloseBar(bar.ts) ? atrDay.get(id)?.get(date) : undefined,
+        dailyAtr: generated.atrByProduct.get(id)?.get(date) ?? (isDayCloseBar(bar.ts) ? atrDay.get(id)?.get(date) : undefined),
+        bScores: week?.rows,
       });
     }
   }
   for (const [ts, list] of byTs) {
     list.sort((a, b) => (a.classId < b.classId ? -1 : 1) || (a.productId < b.productId ? -1 : 1));
-    for (const [index, entry] of list.entries()) {
+    for (const entry of list) {
       const openSec = Math.floor(entry.tsMs / 1000);
       const bar = (px.get(entry.productId) ?? []).find((row) => row.ts === openSec);
       const nextOpen = bar?.open ?? entry.nextOpen;
       events.push({
         kind: "x1",
-        id: `${entry.classId}-${entry.productId}-${index}`,
+        id: `${entry.classId}-${entry.productId}-${entry.tsMs}`,
         classId: entry.classId,
         productId: entry.productId,
         tsMs: entry.tsMs,
@@ -392,7 +383,7 @@ export function replayFrozenWindow(): { diffs: ParityDiff[]; published: Publishe
         sendTsMs: entry.tsMs,
         decisionMid: nextOpen,
         dailyAtr: entry.dailyAtr,
-        ruleExitTs: entry.ruleExitTs ?? undefined,
+        priorDailyCloses: entry.priorDailyCloses,
       });
     }
   }

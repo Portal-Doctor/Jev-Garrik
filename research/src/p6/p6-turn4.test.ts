@@ -82,11 +82,11 @@ test("the $500 backstop latches one pair, logs the trip, and re-arms on re-enabl
   enter(book, "eth-recovered", "ETH-USD", wednesday + 3 * 86_400_000);
   expect(book.rejected.some((row) => row.id === "eth-recovered" && row.reason === "pair-backstop")).toBe(true);
 
-  applyForward(book, { kind: "pair-enable", productId: "ETH-USD", tsMs: wednesday + 3 * 86_400_000 });
+  applyForward(book, { kind: "pair-enable", productId: "ETH-USD", tsMs: wednesday + 3 * 86_400_000, who: "Brian", why: "re-enable after review" });
   const enabled = book.pairs["ETH-USD"];
   expect(enabled?.latched).toBe(false);
   expect(enabled?.baselineUsd).toBe(300);
-  expect(enabled?.log[1]).toMatchObject({ kind: "reenable", tsMs: wednesday + 3 * 86_400_000, realizedUsd: 300, markedUsd: 0, cumulativeUsd: 300 });
+  expect(enabled?.log[1]).toMatchObject({ kind: "reenable", tsMs: wednesday + 3 * 86_400_000, realizedUsd: 300, markedUsd: 0, cumulativeUsd: 300, who: "Brian", why: "re-enable after review" });
   enter(book, "eth-ok", "ETH-USD", wednesday + 3 * 86_400_000 + 1_000);
   expect(book.positions.some((position) => position.id === "eth-ok")).toBe(true);
 
@@ -106,6 +106,75 @@ test("the $500 backstop latches one pair, logs the trip, and re-arms on re-enabl
   expect(book.pairs["ETH-USD"]?.log.at(-1)?.cumulativeUsd).toBeLessThanOrEqual(-200);
   expect(book.positions.some((position) => position.id === "eth-ok")).toBe(true);
   expect(book.positions.some((position) => position.id === "sol")).toBe(true);
+});
+
+test("a re-enable needs a note and a latched pair", () => {
+  const book = freshBook({ members: ["ETH-USD"] });
+  applyForward(book, { kind: "clock", tsMs: wednesday });
+  applyForward(book, { kind: "pair-enable", productId: "ETH-USD", tsMs: wednesday, who: "Brian", why: "not latched yet" });
+  expect(book.rejected.some((row) => row.reason === "not-latched")).toBe(true);
+  expect(book.pairs["ETH-USD"]?.baselineUsd ?? 0).toBe(0);
+  applyForward(book, {
+    kind: "realize",
+    id: "cushion",
+    classId: "C",
+    productId: "BTC-USD",
+    netR: 1,
+    netUsd: 2_000,
+    riskUsd: 20,
+    entryDate: "2026-03-04",
+    exitTs: wednesday,
+  });
+  applyForward(book, {
+    kind: "realize",
+    id: "eth-loss",
+    classId: "A",
+    productId: "ETH-USD",
+    netR: -1,
+    netUsd: -500,
+    riskUsd: 500,
+    entryDate: "2026-03-04",
+    exitTs: wednesday,
+  });
+  applyForward(book, { kind: "pair-enable", productId: "ETH-USD", tsMs: wednesday + 1_000, who: " ", why: " " });
+  expect(book.pairs["ETH-USD"]?.latched).toBe(true);
+  expect(book.rejected.some((row) => row.reason === "reenable-note")).toBe(true);
+});
+
+test("parity mode keeps B at $60 after a rolling-20 breach and a 10R pause", () => {
+  const book = freshBook({ members: ["ETH-USD"], parity: { riskUsd: 60, sBtBps: 5 } });
+  applyForward(book, { kind: "clock", tsMs: wednesday });
+  for (let i = 0; i < 20; i += 1) {
+    applyForward(book, {
+      kind: "realize",
+      id: `loss-${i}`,
+      classId: "B",
+      productId: "BTC-USD",
+      netR: -0.3,
+      netUsd: -18,
+      riskUsd: 60,
+      entryDate: "2026-03-04",
+      exitTs: wednesday + i,
+    });
+  }
+  applyForward(book, {
+    kind: "x1",
+    id: "b-week",
+    classId: "B",
+    productId: "ETH-USD",
+    tsMs: wednesday + 86_400_000,
+    nextOpen: 100,
+    stop: 90,
+    atr1h: 1,
+    bid: 100,
+    ask: 100.1,
+    bookTsMs: wednesday + 86_400_000,
+    sendTsMs: wednesday + 86_400_000,
+    decisionMid: 100,
+    dailyAtr: 4,
+  });
+  expect(book.rejected.find((row) => row.id === "b-week")).toBeUndefined();
+  expect(book.positions.find((position) => position.id === "b-week")?.riskUsd).toBe(60);
 });
 
 test("an open pair runs to its stop after the latch", () => {
