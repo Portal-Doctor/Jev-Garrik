@@ -1,4 +1,8 @@
 {
+  "commitSha": "d6c77d7e7a5853bb7ee5b967fb3bea557052aff0",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T01:39:06.909Z",
+  "phaseId": "P6",
   "role": "report-only",
   "resultsFile": "research/data/reports/p5-v31-results.json",
   "resultsSha256": "d262a752adf0fcbcaeebc3eba1db2961e4bccd164442634c905a558f10184595",

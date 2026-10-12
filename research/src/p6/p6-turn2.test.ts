@@ -464,6 +464,24 @@ test("a fourth name in one cluster is blocked by the book itself", () => {
   expect(book.rejected.some((row) => row.id === "LINK-USD" && row.reason.includes("cluster"))).toBe(true);
 });
 
+test("the stamped amendment 2 record is approved and the Kelly ruling is separate", () => {
+  const raw = readFileSync(fileURLToPath(new URL("../../data/reports/p6-amendment-2.json", import.meta.url)));
+  const doc = JSON.parse(raw.toString()) as { approvedAt: string; approvedBy: string; rearm: string; kellyIncluded: boolean; commitSha: string; registrationEdited: boolean };
+  expect(doc.approvedAt).toBe("2026-10-12T01:23:00Z");
+  expect(doc.approvedBy).toBe("Brian");
+  expect(doc.rearm).toBe(REARM_RULE);
+  expect(doc.kellyIncluded).toBe(false);
+  expect(doc.registrationEdited).toBe(false);
+  expect(doc.commitSha).toBe("d6c77d7e7a5853bb7ee5b967fb3bea557052aff0");
+  const hash = createHash("sha256").update(raw).digest("hex");
+  const side = readFileSync(fileURLToPath(new URL("../../data/reports/p6-amendment-2.sha256", import.meta.url)), "utf8");
+  expect(side).toBe(`${hash}  research/data/reports/p6-amendment-2.json\n`);
+  const kelly = JSON.parse(readFileSync(fileURLToPath(new URL("../../data/reports/p6-kelly-ruling.json", import.meta.url)), "utf8")) as { partOfAmendment2: boolean; registeredRiskUsd: number; registrationEdited: boolean };
+  expect(kelly.partOfAmendment2).toBe(false);
+  expect(kelly.registeredRiskUsd).toBe(60);
+  expect(kelly.registrationEdited).toBe(false);
+});
+
 test("features.ts is the cb accumulator byte for byte, and the amendment record cites the frozen hash", () => {
   const left = readFileSync(fileURLToPath(new URL("../../../cb/features.ts", import.meta.url)));
   const right = readFileSync(fileURLToPath(new URL("./cb-port/features.ts", import.meta.url)));
