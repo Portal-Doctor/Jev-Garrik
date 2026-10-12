@@ -593,7 +593,8 @@ function p5(): void {
   assertP5OutputPath(out);
   writeJson(out, report);
   const fileHash = createHash("sha256").update(readFileSync(out)).digest("hex");
-  writeFileSync(`${out}.sha256`, `${fileHash}  research/data/reports/${P5_V31_RESULTS}\n`);
+  const sidecar = join(paths.reports, "p5-v31-results.sha256");
+  writeFileSync(sidecar, `${fileHash}  research/data/reports/${P5_V31_RESULTS}\n`);
   console.log(`p5 v31 ${fileHash}`);
 }
 
