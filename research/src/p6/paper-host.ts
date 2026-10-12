@@ -3,8 +3,10 @@
  * Level2, market_trades, and heartbeats only. At most 10 products per socket.
  * A missed first heartbeat reconnects, and a socket that stays silent reconnects
  * again. Strategy bars are public REST 15-minute candles. Daily, 1h, and 4h
- * series are derived from those bars plus the daily warmup. Status and the book
- * are files under data/runtime. Nothing here opens a port.
+ * series are derived from those bars plus the daily warmup. One bar step is
+ * accept or fallback, then a save. The socket loop is a driver for that step,
+ * not a requirement of the book. Status and the book are files under
+ * data/runtime. Nothing here opens a port.
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -80,6 +82,10 @@ export interface PaperHost {
   trades: TradePrint[];
   rest: Map<string, RestSlot>;
   restCursor: Map<string, number>;
+  /** Highest applied 15m start per product. The resume point is this plus 900. */
+  appliedThrough: Map<string, number>;
+  /** Bars already pushed, bounded to the backfill window. A second apply is a no-op. */
+  applied: Set<string>;
   nextRestMs: number;
   books: Map<string, { bids: Map<string, number>; asks: Map<string, number> }>;
   fifteen: FifteenBar[];
@@ -216,6 +222,8 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     trades: [],
     rest: new Map(),
     restCursor: new Map(),
+    appliedThrough: new Map(),
+    applied: new Set(),
     nextRestMs: 0,
     books: new Map(),
     fifteen: [],
@@ -596,9 +604,45 @@ function pushBar(host: PaperHost, bar: OhlcvBar): void {
   boundHost(host);
 }
 
-export function acceptRestBar(host: PaperHost, bar: OhlcvBar): "accepted" | "drop-late" {
-  const slot = host.rest.get(`${bar.productId}:${bar.startSec}`);
+function barKey(productId: string, startSec: number): string {
+  return `${productId}:${startSec}`;
+}
+
+function noteApplied(host: PaperHost, productId: string, startSec: number): void {
+  host.applied.add(barKey(productId, startSec));
+  const prev = host.appliedThrough.get(productId) ?? -1;
+  if (startSec > prev) host.appliedThrough.set(productId, startSec);
+  const keepFrom = startSec - (REST_BACKFILL_BARS - 1) * 900;
+  for (const key of host.applied) {
+    if (!key.startsWith(`${productId}:`)) continue;
+    const start = Number(key.slice(productId.length + 1));
+    if (start < keepFrom) host.applied.delete(key);
+  }
+}
+
+function alreadyApplied(host: PaperHost, productId: string, startSec: number): boolean {
+  if (host.applied.has(barKey(productId, startSec))) return true;
+  return host.fifteen.some((row) => row.productId === productId && row.startSec === startSec);
+}
+
+/**
+ * Where to read next after a restart. Unapplied bars inside the backfill
+ * window are retried. An older snapshot with no appliedThrough is left as saved.
+ */
+export function resumeRestCursor(cursor: number | undefined, appliedThrough: number | undefined): number | undefined {
+  if (cursor == null && appliedThrough == null) return undefined;
+  if (cursor == null) return appliedThrough! + 900;
+  const earliest = Math.max(0, cursor - REST_BACKFILL_BARS * 900);
+  if (appliedThrough == null) return earliest;
+  const next = appliedThrough + 900;
+  if (next >= cursor) return cursor;
+  return Math.max(earliest, next);
+}
+
+export function acceptRestBar(host: PaperHost, bar: OhlcvBar): "accepted" | "already" | "drop-late" {
+  const slot = host.rest.get(barKey(bar.productId, bar.startSec));
   if (slot?.done && slot.fallback) return "drop-late";
+  if (alreadyApplied(host, bar.productId, bar.startSec)) return "already";
   if (slot) {
     slot.done = true;
     slot.inflight = false;
@@ -606,6 +650,7 @@ export function acceptRestBar(host: PaperHost, bar: OhlcvBar): "accepted" | "dro
   }
   host.restAccepted += 1;
   pushBar(host, bar);
+  noteApplied(host, bar.productId, bar.startSec);
   return "accepted";
 }
 
@@ -626,7 +671,10 @@ export function fallbackTradesBar(host: PaperHost, slot: RestSlot): OhlcvBar | n
   if (decision.incident) {
     host.book.incidents.push(`rest 15m missed ${slot.productId} ${slot.barStartSec} after 120s; ${built ? "trades-built bar" : "no trades"}`);
   }
-  if (built) pushBar(host, built);
+  if (built && !alreadyApplied(host, slot.productId, slot.barStartSec)) {
+    pushBar(host, built);
+    noteApplied(host, slot.productId, slot.barStartSec);
+  }
   return built;
 }
 
@@ -689,11 +737,40 @@ export function writeHostFiles(dir: string, host: PaperHost): void {
   runtimeFilePublisher(dir).publish({ status: hostStatus(host), book: hostPanel(host) });
 }
 
-export function savePaperState(dir: string, host: PaperHost): void {
-  assertRuntimeDir(dir);
-  mkdirSync(dir, { recursive: true });
+/** Book and cursor snapshot. A file store writes it today. A later store can keep the same body. */
+export interface PaperStateBody {
+  positions: Book["positions"];
+  closed: Book["closed"];
+  kelly: Book["kelly"];
+  pairs: Book["pairs"];
+  realizedUsd: number;
+  incidents: string[];
+  aPickConfig: string | null;
+  classes: Book["classes"];
+  day: string | null;
+  week: string | null;
+  dayStartEquity: number;
+  weekStartEquity: number;
+  peakEquity: number;
+  killSwitch: boolean;
+  rejected: Book["rejected"];
+  haltWeeks: string[];
+  momentumDates: string[];
+  restCursor: [string, number][];
+  appliedThrough: [string, number][];
+  applied: string[];
+  emitted: string[];
+}
+
+/** Persistence for the book and the last processed bar. The driver does not choose the store. */
+export interface PaperStore {
+  load(): PaperStateBody | null;
+  save(body: PaperStateBody): void;
+}
+
+export function capturePaperState(host: PaperHost): PaperStateBody {
   const book = host.book;
-  const body = {
+  return {
     positions: book.positions,
     closed: book.closed,
     kelly: book.kelly,
@@ -712,36 +789,13 @@ export function savePaperState(dir: string, host: PaperHost): void {
     haltWeeks: book.haltWeeks,
     momentumDates: book.momentumDates,
     restCursor: [...host.restCursor.entries()],
+    appliedThrough: [...host.appliedThrough.entries()],
+    applied: [...host.applied],
     emitted: [...host.emitted],
   };
-  writeFileSync(join(dir, "state.json"), JSON.stringify(body));
 }
 
-export function loadPaperState(dir: string, host: PaperHost): boolean {
-  assertRuntimeDir(dir);
-  const path = join(dir, "state.json");
-  if (!existsSync(path)) return false;
-  const body = JSON.parse(readFileSync(path, "utf8")) as {
-    positions?: Book["positions"];
-    closed?: Book["closed"];
-    kelly?: Book["kelly"];
-    pairs?: Book["pairs"];
-    realizedUsd?: number;
-    incidents?: string[];
-    aPickConfig?: string | null;
-    classes?: Book["classes"];
-    day?: string | null;
-    week?: string | null;
-    dayStartEquity?: number;
-    weekStartEquity?: number;
-    peakEquity?: number;
-    killSwitch?: boolean;
-    rejected?: Book["rejected"];
-    haltWeeks?: string[];
-    momentumDates?: string[];
-    restCursor?: [string, number][];
-    emitted?: string[];
-  };
+export function installPaperState(host: PaperHost, body: Partial<PaperStateBody> & { aPickConfig?: string | null }): void {
   host.book.positions = body.positions ?? [];
   host.book.closed = body.closed ?? [];
   if (body.kelly) host.book.kelly = body.kelly;
@@ -762,7 +816,42 @@ export function loadPaperState(dir: string, host: PaperHost): boolean {
   host.book.haltWeeks = body.haltWeeks ?? [];
   host.book.momentumDates = body.momentumDates ?? [];
   host.restCursor = new Map(body.restCursor ?? []);
+  host.appliedThrough = new Map(body.appliedThrough ?? []);
+  host.applied = new Set(body.applied ?? []);
   host.emitted = new Set(body.emitted ?? []);
+  if (body.appliedThrough) {
+    for (const productId of host.products) {
+      const resumed = resumeRestCursor(host.restCursor.get(productId), host.appliedThrough.get(productId));
+      if (resumed == null) host.restCursor.delete(productId);
+      else host.restCursor.set(productId, resumed);
+    }
+  }
+}
+
+/** File-backed book store under data/runtime. */
+export function filePaperStore(dir: string): PaperStore {
+  assertRuntimeDir(dir);
+  const path = join(dir, "state.json");
+  return {
+    load() {
+      if (!existsSync(path)) return null;
+      return JSON.parse(readFileSync(path, "utf8")) as PaperStateBody;
+    },
+    save(body) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path, JSON.stringify(body));
+    },
+  };
+}
+
+export function savePaperState(dir: string, host: PaperHost, store: PaperStore = filePaperStore(dir)): void {
+  store.save(capturePaperState(host));
+}
+
+export function loadPaperState(dir: string, host: PaperHost, store: PaperStore = filePaperStore(dir)): boolean {
+  const body = store.load();
+  if (!body) return false;
+  installPaperState(host, body);
   return true;
 }
 

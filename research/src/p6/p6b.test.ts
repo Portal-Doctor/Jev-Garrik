@@ -29,6 +29,7 @@ import {
   l2SequenceOk,
   loadPaperState,
   noteRest429,
+  resumeRestCursor,
   noteRestMiss,
   observeHeartbeat,
   onSocketClosed,
@@ -36,6 +37,7 @@ import {
   restAction,
   savePaperState,
   startPaperHost,
+  type PaperStore,
   writeHostFiles,
 } from "./paper-host";
 
@@ -410,6 +412,43 @@ test("REST backs off on 429, drops a late bar, and backfills a bounded gap", () 
   expect(starts[0]).toBe(0);
   expect(starts).toHaveLength(9);
   expect(starts[starts.length - 1]).toBe(7_200);
+});
+
+test("a bar applies once, and a restart continues from the last applied bar", () => {
+  const host = startPaperHost(["ETH-USD"], {});
+  dueRest(host, 915_000);
+  const bar = { productId: "ETH-USD", startSec: 0, open: 2, high: 3, low: 1, close: 2.5, volume: 4 };
+  expect(acceptRestBar(host, bar)).toBe("accepted");
+  expect(acceptRestBar(host, bar)).toBe("already");
+  expect(host.fifteen.filter((row) => row.startSec === 0)).toHaveLength(1);
+  let saved: ReturnType<PaperStore["load"]> = null;
+  const store: PaperStore = {
+    load: () => saved,
+    save(body) {
+      saved = body;
+    },
+  };
+  savePaperState("", host, store);
+  const next = startPaperHost(["ETH-USD"], {});
+  expect(loadPaperState("", next, store)).toBe(true);
+  expect(next.restCursor.get("ETH-USD")).toBe(900);
+  expect(acceptRestBar(next, bar)).toBe("already");
+  const scheduled = startPaperHost(["ETH-USD"], {});
+  dueRest(scheduled, 915_000);
+  expect(scheduled.restCursor.get("ETH-USD")).toBe(900);
+  let pending: ReturnType<PaperStore["load"]> = null;
+  const pendingStore: PaperStore = {
+    load: () => pending,
+    save(body) {
+      pending = body;
+    },
+  };
+  savePaperState("", scheduled, pendingStore);
+  const resumed = startPaperHost(["ETH-USD"], {});
+  expect(loadPaperState("", resumed, pendingStore)).toBe(true);
+  expect(resumed.restCursor.get("ETH-USD")).toBe(0);
+  expect(resumeRestCursor(8_100, undefined)).toBe(900);
+  expect(resumeRestCursor(8_100, 7_200)).toBe(8_100);
 });
 
 test("trades use the exchange time and the maker side", () => {
