@@ -4,7 +4,7 @@
  * Only the lease holder applies a bar, and each bar key is written once.
  */
 
-import { GAP_MAX_MS, gapWeekReport, type VolHour } from "./amendment-v6";
+import { GAP_MAX_MS, gapWeekReport, handoverCause, type VolHour } from "./amendment-v6";
 import { SAVE_HEARTBEAT_MS, type PaperStateBody } from "./paper-host";
 
 export { SAVE_HEARTBEAT_MS };
@@ -12,6 +12,11 @@ export { SAVE_HEARTBEAT_MS };
 export const CRON_EVERY_MS = 15 * 60 * 1000;
 export const MAX_DURATION_MS = 1_800_000;
 export const HANDOVER_MARGIN_MS = 60_000;
+/**
+ * Live lease TTL. The 60s heartbeat renews it. A crash drops the key inside
+ * this window, so the overlap watcher is not stuck until the function deadline.
+ */
+export const LEASE_TTL_MS = 180_000;
 export const LEASE_KEY = "p6:lease";
 /** Survives the lease TTL so a kill is visible after Redis expires the live key. */
 export const LEASE_META_KEY = "p6:lease-meta";
@@ -27,9 +32,9 @@ export interface Kv {
   cas(key: string, expect: string | null, value: string, opts?: { px?: number }): Promise<boolean>;
 }
 
-export function memoryKv(): Kv {
+export function memoryKv(clock: () => number = Date.now): Kv {
   const rows = new Map<string, { value: string; expiresAt: number | null }>();
-  const live = (key: string, now = Date.now()) => {
+  const live = (key: string, now = clock()) => {
     const row = rows.get(key);
     if (!row) return null;
     if (row.expiresAt != null && row.expiresAt <= now) {
@@ -45,7 +50,7 @@ export function memoryKv(): Kv {
     async set(key, value, opts) {
       const current = live(key);
       if (opts?.nx && current) return false;
-      rows.set(key, { value, expiresAt: opts?.px != null ? Date.now() + opts.px : null });
+      rows.set(key, { value, expiresAt: opts?.px != null ? clock() + opts.px : null });
       return true;
     },
     async del(key) {
@@ -55,10 +60,15 @@ export function memoryKv(): Kv {
       const current = live(key);
       const actual = current?.value ?? null;
       if (actual !== expect) return false;
-      rows.set(key, { value, expiresAt: opts?.px != null ? Date.now() + opts.px : null });
+      rows.set(key, { value, expiresAt: opts?.px != null ? clock() + opts.px : null });
       return true;
     },
   };
+}
+
+/** PX for a live lease. Never longer than the function deadline, and never longer than LEASE_TTL_MS. */
+export function leasePx(untilMs: number, nowMs: number): number {
+  return Math.min(LEASE_TTL_MS, Math.max(1, untilMs - nowMs));
 }
 
 export interface Lease {
@@ -108,10 +118,11 @@ export function markerBytesPerDay(products: number, example = barMarker("BTC-USD
 export async function saveState(kv: Kv, body: PaperStateBody, opts?: { writeWarmup?: boolean }): Promise<void> {
   const { warmup, memberCloses, ...live } = body;
   void memberCloses;
-  await kv.set(STATE_KEY, JSON.stringify(live));
-  if (opts?.writeWarmup === false || !warmup) return;
-  if (await kv.get(WARMUP_KEY)) return;
-  await kv.set(WARMUP_KEY, JSON.stringify(warmup));
+  const wrote = await kv.set(STATE_KEY, JSON.stringify(live));
+  if (!wrote) throw new Error("kv set p6:state failed");
+  if (opts?.writeWarmup !== true || !warmup) return;
+  const warmWrote = await kv.set(WARMUP_KEY, JSON.stringify(warmup));
+  if (!warmWrote) throw new Error("kv set p6:warmup failed");
 }
 
 export async function loadState(kv: Kv): Promise<PaperStateBody | null> {
@@ -201,13 +212,29 @@ export async function tryAcquire(kv: Kv, self: string, untilMs: number, nowMs = 
   const raw = await kv.get(LEASE_KEY);
   const current = decodeLease(raw);
   if (current && current.untilMs > nowMs && current.holder !== self) return false;
-  const ttl = Math.max(1, untilMs - nowMs);
+  const ttl = leasePx(untilMs, nowMs);
   const token = current && current.holder === self && current.token ? current.token : `${self}:${nowMs}`;
   const savedAtMs = current && current.holder === self && current.savedAtMs != null ? current.savedAtMs : nowMs;
   const next = encodeLease({ holder: self, untilMs, release: "none", token, savedAtMs });
   const won = await kv.cas(LEASE_KEY, raw, next, { px: ttl });
   if (!won) return false;
   await kv.set(LEASE_META_KEY, next);
+  return true;
+}
+
+/**
+ * Extend the live key by one TTL and move the crash clock. The caller saves
+ * p6:state first. A lost compare-and-swap means this process no longer holds the lease.
+ */
+export async function renewLease(kv: Kv, nowMs: number): Promise<boolean> {
+  const raw = await kv.get(LEASE_KEY);
+  const current = decodeLease(raw);
+  if (!current || current.release !== "none") return false;
+  const next = encodeLease({ ...current, savedAtMs: nowMs });
+  const won = await kv.cas(LEASE_KEY, raw, next, { px: leasePx(current.untilMs, nowMs) });
+  if (!won) return false;
+  const metaWrote = await kv.set(LEASE_META_KEY, next);
+  if (!metaWrote) throw new Error("kv set p6:lease-meta failed");
   return true;
 }
 
@@ -269,6 +296,11 @@ export async function runInvocation(opts: {
     recordGap?(gap: { startMs: number; endMs: number; cause: string }): void;
     /** Load p6:state after this instance owns the lease, before it records or saves. */
     reload?(): Promise<void>;
+    /**
+     * Replay the overlap buffer. True only when sequence and trade ids are contiguous
+     * and every trade has an exchange timestamp.
+     */
+    confirmHandover?(): Promise<boolean>;
   };
   /** Wall clock after an overlap watch. Injected runs keep `nowMs` unless this is set. */
   clock?: () => number;
@@ -337,6 +369,13 @@ export async function runInvocation(opts: {
     return { action: "duplicate", applied: [], socketGap: false, feedGapMs: 0, cause: "duplicate", holder: lease?.holder ?? null };
   }
   await opts.holder.reload?.();
+  if (opts.holder.confirmHandover) {
+    const feedOk = await opts.holder.confirmHandover();
+    for (const gap of staged) {
+      if (gap.cause !== "handover" && gap.cause !== "uncovered") continue;
+      gap.cause = handoverCause(Math.max(0, gap.endMs - gap.startMs), feedOk);
+    }
+  }
   flushStaged();
   const applied = await opts.holder.applyDueBars();
   let sampled = false;
@@ -476,6 +515,18 @@ export function redisEndpoint(url: string, timeoutMs = Number(process.env.REDIS_
   };
 }
 
+function localRedisHost(host: string): boolean {
+  const name = host.replace(/^\[|\]$/g, "");
+  return name === "localhost" || name === "127.0.0.1" || name === "::1";
+}
+
+/** Plain redis:// is only for localhost. Any other host must be rediss://. */
+export function assertRedisTransport(url: string): RedisEndpoint {
+  const endpoint = redisEndpoint(url);
+  if (!endpoint.tls && !localRedisHost(endpoint.host)) throw new Error("REDIS_URL must be rediss:// for a host other than localhost");
+  return endpoint;
+}
+
 const CAS_LUA = [
   "local cur = redis.call('GET', KEYS[1])",
   "if ARGV[1] == '1' then",
@@ -493,7 +544,7 @@ const CAS_LUA = [
  * Brian's deployment sets REDIS_URL. Tests use memoryKv.
  */
 export function redisKvFromUrl(url: string): Kv {
-  const endpoint = redisEndpoint(url);
+  const endpoint = assertRedisTransport(url);
   const send = async (parts: string[]): Promise<string | null> => {
     const net = await import("node:net");
     const tls = endpoint.tls ? await import("node:tls") : null;

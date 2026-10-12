@@ -416,6 +416,7 @@ test("REST backs off on 429, drops a late bar, and backfills a bounded gap", () 
 
 test("a bar applies once, and a restart continues from the last applied bar", () => {
   const host = startPaperHost(["ETH-USD"], {});
+  host.clock = () => 915_000;
   dueRest(host, 915_000);
   const bar = { productId: "ETH-USD", startSec: 0, open: 2, high: 3, low: 1, close: 2.5, volume: 4 };
   expect(acceptRestBar(host, bar)).toBe("accepted");

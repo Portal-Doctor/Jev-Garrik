@@ -17,6 +17,8 @@ export const GAP_MAX_MS = 15 * 60 * 1000;
 export const VOL_HOUR_RATE_MULT = 2;
 export const JEV_SKIP_CAP = 0.05;
 export const SOAK_MS = 7 * 24 * 60 * 60 * 1000;
+/** V6.1. A handover under this width can be covered. The record is p6-amendment-v61.json. */
+export const HANDOVER_MICRO_MS = 1_000;
 
 export const AMENDMENT_V6_RULE = [
   "D orders touching a gap are indeterminate.",
@@ -143,9 +145,15 @@ export interface VolHour {
  * divided by one week. Top-decile realized-vol hours are the highest 10% by rv.
  * A no-go is a weekly forward-monitor flag on that week's Jev and D stats.
  */
+/** V6.1. Covered only when the gap is under 1s and the incoming feed proved contiguous. */
+export function handoverCause(widthMs: number, feedOk: boolean): "handover_micro" | "uncovered" {
+  if (widthMs < HANDOVER_MICRO_MS && feedOk) return "handover_micro";
+  return "uncovered";
+}
+
 export function gapWeekReport(opts: {
   weekMs: number;
-  gaps: readonly { startMs: number; endMs: number }[];
+  gaps: readonly { startMs: number; endMs: number; cause?: string }[];
   hours: readonly VolHour[];
   jevSkipped: number;
   jevPackets: number;
@@ -162,11 +170,19 @@ export function gapWeekReport(opts: {
   noGo: boolean;
   flagWeek: boolean;
   flags: string[];
+  /** V6.1. Count of covered handovers in each week. They are not part of gappedShare. */
+  handoverMicroByWeek: { weekStartMs: number; count: number }[];
 } {
   const weekMs = opts.weekMs > 0 ? opts.weekMs : 7 * 24 * 60 * 60 * 1000;
   let longestMs = 0;
   const byWeek = new Map<number, number>();
+  const micro = new Map<number, number>();
   for (const gap of opts.gaps) {
+    if (gap.cause === "handover_micro") {
+      const index = Math.floor(gap.endMs / weekMs);
+      micro.set(index, (micro.get(index) ?? 0) + 1);
+      continue;
+    }
     const width = Math.max(0, gap.endMs - gap.startMs);
     if (width > longestMs) longestMs = width;
     if (!(gap.endMs > gap.startMs)) continue;
@@ -211,5 +227,8 @@ export function gapWeekReport(opts: {
     noGo,
     flagWeek,
     flags,
+    handoverMicroByWeek: [...micro.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([index, count]) => ({ weekStartMs: index * weekMs, count })),
   };
 }

@@ -3,7 +3,7 @@
  * Redis is a Kv. This file does not choose a Marketplace vendor.
  */
 
-import { acceptRestBar, attachMemberCloses, capturePaperState, catchUpHistory, driveHost, installPaperState, releaseForDeadline, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
+import { acceptRestBar, attachMemberCloses, capturePaperState, catchUpHistory, driveHost, installPaperState, releaseForDeadline, replayHandover, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
 import type { OhlcvBar } from "./rest-bars";
 import {
   commitBar,
@@ -14,20 +14,25 @@ import {
   LEASE_KEY,
   MAX_DURATION_MS,
   noteLeaseSave,
+  renewLease,
   runInvocation,
+  saveState,
   STATE_KEY,
   type Dashboard,
   type InvocationResult,
   type Kv,
 } from "./relay";
 
-/** One state write. Member closes stay off this blob. Markers are only for bars this process has not already written. */
+/** One state write. Member closes stay off this blob. The warmup key is not read on this path. */
 export async function persistRun(kv: Kv, host: PaperHost): Promise<void> {
+  const pending = host.fifteen.slice();
+  host.fifteen = retainFifteens(host.fifteen, Math.floor(host.clock() / 1000));
   const body = capturePaperState(host);
-  await kvPaperStore(kv).save(body);
+  await saveState(kv, body, { writeWarmup: !host.warmupStored && (body.warmup?.length ?? 0) > 0 });
+  host.warmupStored = true;
   await noteLeaseSave(kv, host.clock());
   const seen = new Set<string>();
-  for (const bar of host.fifteen) {
+  for (const bar of pending) {
     const key = `${bar.productId}:${bar.startSec}`;
     if (seen.has(key) || host.persistedBars.has(key)) continue;
     seen.add(key);
@@ -47,6 +52,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
   persist(): Promise<void>;
   recordGap(gap: { startMs: number; endMs: number; cause: string }): void;
   reload(): Promise<void>;
+  confirmHandover(): Promise<boolean>;
   sampleUntil(untilMs: number): Promise<void>;
   watchUntil(untilMs: number): Promise<void>;
 } {
@@ -92,6 +98,9 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
     recordGap(gap) {
       host.gaps.push(gap);
     },
+    async confirmHandover() {
+      return replayHandover(host);
+    },
     sampleUntil(untilMs: number) {
       return driveHost(host, untilMs, {
         persist: () => persistRun(kv, host),
@@ -99,10 +108,19 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
           const result = await commitBar(kv, bar.productId, bar.startSec);
           if (result === "applied" || result === "duplicate") host.persistedBars.add(`${bar.productId}:${bar.startSec}`);
         },
-        heartbeat: () => noteLeaseSave(kv, host.clock()),
+        heartbeat: async () => {
+          try {
+            await persistRun(kv, host);
+            const renewed = await renewLease(kv, host.clock());
+            if (!renewed) host.book.incidents.push("lease renew failed");
+          } catch (error) {
+            host.book.incidents.push(`kv set ${error instanceof Error ? error.message : "failed"}`);
+          }
+        },
       });
     },
     watchUntil(untilMs: number) {
+      host.bufferFeeds = true;
       return driveHost(host, untilMs, {
         applyBars: false,
         stopWhen: async () => {

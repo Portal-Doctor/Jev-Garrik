@@ -23,6 +23,7 @@ import { applyForward, freshBook, forwardBookPanel, noteMemberDay, type Book } f
 import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
 import { completedDays, deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
+import { buildJevPackets, freshJevMeter, type JevMeter } from "./jev-shadow";
 import { MISSED_SEND_STALE_QUOTE, STALE_QUOTE_MS } from "./legs";
 import type { VolHour } from "./amendment-v6";
 import { HEARTBEAT_GAP_MS, heartbeatMustReconnect, type MidBar } from "./mid-feed";
@@ -50,6 +51,48 @@ export const REST_BACKFILL_BARS = 8;
 export const REST_PACE_MS = 200;
 /** Lower bound of the 60–120s save heartbeat. Crash gaps start at this save, not at the previous bar. */
 export const SAVE_HEARTBEAT_MS = 60_000;
+/**
+ * Longest registered 15m-derived lookback is class D's 4h EMA200: 200 four-hour
+ * bars, which is 34 days. The B weekly window is 7 days, 1h ATR14 is 14 hours,
+ * and class E's 15m follow-through is 6 hours. Retention is the longest plus one day.
+ * Daily EMA200, the 55-day lookback, and 60-day correlation read the daily series.
+ */
+export const FOUR_HOUR_EMA_BARS = 200;
+export const FOUR_HOUR_BARS_PER_DAY = 6;
+export const FIFTEEN_LOOKBACK_DAYS = Math.ceil(FOUR_HOUR_EMA_BARS / FOUR_HOUR_BARS_PER_DAY);
+export const FIFTEEN_RETAIN_DAYS = FIFTEEN_LOOKBACK_DAYS + 1;
+export const DAILY_CLOSE_DAYS = 260;
+
+export interface DailyClose {
+  date: string;
+  close: number;
+}
+
+export interface FeedCursor {
+  l2: number | null;
+  tradeId: number | null;
+}
+
+export interface FeedFrame {
+  sequence: number | null;
+  events: PublicEvent[];
+}
+
+export function retainFifteens<T extends { startSec: number }>(bars: readonly T[], nowSec: number): T[] {
+  const today = Math.floor(nowSec / 86400) * 86400;
+  const keepFrom = today - (FIFTEEN_RETAIN_DAYS - 1) * 86400;
+  return bars.filter((bar) => bar.startSec >= keepFrom);
+}
+
+export function retainDailyCloses(rows: readonly DailyClose[]): DailyClose[] {
+  const sorted = rows.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  if (sorted.length <= DAILY_CLOSE_DAYS) return sorted;
+  return sorted.slice(sorted.length - DAILY_CLOSE_DAYS);
+}
+
+export function rollDailyClose(rows: readonly DailyClose[], date: string, close: number): DailyClose[] {
+  return retainDailyCloses([...rows.filter((row) => row.date !== date), { date, close }]);
+}
 
 export interface RestSlot {
   productId: string;
@@ -132,6 +175,18 @@ export interface PaperHost {
   quoteNotBefore: Map<string, number>;
   /** Sockets opened by an overlapping warmup. The lease holder reuses them. */
   openSockets?: WebSocket[];
+  /** Daily closes kept in p6:state. Clusters and betas read this, not the 15m bars. */
+  dailyCloses: Map<string, DailyClose[]>;
+  /** True after p6:warmup was loaded or written. Saves do not re-read that key. */
+  warmupStored: boolean;
+  /** Last level2 sequence and trade id, checked by the next holder. */
+  feedCursor: FeedCursor;
+  /** Messages received before this instance owns the lease. */
+  feedBuffer: FeedFrame[];
+  /** While true, socket messages are buffered instead of applied. */
+  bufferFeeds: boolean;
+  /** Cumulative and monthly Jev spend. Live calls are not made. */
+  jevMeter: JevMeter;
 }
 
 export interface StatusPublisher {
@@ -201,6 +256,7 @@ function loadContext(): HostContext | null {
 }
 
 function boundHost(host: PaperHost): void {
+  trimSeries(host);
   if (host.trades.length > MAX_TRADES) host.trades.splice(0, host.trades.length - MAX_TRADES);
   if (host.book.mids.completed.length > MAX_MIDS) host.book.mids.completed.splice(0, host.book.mids.completed.length - MAX_MIDS);
   if (host.book.incidents.length > MAX_INCIDENTS) host.book.incidents.splice(0, host.book.incidents.length - MAX_INCIDENTS);
@@ -312,7 +368,43 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     persistedBars: new Set(),
     quoteTried: new Set(),
     quoteNotBefore: new Map(),
+    dailyCloses: new Map(),
+    warmupStored: false,
+    feedCursor: { l2: null, tradeId: null },
+    feedBuffer: [],
+    bufferFeeds: false,
+    jevMeter: loadJevMeter(),
   };
+}
+
+function loadJevMeter(): JevMeter {
+  try {
+    const path = join(repoRoot(), "research/data/reports/p6-jev-spend.json");
+    if (!existsSync(path)) return freshJevMeter();
+    const body = JSON.parse(readFileSync(path, "utf8")) as { costUsd?: number };
+    return freshJevMeter(body.costUsd ?? 0);
+  } catch {
+    return freshJevMeter();
+  }
+}
+
+function trimSeries(host: PaperHost): void {
+  const nowSec = Math.floor(host.clock() / 1000);
+  host.fifteen = retainFifteens(host.fifteen, nowSec);
+  for (const [id, rows] of host.dailyCloses) host.dailyCloses.set(id, retainDailyCloses(rows));
+}
+
+function seedDailyCloses(host: PaperHost): void {
+  for (const [productId, days] of host.warmup) {
+    if ((host.dailyCloses.get(productId)?.length ?? 0) > 0) continue;
+    const seeded = days.filter((row) => !row.empty && row.close > 0).map((row) => ({ date: row.date, close: row.close }));
+    if (seeded.length > 0) host.dailyCloses.set(productId, retainDailyCloses(seeded));
+  }
+}
+
+function closeSource(row: DailyClose): SourceDay {
+  const ts = Date.parse(`${row.date}T00:00:00.000Z`) / 1000;
+  return { date: row.date, ts, open: row.close, high: row.close, low: row.close, close: row.close, volume: 0, empty: false };
 }
 
 function shardOf(products: readonly string[]): string[][] {
@@ -443,10 +535,11 @@ function noteSequence(host: PaperHost, shardIndex: number, sequence: number | un
     host.needsReconnect[shardIndex] = true;
   }
   host.lastL2Seq.set(key, sequence);
+  host.feedCursor.l2 = sequence;
 }
 
 /** Public messages for one socket. Trade time and maker side come from the exchange. */
-export function applyPublic(host: PaperHost, shardIndex: number, events: readonly PublicEvent[], nowMs: number): void {
+export function applyPublic(host: PaperHost, shardIndex: number, events: readonly PublicEvent[], nowMs: number, opts?: { handoverMicro?: boolean }): void {
   const sequenced = events.find((event) => (event.kind === "l2-snapshot" || event.kind === "l2-update") && event.sequence != null);
   if (sequenced && (sequenced.kind === "l2-snapshot" || sequenced.kind === "l2-update")) {
     noteSequence(host, shardIndex, sequenced.sequence, false);
@@ -463,9 +556,19 @@ export function applyPublic(host: PaperHost, shardIndex: number, events: readonl
       const key = event.tradeId ?? `${event.productId}|${event.time ?? tsMs}|${event.price}|${event.size}|${event.side ?? ""}`;
       if (host.seenTrades.has(key)) continue;
       host.seenTrades.add(key);
+      const tradeId = event.tradeId != null ? Number(event.tradeId) : Number.NaN;
+      if (Number.isInteger(tradeId)) host.feedCursor.tradeId = tradeId;
       host.trades.push({ productId: event.productId, tsSec: Math.floor(tsMs / 1000), price: event.price, size: event.size });
-      if (event.side === "BUY" || event.side === "SELL") {
-        applyForward(host.book, { kind: "trade", productId: event.productId, price: event.price, size: event.size, makerSide: event.side, tsMs });
+      if (event.side === "BUY" || event.side === "SELL" || opts?.handoverMicro) {
+        applyForward(host.book, {
+          kind: "trade",
+          productId: event.productId,
+          price: event.price,
+          size: event.size,
+          makerSide: event.side ?? "",
+          tsMs,
+          ...(opts?.handoverMicro ? { handoverMicro: true } : {}),
+        });
       }
       continue;
     }
@@ -828,17 +931,21 @@ function pushBar(host: PaperHost, bar: OhlcvBar): void {
   let atr1h = 0;
   let dailyAtr = 0;
   let bScores: ClassBRow[] | undefined;
+  let missing1m = false;
   const dailyClose = isDayCloseBar(bar.startSec);
   const live = host.clock() - nowSec * 1000 < 180_000;
   publishLiveQuote(host, bar.productId, host.clock());
   try {
     ensureHourWarm(host, bar.productId);
     const derived = deriveForwardBook(host.fifteen.filter((row) => row.productId === bar.productId), nowSec);
-    if (dailyClose && derived) {
-      const first = derived.days[0]?.date ?? "9999-99-99";
-      const prior = (host.warmup.get(bar.productId) ?? []).filter((row) => row.date < first);
-      for (const day of withExplicitGaps([...prior, ...derived.days])) noteMemberDay(host.book, bar.productId, day);
+    if (dailyClose) {
+      const date = new Date(bar.startSec * 1000).toISOString().slice(0, 10);
+      const series = rollDailyClose(host.dailyCloses.get(bar.productId) ?? [], date, bar.close);
+      host.dailyCloses.set(bar.productId, series);
+      noteMemberDay(host.book, bar.productId, closeSource({ date, close: bar.close }));
     }
+    const jev = buildJevPackets({ members: host.products, barStartSec: bar.startSec, nowSec, mids: host.book.mids.completed });
+    missing1m = jev.missing;
     if ((live || dailyClose) && host.generatedSec !== nowSec) {
       host.generated = universeEntries(host, nowSec);
       host.generatedSec = nowSec;
@@ -871,6 +978,7 @@ function pushBar(host: PaperHost, bar: OhlcvBar): void {
     dailyAtr,
     ...(bScores ? { bScores } : {}),
     dailyClose,
+    missing1m,
   };
   applyForward(host.book, { ...fields, phase: "gap" });
   applyForward(host.book, { ...fields, phase: "rest" });
@@ -1049,6 +1157,9 @@ export interface PaperStateBody {
   volHours?: VolHour[];
   dSubmitted?: number;
   dIndeterminate?: number;
+  dailyCloses?: [string, DailyClose[]][];
+  feedCursor?: FeedCursor;
+  jevMeter?: JevMeter;
 }
 
 /** Persistence for the book and the last processed bar. The driver does not choose the store. */
@@ -1112,24 +1223,18 @@ export function volHoursFromFifteens(
   return hours;
 }
 
-/** Rebuild cluster closes from warmup plus 15m days. They are not stored on p6:state. */
+/** Point clusters at the daily-close series. Fifteen-minute bars are not an input. */
 export function attachMemberCloses(host: PaperHost): void {
+  seedDailyCloses(host);
   if (!host.context) return;
-  const nowSec = Math.floor(host.clock() / 1000);
-  const rows = [...host.warmup.entries()].flatMap(([productId, days]) => {
+  const rows = [...host.dailyCloses.entries()].flatMap(([productId, days]) => {
     const flags = host.context?.byProduct.get(productId);
     if (!flags || days.length === 0) return [];
-    const bars = host.fifteen.filter((bar) => bar.productId === productId);
-    return [{ productId, flags, days: completedDays(days, bars, nowSec) }];
+    return [{ productId, flags, days: days.map(closeSource) }];
   });
   if (rows.length > 0) host.book.config.memberCloses = rows;
-  const btc = completedDays(
-    host.warmup.get("BTC-USD") ?? [],
-    host.fifteen.filter((bar) => bar.productId === "BTC-USD"),
-    nowSec,
-  );
-  const closes = btc.filter((row) => !row.empty && row.close > 0).map((row) => ({ date: row.date, close: row.close }));
-  if (closes.length > 0) host.book.config.btcCloses = closes;
+  const btc = host.dailyCloses.get("BTC-USD") ?? [];
+  if (btc.length > 0) host.book.config.btcCloses = btc.map((row) => ({ date: row.date, close: row.close }));
 }
 
 export function capturePaperState(host: PaperHost): PaperStateBody {
@@ -1172,6 +1277,9 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     volHours: volHoursFromFifteens(host.fifteen, host.gaps),
     dSubmitted: book.submittedByClass.D,
     dIndeterminate: book.indeterminateByClass.D,
+    dailyCloses: [...host.dailyCloses.entries()],
+    feedCursor: { ...host.feedCursor },
+    jevMeter: { ...host.jevMeter },
   };
 }
 
@@ -1212,7 +1320,13 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
     host.book.config.memberCloses = body.memberCloses.map((row) => ({ ...row, days: [...row.days] }));
   }
   if (body.btcCloses) host.book.config.btcCloses = [...body.btcCloses];
-  if (body.warmup) host.warmup = new Map(body.warmup.map(([id, days]) => [id, [...days]]));
+  if (body.warmup) {
+    host.warmup = new Map(body.warmup.map(([id, days]) => [id, [...days]]));
+    host.warmupStored = true;
+  }
+  if (body.dailyCloses) host.dailyCloses = new Map(body.dailyCloses.map(([id, rows]) => [id, rows.map((row) => ({ ...row }))]));
+  if (body.feedCursor) host.feedCursor = { l2: body.feedCursor.l2 ?? null, tradeId: body.feedCursor.tradeId ?? null };
+  if (body.jevMeter) host.jevMeter = { ...body.jevMeter };
   if (body.gaps) host.gaps = body.gaps.map((gap) => ({ ...gap }));
   if (body.dSubmitted != null) host.book.submittedByClass.D = body.dSubmitted;
   if (body.dIndeterminate != null) host.book.indeterminateByClass.D = body.dIndeterminate;
@@ -1314,9 +1428,55 @@ function envelopeSequence(raw: unknown): number | null {
 
 /** One socket frame. The envelope sequence covers every channel, then the book updates. */
 export function ingestSocketMessage(host: PaperHost, shardIndex: number, raw: unknown, nowMs: number): void {
+  if (host.bufferFeeds) {
+    host.feedBuffer.push({ sequence: envelopeSequence(raw), events: parsePublicMessage(raw) });
+    return;
+  }
   const sequence = envelopeSequence(raw);
   if (sequence != null) noteSequence(host, shardIndex, sequence, false);
   applyPublic(host, shardIndex, parsePublicMessage(raw), nowMs);
+}
+
+/**
+ * V6.1. The buffer continues the saved cursor with no hole, and every trade has
+ * an exchange timestamp. Otherwise the handover is uncovered and nothing is applied.
+ */
+export function feedFramesContiguous(cursor: FeedCursor, frames: readonly FeedFrame[]): boolean {
+  if (cursor.l2 == null) return false;
+  if (frames.length === 0) return true;
+  if (frames.some((frame) => frame.sequence == null)) return false;
+  const ordered = frames.slice().sort((a, b) => a.sequence! - b.sequence!);
+  let prev = cursor.l2;
+  for (const frame of ordered) {
+    const sequence = frame.sequence!;
+    if (sequence !== prev && sequence !== prev + 1) return false;
+    prev = sequence;
+  }
+  let tradePrev = cursor.tradeId;
+  for (const frame of ordered) {
+    for (const event of frame.events) {
+      if (event.kind !== "trade") continue;
+      const id = event.tradeId != null ? Number(event.tradeId) : Number.NaN;
+      const ts = event.time ? Date.parse(event.time) : Number.NaN;
+      if (!Number.isInteger(id) || !Number.isFinite(ts)) return false;
+      if (tradePrev == null || id !== tradePrev + 1) return false;
+      tradePrev = id;
+    }
+  }
+  return true;
+}
+
+/** Replay a contiguous handover buffer in sequence order. Stops fill on the first trade through them. */
+export function replayHandover(host: PaperHost): boolean {
+  const frames = host.feedBuffer.splice(0, host.feedBuffer.length);
+  host.bufferFeeds = false;
+  if (!feedFramesContiguous(host.feedCursor, frames)) return false;
+  const ordered = frames.slice().sort((a, b) => a.sequence! - b.sequence!);
+  for (const frame of ordered) {
+    if (frame.sequence != null) host.feedCursor.l2 = frame.sequence;
+    applyPublic(host, 0, frame.events, host.clock(), { handoverMicro: true });
+  }
+  return true;
 }
 
 /** The function deadline is closing the socket. That close is not a reconnect and not a gap. */
@@ -1523,10 +1683,11 @@ export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHo
                     await hooks.persist?.();
                   }
                 })
-                .catch(() => {
-                  due.slot.inflight = false;
-                  noteRestMiss(host, due.slot);
-                });
+        .catch((error: unknown) => {
+          due.slot.inflight = false;
+          noteRestMiss(host, due.slot);
+          host.book.incidents.push(`kv set ${error instanceof Error ? error.message : "failed"}`);
+        });
             } else if (due?.action === "fallback") {
               await prepareExitQuotes(host, due.slot.productId, due.slot.barStartSec, now);
               const built = fallbackTradesBar(host, due.slot);
@@ -1543,8 +1704,14 @@ export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHo
           releaseForDeadline(host);
           for (const socket of sockets) socket.close();
           host.openSockets = undefined;
-          await hooks.persist?.();
+          try {
+            await hooks.persist?.();
+          } catch (error) {
+            host.book.incidents.push(`kv set ${error instanceof Error ? error.message : "failed"}`);
+          }
           resolve();
+        } catch (error) {
+          host.book.incidents.push(`kv set ${error instanceof Error ? error.message : "failed"}`);
         } finally {
           busy = false;
         }
@@ -1589,6 +1756,7 @@ export async function warmSeriesFromRest(
       });
       const series = withExplicitGaps(days);
       host.warmup.set(productId, series);
+      host.warmupStored = false;
       const origin = historyOriginSec(series);
       if (origin != null) host.historyFrom.set(productId, origin);
     } catch (error) {

@@ -206,6 +206,8 @@ export interface Book {
   jevSkipped: number;
   /** V6. Stops filled from the first price after a gap. */
   gapFills: number;
+  /** Start of the 15m window whose Jev packets were already counted. */
+  jevBarSec?: number;
 }
 
 export type ForwardEvent =
@@ -287,7 +289,7 @@ export type ForwardEvent =
   | { kind: "btc"; tsMs: number; return60: number; return10: number }
   | { kind: "rho"; a: string; b: string; rho: number; month?: string }
   | { kind: "gap"; productId: string; startMs?: number; endMs?: number }
-  | { kind: "trade"; productId: string; price: number; size: number; makerSide: string; tsMs?: number }
+  | { kind: "trade"; productId: string; price: number; size: number; makerSide: string; tsMs?: number; handoverMicro?: boolean }
   | { kind: "shadow"; id: string; mode: "X2" | "X3"; classId: ClassId; productId: string; limit: number; tick: number }
   | {
       kind: "realize";
@@ -1064,6 +1066,15 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       const hit = sellThrough(position.target, event.price, position.tick, event.size);
       if (hit?.filled) closePosition(book, position, { tsMs, fill: position.target, kind: "target", triggerBarTs: tsMs, makerExit: true, decisionMid: position.target });
     }
+    if (event.handoverMicro) {
+      for (const position of [...book.positions]) {
+        if (position.productId !== event.productId) continue;
+        if (!(event.price <= position.stop)) continue;
+        book.quotes[position.productId] = { bid: event.price, ask: event.price, tsMs };
+        book.incidents.push(`handover_micro ${position.id}`);
+        closePosition(book, position, { tsMs, fill: event.price, kind: "stop", triggerBarTs: tsMs, decisionMid: event.price });
+      }
+    }
     return book;
   }
   if (event.kind === "gap") {
@@ -1221,13 +1232,16 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       touchTime(book, event.startSec * 1000);
     } else if (closed) {
       book.marks[event.productId] = event.close;
-      const packets = shadowPackets({ members: book.config.members, barStartSec: event.startSec, nowSec: event.nowSec, warming: false });
-      book.jevPackets += packets.length;
-      if (event.missing1m) {
-        book.jevSkipped += packets.length;
-        book.incidents.push(`jev skip ${event.productId} ${event.startSec}`);
-      } else {
-        book.packets.push(...packets);
+      if (book.jevBarSec !== event.startSec) {
+        book.jevBarSec = event.startSec;
+        const packets = shadowPackets({ members: book.config.members, barStartSec: event.startSec, nowSec: event.nowSec, warming: false });
+        book.jevPackets += packets.length;
+        if (event.missing1m) {
+          book.jevSkipped += packets.length;
+          book.incidents.push(`jev skip ${event.productId} ${event.startSec}`);
+        } else {
+          book.packets.push(...packets);
+        }
       }
       touchTime(book, (event.startSec + 900) * 1000);
       reviewPair(book, event.productId, (event.startSec + 900) * 1000);
