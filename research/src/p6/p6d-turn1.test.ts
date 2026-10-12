@@ -29,6 +29,7 @@ import {
   saveState,
   tryAcquire,
 } from "./relay";
+import { stampP6Record } from "./stamp-records";
 import { hostHolder, persistRun } from "./vercel-live";
 
 test("the live lease expires inside 3 minutes and a crash gap stays under 15 minutes", async () => {
@@ -339,6 +340,9 @@ test("V6.1 is a new wording record and does not edit V6", () => {
   expect(approval.bindsToFileHash).toBe(false);
   expect(approval.amendmentV6Edited).toBe(false);
   expect(approval.confirmedBy).toEqual(["Quant", "Trader"]);
+  expect(() => stampP6Record("p6-stamp-amendment-v61")).toThrow(/refusing to overwrite/);
+  expect(() => stampP6Record("p6-stamp-amendment-v61-approval")).toThrow(/refusing to overwrite/);
+  expect(() => stampP6Record("p6-stamp-amendment-v6")).toThrow(/refusing to overwrite/);
 });
 
 test("persist writes the warmup key once and does not read it again", async () => {
