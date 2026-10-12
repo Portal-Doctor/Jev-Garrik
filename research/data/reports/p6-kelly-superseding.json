@@ -1,0 +1,22 @@
+{
+  "commitSha": "ff0df64af06a5988d01f7d4aa76d2c6f87ec5630",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T03:59:17.312Z",
+  "phaseId": "P6",
+  "role": "label",
+  "supersedes": "research/data/reports/p6-kelly-status.json",
+  "supersedesSha256": "162131821d358c2caf8faf21ebe58005dee875a8e7d7023b33c8324bcea584ba",
+  "rulingFile": "research/data/reports/p6-kelly-ruling.json",
+  "rulingSha256": "e099c0223e35712e78e4b7f0ef19f72d8f312a539a75e4d7f397816f57cd8e48",
+  "text": "$20 until promotion is registered (TDF Section 8, ADD Section 5, R5, default 13); the hard-coded $60 was the defect.",
+  "unpromotedRiskUsd": 20,
+  "bankrollUsd": 8000,
+  "kellyInput": "L80",
+  "promotionMinDays": 90,
+  "promotionMinN": 30,
+  "default13": "resolved default 13: a null or non-positive lower-80% bound sizes at $20",
+  "registrationEdited": false,
+  "amendment2Edited": false,
+  "kellyRulingEdited": false,
+  "kellyStatusEdited": false
+}
