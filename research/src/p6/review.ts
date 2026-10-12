@@ -114,5 +114,38 @@ export function forwardReview(opts: {
   };
 }
 
+export interface BookPanel {
+  weeklyHaltsLast6: number;
+  bookDrawdownUsd: number;
+  parity7d: "match" | "break" | "n/a";
+}
+
+/** Book block of the review: halt count, equity drawdown, and the 7-day parity flag. */
+export function bookPanel(input: BookPanel): BookPanel {
+  return {
+    weeklyHaltsLast6: input.weeklyHaltsLast6,
+    bookDrawdownUsd: input.bookDrawdownUsd,
+    parity7d: input.parity7d,
+  };
+}
+
+/** Halt weeks whose Monday falls in the six weeks ending at `asOfWeek`. */
+export function weeklyHaltsInLast6(haltWeeks: readonly string[], asOfWeek: string | null): number {
+  if (asOfWeek == null) return 0;
+  const end = Date.parse(`${asOfWeek}T00:00:00.000Z`);
+  if (!Number.isFinite(end)) return 0;
+  const start = end - 5 * 7 * 86_400_000;
+  return haltWeeks.filter((week) => {
+    const ts = Date.parse(`${week}T00:00:00.000Z`);
+    return Number.isFinite(ts) && ts >= start && ts <= end;
+  }).length;
+}
+
+/** Equal nets match. A missing replay is n/a. Any other difference is a break. */
+export function parity7d(engineNetUsd: number | null, replayNetUsd: number | null): BookPanel["parity7d"] {
+  if (engineNetUsd == null || replayNetUsd == null) return "n/a";
+  return engineNetUsd === replayNetUsd ? "match" : "break";
+}
+
 export { placeboP };
 export type { BreadthLabel };

@@ -115,11 +115,44 @@ export const HEARTBEAT_GAP_MS = 15_000;
 export const MISSING_MID_KILL = 0.05;
 
 /** Exchange limit is not specified. The caller passes the shard size. */
-export function shardProducts(ids: readonly string[], perSocket: number): string[][] {
+/**
+ * Architect's cap. Advanced Trade does not publish a products-per-message maximum.
+ * The Exchange websocket limit is 10 subscriptions per product per channel.
+ * One subscribe per product per channel stays inside that limit. A caller cannot
+ * put more than 10 products on one socket.
+ */
+export const MAX_PRODUCTS_PER_SOCKET = 10;
+
+export function shardProducts(ids: readonly string[], perSocket: number = MAX_PRODUCTS_PER_SOCKET): string[][] {
   if (!(perSocket > 0)) throw new Error("L2 shard size is not specified");
+  const cap = Math.min(perSocket, MAX_PRODUCTS_PER_SOCKET);
   const out: string[][] = [];
-  for (let i = 0; i < ids.length; i += perSocket) out.push(ids.slice(i, i + perSocket));
+  for (let i = 0; i < ids.length; i += cap) out.push(ids.slice(i, i + cap));
   return out;
+}
+
+/** Half the touch spread, in bps. s_live = 0.5 * (ask - bid) / mid * 1e4. */
+export function halfSpreadBps(bid: number, ask: number): number | null {
+  if (!(bid > 0) || !(ask >= bid)) return null;
+  const mid = (bid + ask) / 2;
+  if (!(mid > 0)) return null;
+  return 0.5 * ((ask - bid) / mid) * 10_000;
+}
+
+/**
+ * s_live for `size` units. Walking the touch returns the half spread. Walking
+ * deeper levels returns the larger slippage versus mid.
+ */
+export function walkedSpreadBps(book: PairBook, side: "buy" | "sell", size: number): number | null {
+  const bid = book.bidsDesc()[0]?.[0];
+  const ask = book.asksAsc()[0]?.[0];
+  if (bid == null || ask == null) return null;
+  if (!(size > 0)) return halfSpreadBps(bid, ask);
+  const mid = (bid + ask) / 2;
+  const walked = book.walk(side, size);
+  if (walked == null || !(mid > 0)) return halfSpreadBps(bid, ask);
+  const slip = side === "buy" ? (walked - mid) / mid : (mid - walked) / mid;
+  return Math.max(0, slip * 10_000);
 }
 
 export function heartbeatMustReconnect(lastHeartbeatMs: number, nowMs: number, gapMs = HEARTBEAT_GAP_MS): boolean {

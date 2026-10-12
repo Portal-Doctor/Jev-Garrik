@@ -1,12 +1,16 @@
 /**
- * Guarded P6 writer. Refuses a dirty tree, the registration, and amendment 1.
- * The stamp is the caller's. Production passes stampFromGit on a clean tree.
+ * Guarded P6 writer. Production calls this. It checks git itself and the frozen
+ * candle and derived roots. It refuses the registration, amendment 1, and the
+ * approved amendment 2 record. The stamp is the caller's. Production passes
+ * stampFromGit on the clean tree this function just checked.
  */
 
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { writeJson } from "../data/io";
-import type { ArtifactStamp } from "../manifest";
+import { assertFrozenRoots } from "../data/refresh";
+import { assertCleanWorkTree, repoRoot, type ArtifactStamp } from "../manifest";
 
 const FROZEN = new Set([
   "p5-v31-registration.json",
@@ -18,6 +22,10 @@ const FROZEN = new Set([
   "p5-registered.json",
   "p5-v31-results.json",
   "p5-historical.json",
+  "p6-amendment-2.json",
+  "p6-amendment-2.sha256",
+  "p6-kelly-ruling.json",
+  "p6-kelly-ruling.sha256",
 ]);
 
 export function assertP6Target(name: string): void {
@@ -28,9 +36,11 @@ export function assertP6Target(name: string): void {
 export function writeP6(
   path: string,
   body: Record<string, unknown>,
-  opts: { stamp: ArtifactStamp; dirty?: boolean; sidecarLabel?: string },
+  opts: { stamp: ArtifactStamp; cwd?: string; sidecarLabel?: string },
 ): { sha256: string } {
-  if (opts.dirty) throw new Error("refusing to stamp a dirty git tree");
+  const cwd = opts.cwd ?? repoRoot();
+  assertCleanWorkTree(cwd);
+  if (opts.cwd == null) assertFrozenRoots(join(repoRoot(), "research/data"));
   assertP6Target(path);
   writeJson(path, { ...opts.stamp, ...body });
   const sha256 = createHash("sha256").update(readFileSync(path)).digest("hex");

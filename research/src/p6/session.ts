@@ -4,7 +4,6 @@
  * An outage logs nothing and adds no trade.
  */
 
-import { MAKER_FEE_BPS } from "../../vendor/87b35d0/config.ts";
 import {
   backstopTripped,
   betaAllows,
@@ -15,6 +14,7 @@ import {
   openRiskAllows,
   PAPER_MINIMUM_USD,
   reentryAllowed,
+  section1CostBps,
 } from "../p3/design-rules";
 import { MAX_POSITIONS, notionalUsd, SLOT_CAPS, type ClassId } from "../p3/portfolio";
 import { CLASS_DOLLAR_BACKSTOP_USD, entryOpenRiskUsd, sizingCostBps } from "../p5/risk";
@@ -109,7 +109,8 @@ export interface PaperDecision {
  * Forward risk is the scheduled amount: $20 until a class is promoted, then
  * the forward Kelly size. A 1b or 1c pause shrinks a larger schedule to $20
  * and does not raise a schedule that is already under $20. Kills stop entries.
- * Class D is sized with the maker fee, not the 190 bps taker round trip.
+ * Class D is sized with TDF section 1 at q = 0: 50 + 90 + s_live. The entry
+ * leg is still the maker fee. The taker exit is in the risk.
  * Breadth is logged and is not a blocker.
  */
 export function paperDecision(opts: {
@@ -126,7 +127,7 @@ export function paperDecision(opts: {
   const entries = !kill && !blockB;
   const riskUsd = shrink || blockB ? Math.min(opts.scheduledRiskUsd, PAPER_MINIMUM_USD) : opts.scheduledRiskUsd;
   const maker = opts.classId === "D";
-  const costBps = maker ? MAKER_FEE_BPS : sizingCostBps(opts.sBtBps ?? 5);
+  const costBps = maker ? section1CostBps(0, opts.sBtBps ?? 0) : sizingCostBps(opts.sBtBps ?? 5);
   const notional = entries ? notionalUsd(opts.stopBps, costBps, riskUsd) : 0;
   const openRisk = entries ? entryOpenRiskUsd(notional, opts.stopBps, costBps) : 0;
   return {

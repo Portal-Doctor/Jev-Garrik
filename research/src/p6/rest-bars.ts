@@ -1,13 +1,17 @@
 /**
- * Strategy bars are public REST 15-minute candles, fetched at the completed
- * bar plus a settle delay. The delay in seconds is not specified. Callers pass
- * it. Nothing here fetches.
+ * Strategy bars are public REST 15-minute candles. The first fetch is the bar
+ * close plus 15 seconds. Retries are every 10 seconds for 120 seconds. After
+ * that the bar is built from public trades and the miss is an incident.
+ * Nothing here fetches.
  */
 
 import { candlesUrl } from "../data/public";
 import { assertMarketDataUrl } from "./public-ws";
 
 export const REST_GRANULARITY_15M = 900;
+export const REST_SETTLE_DELAY_MS = 15_000;
+export const REST_RETRY_MS = 10_000;
+export const REST_RETRY_BUDGET_MS = 120_000;
 export const HOUR_SEC = 3_600;
 export const FOUR_HOUR_SEC = 14_400;
 export const DAY_SEC = 86_400;
@@ -20,6 +24,22 @@ export interface OhlcvBar {
   low: number;
   close: number;
   volume: number;
+}
+
+/** First attempt, retry spacing, and the deadline after which the trades bar is used. */
+export function restSettleSchedule(barEndMs: number): { firstMs: number; intervalMs: number; deadlineMs: number } {
+  const firstMs = barEndMs + REST_SETTLE_DELAY_MS;
+  return { firstMs, intervalMs: REST_RETRY_MS, deadlineMs: firstMs + REST_RETRY_BUDGET_MS };
+}
+
+/**
+ * A successful REST read wins. Once the budget is spent with no read, the bar
+ * is the trades-built bar and the miss is an incident.
+ */
+export function restOrTrades(opts: { restOk: boolean; deadlinePassed: boolean }): { source: "rest" | "trades"; incident: boolean } {
+  if (opts.restOk) return { source: "rest", incident: false };
+  if (opts.deadlinePassed) return { source: "trades", incident: true };
+  return { source: "rest", incident: false };
 }
 
 /** The moment a completed 15m bar may be requested. `settleDelaySec` is required. */

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,12 +10,12 @@ import { percentileLinear } from "../p5/stats";
 import { amendment2Body, METRIC_SHA256 } from "./amendment2";
 import { stepBleed, freshBleed, acceptBrianOk } from "./bleed";
 import { applyForward, bookRoundTrip, freshBook, replayInjected } from "./engine";
-import { DEFAULT_13_USD, forwardClassRisk, kellyRulingBody, UNPROMOTED_RISK_USD } from "./kelly";
+import { forwardClassRisk, kellyRulingBody, PAPER_BANKROLL_USD, UNPROMOTED_RISK_USD } from "./kelly";
 import { classDollarBackstop, classBlockers, freshClassCurve, stepClass } from "./session";
 import { colourDrawdown, colourExTop3, costDrag, MASTER_SEED, mostlyGreen, payoffBreakEven, subSeed, wilsonLower, WILSON_Z80, WILSON_Z95 } from "./metrics";
 import { applyMidSample, freshMidBook, missingMidShare, shardProducts, takerSideFromMaker } from "./mid-feed";
 import { fifteenMinuteUrl, strategyFetchAt, tradesBuilt15m, closeDivergenceBps } from "./rest-bars";
-import { freshClassPause, REARM_RULE, stepClassPause } from "./rearm";
+import { AMENDMENT_2A_RULE, freshClassPause, REARM_RULE, stepClassPause } from "./rearm";
 import { assertP6Target, writeP6 } from "./write";
 
 const monday = Date.parse("2026-03-02T00:00:00.000Z");
@@ -27,13 +28,14 @@ function walk(values: readonly number[]) {
   return state;
 }
 
-test("the confirmed re-arm pauses on a new trough, a new peak, and kills from the original peak", () => {
+test("amendment 2a kills from the running high and does not reset it on a pause", () => {
   expect(REARM_RULE).toBe(
     "the 10R pause re-fires only on a new trough below the prior one, or on a 10R drawdown from a new peak; the 20R kill is measured from the original peak.",
   );
+  expect(AMENDMENT_2A_RULE).toContain("running high-water mark");
   const resumed = walk([0, -16, -11]);
   expect(resumed.paused).toBe(false);
-  expect(resumed.originalPeak).toBe(0);
+  expect(resumed.peak).toBe(0);
   const dip = stepClassPause(resumed, -11.1);
   expect(dip.paused).toBe(false);
   expect(dip.killed).toBe(false);
@@ -41,17 +43,22 @@ test("the confirmed re-arm pauses on a new trough, a new peak, and kills from th
   expect(trough.paused).toBe(true);
   expect(trough.killed).toBe(false);
   expect(trough.priorTrough).toBe(-16.1);
+  expect(trough.peak).toBe(0);
+
+  const marked = walk([4, -8, -3]);
+  expect(marked.paused).toBe(false);
+  expect(marked.peak).toBe(4);
+  expect(stepClassPause(marked, 6).peak).toBe(6);
 
   const peaked = walk([0, -16, -11, 5, -5]);
   expect(peaked.paused).toBe(true);
   expect(peaked.killed).toBe(false);
-  expect(peaked.originalPeak).toBe(0);
   expect(peaked.peak).toBe(5);
 
-  const killed = walk([0, -16, -11, 8, -20]);
+  const killed = walk([0, -16, -11, 8, -12]);
   expect(killed.killed).toBe(true);
-  expect(killed.originalPeak).toBe(0);
-  const notYet = walk([0, -16, -11, 8, -12]);
+  expect(killed.peak).toBe(8);
+  const notYet = walk([0, -16, -11, 8, -11.5]);
   expect(notYet.killed).toBe(false);
   expect(notYet.paused).toBe(true);
 
@@ -82,7 +89,16 @@ test("rolling-20 stays paused until 20 minimum-size trades sum to at least 0, or
     stuck = stepBleed(stuck, again, -0.25, true);
     again.push(-0.25);
   }
-  expect(acceptBrianOk(stuck).paused).toBe(false);
+  const cleared = acceptBrianOk(stuck);
+  expect(cleared.paused).toBe(false);
+  expect(cleared.brianOk).toBe(false);
+  let rearmed = cleared;
+  const later: number[] = [];
+  for (let i = 0; i < 20; i += 1) {
+    rearmed = stepBleed(rearmed, later, -1, true);
+    later.push(-1);
+  }
+  expect(rearmed.paused).toBe(true);
 });
 
 function rollingSum(values: readonly number[]): number {
@@ -104,68 +120,60 @@ test("unpromoted classes stay at $20, a promoted class uses forward Kelly, and t
     classId: "A",
     forward: [],
     streams: streams.map((stream) => ({ id: stream.id, netR: [] })),
-    bankrollUsd: 10_000,
     nowMs: monday,
     held: null,
     bootstrapSeed: 1,
-    default13Usd: DEFAULT_13_USD,
     reps: 50,
   });
   expect(quiet.riskUsd).toBe(UNPROMOTED_RISK_USD);
   expect(quiet.promoted).toBe(false);
-  expect(quiet.default13Usd).toBe(13);
-  expect(quiet.riskUsd).not.toBe(13);
+  expect(quiet.bankrollUsd).toBe(PAPER_BANKROLL_USD);
+  expect(quiet.riskUsd).not.toBe(60);
 
-  const points = mixed().map((netR) => ({ netR, entryDate: "2026-02-24" }));
-  const promoted = forwardClassRisk({
+  const points = mixed().map((netR) => ({ netR, entryDate: "2025-12-02" }));
+  const tooSoon = forwardClassRisk({
     classId: "A",
-    forward: points,
+    forward: points.map((point) => ({ ...point, entryDate: "2026-02-24" })),
     streams,
-    bankrollUsd: 10_000,
-    nowMs: monday,
-    held: null,
-    bootstrapSeed: 422_918_504,
-    default13Usd: 13,
-    reps: 50,
-  });
-  expect(promoted.promoted).toBe(true);
-  expect(promoted.riskUsd).toBeCloseTo(75, 6);
-  expect(promoted.l80).toBeGreaterThan(0);
-
-  const small = forwardClassRisk({
-    classId: "A",
-    forward: points,
-    streams,
-    bankrollUsd: 1_000,
     nowMs: monday,
     held: null,
     bootstrapSeed: 1,
     reps: 20,
   });
-  expect(small.promoted).toBe(true);
-  expect(small.riskUsd).toBeCloseTo(7.5, 6);
-  expect(small.riskUsd).toBeLessThan(20);
+  expect(tooSoon.promoted).toBe(false);
+  expect(tooSoon.riskUsd).toBe(20);
+  const promoted = forwardClassRisk({
+    classId: "A",
+    forward: points,
+    streams,
+    nowMs: monday,
+    held: null,
+    bootstrapSeed: 422_918_504,
+    reps: 50,
+  });
+  expect(promoted.promoted).toBe(true);
+  expect(promoted.riskUsd).toBeCloseTo(60, 6);
+  expect(promoted.l80).toBeGreaterThan(0);
+  expect(promoted.forwardDays).toBeGreaterThanOrEqual(90);
 
   const held = forwardClassRisk({
     classId: "A",
     forward: points.map((point) => ({ ...point, netR: -1 })),
     streams,
-    bankrollUsd: 10_000,
     nowMs: wednesday,
     held: { reviewMonday: promoted.reviewMonday, riskUsd: promoted.riskUsd, promoted: true },
     bootstrapSeed: 1,
     reps: 20,
   });
   expect(held.held).toBe(true);
-  expect(held.riskUsd).toBeCloseTo(75, 6);
+  expect(held.riskUsd).toBeCloseTo(60, 6);
 
   const demoted = forwardClassRisk({
     classId: "A",
     forward: points.map((point) => ({ netR: -1, entryDate: "2026-03-04" })),
     streams: streams.map((stream) => ({ id: stream.id, netR: stream.id === "A" ? points.map(() => -1) : [] })),
-    bankrollUsd: 10_000,
     nowMs: nextMonday,
-    held: { reviewMonday: "2026-03-02", riskUsd: 75, promoted: true },
+    held: { reviewMonday: "2026-03-02", riskUsd: 60, promoted: true },
     bootstrapSeed: 1,
     reps: 20,
   });
@@ -256,10 +264,9 @@ test("the paper book trades at $20 until a Monday review, then holds Kelly, and 
     sendTsMs: wednesday + 5,
     decisionMid: 100.05,
   };
-  const early = replayInjected([{ kind: "clock", tsMs: wednesday }, x1], { bankrollUsd: 10_000, default13Usd: 13 });
+  const early = replayInjected([{ kind: "clock", tsMs: wednesday }, x1]);
   expect(early.positions[0]?.riskUsd).toBe(20);
   expect(early.positions[0]?.riskUsd).not.toBe(60);
-  expect(early.config.default13Usd).toBe(13);
   const leg = early.legs[0]!;
   expect(leg.arrivalBid).toBe(100);
   expect(leg.arrivalAsk).toBe(100.2);
@@ -279,14 +286,14 @@ test("the paper book trades at $20 until a Monday review, then holds Kelly, and 
     netR,
     netUsd: netR * 20,
     riskUsd: 20,
-    entryDate: "2026-02-24",
+    entryDate: "2025-12-02",
     exitTs: monday - 1,
   }));
-  const reviewed = replayInjected([...good, { kind: "clock", tsMs: monday }, x1], { bankrollUsd: 10_000 });
+  const reviewed = replayInjected([...good, { kind: "clock", tsMs: monday }, x1]);
   expect(reviewed.kelly.A?.promoted).toBe(true);
-  expect(reviewed.positions[0]?.riskUsd).toBeCloseTo(75, 6);
+  expect(reviewed.positions[0]?.riskUsd).toBeCloseTo(60, 6);
   const heldBook = applyForward(reviewed, { kind: "clock", tsMs: wednesday });
-  expect(heldBook.kelly.A?.riskUsd).toBeCloseTo(75, 6);
+  expect(heldBook.kelly.A?.riskUsd).toBeCloseTo(60, 6);
   const bad = mixed().map((_, index) => ({
     kind: "realize" as const,
     id: `b${index}`,
@@ -301,14 +308,14 @@ test("the paper book trades at $20 until a Monday review, then holds Kelly, and 
   let demoted = heldBook;
   for (const event of bad) demoted = applyForward(demoted, event);
   demoted = applyForward(demoted, { kind: "clock", tsMs: wednesday });
-  expect(demoted.kelly.A?.riskUsd).toBeCloseTo(75, 6);
+  expect(demoted.kelly.A?.riskUsd).toBeCloseTo(60, 6);
   demoted = applyForward(demoted, { kind: "clock", tsMs: nextMonday });
   expect(demoted.kelly.A?.riskUsd).toBe(20);
   expect(demoted.kelly.A?.promoted).toBe(false);
 });
 
 test("stops, maker orders, halts, packets, and the kill switch run on injected events", () => {
-  const book = freshBook({ members: ["ETH-USD"], bankrollUsd: 10_000 });
+  const book = freshBook({ members: ["ETH-USD"] });
   applyForward(book, { kind: "clock", tsMs: wednesday });
   applyForward(book, {
     kind: "x1",
@@ -328,8 +335,13 @@ test("stops, maker orders, halts, packets, and the kill switch run on injected e
   expect(book.positions).toHaveLength(1);
   applyForward(book, { kind: "mark", productId: "ETH-USD", price: 50 });
   expect(book.classes.A.pause.paused).toBe(false);
-  applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec: 1_700_000_000, nowSec: 1_700_000_000, open: 90, high: 91, low: 89, close: 90 });
+  const startSec = Math.floor(wednesday / 1000);
+  applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec, nowSec: startSec, open: 90, high: 91, low: 89, close: 90 });
   expect(book.packets).toHaveLength(0);
+  expect(book.positions).toHaveLength(1);
+  applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec: 1_700_000_000, nowSec: 1_700_000_900, open: 90, high: 91, low: 80, close: 90 });
+  expect(book.positions).toHaveLength(1);
+  applyForward(book, { kind: "bar15", productId: "ETH-USD", startSec, nowSec: startSec + 900, open: 90, high: 91, low: 89, close: 90 });
   expect(book.positions).toHaveLength(0);
   expect(book.closed[0]?.exitKind).toBe("stop");
   expect(book.legs.some((leg) => leg.side === "exit" && leg.triggerBarTs != null)).toBe(true);
@@ -359,11 +371,11 @@ test("stops, maker orders, halts, packets, and the kill switch run on injected e
     productId: "ETH-USD",
     limit: 100,
     units: 1,
-    placedTs: 1_000,
+    placedTs: wednesday + 2 * 86_400_000,
     stop: 90,
     bid: 101,
     ask: 101.1,
-    bookTsMs: 1_000,
+    bookTsMs: wednesday,
     decisionMid: 101,
   });
   expect(book.working).toHaveLength(1);
@@ -378,16 +390,16 @@ test("stops, maker orders, halts, packets, and the kill switch run on injected e
     productId: "ETH-USD",
     limit: 100,
     units: 1,
-    placedTs: 1_000,
+    placedTs: wednesday + 2 * 86_400_000,
     stop: 90,
     bid: 101,
     ask: 101.1,
-    bookTsMs: 1_000,
+    bookTsMs: wednesday,
     decisionMid: 101,
   });
-  applyForward(book, { kind: "minute", productId: "ETH-USD", tsMs: 61_000, open: 101, high: 102, low: 100, close: 101, volume: 4 });
-  expect(book.positions.some((position) => position.id === "d2")).toBe(true);
-  expect(book.positions.find((position) => position.id === "d2")?.riskUsd).toBe(20);
+  applyForward(book, { kind: "minute", productId: "ETH-USD", tsMs: wednesday + 2 * 86_400_000 + 1_000, open: 101, high: 102, low: 100, close: 101, volume: 4 });
+  expect(book.positions.some((position) => position.id === "d2")).toBe(false);
+  expect(book.working.some((order) => order.order.id === "d2")).toBe(true);
 
   const halted = freshBook();
   applyForward(halted, { kind: "clock", tsMs: Date.parse("2026-03-02T00:00:00.000Z") });
@@ -435,7 +447,7 @@ test("stops, maker orders, halts, packets, and the kill switch run on injected e
 
 test("a fourth name in one cluster is blocked by the book itself", () => {
   const names = ["ETH-USD", "BTC-USD", "SOL-USD", "LINK-USD"] as const;
-  let book = freshBook({ bankrollUsd: 10_000 });
+  let book = freshBook({ members: [...names] });
   book = applyForward(book, { kind: "clock", tsMs: wednesday });
   for (let i = 0; i < names.length; i += 1) {
     for (let j = i + 1; j < names.length; j += 1) {
@@ -498,14 +510,17 @@ test("features.ts is the cb accumulator byte for byte, and the amendment record 
   expect(body.metricSha256).toBe(METRIC_SHA256);
   expect(() => assertP6Target("research/data/reports/p5-v31-registration.json")).toThrow(/refusing/);
   expect(() => assertP6Target("research/data/reports/p4-amendment-1.json")).toThrow(/refusing/);
+  expect(() => assertP6Target("research/data/reports/p6-amendment-2.json")).toThrow(/refusing/);
   const dir = mkdtempSync(join(tmpdir(), "p6-"));
-  const written = writeP6(join(dir, "p6-note.json"), { ok: true }, {
-    stamp: { commitSha: "a".repeat(40), dataRootHash: null, createdAt: "2026-10-12T01:23:00.000Z", phaseId: "P6" },
-    sidecarLabel: "tmp/p6-note.json",
-  });
+  execFileSync("git", ["init"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "p6@example.com"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "p6"], { cwd: dir });
+  writeFileSync(join(dir, "note.txt"), "clean\n");
+  execFileSync("git", ["add", "note.txt"], { cwd: dir });
+  execFileSync("git", ["commit", "-m", "init"], { cwd: dir });
+  const stamp = { commitSha: "a".repeat(40), dataRootHash: null, createdAt: "2026-10-12T01:23:00.000Z", phaseId: "P6" };
+  const written = writeP6(join(dir, "p6-note.json"), { ok: true }, { stamp, cwd: dir, sidecarLabel: "tmp/p6-note.json" });
   expect(written.sha256).toHaveLength(64);
-  expect(() => writeP6(join(dir, "x.json"), {}, {
-    stamp: { commitSha: "a".repeat(40), dataRootHash: null, createdAt: "2026-10-12T01:23:00.000Z", phaseId: "P6" },
-    dirty: true,
-  })).toThrow(/dirty/);
+  writeFileSync(join(dir, "dirty.txt"), "dirty\n");
+  expect(() => writeP6(join(dir, "x.json"), {}, { stamp, cwd: dir })).toThrow(/dirty/);
 });

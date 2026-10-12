@@ -1,7 +1,9 @@
 /**
- * Rolling-20 pause (1b). The trigger is still the last 20 net R summing to -5R
- * or worse. Resume is 20 minimum-size trades after the pause summing to at
- * least 0, or Brian's OK. A recovered window does not clear the pause by itself.
+ * Rolling-20 pause (1b). The trigger is the last 20 net R summing to -5R or
+ * worse. Resume is 20 minimum-size trades after the pause summing to at least
+ * 0, or one Brian OK. The OK clears the current pause and does not stick:
+ * a later window of -5R pauses again. A recovered window does not clear the
+ * pause by itself.
  */
 
 import { rolling20Paused } from "../p5/guards";
@@ -16,8 +18,9 @@ export function freshBleed(): BleedState {
   return { paused: false, postPause: [], brianOk: false };
 }
 
+/** Clears the current rolling-20 pause once. The next breach can pause again. */
 export function acceptBrianOk(state: BleedState): BleedState {
-  return { paused: false, postPause: [], brianOk: true };
+  return { paused: false, postPause: [], brianOk: false };
 }
 
 /**
@@ -25,7 +28,6 @@ export function acceptBrianOk(state: BleedState): BleedState {
  * trade's entry risk is at or below the paper minimum.
  */
 export function stepBleed(state: BleedState, history: readonly number[], next: number, minSize: boolean): BleedState {
-  if (state.brianOk) return { paused: false, postPause: [], brianOk: true };
   const values = [...history, next];
   if (!state.paused) {
     if (rolling20Paused(values)) return { paused: true, postPause: [], brianOk: false };

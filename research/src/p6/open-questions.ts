@@ -59,38 +59,13 @@ export const CLOSED_QUESTIONS: readonly OpenQuestion[] = [
 
 export const OPEN_QUESTIONS: readonly OpenQuestion[] = [
   {
-    id: "rest-settle",
-    topic: "REST 15-minute settle delay",
-    note: "Architect said a short settle delay and did not give seconds. strategyFetchAt takes the delay as an argument.",
-  },
-  {
-    id: "s-live",
-    topic: "How s_live is taken from the L2 snapshot",
-    note: "The registration names the snapshot and not the transform. The engine uses the raw bid-ask spread in bps. Half-spread and the historical cap are not applied.",
-  },
-  {
-    id: "d-round-trip",
-    topic: "Class D round-trip cost",
-    note: "D is sized with the maker fee, not 190 bps taker. Whether the taker exit leg is added to that cost is not specified.",
-  },
-  {
-    id: "forward-bankroll",
-    topic: "Bankroll for half-Kelly dollars",
-    note: "Risk after promotion is the capped fraction times a bankroll. The forward bankroll is not specified. Callers pass bankrollUsd.",
-  },
-  {
-    id: "default-13",
-    topic: "Architect's '(default 13)'",
-    note: "The phrase is ambiguous. It is the named parameter default13Usd. The size does not read it. Resolved default 13 is a different sentence and was not used to guess this one.",
-  },
-  {
-    id: "l2-shard",
-    topic: "Level2 products per socket",
-    note: "The exchange limit is not specified. shardProducts takes the size as an argument.",
-  },
-  {
     id: "live-tape",
     topic: "Historical tape for a real-day replay",
     note: "This checkout has no 1m candle store. The forward engine replays injected events. An exchange-day replay is still outstanding.",
+  },
+  {
+    id: "at-product-cap",
+    topic: "Advanced Trade products per subscribe message",
+    note: "Architect capped a socket at 10 products. The public Advanced Trade pages do not publish a products-per-message maximum. The Exchange limit of 10 is subscriptions per product per channel, and one subscribe per product per channel stays inside it.",
   },
 ];

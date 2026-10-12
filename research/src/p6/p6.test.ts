@@ -172,7 +172,7 @@ test("breadth is logged and does not change size, pauses shrink, and kills latch
   expect(shrunk.riskUsd).toBe(20);
   expect(paperDecision({ classId: "D", blockers: [], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 }).riskUsd).toBe(20);
   expect(paperDecision({ classId: "D", blockers: [], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 }).entry).toBe("maker");
-  expect(paperDecision({ classId: "D", blockers: [], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 }).costBps).toBe(50);
+  expect(paperDecision({ classId: "D", blockers: [], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 }).costBps).toBe(140);
   expect(paperDecision({ classId: "E", blockers: [], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 }).riskUsd).toBe(20);
   const blocked = paperDecision({ classId: "B", blockers: ["pause-2b"], stopBps: 500, breadthPaused: false, scheduledRiskUsd: 20 });
   expect(blocked.entries).toBe(false);
@@ -344,7 +344,8 @@ test("the forward review reports the 5-stream Holm and the Jev family of 2 at p 
   expect(report.breadth.selects).toBe(false);
   expect(report.breadth.label).toBe("diagnostic, no selection");
   expect(report.gates.coloursDoNotPromote).toBe(true);
-  expect(OPEN_QUESTIONS.map((row) => row.id)).toContain("default-13");
+  expect(OPEN_QUESTIONS.map((row) => row.id)).toContain("live-tape");
+  expect(OPEN_QUESTIONS.map((row) => row.id)).not.toContain("default-13");
   expect(OPEN_QUESTIONS.map((row) => row.id)).not.toContain("wilson");
 });
 

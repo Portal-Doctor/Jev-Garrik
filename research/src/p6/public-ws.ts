@@ -5,6 +5,7 @@
 
 import { candlesUrl } from "../data/public";
 import { assertSafeToStart } from "../safety";
+import { shardProducts } from "./mid-feed";
 
 /**
  * Public Advanced Trade market data, no credentials.
@@ -35,12 +36,16 @@ export function subscribeFrames(
   const safety = assertSafeToStart(env);
   if (!safety.ok) throw new Error(safety.reason);
   if (productIds.length === 0) throw new Error("public subscribe needs a product");
-  return channels.map((channel) => {
+  const frames: string[] = [];
+  for (const channel of channels) {
     if (!PUBLIC_CHANNELS.includes(channel) || ORDER_CHANNELS.has(channel)) throw new Error(`refusing channel ${channel}`);
-    const frame = JSON.stringify({ type: "subscribe", product_ids: [...productIds], channel });
-    assertPublicFrame(frame);
-    return frame;
-  });
+    for (const shard of shardProducts(productIds)) {
+      const frame = JSON.stringify({ type: "subscribe", product_ids: [...shard], channel });
+      assertPublicFrame(frame);
+      frames.push(frame);
+    }
+  }
+  return frames;
 }
 
 export function assertPublicFrame(raw: string): void {

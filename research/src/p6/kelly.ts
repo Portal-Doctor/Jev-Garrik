@@ -3,8 +3,10 @@
  * It deviates from the registered $60: every class A–E starts at $20, and a
  * promoted class is sized from its own forward net R. P5 rows are not an input.
  *
- * "(default 13)" is stored as default13Usd and is not applied. Its meaning is
- * an open question.
+ * The bankroll is the fixed $8,000 reference. The Kelly fraction uses the
+ * lower-80% bound of forward net R, not the sample mean. Promotion also needs
+ * 90 forward days and n >= 30. Resolved default 13 is the $20 size when that
+ * bound is null or not positive. There is no default13Usd parameter.
  */
 
 import { kellyFraction, PAPER_MINIMUM_USD } from "../p3/design-rules";
@@ -12,9 +14,12 @@ import { HOLM_ALPHA, holmAdjusted, netRStreamP, oneSided80TradeMean, weeklyGroup
 
 export const UNPROMOTED_RISK_USD = PAPER_MINIMUM_USD;
 export const REGISTERED_FULL_RISK_USD = 60;
+export const PAPER_BANKROLL_USD = 8_000;
+export const PROMOTION_MIN_DAYS = 90;
+export const PROMOTION_MIN_N = 30;
 
-/** Named stand-in for Architect's "(default 13)". Not used in the size. */
-export const DEFAULT_13_USD = 13;
+export const KELLY_STATUS_TEXT =
+  "$20 until promotion is registered (TDF Section 8, ADD Section 5, R5, default 13); the hard-coded $60 was the defect.";
 
 export const KELLY_RULING_TEXT =
   "Every class A-E trades at $20 risk from forward bar 1. The hard-coded $60 is a defect. kellyRiskUsd stays $20 until a class is promoted. The forward gate is mean net R > 0, L80 > 0, and Holm over the 5 streams. After promotion, risk is min(0.75%, half-Kelly) on forward realized net R only. P5 data never sizes a forward trade. Recompute at each weekly review (Monday 00:00 UTC cutoff) and hold until the next review. Drop back to $20 if the forward bound goes <= 0. Sizing may go under $20 below the cap. Architect wrote '(default 13)'.";
@@ -43,8 +48,8 @@ export interface KellySize {
   meanNetR: number | null;
   l80: number | null;
   holmPass: boolean;
-  /** Echo of the named parameter. The size does not read it. */
-  default13Usd: number;
+  forwardDays: number;
+  bankrollUsd: number;
 }
 
 export function kellyRulingBody(): {
@@ -71,6 +76,47 @@ export function kellyRulingBody(): {
     default13Parameter: "default13Usd",
     default13Applied: false,
   };
+}
+
+export function kellyStatusBody(): {
+  role: "label";
+  text: string;
+  unpromotedRiskUsd: 20;
+  registeredRiskUsd: 60;
+  bankrollUsd: 8000;
+  kellyInput: "L80";
+  promotionMinDays: 90;
+  promotionMinN: 30;
+  default13: string;
+  registrationEdited: false;
+  amendment2Edited: false;
+  kellyRulingEdited: false;
+} {
+  return {
+    role: "label",
+    text: KELLY_STATUS_TEXT,
+    unpromotedRiskUsd: UNPROMOTED_RISK_USD,
+    registeredRiskUsd: REGISTERED_FULL_RISK_USD,
+    bankrollUsd: PAPER_BANKROLL_USD,
+    kellyInput: "L80",
+    promotionMinDays: PROMOTION_MIN_DAYS,
+    promotionMinN: PROMOTION_MIN_N,
+    default13: "resolved default 13: a null or non-positive lower-80% bound sizes at $20",
+    registrationEdited: false,
+    amendment2Edited: false,
+    kellyRulingEdited: false,
+  };
+}
+
+export function forwardDays(points: readonly ForwardPoint[], nowMs: number): number {
+  if (points.length === 0) return 0;
+  let first = Number.POSITIVE_INFINITY;
+  for (const point of points) {
+    const ts = Date.parse(`${point.entryDate}T00:00:00.000Z`);
+    if (Number.isFinite(ts) && ts < first) first = ts;
+  }
+  if (!Number.isFinite(first) || nowMs < first) return 0;
+  return Math.floor((nowMs - first) / 86_400_000);
 }
 
 function mean(values: readonly number[]): number | null {
@@ -105,22 +151,21 @@ export function forwardBound(points: readonly ForwardPoint[], seed: number, reps
 
 /**
  * Size one class from its forward trades. `held` is the last Monday review.
- * The same Monday returns that size unchanged. `default13Usd` is recorded and
- * is not a floor, a count, or a risk.
+ * The same Monday returns that size unchanged. The fraction is half of L80/Var,
+ * capped at 0.75% of the fixed $8,000 bankroll ($60). A null or non-positive
+ * L80 bound, or fewer than 90 forward days or 30 trades, stays at $20.
  */
 export function forwardClassRisk(opts: {
   classId: string;
   forward: readonly ForwardPoint[];
   streams: readonly KellyStream[];
-  bankrollUsd: number;
   nowMs: number;
   held: KellyHold | null;
   bootstrapSeed: number;
-  default13Usd?: number;
   reps?: number;
 }): KellySize {
   const reviewMonday = weekKey(new Date(opts.nowMs).toISOString().slice(0, 10));
-  const default13Usd = opts.default13Usd ?? DEFAULT_13_USD;
+  const days = forwardDays(opts.forward, opts.nowMs);
   if (opts.held && opts.held.reviewMonday === reviewMonday) {
     return {
       riskUsd: opts.held.riskUsd,
@@ -130,22 +175,30 @@ export function forwardClassRisk(opts: {
       meanNetR: null,
       l80: null,
       holmPass: opts.held.promoted,
-      default13Usd,
+      forwardDays: days,
+      bankrollUsd: PAPER_BANKROLL_USD,
     };
   }
   const bound = forwardBound(opts.forward, opts.bootstrapSeed, opts.reps);
-  const pass = bound.mean != null && bound.mean > 0 && bound.l80 != null && bound.l80 > 0 && holmPass(opts.classId, opts.streams);
-  const fraction = pass ? kellyFraction(bound.mean ?? 0, sampleVariance(opts.forward.map((point) => point.netR))) : null;
-  const sized = fraction != null && fraction > 0 ? fraction * opts.bankrollUsd : UNPROMOTED_RISK_USD;
-  const riskUsd = pass && fraction != null && fraction > 0 ? sized : UNPROMOTED_RISK_USD;
+  const eligible =
+    days >= PROMOTION_MIN_DAYS &&
+    opts.forward.length >= PROMOTION_MIN_N &&
+    bound.mean != null &&
+    bound.mean > 0 &&
+    bound.l80 != null &&
+    bound.l80 > 0 &&
+    holmPass(opts.classId, opts.streams);
+  const fraction = eligible && bound.l80 != null ? kellyFraction(bound.l80, sampleVariance(opts.forward.map((point) => point.netR))) : null;
+  const riskUsd = fraction != null && fraction > 0 ? fraction * PAPER_BANKROLL_USD : UNPROMOTED_RISK_USD;
   return {
     riskUsd,
-    promoted: pass && fraction != null && fraction > 0,
+    promoted: fraction != null && fraction > 0,
     reviewMonday,
     held: false,
     meanNetR: bound.mean,
     l80: bound.l80,
-    holmPass: pass,
-    default13Usd,
+    holmPass: eligible,
+    forwardDays: days,
+    bankrollUsd: PAPER_BANKROLL_USD,
   };
 }
