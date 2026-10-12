@@ -7,6 +7,12 @@ import { dataPaths } from "./paths";
 import { sha256File } from "./store";
 import { BAR_SEC } from "./time";
 
+/** Bun when the host provides it. The Next bundle does not reference the Bun global. */
+function hostRuntimeVersion(): string {
+  const host = globalThis as { Bun?: { version?: string } };
+  return host.Bun?.version ?? "node";
+}
+
 export const ROOT_HASH_INPUT = "sorted lines of relativePath TAB sha256 LF, UTF-8";
 
 export const SNAPSHOT_FREEZE_REASON =
@@ -104,7 +110,7 @@ export function buildDataManifest(opts: {
     phaseId: opts.stamp.phaseId,
     hashAlgorithm: "sha256",
     rootHashInput: ROOT_HASH_INPUT,
-    bunVersion: opts.bunVersion ?? Bun.version,
+    bunVersion: opts.bunVersion ?? hostRuntimeVersion(),
     writerVersion: "1",
     barSec: opts.barSec ?? BAR_SEC,
     ...(opts.snapshotLift ? { snapshotLift: opts.snapshotLift } : {}),

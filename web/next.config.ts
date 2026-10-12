@@ -2,8 +2,8 @@ import type { NextConfig } from "next";
 import path from "node:path";
 
 const nextConfig: NextConfig = {
-  // The repo root also has a bun.lock; pin the workspace root to this app.
-  turbopack: { root: path.resolve(__dirname) },
+  // The engine lives in the repo, outside this app. Turbopack has to see it.
+  turbopack: { root: path.resolve(__dirname, "..") },
 };
 
 export default nextConfig;
