@@ -30,6 +30,8 @@ import {
 
 const flags = { priceGroupPasses: true, volumeGroupPasses: true, boundarySaved: false };
 const dailyRoot = fileURLToPath(new URL("../../data/daily", import.meta.url));
+/** The manifest is tracked. The sqlite bytes are not, so CI must not hash them. */
+const dailyBytes = existsSync(join(dailyRoot, "candles", "00-USD", "2023-10.sqlite"));
 
 test("deleting any daily month throws, including the first and the last", () => {
   const dir = mkdtempSync(join(tmpdir(), "p6-d1-"));
@@ -55,7 +57,7 @@ test("deleting any daily month throws, including the first and the last", () => 
   }
 });
 
-test.skipIf(!existsSync(join(dailyRoot, "data-manifest.json")))("daily sqlite bytes match the frozen daily manifest", () => {
+test.skipIf(!dailyBytes)("daily sqlite bytes match the frozen daily manifest", () => {
   const hashed = dailyByteHash(dailyRoot);
   expect(hashed.dailyRootHash).toBe("76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4");
   expect(hashed.files).toBeGreaterThan(0);
