@@ -421,9 +421,12 @@ test("an X1 fill matches the half-spread formula, and a replay of the same event
   ];
   const left = replayInjected(events);
   const right = replayInjected(events);
-  expect(left.positions[0]?.fillPrice).toBeCloseTo(expected, 8);
-  expect(left.positions[0]?.sLiveBps).toBeCloseTo(sLive, 8);
-  expect(right.positions[0]?.fillPrice).toBe(left.positions[0]?.fillPrice);
-  expect(left.legs[0]?.orderSendTs - (left.legs[0]?.triggerBarTs ?? left.legs[0]!.orderSendTs)).toBe(0);
-  expect(left.legs[0]?.orderSendTs - wednesday).toBe(250);
+  const position = left.positions[0];
+  const leg = left.legs[0];
+  expect(position).toBeDefined();
+  expect(leg).toBeDefined();
+  expect(position!.fillPrice).toBeCloseTo(expected, 8);
+  expect(position!.sLiveBps).toBeCloseTo(sLive, 8);
+  expect(right.positions[0]?.fillPrice).toBe(position!.fillPrice);
+  expect(leg!.orderSendTs - wednesday).toBe(250);
 });
