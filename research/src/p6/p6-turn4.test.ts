@@ -291,6 +291,8 @@ test("a throwaway worktree cannot write through the guarded writer", () => {
   expect(() => stampP6Record("p6-stamp-kelly-ruling")).toThrow(/refusing to overwrite/);
   expect(() => stampP6Record("p6-stamp-amendment-2b")).toThrow(/refusing to overwrite/);
   expect(() => stampP6Record("p6-stamp-amendment-2b-approval")).toThrow(/refusing to overwrite/);
+  expect(() => stampP6Record("p6-stamp-forward-a")).toThrow(/refusing to overwrite/);
+  expect(() => stampP6Record("p6-stamp-kelly-superseding")).toThrow(/refusing to overwrite/);
   expect(() => stampP6Record("p6-stamp-jev-spend" as "p6-stamp-amendment-2")).toThrow();
 });
 

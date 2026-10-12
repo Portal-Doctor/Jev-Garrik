@@ -54,6 +54,12 @@ test("the generator has no built-in A config", () => {
   expect(() => readForwardPick(join(tmpdir(), "no-forward-pick"))).toThrow();
   const picked = generateForward({ bars: [], nowSec: 0, flags, pick: { lookback: 55, k: 3 } });
   expect(picked.entries).toEqual([]);
+  const stamped = readForwardPick();
+  expect(stamped.config).toBe("A55-k3");
+  expect(stamped.lookback).toBe(55);
+  expect(stamped.k).toBe(3);
+  expect(stamped.stats).toHaveLength(6);
+  expect(generateForward({ bars: [], nowSec: 1, flags }).entries).toEqual([]);
 });
 
 test("monthly re-selection is off by default and leaves an open position on its entry config", () => {

@@ -81,6 +81,12 @@ const FROZEN = new Set([
   "p6-jev-spend.sha256",
   "p6-b-sizing-check.json",
   "p6-b-sizing-check.sha256",
+  "p6-forward-a.json",
+  "p6-forward-a.sha256",
+  "p6-kelly-superseding.json",
+  "p6-kelly-superseding.sha256",
+  "p6-wide-parity.json",
+  "p6-wide-parity.sha256",
   "data-manifest.json",
   "derived-manifest.json",
 ]);
