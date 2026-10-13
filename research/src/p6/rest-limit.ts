@@ -1,12 +1,15 @@
 /**
- * One lane for every public Coinbase REST call.
- * Token bucket: 4 requests/second, burst 4. A 429 pauses the whole bucket.
+ * One lane per invocation for every public Coinbase REST call.
+ * Token bucket: 4 requests/second, burst 4. A 429 pauses that invocation's bucket.
+ * Seed calls stop at 250 so 150 requests stay for live confirms and backfill.
  */
 
 export const REST_RATE_PER_SEC = 4;
 export const REST_BURST = 4;
 export const REST_MAX_ATTEMPTS = 5;
 export const REST_HARD_CAP = 400;
+export const REST_RESERVE = 150;
+export const SEED_BUDGET = REST_HARD_CAP - REST_RESERVE;
 export const REST_DEADLINE_MARGIN_MS = 90_000;
 export const REST_JITTER_CAP_MS = 8_000;
 
@@ -25,6 +28,18 @@ export interface RestLimitDeps {
   deadlineMs: () => number;
 }
 
+export interface RestRun {
+  deps: RestLimitDeps;
+  pauseUntil: number;
+  lane: Promise<void>;
+  stats: RestStats;
+  cold: Map<string, string>;
+  sentAt: number[];
+  seedUsed: number;
+  seedBudget: number;
+  onCold?: (id: string, reason: string) => void;
+}
+
 const defaults: RestLimitDeps = {
   now: () => Date.now(),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -33,48 +48,72 @@ const defaults: RestLimitDeps = {
   deadlineMs: () => Number.POSITIVE_INFINITY,
 };
 
-let deps: RestLimitDeps = defaults;
-let pauseUntil = 0;
-let lane: Promise<void> = Promise.resolve();
-let stats: RestStats = { n: 0, r429: 0, waitedMs: 0 };
-const cold = new Set<string>();
-const sentAt: number[] = [];
+/** Test lane. Production passes the host's run and does not read this. */
+let active: RestRun | null = null;
 
-export function resetRestLimit(next?: Partial<RestLimitDeps>): void {
-  deps = { ...defaults, ...next };
-  pauseUntil = 0;
-  lane = Promise.resolve();
-  stats = { n: 0, r429: 0, waitedMs: 0 };
-  cold.clear();
-  sentAt.length = 0;
+export function createRestRun(deadlineMs: number, partial?: Partial<RestLimitDeps>, onCold?: (id: string, reason: string) => void): RestRun {
+  return {
+    deps: { ...defaults, ...partial, deadlineMs: partial?.deadlineMs ?? (() => deadlineMs) },
+    pauseUntil: 0,
+    lane: Promise.resolve(),
+    stats: { n: 0, r429: 0, waitedMs: 0 },
+    cold: new Map(),
+    sentAt: [],
+    seedUsed: 0,
+    seedBudget: SEED_BUDGET,
+    ...(onCold ? { onCold } : {}),
+  };
 }
 
-export function beginRestRun(deadlineMs: number): void {
-  resetRestLimit({ deadlineMs: () => deadlineMs });
+export function resetRestLimit(next?: Partial<RestLimitDeps>): RestRun {
+  active = createRestRun(next?.deadlineMs?.() ?? Number.POSITIVE_INFINITY, next);
+  return active;
 }
 
-export function restStats(): RestStats {
-  return { ...stats };
+export function beginRestRun(deadlineMs: number, onCold?: (id: string, reason: string) => void): RestRun {
+  active = createRestRun(deadlineMs, undefined, onCold);
+  return active;
 }
 
-export function restSentAt(): readonly number[] {
-  return sentAt;
+function runOf(run?: RestRun): RestRun {
+  if (run) return run;
+  if (!active) active = createRestRun(Number.POSITIVE_INFINITY);
+  return active;
 }
 
-export function restLogLine(): string {
-  return `rest n=${stats.n}, 429=${stats.r429}, waited_ms=${stats.waitedMs}`;
+export function restStats(run?: RestRun): RestStats {
+  return { ...runOf(run).stats };
 }
 
-export function markCold(productId: string): void {
-  if (productId) cold.add(productId);
+export function restSentAt(run?: RestRun): readonly number[] {
+  return runOf(run).sentAt;
 }
 
-export function isCold(productId: string): boolean {
-  return cold.has(productId);
+export function restLogLine(run?: RestRun, extra?: { warm: number; total: number; seedIdx: number }): string {
+  const state = runOf(run);
+  const ids = [...state.cold.keys()].sort();
+  const tail = extra ? ` warm=${extra.warm}/${extra.total} seed_idx=${extra.seedIdx}` : "";
+  return `rest n=${state.stats.n}, 429=${state.stats.r429}, waited_ms=${state.stats.waitedMs}, cold=[${ids.join(",")}]${tail}`;
 }
 
-export function coldProducts(): string[] {
-  return [...cold].sort();
+export function markCold(productId: string, run?: RestRun, reason = "cold"): void {
+  if (!productId) return;
+  const state = runOf(run);
+  if (state.cold.has(productId)) return;
+  state.cold.set(productId, reason);
+  state.onCold?.(productId, reason);
+}
+
+export function isCold(productId: string, run?: RestRun): boolean {
+  return runOf(run).cold.has(productId);
+}
+
+export function coldProducts(run?: RestRun): string[] {
+  return [...runOf(run).cold.keys()].sort();
+}
+
+export function coldReasons(run?: RestRun): { id: string; reason: string }[] {
+  return [...runOf(run).cold.entries()].map(([id, reason]) => ({ id, reason })).sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
 export function productIdFromUrl(url: string): string | null {
@@ -100,74 +139,92 @@ export function fullJitterMs(attempt: number, rand: () => number): number {
   return Math.floor(rand() * (cap + 1));
 }
 
-async function pause(ms: number): Promise<void> {
+async function pause(state: RestRun, ms: number): Promise<void> {
   if (!(ms > 0)) return;
-  pauseUntil = Math.max(pauseUntil, deps.now() + ms);
-  stats.waitedMs += ms;
-  await deps.sleep(ms);
+  state.pauseUntil = Math.max(state.pauseUntil, state.deps.now() + ms);
+  state.stats.waitedMs += ms;
+  await state.deps.sleep(ms);
 }
 
 /** At most `burst` sends in any 1s window. Burst 4 at 4/s, so the window never holds a fifth. */
-async function takeToken(): Promise<void> {
+async function takeToken(state: RestRun): Promise<void> {
   for (;;) {
-    const now = deps.now();
-    if (pauseUntil > now) {
-      await pause(pauseUntil - now);
+    const now = state.deps.now();
+    if (state.pauseUntil > now) {
+      await pause(state, state.pauseUntil - now);
       continue;
     }
-    const recent = sentAt.filter((sent) => now - sent < 1_000);
+    const recent = state.sentAt.filter((sent) => now - sent < 1_000);
     if (recent.length < REST_BURST) return;
     const oldest = recent[0] ?? now;
-    await pause(Math.max(1, 1_000 - (now - oldest)));
+    await pause(state, Math.max(1, 1_000 - (now - oldest)));
   }
 }
 
-async function once(url: string): Promise<Response> {
+function seedStopped(): Response {
+  return new Response("", { status: 429, headers: { "x-p6-budget": "seed" } });
+}
+
+export function seedBudgetStopped(response: Pick<Response, "headers">): boolean {
+  return response.headers.get("x-p6-budget") === "seed";
+}
+
+async function once(state: RestRun, url: string, seed: boolean, mark: boolean): Promise<Response> {
   const product = productIdFromUrl(url);
+  if (seed && state.seedUsed >= state.seedBudget) return seedStopped();
   let last: Response | null = null;
   for (let attempt = 0; attempt < REST_MAX_ATTEMPTS; attempt += 1) {
-    const now = deps.now();
-    if (now >= deps.deadlineMs() - REST_DEADLINE_MARGIN_MS) break;
-    if (stats.n >= REST_HARD_CAP) {
-      if (product) markCold(product);
+    const now = state.deps.now();
+    if (now >= state.deps.deadlineMs() - REST_DEADLINE_MARGIN_MS) break;
+    if (seed && state.seedUsed >= state.seedBudget) return seedStopped();
+    if (state.stats.n >= REST_HARD_CAP) {
+      if (product) markCold(product, state, "cap");
       return last ?? new Response("", { status: 429 });
     }
-    await takeToken();
-    stats.n += 1;
-    sentAt.push(deps.now());
+    await takeToken(state);
+    state.stats.n += 1;
+    if (seed) state.seedUsed += 1;
+    state.sentAt.push(state.deps.now());
     let response: Response;
     try {
-      response = await deps.fetch(url);
+      response = await state.deps.fetch(url);
     } catch {
       last = new Response("", { status: 599 });
-      await pause(fullJitterMs(attempt, deps.rand));
+      await pause(state, fullJitterMs(attempt, state.deps.rand));
       continue;
     }
     if (response.ok && response.status !== 429) return response;
     last = response;
     if (response.status === 429) {
-      stats.r429 += 1;
+      state.stats.r429 += 1;
       const honored = retryAfterMs(response.headers.get("retry-after"));
-      await pause(honored ?? fullJitterMs(attempt, deps.rand));
+      await pause(state, honored ?? fullJitterMs(attempt, state.deps.rand));
       continue;
     }
-    await pause(fullJitterMs(attempt, deps.rand));
+    if (response.status >= 400 && response.status < 500) {
+      if (mark && product) markCold(product, state, `http-${response.status}`);
+      return response;
+    }
+    await pause(state, fullJitterMs(attempt, state.deps.rand));
   }
-  if (product) markCold(product);
+  if (product) markCold(product, state, "retries");
   return last ?? new Response("", { status: 429 });
 }
 
-/** Serial. Every Coinbase REST call goes through here. */
-export function limited(url: string): Promise<Response> {
-  const run = lane.then(() => once(url));
-  lane = run.then(
+/** Serial on this run. A second run has its own lane. `cold: false` still returns a 4xx and does not retry it. */
+export function limited(url: string, run?: RestRun, opts?: { seed?: boolean; cold?: boolean }): Promise<Response> {
+  const state = runOf(run);
+  const seed = opts?.seed === true;
+  const mark = opts?.cold !== false;
+  const task = state.lane.then(() => once(state, url, seed, mark));
+  state.lane = task.then(
     () => undefined,
     () => undefined,
   );
-  return run;
+  return task;
 }
 
-/** Default transport for the six public market-data call sites. */
-export function coinbaseGet(url: string): Promise<Response> {
-  return limited(url);
+/** Default transport for the public market-data call sites. Pass the host's run. */
+export function coinbaseGet(url: string, run?: RestRun, opts?: { seed?: boolean; cold?: boolean }): Promise<Response> {
+  return limited(url, run, opts);
 }

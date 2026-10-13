@@ -6,9 +6,10 @@
  */
 
 import { newEntryOrder, type RestingOrder } from "../../vendor/87b35d0/fill.ts";
-import { MAKER_FEE_BPS, TAKER_FEE_BPS } from "../../vendor/87b35d0/config.ts";
+import { DEPLOYABLE_USD, MAKER_FEE_BPS, TAKER_FEE_BPS } from "../../vendor/87b35d0/config.ts";
 import {
   BACKSTOP_PAIR_USD,
+  BOOK_HALT_USD,
   classATenDayExit,
   classBDisasterStop,
   classBHeld,
@@ -27,7 +28,7 @@ import { dateOfTs, isDayCloseBar, TRAIL_ATR } from "../p5/book";
 import { netBps } from "../p5/walk";
 import { momentumBlocked, momentumCrashOn } from "../p5/guards";
 import { isMondayCloseBar, x1EntryTs } from "../p5/run";
-import { assignBetas, averageLinkage, betaWeight, openRiskAfterMove } from "../p5/risk";
+import { assignBetas, averageLinkage, betaWeight, CLASS_DOLLAR_BACKSTOP_USD, openRiskAfterMove } from "../p5/risk";
 import type { SourceDay } from "../p3/bar-access";
 import { forwardClusterBeta, latestClusterDate, type MemberCloses } from "./clusters";
 import { readForwardPick, type APick, type APickLog } from "./select";
@@ -422,6 +423,131 @@ function openMtm(book: Book): number {
     total += markedPnl(book, position, mark);
   }
   return total;
+}
+
+export interface ClassPnl {
+  cumR: number;
+  peakR: number;
+  drawdownR: number;
+  cumUsd: number;
+  peakUsd: number;
+  drawdownUsd: number;
+  paused: boolean;
+  killed: boolean;
+  /** Paused-state size. Null when the class is not paused. */
+  sizingUsd: number | null;
+}
+
+export interface PairPnl {
+  productId: string;
+  classId: string;
+  side: "long" | "flat";
+  entry: number | null;
+  stop: number | null;
+  unrealizedUsd: number;
+  realizedUsd: number;
+  feesUsd: number;
+  latched: boolean;
+  /** Dollars of room before the $500 pair backstop. Zero when latched. */
+  roomUsd: number;
+}
+
+export interface PaperPnl {
+  startingUsd: number;
+  realizedUsd: number;
+  unrealizedUsd: number;
+  equityUsd: number;
+  feesUsd: number;
+  spreadSlipUsd: number;
+  /** Mean decision-to-arrival bps of the last 20 legs. Not part of cost. */
+  arrivalDelayBps: number | null;
+  feeBps: { maker: number; taker: number };
+  book: { hwmUsd: number; drawdownUsd: number; haltUsd: number; roomUsd: number };
+  classes: { A: ClassPnl; B: ClassPnl; C: ClassPnl; D: ClassPnl; E: ClassPnl };
+  classBackstopUsd: number;
+  pairBackstopUsd: number;
+  pairs: PairPnl[];
+}
+
+function classPnl(curve: ClassCurve): ClassPnl {
+  const cumR = curve.netR.reduce((sum, value) => sum + value, 0);
+  const paused = curve.pause.paused || curve.bleed.paused;
+  return {
+    cumR,
+    peakR: curve.pause.peak,
+    drawdownR: Math.max(0, curve.pause.peak - cumR),
+    cumUsd: curve.cumUsd,
+    peakUsd: curve.peakUsd,
+    drawdownUsd: Math.max(0, curve.peakUsd - curve.cumUsd),
+    paused: curve.pause.paused,
+    killed: curve.pause.killed,
+    sizingUsd: paused ? PAPER_MINIMUM_USD : null,
+  };
+}
+
+/** R3 equity and the Quant bars. The page displays this and does not recompute it. */
+export function paperPnl(book: Book): PaperPnl {
+  const unrealizedUsd = openMtm(book);
+  const mtm = book.realizedUsd + unrealizedUsd;
+  const equityUsd = DEPLOYABLE_USD + mtm;
+  const hwmUsd = DEPLOYABLE_USD + Math.max(book.peakEquity, mtm);
+  const drawdownUsd = Math.max(0, hwmUsd - equityUsd);
+  const haltUsd = Math.abs(BOOK_HALT_USD);
+  const feesUsd = book.legs.reduce((sum, leg) => sum + leg.feesUsd, 0);
+  const closedFees = new Map<string, number>();
+  for (const leg of book.legs) {
+    const id = leg.side === "exit" ? leg.id.replace(/:exit$/, "") : leg.id;
+    closedFees.set(id, (closedFees.get(id) ?? 0) + leg.feesUsd);
+  }
+  let spreadSlipUsd = book.positions.reduce((sum, position) => sum + position.entrySpreadUsd, 0);
+  for (const trade of book.closed) spreadSlipUsd += Math.max(0, trade.costUsd - (closedFees.get(trade.id) ?? 0));
+  const recent = book.legs.slice(-20);
+  const delays = recent.flatMap((leg) => (leg.decisionMid > 0 ? [((leg.fillPrice - leg.decisionMid) / leg.decisionMid) * 10_000] : []));
+  const arrivalDelayBps = delays.length > 0 ? delays.reduce((sum, value) => sum + value, 0) / delays.length : null;
+  const ids = [...new Set([...book.positions.map((row) => row.productId), ...book.closed.map((row) => row.productId)])];
+  const pairs: PairPnl[] = ids.map((productId) => {
+    const open = book.positions.filter((row) => row.productId === productId);
+    const parts = pairParts(book, productId);
+    const state = book.pairs[productId];
+    const latched = state?.latched === true;
+    const baseline = state?.baselineUsd ?? 0;
+    const roomUsd = latched ? 0 : Math.max(0, BACKSTOP_PAIR_USD - (baseline - parts.cumulativeUsd));
+    const fees = book.legs.filter((leg) => leg.productId === productId).reduce((sum, leg) => sum + leg.feesUsd, 0);
+    const position = open[0];
+    return {
+      productId,
+      classId: position?.classId ?? book.closed.filter((row) => row.productId === productId).at(-1)?.classId ?? "",
+      side: open.length > 0 ? "long" : "flat",
+      entry: position?.fillPrice ?? null,
+      stop: position?.stop ?? null,
+      unrealizedUsd: parts.markedUsd,
+      realizedUsd: parts.realizedUsd,
+      feesUsd: fees,
+      latched,
+      roomUsd,
+    };
+  });
+  return {
+    startingUsd: DEPLOYABLE_USD,
+    realizedUsd: book.realizedUsd,
+    unrealizedUsd,
+    equityUsd,
+    feesUsd,
+    spreadSlipUsd,
+    arrivalDelayBps,
+    feeBps: { maker: MAKER_FEE_BPS, taker: TAKER_FEE_BPS },
+    book: { hwmUsd, drawdownUsd, haltUsd, roomUsd: Math.max(0, haltUsd - drawdownUsd) },
+    classes: {
+      A: classPnl(book.classes.A),
+      B: classPnl(book.classes.B),
+      C: classPnl(book.classes.C),
+      D: classPnl(book.classes.D),
+      E: classPnl(book.classes.E),
+    },
+    classBackstopUsd: CLASS_DOLLAR_BACKSTOP_USD,
+    pairBackstopUsd: BACKSTOP_PAIR_USD,
+    pairs,
+  };
 }
 
 function pairParts(book: Book, productId: string): { realizedUsd: number; markedUsd: number; cumulativeUsd: number } {

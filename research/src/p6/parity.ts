@@ -19,6 +19,15 @@ import { A_REGISTRATION, type APick } from "./select";
 import { registeredFlags, type RegistrationFlagSource } from "../p5/flags";
 import { applyForward, freshBook, type Book, type ForwardEvent } from "./engine";
 import { generateForward, type FifteenBar, type GeneratedEntry } from "./generate";
+import { WARM } from "./warm-caps";
+
+/** The host caps 4h and 1h at these lengths. This replay keeps the full history. */
+export function cappedLength(full: number, kind: "four" | "hour"): number {
+  const keep = kind === "four" ? WARM.FOUR_KEEP : WARM.HOUR_KEEP;
+  return Math.min(full, keep);
+}
+
+export { WARM };
 
 const WINDOW_ENTRY_START = "2025-11-11";
 const WINDOW_ENTRY_END = "2025-11-18";

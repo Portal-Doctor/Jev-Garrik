@@ -156,6 +156,7 @@ export function applyMemoryFlush(
     ...(body.bars ?? []).map((row) => row.value),
     ...(body.marks ?? []).map((row) => row.value),
     ...(body.warm ?? []).map((row) => row.value),
+    ...(body.extra ?? []).map((row) => row.value),
   ];
   if (values.some((value) => Buffer.byteLength(value) > VALUE_MAX_BYTES)) return 3;
   const staged = new Map<string, { value: string; px: number }>();
@@ -191,6 +192,7 @@ export function applyMemoryFlush(
   for (const warm of body.warm ?? []) {
     if (!rows.get(warm.key)) rows.set(warm.key, { value: warm.value, expiresAt: null });
   }
+  for (const row of body.extra ?? []) rows.set(row.key, { value: row.value, expiresAt: null });
   return 1;
 }
 
@@ -201,6 +203,7 @@ interface FlushBody {
   bars?: { key: string; value: string; id: string; field: string; max: number; px: number }[];
   marks?: { key: string; value: string }[];
   warm?: { key: string; value: string }[];
+  extra?: { key: string; value: string }[];
 }
 
 /** PX for a live lease. Never longer than the function deadline, and never longer than LEASE_TTL_MS. */
@@ -452,7 +455,9 @@ export async function runInvocation(opts: {
   holder: {
     warm(): Promise<void>;
     applyDueBars(): Promise<string[]>;
-    releaseDeadline(): void;
+    releaseDeadline(cause?: string): void;
+    /** Bars accepted while sampling. Merged into the response after the run. */
+    appliedDuringRun?(): string[];
     sampleUntil?(untilMs: number): Promise<void>;
     /** Subscribe before this instance owns the lease. A normal handover then has no feed gap. */
     watchUntil?(untilMs: number): Promise<void>;
@@ -578,14 +583,15 @@ export async function runInvocation(opts: {
     }
   }
   flushStaged();
-  const applied = await opts.holder.applyDueBars();
+  const seeded = await opts.holder.applyDueBars();
+  const appliedOf = () => [...new Set([...seeded, ...(opts.holder.appliedDuringRun?.() ?? [])])];
   let sampled = false;
   if (opts.holder.sampleUntil && nowMs < opts.deadlineMs - HANDOVER_MARGIN_MS) {
     try {
       await opts.holder.sampleUntil(opts.deadlineMs - HANDOVER_MARGIN_MS);
       sampled = true;
     } catch (error) {
-      opts.holder.releaseDeadline();
+      opts.holder.releaseDeadline("crash");
       const failedAt = opts.clock ? opts.clock() : nowMs;
       const savedAt = decodeLease(await opts.kv.get(LEASE_META_KEY))?.savedAtMs ?? nowMs;
       opts.holder.recordGap?.({ startMs: savedAt, endMs: Math.max(savedAt, failedAt), cause: "crash" });
@@ -600,11 +606,11 @@ export async function runInvocation(opts: {
   if (sampled) {
     const at = opts.deadlineMs - HANDOVER_MARGIN_MS;
     const saved = await releaseFinal(at);
-    return { action: "handover", applied, socketGap: false, feedGapMs, cause: saved ? (plan.cause ?? "handover") : "uncovered", holder: null };
+    return { action: "handover", applied: appliedOf(), socketGap: false, feedGapMs, cause: saved ? (plan.cause ?? "handover") : "uncovered", holder: null };
   }
   await persistBook();
   await noteLeaseSave(opts.kv, nowMs);
-  return { action: "hold", applied, socketGap: plan.socketGap, feedGapMs, cause: plan.cause, holder: opts.self };
+  return { action: "hold", applied: appliedOf(), socketGap: plan.socketGap, feedGapMs, cause: plan.cause, holder: opts.self };
 }
 
 export function cronAuthorized(header: string | null, secret: string | undefined): boolean {
@@ -794,7 +800,7 @@ const FLUSH_LUA = [
   "  end",
   "  return false",
   "end",
-  "if scan(body['tapes']) or scan(body['rings']) or scan(body['bars']) or scan(body['marks']) or scan(body['warm']) then return 3 end",
+  "if scan(body['tapes']) or scan(body['rings']) or scan(body['bars']) or scan(body['marks']) or scan(body['warm']) or scan(body['extra']) then return 3 end",
   "local pending = {}",
   "local function remember(key, encoded, px)",
   "  if string.len(encoded) > 1048576 then return false end",
@@ -870,6 +876,11 @@ const FLUSH_LUA = [
   "if type(body['warm']) == 'table' then",
   "  for _, warm in ipairs(body['warm']) do",
   "    if redis.call('EXISTS', warm['key']) == 0 then redis.call('SET', warm['key'], warm['value']) end",
+  "  end",
+  "end",
+  "if type(body['extra']) == 'table' then",
+  "  for _, row in ipairs(body['extra']) do",
+  "    redis.call('SET', row['key'], row['value'])",
   "  end",
   "end",
   "return 1",

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { coldProducts, isCold, limited, resetRestLimit, restStats } from "./rest-limit";
+import { coldProducts, coldReasons, createRestRun, isCold, limited, resetRestLimit, restStats } from "./rest-limit";
 
 const host = "https://api.exchange.coinbase.com";
 
@@ -95,6 +95,43 @@ test("retries stop at the deadline minus 90s", async () => {
   expect(response.status).toBe(500);
   expect(calls).toBe(1);
   expect(isCold("BTC-USD")).toBe(true);
+});
+
+test("a 404 is one attempt and that product is cold", async () => {
+  let calls = 0;
+  resetRestLimit({
+    now: () => 0,
+    sleep: async () => undefined,
+    rand: () => 0,
+    deadlineMs: () => 1_000_000_000,
+    fetch: async () => {
+      calls += 1;
+      return new Response("", { status: 404 });
+    },
+  });
+  const response = await limited(`${host}/products/GONE-USD/candles`);
+  expect(response.status).toBe(404);
+  expect(calls).toBe(1);
+  expect(restStats().n).toBe(1);
+  expect(isCold("GONE-USD")).toBe(true);
+  expect(coldReasons()).toEqual([{ id: "GONE-USD", reason: "http-404" }]);
+});
+
+test("two runs do not share counters", async () => {
+  const deps = {
+    now: () => 0,
+    sleep: async () => undefined,
+    rand: () => 0,
+    fetch: async () => new Response("ok", { status: 200 }),
+  };
+  const a = createRestRun(1_000_000_000, deps);
+  const b = createRestRun(1_000_000_000, deps);
+  await limited(`${host}/products/AAA-USD/candles`, a);
+  await limited(`${host}/products/BBB-USD/candles`, b);
+  await limited(`${host}/products/AAA-USD/book?level=1`, a);
+  expect(restStats(a).n).toBe(2);
+  expect(restStats(b).n).toBe(1);
+  expect(isCold("AAA-USD", a)).toBe(false);
 });
 
 test("no raw fetch( outside rest-limit.ts", () => {

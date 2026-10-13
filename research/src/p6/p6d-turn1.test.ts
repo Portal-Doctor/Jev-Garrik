@@ -8,7 +8,6 @@ import {
   acceptRestBar,
   attachMemberCloses,
   capturePaperState,
-  DAILY_CLOSE_DAYS,
   feedFramesContiguous,
   FIFTEEN_RETAIN_DAYS,
   FOUR_KEEP,
@@ -94,7 +93,7 @@ test("the heartbeat saves state and renews the lease", async () => {
   expect(saved.savedAtMs).toBe(now);
 });
 
-test("15m bars stay for 8 days and daily closes stay at 260", () => {
+test("15m bars stay for 8 days and daily closes keep the full history", () => {
   expect(FIFTEEN_RETAIN_DAYS).toBe(8);
   expect(FOUR_KEEP).toBeGreaterThanOrEqual(220);
   const nowSec = Math.floor(Date.parse("2026-10-12T12:00:00.000Z") / 1000);
@@ -117,9 +116,9 @@ test("15m bars stay for 8 days and daily closes stay at 260", () => {
     })),
   );
   attachMemberCloses(host);
-  expect(host.dailyCloses.get("ETH-USD")).toHaveLength(DAILY_CLOSE_DAYS);
-  expect(host.book.config.memberCloses?.[0]?.days).toHaveLength(DAILY_CLOSE_DAYS);
-  expect(host.book.config.memberCloses?.[0]?.days[0]?.date).toBe(day(40));
+  expect(host.dailyCloses.get("ETH-USD")).toHaveLength(300);
+  expect(host.book.config.memberCloses?.[0]?.days).toHaveLength(300);
+  expect(host.book.config.memberCloses?.[0]?.days[0]?.date).toBe(day(0));
   const old = nowSec - 9 * 86_400;
   const kept = nowSec - 2 * 86_400;
   acceptRestBar(host, { productId: "ETH-USD", startSec: old, open: 1, high: 1, low: 1, close: 1, volume: 1 });
@@ -131,7 +130,7 @@ test("15m bars stay for 8 days and daily closes stay at 260", () => {
   const closeStart = Math.floor(Date.parse("2026-10-12T00:00:00.000Z") / 1000) + 95 * 900;
   acceptRestBar(host, { productId: "ETH-USD", startSec: closeStart, open: 3, high: 4, low: 2, close: 3.5, volume: 1 });
   expect(host.dailyCloses.get("ETH-USD")?.some((row) => row.date === "2026-10-12" && row.close === 3.5)).toBe(true);
-  expect(host.dailyCloses.get("ETH-USD")).toHaveLength(before);
+  expect(host.dailyCloses.get("ETH-USD")).toHaveLength(before + 1);
   expect(host.book.config.memberCloses?.[0]?.days.some((row) => row.date === "2026-10-12")).toBe(true);
 });
 

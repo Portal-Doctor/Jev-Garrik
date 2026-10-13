@@ -6,7 +6,7 @@
 import type { SourceDay } from "../p3/bar-access";
 import { loadSplit, persistSplit, warmupKey } from "./hot-store";
 import { acceptRestBar, attachMemberCloses, backfillTapeIfNeeded, catchUpHistory, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
-import { beginRestRun, restLogLine } from "./rest-limit";
+import { createRestRun, restLogLine } from "./rest-limit";
 import type { OhlcvBar } from "./rest-bars";
 import {
   commitBar,
@@ -55,7 +55,8 @@ function rememberPersistedBars(host: PaperHost): void {
 export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = []): {
   warm(): Promise<void>;
   applyDueBars(): Promise<string[]>;
-  releaseDeadline(): void;
+  releaseDeadline(cause?: string): void;
+  appliedDuringRun(): string[];
   persist(): Promise<void>;
   recordGap(gap: { startMs: number; endMs: number; cause: string }): void;
   reload(): Promise<void>;
@@ -70,9 +71,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       if (saved) installPaperState(host, saved);
       await loadWarmup(kv, host);
       rememberPersistedBars(host);
-      if (host.restWarm && (host.warmup.size === 0 || [...host.products].some((id) => (host.hourWarm.get(id)?.length ?? 0) === 0 || (host.fourBars.get(id)?.length ?? 0) < 200))) {
-        await warmSeriesFromRest(host);
-      }
+      if (host.restWarm) await warmSeriesFromRest(host);
       if (!saved || host.restWarm) await catchUpHistory(host);
       attachMemberCloses(host);
     },
@@ -98,14 +97,22 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       }
       return applied;
     },
-    releaseDeadline() {
+    releaseDeadline(cause?: string) {
+      if (cause) host.runOutcome = cause;
       releaseForDeadline(host);
+    },
+    appliedDuringRun() {
+      return [...host.runApplied];
     },
     persist() {
       return persistRun(kv, host);
     },
     recordGap(gap) {
-      if (gap.cause === "crash" || gap.cause === "kill") host.tapeHole = true;
+      if (gap.cause === "crash" || gap.cause === "kill") {
+        host.tapeHole = true;
+        const from = Math.floor(gap.startMs / 1000);
+        host.tapeHoleFromSec = host.tapeHoleFromSec == null ? from : Math.min(host.tapeHoleFromSec, from);
+      }
       if (gap.cause === "save failed") {
         host.gaps.push({ ...gap, cause: "uncovered" });
         host.book.incidents.push("save failed");
@@ -126,6 +133,8 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
     async sampleUntil(untilMs: number) {
       const lease = decodeLease(await kv.get(LEASE_KEY));
       if (lease?.token) host.leaseToken = lease.token;
+      host.runBaseFills = host.book.legs.length;
+      host.runBaseDecisions = host.emitted.size;
       if (host.tapeHole) await backfillTapeIfNeeded(host);
       else markOrdersBeforeTape(host);
       try {
@@ -142,8 +151,9 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
           },
         });
       } finally {
+        const warm = [...host.seedMarks.values()].filter((mark) => mark.status === "warm").length;
         console.log(`redis cmds=${host.saveCommands}, bytes=${host.saveBytes}, duplicates=${host.duplicateAppends}`);
-        console.log(restLogLine());
+        console.log(restLogLine(host.restRun, { warm, total: host.products.length, seedIdx: host.seedCursor.idx }));
       }
     },
     watchUntil(untilMs: number) {
@@ -230,7 +240,8 @@ export async function handleEngineRequest(
     holder?: {
       warm(): Promise<void>;
       applyDueBars(): Promise<string[]>;
-      releaseDeadline(): void;
+      releaseDeadline(cause?: string): void;
+      appliedDuringRun?(): string[];
       sampleUntil?(untilMs: number): Promise<void>;
       watchUntil?(untilMs: number): Promise<void>;
       persist?(): Promise<void>;
@@ -251,10 +262,24 @@ export async function handleEngineRequest(
   if (request.method !== "GET" && request.method !== "POST") return new Response("method", { status: 405 });
   const nowMs = deps?.nowMs ?? Date.now();
   const deadlineMs = deps?.deadlineMs ?? nowMs + MAX_DURATION_MS;
-  beginRestRun(deadlineMs);
   const self = deps?.self ?? `cron-${nowMs}`;
   const host = deps?.holder ? null : startPaperHost((env.P6_PRODUCTS ?? "BTC-USD").split(",").filter(Boolean), env);
-  if (host) host.restWarm = true;
+  if (host) {
+    host.restWarm = true;
+    host.runStartedMs = nowMs;
+    host.deadlineMs = deadlineMs;
+    host.runOutcome = "running";
+    host.restRun = createRestRun(deadlineMs, {}, (id, reason) => {
+      host.cold.add(id);
+      const prev = host.seedMarks.get(id);
+      host.seedMarks.set(id, {
+        oldestTs: prev?.oldestTs ?? 0,
+        newestTs: prev?.newestTs ?? 0,
+        status: "cold",
+        reason,
+      });
+    });
+  }
   const holder = deps?.holder ?? hostHolder(host!, kv);
   const result: InvocationResult = await runInvocation({
     kv,

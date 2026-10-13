@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
     "/api/engine": [
       "../research/data/reports/p4-registration.json",
       "../research/data/reports/universe-membership.json",
+      "../research/data/reports/product-stats.json",
       "../research/data/products/usd-spot.json",
       "../research/data/reports/p6-jev-spend.json",
       "../research/data/reports/p6-forward-a.json",

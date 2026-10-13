@@ -117,17 +117,19 @@ test("a crash keeps the fills, loses at most 120s of tape, and backfills it", as
     classId: "D",
     status: "working",
   } as Book["working"][number]);
-  let fetched = 0;
+  let trades = 0;
   await backfillTapeIfNeeded(successor, async (url) => {
-    fetched += 1;
-    expect(url).toContain("/products/BTC-USD/trades");
-    return {
-      ok: true,
-      status: 200,
-      json: async () => [{ time: new Date(lostSec * 1000).toISOString(), price: "11", size: "2", side: "sell" }],
-    };
+    if (url.includes("/trades")) {
+      trades += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => [{ time: new Date(lostSec * 1000).toISOString(), price: "11", size: "2", side: "sell" }],
+      };
+    }
+    return { ok: true, status: 200, json: async () => [] };
   });
-  expect(fetched).toBe(1);
+  expect(trades).toBe(1);
   expect(successor.trades.some((trade) => trade.tsSec === lostSec && trade.price === 11)).toBe(true);
   expect(successor.book.working[0]?.status).toBe("indeterminate");
   expect(await kv.get(FILLS_KEY)).toContain("fill-1");

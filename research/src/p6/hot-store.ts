@@ -4,16 +4,22 @@
  */
 
 import type { BarOHLC } from "../p3/signals";
+import { paperPnl } from "./engine";
 import {
-  DAILY_CLOSE_DAYS,
   FOUR_KEEP,
   HOUR_KEEP,
+  SEED_CURSOR_KEY,
+  seedMarkKey,
   type DailyClose,
+  type SeedMark,
   type PaperHost,
   type PaperStateBody,
   retainDailyCloses,
 } from "./paper-host";
 import { barMarker, HOT_KEY, LEASE_KEY, VALUE_MAX_BYTES, type Kv } from "./relay";
+
+/** One record per flush. The dashboard reads this and does not recompute P/L. */
+export const LAST_RUN_KEY = "p6:lastRun";
 
 /** Heartbeat payload cap. A larger write is an incident and is not sent. */
 export const HOT_MAX_BYTES = 256 * 1024;
@@ -434,7 +440,7 @@ function buildFlush(host: PaperHost): FlushPlan {
         value: JSON.stringify(bar),
         id: String(bar.ts),
         field: "ts",
-        max: DAILY_CLOSE_DAYS,
+        max: 0,
         px: 0,
         mark: `d1:${productId}:${bar.ts}`,
       });
@@ -470,14 +476,59 @@ function buildFlush(host: PaperHost): FlushPlan {
     seenMark.add(marker);
     marksOut.push({ key: `p6:bar:${bar.productId}:${bar.startSec}`, value: barMarker(bar.productId, bar.startSec) });
   }
+  for (const tape of tapes) noteValue(host, tape.value);
+  for (const bar of bars) noteValue(host, bar.value);
+  for (const ring of rings) noteValue(host, ring.value);
+  const extra = flushExtra(host, hot ?? "");
+  for (const row of extra) noteValue(host, row.value);
   const payload = JSON.stringify({
     ...(hot ? { hot } : {}),
     tapes,
     rings,
     bars: bars.map(({ key, value, id, field, max, px }) => ({ key, value, id, field, max, px })),
     marks: marksOut,
+    extra,
   });
   return { payload, bytes: Buffer.byteLength(payload), marks, minute };
+}
+
+function noteValue(host: PaperHost, value: string): void {
+  const bytes = Buffer.byteLength(value);
+  if (bytes > host.maxValueBytes) host.maxValueBytes = bytes;
+}
+
+function flushExtra(host: PaperHost, hot: string): { key: string; value: string }[] {
+  noteValue(host, hot);
+  const cold = [...host.restRun.cold.entries()].map(([id, reason]) => ({ id, reason }));
+  const warm = [...host.seedMarks.values()].filter((mark) => mark.status === "warm").length;
+  const last = {
+    start: host.runStartedMs,
+    end: host.clock(),
+    deadlineMs: host.deadlineMs,
+    outcome: host.runOutcome || "running",
+    applied: host.runApplied,
+    decisions: Math.max(0, host.emitted.size - host.runBaseDecisions),
+    fills: Math.max(0, host.book.legs.length - host.runBaseFills),
+    rest: { n: host.restRun.stats.n, r429: host.restRun.stats.r429, waitedMs: host.restRun.stats.waitedMs },
+    redis: { cmds: host.saveCommands + 1, bytes: host.saveBytes, maxValueBytes: host.maxValueBytes },
+    cold,
+    warm,
+    seedIdx: host.seedCursor.idx,
+    pnl: paperPnl(host.book),
+  };
+  let encoded = JSON.stringify(last);
+  const lastBytes = Buffer.byteLength(encoded);
+  if (lastBytes > host.maxValueBytes) {
+    host.maxValueBytes = lastBytes;
+    last.redis.maxValueBytes = lastBytes;
+    encoded = JSON.stringify(last);
+  }
+  const extra = [
+    { key: SEED_CURSOR_KEY, value: JSON.stringify(host.seedCursor) },
+    ...[...host.seedMarks.entries()].map(([id, mark]) => ({ key: seedMarkKey(id), value: JSON.stringify(mark) })),
+    { key: LAST_RUN_KEY, value: encoded },
+  ];
+  return extra;
 }
 
 async function writeWarmupOnce(kv: Kv, host: PaperHost): Promise<void> {
@@ -507,8 +558,14 @@ async function writeWarmupOnce(kv: Kv, host: PaperHost): Promise<void> {
 
 function payloadTooBig(plan: FlushPlan): boolean {
   if (plan.bytes <= VALUE_MAX_BYTES) return false;
-  const body = JSON.parse(plan.payload) as { hot?: string; tapes?: { value: string }[]; bars?: { value: string }[]; rings?: { value: string }[] };
-  const values = [body.hot ?? "", ...(body.tapes ?? []).map((row) => row.value), ...(body.bars ?? []).map((row) => row.value), ...(body.rings ?? []).map((row) => row.value)];
+  const body = JSON.parse(plan.payload) as { hot?: string; tapes?: { value: string }[]; bars?: { value: string }[]; rings?: { value: string }[]; extra?: { value: string }[] };
+  const values = [
+    body.hot ?? "",
+    ...(body.tapes ?? []).map((row) => row.value),
+    ...(body.bars ?? []).map((row) => row.value),
+    ...(body.rings ?? []).map((row) => row.value),
+    ...(body.extra ?? []).map((row) => row.value),
+  ];
   return values.some((value) => Buffer.byteLength(value) > VALUE_MAX_BYTES);
 }
 
@@ -524,6 +581,7 @@ async function applyUnowned(kv: Kv, host: PaperHost, plan: FlushPlan): Promise<v
     bars?: { key: string; value: string; id: string; field: string; max: number; px: number }[];
     marks?: { key: string; value: string }[];
     warm?: { key: string; value: string }[];
+    extra?: { key: string; value: string }[];
   };
   if (body.hot) {
     const wrote = await kv.set(HOT_KEY, body.hot);
@@ -548,6 +606,10 @@ async function applyUnowned(kv: Kv, host: PaperHost, plan: FlushPlan): Promise<v
   for (const mark of body.marks ?? []) {
     if (await kv.get(mark.key)) continue;
     await kv.set(mark.key, mark.value);
+  }
+  for (const row of body.extra ?? []) {
+    const wrote = await kv.set(row.key, row.value);
+    if (!wrote) throw new Error(`kv set ${row.key} failed`);
   }
 }
 
@@ -643,11 +705,11 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
   const products = [...new Set(host.products)];
   const tapeMinutes: number[] = [];
   for (let i = 0; i < TAPE_LOOKBACK_MIN; i += 1) tapeMinutes.push(minute - i * 60);
-  const keys: string[] = [HOT_KEY, FILLS_KEY, LEDGER_KEY];
+  const keys: string[] = [HOT_KEY, FILLS_KEY, LEDGER_KEY, SEED_CURSOR_KEY];
   for (const at of tapeMinutes) keys.push(tapeKey(at));
   for (const productId of products) {
     for (const day of days) keys.push(bar15Key(productId, day));
-    keys.push(bar4hKey(productId), bar1hKey(productId), d1Key(productId));
+    keys.push(bar4hKey(productId), bar1hKey(productId), d1Key(productId), seedMarkKey(productId));
   }
   const values = await kv.mget(keys);
   const byKey = new Map(keys.map((key, index) => [key, values[index] ?? null]));
@@ -702,6 +764,16 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
   const ledger = parseList<PaperStateBody["closed"][number]>(byKey.get(LEDGER_KEY) ?? null);
   host.fillStored = legs.length;
   host.ledgerStored = ledger.length > 0 ? ledger.length : (hot.closed ?? []).length;
+  const cursorRaw = byKey.get(SEED_CURSOR_KEY) ?? null;
+  if (cursorRaw) {
+    const cursor = JSON.parse(cursorRaw) as { order?: string[]; idx?: number; runId?: string };
+    if (Array.isArray(cursor.order)) host.seedCursor = { order: cursor.order, idx: cursor.idx ?? 0, runId: cursor.runId ?? "" };
+  }
+  for (const productId of products) {
+    const raw = byKey.get(seedMarkKey(productId)) ?? null;
+    if (!raw) continue;
+    host.seedMarks.set(productId, JSON.parse(raw) as SeedMark);
+  }
   host.seedChecked = true;
   return {
     ...hot,
