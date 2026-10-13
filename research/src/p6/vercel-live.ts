@@ -71,8 +71,6 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       if (saved) installPaperState(host, saved);
       await loadWarmup(kv, host);
       rememberPersistedBars(host);
-      if (host.restWarm) await warmSeriesFromRest(host);
-      if (!saved || host.restWarm) await catchUpHistory(host);
       attachMemberCloses(host);
     },
     async reload() {
@@ -126,6 +124,9 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       host.gaps.push(gap);
     },
     async confirmHandover() {
+      const lease = decodeLease(await kv.get(LEASE_KEY));
+      if (lease?.token) host.leaseToken = lease.token;
+      if (!host.leaseToken) return false;
       const ok = replayHandover(host);
       if (!ok) await resyncBooksFromRest(host);
       return ok;
@@ -135,8 +136,12 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       if (lease?.token) host.leaseToken = lease.token;
       host.runBaseFills = host.book.legs.length;
       host.runBaseDecisions = host.emitted.size;
-      if (host.tapeHole) await backfillTapeIfNeeded(host);
-      else markOrdersBeforeTape(host);
+      if (host.leaseToken && host.restWarm) {
+        await warmSeriesFromRest(host);
+        await catchUpHistory(host);
+        attachMemberCloses(host);
+      }
+      if (!host.kv || host.leaseToken) await backfillTapeIfNeeded(host);
       try {
         await driveHost(host, untilMs, {
           persist: () => persistRun(kv, host),
@@ -151,9 +156,10 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
           },
         });
       } finally {
+        const cold = [...host.seedMarks.entries()].filter(([, mark]) => mark.status === "cold").map(([id, mark]) => ({ id, reason: mark.reason }));
         const warm = [...host.seedMarks.values()].filter((mark) => mark.status === "warm").length;
         console.log(`redis cmds=${host.saveCommands}, bytes=${host.saveBytes}, duplicates=${host.duplicateAppends}`);
-        console.log(restLogLine(host.restRun, { warm, total: host.products.length, seedIdx: host.seedCursor.idx }));
+        console.log(restLogLine(host.restRun, { warm, total: host.products.length, seedIdx: host.seedCursor.idx, cold }));
       }
     },
     watchUntil(untilMs: number) {

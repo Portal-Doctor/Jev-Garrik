@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { dashboardAuthorized, openDashboardKv, readP6Dashboard } from "./dashboard-read";
+import { applyForward, paperPnl, replayInjected } from "./engine";
+import { delayBps } from "./legs";
 import { memoryKv } from "./relay";
 
 test("the cron secret does not authorize the dashboard", () => {
@@ -77,4 +79,94 @@ test("the page does not import the cron secret, auth, or a Redis write", () => {
   const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
   expect(page.includes("DASHBOARD_TOKEN")).toBe(true);
   expect(page.includes("readP6Dashboard")).toBe(true);
+  expect(page.includes("last?.completed")).toBe(true);
+  expect(page.includes("kill R")).toBe(true);
+  expect(page.includes("Arrival delay bps")).toBe(true);
+  expect(page.includes("muted")).toBe(true);
+});
+
+test("paper P/L separates equity, fees, spread, drawdown, and the backstops", () => {
+  const wednesday = Date.parse("2026-03-04T00:00:00.000Z");
+  const x1 = {
+    kind: "x1" as const,
+    id: "a1",
+    classId: "A" as const,
+    productId: "ETH-USD",
+    tsMs: wednesday,
+    nextOpen: 100,
+    stop: 90,
+    atr1h: 1,
+    bid: 100,
+    ask: 100.2,
+    bookTsMs: wednesday,
+    sendTsMs: wednesday + 5,
+    decisionMid: 100.05,
+    aConfig: "A55-k3",
+  };
+  const opened = replayInjected([
+    { kind: "realize", id: "win", classId: "A", productId: "BTC-USD", netR: 5, netUsd: 100, riskUsd: 20, entryDate: "2026-03-01", exitTs: wednesday - 3 * 86_400_000 },
+    { kind: "realize", id: "give", classId: "A", productId: "BTC-USD", netR: -1, netUsd: -20, riskUsd: 20, entryDate: "2026-03-02", exitTs: wednesday - 2 * 86_400_000 },
+    { kind: "clock", tsMs: wednesday },
+    x1,
+  ]);
+  const startSec = Math.floor(wednesday / 1000);
+  const marked = applyForward(opened, {
+    kind: "bar15",
+    productId: "ETH-USD",
+    startSec,
+    nowSec: startSec + 900,
+    open: 99,
+    high: 99,
+    low: 98,
+    close: 98,
+  });
+  const position = marked.positions[0]!;
+  const mark = 98;
+  const exitCost = (mark * position.units * (90 + position.sLiveBps)) / 10_000;
+  const unrealized = (mark - position.fillPrice) * position.units - exitCost;
+  const pnl = paperPnl(marked);
+  expect(pnl.startingUsd).toBe(8000);
+  expect(pnl.realizedUsd).toBeCloseTo(80, 6);
+  expect(pnl.unrealizedUsd).toBeCloseTo(unrealized, 6);
+  expect(pnl.equityUsd).toBeCloseTo(8000 + pnl.realizedUsd + pnl.unrealizedUsd, 6);
+  expect(pnl.feesUsd).toBeCloseTo(marked.legs.reduce((sum, leg) => sum + leg.feesUsd, 0), 6);
+  expect(pnl.feesUsd).toBeGreaterThan(0);
+  expect(pnl.spreadSlipUsd).toBeCloseTo(position.entrySpreadUsd, 6);
+  expect(pnl.spreadSlipUsd).not.toBeCloseTo(pnl.feesUsd, 4);
+  expect(pnl.book.hwmUsd).toBeCloseTo(8100, 6);
+  expect(pnl.book.drawdownUsd).toBeCloseTo(pnl.book.hwmUsd - pnl.equityUsd, 6);
+  expect(pnl.book.haltUsd).toBe(1600);
+  expect(pnl.book.roomUsd).toBeCloseTo(1600 - pnl.book.drawdownUsd, 6);
+  expect(pnl.classBackstopUsd).toBe(1200);
+  expect(pnl.pairBackstopUsd).toBe(500);
+  expect(pnl.feeBps).toEqual({ maker: 50, taker: 90 });
+  expect(pnl.classes.A.drawdownR).toBeCloseTo(1, 6);
+  expect(pnl.classes.A.killed).toBe(false);
+  const pair = pnl.pairs.find((row) => row.productId === "ETH-USD")!;
+  const cumulative = pair.realizedUsd + pair.unrealizedUsd;
+  expect(pair.latched).toBe(false);
+  expect(pair.roomUsd).toBeCloseTo(Math.max(0, 500 + cumulative), 6);
+  const arrivalMid = (100 + 100.2) / 2;
+  expect(pnl.arrivalDelayBps).toBeCloseTo(delayBps(100.05, arrivalMid)!, 6);
+  expect(pnl.arrivalDelayBps).not.toBeCloseTo(delayBps(100.05, position.fillPrice)!, 4);
+
+  const losses = Array.from({ length: 20 }, (_, index) => ({
+    kind: "realize" as const,
+    id: `k${index}`,
+    classId: "A" as const,
+    productId: "BTC-USD",
+    netR: -1,
+    netUsd: -20,
+    riskUsd: 20,
+    entryDate: "2026-03-01",
+    exitTs: wednesday + index,
+  }));
+  const killed = paperPnl(replayInjected(losses));
+  expect(killed.classes.A.killed).toBe(true);
+  expect(killed.classes.A.drawdownR).toBeGreaterThanOrEqual(20);
+  expect(killed.classes.A.paused).toBe(true);
+  expect(killed.book.drawdownUsd).toBeCloseTo(400, 6);
+  expect(killed.book.haltUsd).toBe(1600);
+  expect(killed.classBackstopUsd).toBe(1200);
+  expect(killed.pairBackstopUsd).toBe(500);
 });

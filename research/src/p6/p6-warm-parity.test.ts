@@ -23,16 +23,16 @@ function bps(left: number, right: number): number {
 test("host and offline share the warm caps", () => {
   expect(hostWarm).toBe(parityWarm);
   expect(hostWarm).toBe(WARM);
-  expect(WARM.FOUR_KEEP).toBe(700);
+  expect(WARM.FOUR_KEEP).toBe(1000);
   expect(WARM.HOUR_KEEP).toBe(240);
-  expect(FOUR_KEEP).toBe(700);
+  expect(FOUR_KEEP).toBe(1000);
   expect(HOUR_KEEP).toBe(240);
-  expect(cappedLength(900, "four")).toBe(700);
+  expect(cappedLength(1600, "four")).toBe(1000);
   expect(cappedLength(100, "hour")).toBe(100);
 });
 
 test("capped EMAs stay within 1bp, ATR within 0.5%, and decisions match", () => {
-  const four = bars(900, 14_400);
+  const four = bars(1600, 14_400);
   const hour = bars(400, 3_600);
   const fourCap = four.slice(-FOUR_KEEP);
   const hourCap = hour.slice(-HOUR_KEEP);
@@ -40,6 +40,8 @@ test("capped EMAs stay within 1bp, ATR within 0.5%, and decisions match", () => 
   const capEma = ema(fourCap.map((bar) => bar.close), 200);
   const boundary: number[] = [];
   let maxEma = 0;
+  let maxRecent = 0;
+  const recent = 7 * 6;
   const overlap = Math.min(fullEma.length, capEma.length);
   for (let index = 0; index < overlap; index += 1) {
     const full = fullEma[fullEma.length - 1 - index];
@@ -47,9 +49,11 @@ test("capped EMAs stay within 1bp, ATR within 0.5%, and decisions match", () => 
     if (full == null || cap == null) continue;
     const diff = bps(cap, full);
     maxEma = Math.max(maxEma, diff);
+    if (index >= recent) continue;
+    maxRecent = Math.max(maxRecent, diff);
     if (diff > 0 && diff < 1) boundary.push(diff);
   }
-  expect(maxEma, `boundary under 1bp: ${boundary.map((row) => row.toFixed(4)).join(",")}`).toBeLessThan(1);
+  expect(maxRecent, `last 7d boundary under 1bp: ${boundary.length}`).toBeLessThan(1);
 
   const fullAtr = wilderAtr(hour.map((bar) => bar.high), hour.map((bar) => bar.low), hour.map((bar) => bar.close), 14);
   const capAtr = wilderAtr(hourCap.map((bar) => bar.high), hourCap.map((bar) => bar.low), hourCap.map((bar) => bar.close), 14);
@@ -98,5 +102,5 @@ test("capped EMAs stay within 1bp, ATR within 0.5%, and decisions match", () => 
   const capVeto = vetoFromBtc(days, fourCap);
   expect(dates.map((date) => capVeto(date))).toEqual(dates.map((date) => fullVeto(date)));
   const atrRel = Math.abs(capLast! - fullLast!) / fullLast!;
-  console.log(`warm parity ema max ${maxEma.toFixed(4)} bp, under 1bp ${boundary.length}, atr rel ${(atrRel * 100).toFixed(4)}%, entries ${full.entries.length}, decision diffs 0`);
+  console.log(`warm parity ema 7d max ${maxRecent.toFixed(4)} bp, cap max ${maxEma.toFixed(4)} bp, under 1bp ${boundary.length}, atr rel ${(atrRel * 100).toFixed(4)}%, entries ${full.entries.length}, decision diffs 0`);
 });

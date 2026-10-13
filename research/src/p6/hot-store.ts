@@ -481,7 +481,7 @@ function buildFlush(host: PaperHost): FlushPlan {
   for (const tape of tapes) noteValue(host, tape.value);
   for (const bar of bars) noteValue(host, bar.value);
   for (const ring of rings) noteValue(host, ring.value);
-  const extra = flushExtra(host, hot ?? "");
+  const extra = flushExtra(host, hot ?? "", new Set(bars.map((bar) => bar.key)));
   for (const row of extra) noteValue(host, row.value);
   const payload = JSON.stringify({
     ...(hot ? { hot } : {}),
@@ -499,10 +499,42 @@ function noteValue(host: PaperHost, value: string): void {
   if (bytes > host.maxValueBytes) host.maxValueBytes = bytes;
 }
 
-function flushExtra(host: PaperHost, hot: string): { key: string; value: string }[] {
+function marksForFlush(host: PaperHost, barKeys: ReadonlySet<string>): [string, SeedMark][] {
+  const out: [string, SeedMark][] = [];
+  for (const [id, mark] of host.seedMarks) {
+    if (mark.status !== "warm") {
+      out.push([id, mark]);
+      continue;
+    }
+    const series = host.fourBars.get(id) ?? [];
+    const withBars = barKeys.has(bar4hKey(id)) || host.fourFlushed.has(id);
+    if (!withBars || series.length < FOUR_KEEP) {
+      const short: SeedMark = { ...mark, status: "short", reason: "short" };
+      host.seedMarks.set(id, short);
+      out.push([id, short]);
+      continue;
+    }
+    out.push([id, mark]);
+  }
+  return out;
+}
+
+function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>): { key: string; value: string }[] {
   noteValue(host, hot);
-  const cold = [...host.restRun.cold.entries()].map(([id, reason]) => ({ id, reason }));
-  const warm = [...host.seedMarks.values()].filter((mark) => mark.status === "warm").length;
+  const storedMarks = marksForFlush(host, barKeys);
+  const cold = storedMarks
+    .filter(([, mark]) => mark.status === "cold")
+    .map(([id, mark]) => ({ id, reason: mark.reason }))
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  const warm = storedMarks.filter(([, mark]) => mark.status === "warm").length;
+  const pending = host.products.filter((id) => {
+    const mark = storedMarks.find(([productId]) => productId === id)?.[1];
+    return !mark || mark.status === "short";
+  }).length;
+  const finished = host.runOutcome !== "" && host.runOutcome !== "running";
+  const completed = finished
+    ? { end: host.clock(), cmds: host.saveCommands + 1, outcome: host.runOutcome }
+    : host.completedRun;
   const last = {
     start: host.runStartedMs,
     end: host.clock(),
@@ -515,7 +547,9 @@ function flushExtra(host: PaperHost, hot: string): { key: string; value: string 
     redis: { cmds: host.saveCommands + 1, bytes: host.saveBytes, maxValueBytes: host.maxValueBytes },
     cold,
     warm,
+    pending,
     seedIdx: host.seedCursor.idx,
+    completed,
     pnl: paperPnl(host.book),
   };
   let encoded = JSON.stringify(last);
@@ -527,7 +561,7 @@ function flushExtra(host: PaperHost, hot: string): { key: string; value: string 
   }
   const extra = [
     { key: SEED_CURSOR_KEY, value: JSON.stringify(host.seedCursor) },
-    ...[...host.seedMarks.entries()].map(([id, mark]) => ({ key: seedMarkKey(id), value: JSON.stringify(mark) })),
+    ...storedMarks.map(([id, mark]) => ({ key: seedMarkKey(id), value: JSON.stringify(mark) })),
     { key: LAST_RUN_KEY, value: encoded },
   ];
   return extra;
@@ -674,6 +708,10 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
       if ((body.warm ?? []).length > 0) host.warmupStored = true;
     }
     for (const minute of plan.minutes) host.tapeWritten.add(minute);
+    const flushed = JSON.parse(plan.payload) as { bars?: { key: string }[] };
+    for (const bar of flushed.bars ?? []) {
+      if (bar.key.startsWith("p6:bar4h:")) host.fourFlushed.add(bar.key.slice("p6:bar4h:".length));
+    }
     host.closingMarks = host.closingMarks.filter((bar) => !host.persistedBars.has(`bar:${bar.productId}:${bar.startSec}`));
     host.saveCommands += 1;
     host.saveBytes += plan.bytes;
@@ -709,7 +747,7 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
   const products = [...new Set(host.products)];
   const tapeMinutes: number[] = [];
   for (let i = 0; i < TAPE_LOOKBACK_MIN; i += 1) tapeMinutes.push(minute - i * 60);
-  const keys: string[] = [HOT_KEY, FILLS_KEY, LEDGER_KEY, SEED_CURSOR_KEY];
+  const keys: string[] = [HOT_KEY, FILLS_KEY, LEDGER_KEY, SEED_CURSOR_KEY, LAST_RUN_KEY];
   for (const at of tapeMinutes) keys.push(tapeKey(at));
   for (const productId of products) {
     for (const day of days) keys.push(bar15Key(productId, day));
@@ -777,7 +815,22 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
     for (const productId of products) {
       const raw = byKey.get(seedMarkKey(productId)) ?? null;
       if (!raw) continue;
-      host.seedMarks.set(productId, JSON.parse(raw) as SeedMark);
+      const mark = JSON.parse(raw) as SeedMark;
+      const bars = fourBars.find(([id]) => id === productId)?.[1] ?? [];
+      if (mark.status === "warm" && bars.length < FOUR_KEEP) {
+        host.seedMarks.set(productId, { ...mark, status: "short", reason: "short" });
+        continue;
+      }
+      host.seedMarks.set(productId, mark);
+      if (mark.status === "cold") host.cold.add(productId);
+      if (mark.status === "warm" && bars.length >= FOUR_KEEP) host.fourFlushed.add(productId);
+    }
+    const lastRaw = byKey.get(LAST_RUN_KEY) ?? null;
+    if (lastRaw) {
+      const prev = JSON.parse(lastRaw) as { outcome?: string; end?: number; redis?: { cmds?: number }; completed?: { end: number; cmds: number; outcome: string } | null };
+      if (prev.outcome && prev.outcome !== "running") {
+        host.completedRun = prev.completed ?? { end: prev.end ?? 0, cmds: prev.redis?.cmds ?? 0, outcome: prev.outcome };
+      } else if (prev.completed) host.completedRun = prev.completed;
     }
     host.seedChecked = true;
   }

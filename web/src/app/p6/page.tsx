@@ -18,8 +18,8 @@ function toneOf(value: unknown): number | undefined {
   return n > 0 ? 1 : -1;
 }
 
-function Stat({ label, value, tone, big }: { label: string; value: string; tone?: number; big?: boolean }) {
-  const cls = tone === undefined ? "" : tone > 0 ? styles.pos : tone < 0 ? styles.neg : "";
+function Stat({ label, value, tone, big, muted }: { label: string; value: string; tone?: number; big?: boolean; muted?: boolean }) {
+  const cls = muted ? styles.muted : tone === undefined ? "" : tone > 0 ? styles.pos : tone < 0 ? styles.neg : "";
   return (
     <div className={`${styles.stat} ${big ? styles.statBig : ""}`}>
       <span className={styles.statLabel}>{label}</span>
@@ -97,14 +97,16 @@ export default async function P6DashboardPage() {
   const redis = (last?.redis ?? {}) as { cmds?: number; bytes?: number; maxValueBytes?: number };
   const cold = Array.isArray(last?.cold) ? (last.cold as { id?: string; reason?: string }[]) : [];
   const warm = typeof last?.warm === "number" ? last.warm : 0;
-  const month = monthCommands(redis.cmds ?? 0);
+  const pending = typeof last?.pending === "number" ? last.pending : 0;
+  const completed = (last?.completed ?? null) as { end?: number; cmds?: number } | null;
+  const month = monthCommands(typeof completed?.cmds === "number" ? completed.cmds : 0);
   const budget = commandBudget();
   const proj = projectionTone(month);
   const openIds = new Set(view.positions.map((row) => row.productId).filter((id): id is string => Boolean(id)));
   const bookDd = pnl?.book?.drawdownUsd ?? 0;
   const bookTone = bookDd < 800 ? "green" : bookDd < 1600 ? "amber" : "red";
-  const lastEnd = typeof last?.end === "number" ? last.end : null;
-  const gaps24 = view.gaps.filter((gap) => lastEnd == null || (lastEnd - gap.endMs) < 24 * 60 * 60 * 1000);
+  const healthEnd = typeof completed?.end === "number" ? completed.end : null;
+  const gaps24 = view.gaps.filter((gap) => healthEnd == null || (healthEnd - gap.endMs) < 24 * 60 * 60 * 1000);
 
   return (
     <main>
@@ -123,10 +125,12 @@ export default async function P6DashboardPage() {
             warm {warm}/50 · cold {cold.length}
             {cold.length > 0 ? ` [${cold.map((row) => row.id).filter(Boolean).join(",")}]` : ""}
             {" · "}
+            pending {pending}
+            {" · "}
             gaps {gaps24.length}
           </p>
         </div>
-        <RunClock lastEnd={lastEnd} />
+        <RunClock lastEnd={healthEnd} />
       </header>
 
       <section className={styles.equityStrip}>
@@ -150,7 +154,7 @@ export default async function P6DashboardPage() {
         <Stat label="Unrealized" value={usd(pnl?.unrealizedUsd)} tone={toneOf(pnl?.unrealizedUsd)} />
         <Stat label="Fees" value={usd(pnl?.feesUsd)} />
         <Stat label="Spread + slippage" value={usd(pnl?.spreadSlipUsd)} />
-        <Stat label="Arrival delay bps" value={pnl?.arrivalDelayBps == null ? "-" : pnl.arrivalDelayBps.toFixed(2)} />
+        <Stat label="Arrival delay bps" value={pnl?.arrivalDelayBps == null ? "-" : pnl.arrivalDelayBps.toFixed(2)} muted />
         <Stat label="Fee bps" value={`${pnl?.feeBps?.maker ?? "-"} / ${pnl?.feeBps?.taker ?? "-"}`} />
       </section>
 
@@ -166,7 +170,15 @@ export default async function P6DashboardPage() {
               const row = pnl.classes?.[id];
               const dd = row?.drawdownR ?? 0;
               const cap = id === "A" || id === "B" ? 10 : 5;
-              return <Meter key={id} label={`${id} drawdown R`} text={`${dd.toFixed(2)}R`} pct={(dd / cap) * 100} tone={classTone(id, dd)} />;
+              return <Meter key={id} label={`${id} drawdown R`} text={`${dd.toFixed(2)}R / ${cap}R`} pct={(dd / cap) * 100} tone={classTone(id, dd)} />;
+            })
+          : null}
+        {pnl?.classes
+          ? (["A", "B", "C", "D", "E"] as const).map((id) => {
+              const dd = pnl.classes?.[id]?.drawdownR ?? 0;
+              const cap = 20;
+              const tone = dd >= cap ? "red" : dd >= 10 ? "yellow" : "green";
+              return <Meter key={`${id}-kill`} label={`${id} kill R`} text={`${dd.toFixed(2)} / ${cap}R`} pct={(dd / cap) * 100} tone={tone} />;
             })
           : null}
         {pnl?.classes

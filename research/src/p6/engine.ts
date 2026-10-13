@@ -36,7 +36,7 @@ import { daysBetween, weekKey } from "../p5/stats";
 import { shadowPackets, type ShadowPacket } from "./jev-shadow";
 import { bookPanel, parity7d, weeklyHaltsInLast6, type BookPanel } from "./review";
 import { forwardClassRisk, UNPROMOTED_RISK_USD, type KellyHold } from "./kelly";
-import { MISSED_SEND_STALE_QUOTE, STALE_QUOTE_MS, type LegLog } from "./legs";
+import { delayBps, MISSED_SEND_STALE_QUOTE, STALE_QUOTE_MS, type LegLog } from "./legs";
 import { BOOTSTRAP_SEEDS } from "./metrics";
 import { applyMidSample, freshMidBook, halfSpreadBps, heartbeatMustReconnect, takerSideFromMaker, type MidBook } from "./mid-feed";
 import { barBeginsAtOrAfterEntry, strategyBarClosed } from "./signals";
@@ -502,7 +502,10 @@ export function paperPnl(book: Book): PaperPnl {
   let spreadSlipUsd = book.positions.reduce((sum, position) => sum + position.entrySpreadUsd, 0);
   for (const trade of book.closed) spreadSlipUsd += Math.max(0, trade.costUsd - (closedFees.get(trade.id) ?? 0));
   const recent = book.legs.slice(-20);
-  const delays = recent.flatMap((leg) => (leg.decisionMid > 0 ? [((leg.fillPrice - leg.decisionMid) / leg.decisionMid) * 10_000] : []));
+  const delays = recent.flatMap((leg) => {
+    const delay = delayBps(leg.decisionMid, leg.arrivalMid);
+    return delay == null ? [] : [delay];
+  });
   const arrivalDelayBps = delays.length > 0 ? delays.reduce((sum, value) => sum + value, 0) / delays.length : null;
   const ids = [...new Set([...book.positions.map((row) => row.productId), ...book.closed.map((row) => row.productId)])];
   const pairs: PairPnl[] = ids.map((productId) => {

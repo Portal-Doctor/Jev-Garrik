@@ -22,7 +22,6 @@ import {
   FOUR_KEEP,
   HOUR_KEEP,
   contiguousTail,
-  foldBars,
   FOUR_HOUR_EMA_BARS,
   ingestSocketMessage,
   feedFramesContiguous,
@@ -37,6 +36,8 @@ import {
   acceptRestBar,
 } from "./paper-host";
 import { readFileSync } from "node:fs";
+import type { MinuteRow } from "../data/candles";
+import { deriveBars, foldHours } from "../data/derive";
 import type { Book } from "./engine";
 import { decodeLease, HOT_KEY, HANDOVER_MARGIN_MS, LEASE_KEY, LEASE_META_KEY, memoryKv, releaseLease, renewLease, runInvocation, tryAcquire } from "./relay";
 import { stampP6Record } from "./stamp-records";
@@ -214,7 +215,43 @@ test("a seeded 4h series stays warm when the 15m book is only a day", () => {
     close: index + 1.5,
     volume: 1,
   }));
-  expect(foldBars(hours, 14_400, 3_600)).toHaveLength(2);
+  expect(foldHours(hours, 14_400, 3_600)).toHaveLength(2);
+});
+
+test("a missing hour still folds one 4h bar, matching the offline aggregate", () => {
+  const minutes: MinuteRow[] = [];
+  for (let ts = 0; ts < 14_400; ts += 900) {
+    const empty = ts >= 7_200 && ts < 10_800;
+    minutes.push({
+      minuteSec: ts,
+      empty,
+      open: empty ? null : "10",
+      high: empty ? null : "12",
+      low: empty ? null : "9",
+      close: empty ? null : "11",
+      volume: empty ? null : "2",
+    });
+  }
+  const hours = [0, 3_600, 10_800].map((start) => {
+    const rows = minutes.filter((row) => !row.empty && row.minuteSec >= start && row.minuteSec < start + 3_600);
+    return {
+      ts: start,
+      open: Number(rows[0]!.open),
+      high: Math.max(...rows.map((row) => Number(row.high))),
+      low: Math.min(...rows.map((row) => Number(row.low))),
+      close: Number(rows[rows.length - 1]!.close),
+      volume: rows.reduce((sum, row) => sum + Number(row.volume), 0),
+    };
+  });
+  const folded = foldHours(hours, 14_400, 3_600);
+  const derived = deriveBars(minutes, "4h", 0, 14_400).filter((bar) => !bar.empty);
+  expect(folded).toHaveLength(1);
+  expect(derived).toHaveLength(1);
+  expect(folded[0]!.open).toBe(Number(derived[0]!.open));
+  expect(folded[0]!.high).toBe(Number(derived[0]!.high));
+  expect(folded[0]!.low).toBe(Number(derived[0]!.low));
+  expect(folded[0]!.close).toBe(Number(derived[0]!.close));
+  expect(folded[0]!.volume).toBe(Number(derived[0]!.volume));
 });
 
 test("history bars do not increment the Jev skip count", () => {

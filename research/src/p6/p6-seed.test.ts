@@ -3,7 +3,7 @@ import { memoryKv } from "./relay";
 import { LAST_RUN_KEY, loadSplit, persistSplit } from "./hot-store";
 import { SEED_BUDGET } from "./rest-limit";
 import { hostHolder } from "./vercel-live";
-import { acceptRestBar, backfillTapeIfNeeded, installPaperState, seedBudgeted, seedFourHours, SEED_REQUESTS_PER_PRODUCT, startPaperHost } from "./paper-host";
+import { acceptRestBar, backfillTapeIfNeeded, installPaperState, seedBudgeted, seedFourHours, seedMarkKey, SEED_PRODUCTS_PER_RUN, SEED_REQUESTS_PER_PRODUCT, startPaperHost } from "./paper-host";
 import { hourPagesForKeep } from "./warm-caps";
 
 const NOW = Date.parse("2026-10-12T12:00:00.000Z");
@@ -50,7 +50,8 @@ test("a hole costs one page past the gap and then stops", async () => {
   expect(host.cold.has("HOLE-USD")).toBe(true);
 });
 
-test("50 products at the seed budget finish in 3 runs and the cursor resumes", async () => {
+test("50 products at the seed budget finish in 4 runs and the cursor resumes", async () => {
+  expect(SEED_PRODUCTS_PER_RUN).toBe(13);
   expect(SEED_REQUESTS_PER_PRODUCT).toBe(1 + hourPagesForKeep());
   expect(SEED_BUDGET).toBe(250);
   const ids = Array.from({ length: 50 }, (_, index) => `P${String(index).padStart(2, "0")}-USD`);
@@ -65,8 +66,9 @@ test("50 products at the seed budget finish in 3 runs and the cursor resumes", a
     return { ok: true, status: 200, json: async () => rows };
   };
   const kv = memoryKv(() => NOW);
+  const deltas: number[] = [];
   let idx = 0;
-  for (let run = 0; run < 3; run += 1) {
+  for (let run = 0; run < 4; run += 1) {
     const host = startPaperHost(ids, {});
     host.clock = () => NOW;
     if (run > 0) {
@@ -78,12 +80,14 @@ test("50 products at the seed budget finish in 3 runs and the cursor resumes", a
     await seedBudgeted(host, fetchImpl);
     expect(host.restRun.seedUsed).toBeLessThanOrEqual(SEED_BUDGET);
     expect(host.seedCursor.idx).toBeGreaterThan(before);
+    deltas.push(host.seedCursor.idx - before);
     idx = host.seedCursor.idx;
     await persistSplit(kv, host);
     const cursor = JSON.parse((await kv.get("p6:seed:cursor")) ?? "{}") as { idx: number };
     expect(cursor.idx).toBe(idx);
     expect(await kv.get(LAST_RUN_KEY)).toBeTruthy();
   }
+  expect(deltas).toEqual([13, 13, 13, 11]);
   expect(idx).toBe(50);
 });
 
@@ -136,6 +140,113 @@ test("trades in the hole become 1m bars and a covered minute skips candles", asy
   const first = host.book.mids.completed.find((mid) => mid.ts === minute * 1000);
   expect(first).toMatchObject({ open: 100, high: 110, low: 100, close: 110, volumeBase: 3 });
   expect(host.book.mids.completed.length).toBeGreaterThanOrEqual(2);
+});
+
+test("a live socket still backfills the hole up to the socket open", async () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  const now = NOW;
+  host.clock = () => now;
+  host.tapeHole = true;
+  host.wsTape = true;
+  host.socketOpenedMs = now - 60_000;
+  host.tapeHoleFromSec = Math.floor(now / 1000) - 6 * 60;
+  const urls: string[] = [];
+  await backfillTapeIfNeeded(host, async (url) => {
+    urls.push(url);
+    return { ok: true, status: 200, json: async () => [] };
+  });
+  expect(urls.some((url) => url.includes("/trades"))).toBe(true);
+  expect(urls.some((url) => url.includes("granularity=60"))).toBe(true);
+  const gap = host.book.incidents.find((row) => row.startsWith("tape gap BTC-USD "));
+  expect(gap).toBe("tape gap BTC-USD 5");
+  expect(host.cold.has("BTC-USD")).toBe(false);
+});
+
+test("a budget stop is labeled budget-stop and is not a 429", async () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  host.clock = () => NOW;
+  host.tapeHole = true;
+  host.wsTape = false;
+  host.tapeHoleFromSec = Math.floor(NOW / 1000) - 120;
+  await backfillTapeIfNeeded(host, async () => ({
+    ok: false,
+    status: 429,
+    headers: { get: (name: string) => (name === "x-p6-budget" ? "reserve" : null) },
+    json: async () => [],
+  }));
+  expect(host.book.incidents.some((row) => row.includes("budget-stop"))).toBe(true);
+  expect(host.book.incidents.some((row) => /\b429\b/.test(row))).toBe(false);
+  expect(host.restRun.stats.r429).toBe(0);
+});
+
+test("cold marks persist across runs and a short series is not cold", async () => {
+  const ids = ["STRK-USD", "BTC-USD"];
+  const kv = memoryKv(() => NOW);
+  const host = startPaperHost(ids, {});
+  host.clock = () => NOW;
+  host.seedMarks.set("STRK-USD", { oldestTs: 1, newestTs: 2, status: "cold", reason: "hole" });
+  host.cold.add("STRK-USD");
+  host.seedMarks.set("BTC-USD", { oldestTs: 1, newestTs: 2, status: "short", reason: "short" });
+  await persistSplit(kv, host);
+  const first = JSON.parse((await kv.get(LAST_RUN_KEY)) ?? "{}") as { cold: { id: string; reason: string }[]; warm: number; pending: number };
+  expect(first.cold).toEqual([{ id: "STRK-USD", reason: "hole" }]);
+  expect(first.warm + first.cold.length + first.pending).toBe(ids.length);
+  const later = startPaperHost(ids, {});
+  later.clock = () => NOW;
+  expect(await loadSplit(kv, later)).toBeTruthy();
+  expect(later.cold.has("STRK-USD")).toBe(true);
+  expect(later.seedMarks.get("BTC-USD")?.status).toBe("short");
+  expect(later.cold.has("BTC-USD")).toBe(false);
+  await persistSplit(kv, later);
+  const third = JSON.parse((await kv.get(LAST_RUN_KEY)) ?? "{}") as { cold: { id: string }[] };
+  expect(third.cold.map((row) => row.id)).toEqual(["STRK-USD"]);
+});
+
+test("a warm mark without FOUR_KEEP bars is stored short and the next run reseeds it", async () => {
+  const kv = memoryKv(() => NOW);
+  const host = startPaperHost(["BCH-USD"], {});
+  host.clock = () => NOW;
+  host.seedMarks.set("BCH-USD", { oldestTs: 1, newestTs: 3_600, status: "warm", reason: "seeded" });
+  host.hourWarm.set("BCH-USD", [{ ts: 3_600, open: 1, high: 1, low: 1, close: 1, volume: 1 }]);
+  await persistSplit(kv, host);
+  const stored = JSON.parse((await kv.get(seedMarkKey("BCH-USD"))) ?? "{}") as { status: string };
+  expect(stored.status).toBe("short");
+  await kv.set(seedMarkKey("BCH-USD"), JSON.stringify({ oldestTs: 1, newestTs: 3_600, status: "warm", reason: "seeded" }));
+  await kv.del("p6:bar4h:BCH-USD");
+  const next = startPaperHost(["BCH-USD"], {});
+  next.clock = () => NOW;
+  expect(await loadSplit(kv, next)).toBeTruthy();
+  expect(next.seedMarks.get("BCH-USD")?.status).toBe("short");
+  expect(next.cold.has("BCH-USD")).toBe(false);
+  let calls = 0;
+  await seedBudgeted(next, async (url) => {
+    calls += 1;
+    const parsed = new URL(url);
+    const start = Number(parsed.searchParams.get("start"));
+    const end = Number(parsed.searchParams.get("end"));
+    const gran = Number(parsed.searchParams.get("granularity"));
+    if (gran === 86_400) return { ok: true, status: 200, json: async () => [candle(start)] };
+    const rows: number[][] = [];
+    for (let ts = start; ts <= end && rows.length < 300; ts += 3_600) rows.push(candle(ts));
+    return { ok: true, status: 200, json: async () => rows };
+  });
+  expect(calls).toBeGreaterThan(2);
+  expect(next.fourBars.get("BCH-USD")?.length ?? 0).toBeGreaterThanOrEqual(1000);
+});
+
+test("a watcher does not seed or backfill before it holds the lease", async () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  host.clock = () => NOW;
+  host.restWarm = true;
+  host.tapeHole = true;
+  host.tapeHoleFromSec = Math.floor(NOW / 1000) - 180;
+  const holder = hostHolder(host, memoryKv(() => NOW));
+  await holder.warm();
+  await holder.sampleUntil(NOW - 1);
+  expect(host.leaseToken).toBeNull();
+  expect(host.restRun.stats.n).toBe(0);
+  expect(host.seedCursor.idx).toBe(0);
+  expect(host.trades).toHaveLength(0);
 });
 
 test("bars accepted while sampling are reported", () => {

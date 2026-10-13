@@ -96,9 +96,15 @@ export function restSentAt(run?: RestRun): readonly number[] {
   return runOf(run).sentAt;
 }
 
-export function restLogLine(run?: RestRun, extra?: { warm: number; total: number; seedIdx: number }): string {
+export function budgetStopLabel(headers: { get(name: string): string | null } | undefined): "budget-stop" | null {
+  const kind = headers?.get("x-p6-budget");
+  if (kind === "seed" || kind === "reserve" || kind === "hard") return "budget-stop";
+  return null;
+}
+
+export function restLogLine(run?: RestRun, extra?: { warm: number; total: number; seedIdx: number; cold?: { id: string }[] }): string {
   const state = runOf(run);
-  const ids = [...state.cold.keys()].sort();
+  const ids = (extra?.cold ? extra.cold.map((row) => row.id) : [...state.cold.keys()]).sort();
   const tail = extra ? ` warm=${extra.warm}/${extra.total} seed_idx=${extra.seedIdx}` : "";
   return `rest n=${state.stats.n}, 429=${state.stats.r429}, waited_ms=${state.stats.waitedMs}, cold=[${ids.join(",")}]${tail}`;
 }

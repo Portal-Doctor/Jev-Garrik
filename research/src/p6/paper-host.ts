@@ -26,7 +26,8 @@ import { completedDays, deriveForwardBook, forwardBarAnnotation, generateForward
 import { buildJevPackets, freshJevMeter, type JevMeter } from "./jev-shadow";
 import type { Kv } from "./relay";
 import { kickDurable } from "./hot-store";
-import { coinbaseGet, createRestRun, isCold, markCold, type RestRun } from "./rest-limit";
+import { foldHours } from "../data/derive";
+import { budgetStopLabel, coinbaseGet, createRestRun, isCold, markCold, type RestRun } from "./rest-limit";
 import { FOUR_KEEP, HOUR_KEEP, hourPagesForKeep, WARM } from "./warm-caps";
 import { MISSED_SEND_STALE_QUOTE, STALE_QUOTE_MS } from "./legs";
 import type { VolHour } from "./amendment-v6";
@@ -270,6 +271,10 @@ export interface PaperHost {
   /** Leg and decision counts at the start of sampling. The flush stores the delta. */
   runBaseFills: number;
   runBaseDecisions: number;
+  /** Last run that reached a final outcome. Month and health read this, not a partial flush. */
+  completedRun: { end: number; cmds: number; outcome: string } | null;
+  /** Products whose 4h bars were stored in a successful flush. A warm mark needs this or the same payload. */
+  fourFlushed: Set<string>;
 }
 
 export interface SeedCursor {
@@ -307,6 +312,8 @@ export interface RestRead {
   bar: OhlcvBar | null;
   status: number;
   retryAfterMs: number;
+  /** Limiter reserve. This is not an exchange 429. */
+  budgetStop?: boolean;
 }
 
 function emptySlot(productId: string, barStartSec: number): RestSlot {
@@ -526,6 +533,8 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     runOutcome: "running",
     runBaseFills: 0,
     runBaseDecisions: 0,
+    completedRun: null,
+    fourFlushed: new Set(),
   };
   host.restRun = createRestRun(Number.POSITIVE_INFINITY, {}, (id, reason) => {
     host.cold.add(id);
@@ -584,34 +593,8 @@ function seedDailyCloses(host: PaperHost): void {
   }
 }
 
-/** Fold child bars into UTC spans. A partial span is omitted. The live 15m roll uses deriveForwardBook instead. */
-export function foldBars(bars: readonly BarOHLC[], spanSec: number, childSec: number): BarOHLC[] {
-  const need = spanSec / childSec;
-  if (!(need >= 1) || need !== Math.floor(need)) return [];
-  const groups = new Map<number, BarOHLC[]>();
-  for (const bar of bars) {
-    const start = Math.floor(bar.ts / spanSec) * spanSec;
-    const list = groups.get(start) ?? [];
-    list.push(bar);
-    groups.set(start, list);
-  }
-  const out: BarOHLC[] = [];
-  for (const [start, list] of [...groups.entries()].sort((a, b) => a[0] - b[0])) {
-    const ordered = list.slice().sort((a, b) => a.ts - b.ts);
-    const first = ordered[0];
-    const last = ordered[ordered.length - 1];
-    if (!first || !last || ordered.length < need) continue;
-    if (first.ts !== start || last.ts !== start + spanSec - childSec) continue;
-    out.push({
-      ts: start,
-      open: first.open,
-      high: Math.max(...ordered.map((bar) => bar.high)),
-      low: Math.min(...ordered.map((bar) => bar.low)),
-      close: last.close,
-      volume: ordered.reduce((sum, bar) => sum + bar.volume, 0),
-    });
-  }
-  return out;
+function statusNote(response: { status?: number; headers?: { get(name: string): string | null } }): string {
+  return budgetStopLabel(response.headers) ?? String(response.status ?? 0);
 }
 
 function closeSource(row: DailyClose): SourceDay {
@@ -1039,7 +1022,7 @@ async function readSendQuote(
     if (response.status === 429) {
       const wait = retryAfterMs(response.headers?.get("retry-after") ?? null);
       host.quoteNotBefore.set(productId, nowMs + wait);
-      host.book.incidents.push(`rest book ${productId} 429`);
+      host.book.incidents.push(budgetStopLabel(response.headers) ? `rest book ${productId} budget-stop` : `rest book ${productId} 429`);
       return "stale";
     }
     if (response.ok) {
@@ -1100,11 +1083,11 @@ export async function resyncBooksFromRest(
       if (response.status === 429) {
         const wait = retryAfterMs(response.headers?.get("retry-after") ?? null);
         host.quoteNotBefore.set(productId, host.clock() + wait);
-        host.book.incidents.push(`l2 rest snapshot ${productId} 429`);
+        host.book.incidents.push(budgetStopLabel(response.headers) ? `l2 rest snapshot ${productId} budget-stop` : `l2 rest snapshot ${productId} 429`);
         continue;
       }
       if (!response.ok) {
-        host.book.incidents.push(`l2 rest snapshot ${productId} ${response.status}`);
+        host.book.incidents.push(`l2 rest snapshot ${productId} ${statusNote(response)}`);
         continue;
       }
       const body = (await response.json()) as { bids?: [string, string][]; asks?: [string, string][] };
@@ -1750,7 +1733,7 @@ export async function catchUpHistory(
         const response = await get(fifteenMinuteUrl(productId, span.startSec, span.endSec));
         if (budgetHit(response)) break;
         if (response.status === 429 || !response.ok) {
-          host.book.incidents.push(`history rest ${productId} ${span.startSec} ${response.status}`);
+          host.book.incidents.push(`history rest ${productId} ${span.startSec} ${statusNote(response)}`);
           markCold(productId, host.restRun, response.status === 429 ? "retries" : `http-${response.status}`);
           break;
         }
@@ -1776,6 +1759,7 @@ export async function catchUpHistory(
 export async function fetchRestBar(productId: string, startSec: number, run?: RestRun): Promise<RestRead> {
   try {
     const response = await coinbaseGet(fifteenMinuteUrl(productId, startSec, startSec), run, { live: true });
+    if (budgetStopLabel(response.headers)) return { bar: null, status: 429, retryAfterMs: 0, budgetStop: true };
     if (response.status === 429) return { bar: null, status: 429, retryAfterMs: retryAfterMs(response.headers.get("retry-after")) };
     if (!response.ok) return { bar: null, status: response.status, retryAfterMs: 0 };
     const rows = (await response.json()) as number[][];
@@ -2008,6 +1992,12 @@ export async function runPublicPaper(opts: {
       host.nextRestMs = now + REST_PACE_MS;
       void fetchRestBar(due.slot.productId, due.slot.barStartSec, host.restRun)
         .then((result) => {
+          if (result.budgetStop) {
+            due.slot.inflight = false;
+            due.slot.notBeforeMs = Math.max(due.slot.notBeforeMs, host.deadlineMs || Date.now() + 60_000);
+            host.book.incidents.push(`rest 15m ${due.slot.productId} budget-stop`);
+            return;
+          }
           if (result.status === 429) {
             noteRest429(due.slot, Date.now(), result.retryAfterMs);
             return;
@@ -2099,18 +2089,25 @@ export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHo
             resolve();
             return;
           }
-          if (apply) await sendDueEntries(host, now);
+          const held = !host.kv || host.leaseToken != null;
+          if (apply && held) await sendDueEntries(host, now);
           host.shards.forEach((_, index) => {
             if (!considerHeartbeatGap(host, index, now)) return;
             replaceShard(host, sockets, index, PUBLIC_WS_URL);
           });
-          if (apply) {
+          if (apply && held) {
             const due = nextRest(host, now);
             if (due?.action === "fetch") {
               due.slot.inflight = true;
               host.nextRestMs = now + REST_PACE_MS;
               void fetchRestBar(due.slot.productId, due.slot.barStartSec, host.restRun)
                 .then(async (result) => {
+                  if (result.budgetStop) {
+                    due.slot.inflight = false;
+                    due.slot.notBeforeMs = Math.max(due.slot.notBeforeMs, host.deadlineMs || Date.now() + 60_000);
+                    host.book.incidents.push(`rest 15m ${due.slot.productId} budget-stop`);
+                    return;
+                  }
                   if (result.status === 429) {
                     noteRest429(due.slot, Date.now(), result.retryAfterMs);
                     return;
@@ -2230,7 +2227,9 @@ export async function seedBudgeted(host: PaperHost, fetchImpl?: SeedFetch): Prom
     const prior = order[index]!;
     if (host.seedMarks.get(prior)?.status === "warm") await seedHourDelta(host, prior, fetchImpl);
   }
+  let added = 0;
   while (host.seedCursor.idx < order.length) {
+    if (added >= SEED_PRODUCTS_PER_RUN) break;
     if (host.restRun.seedBudget - host.restRun.seedUsed < SEED_REQUESTS_PER_PRODUCT) break;
     const productId = order[host.seedCursor.idx]!;
     const mark = host.seedMarks.get(productId);
@@ -2255,6 +2254,7 @@ export async function seedBudgeted(host: PaperHost, fetchImpl?: SeedFetch): Prom
       break;
     }
     host.seedCursor.idx += 1;
+    added += 1;
   }
 }
 
@@ -2277,7 +2277,7 @@ async function seedDailyProduct(host: PaperHost, productId: string, fetchImpl?: 
     const response = await seedCall(host, historyCandleUrl(productId, start, end, DAY_SEC), fetchImpl);
     if (budgetHit(response)) return "budget";
     if (!response.ok) {
-      host.book.incidents.push(`history daily ${productId} ${response.status}`);
+      host.book.incidents.push(`history daily ${productId} ${statusNote(response)}`);
       noteCold(host, productId, response.status >= 400 && response.status < 500 ? `http-${response.status}` : "daily");
       return "cold";
     }
@@ -2331,7 +2331,7 @@ async function seedHourDelta(host: PaperHost, productId: string, fetchImpl?: See
   if (got.length === 0) return;
   const merged = mergeRolled(host.hourWarm.get(productId) ?? [], got, HOUR_KEEP);
   host.hourWarm.set(productId, merged);
-  const folded = contiguousTail(foldBars(merged, FOUR_STEP_SEC, HOUR_SEC), FOUR_STEP_SEC);
+  const folded = contiguousTail(foldHours(merged, FOUR_STEP_SEC, HOUR_SEC), FOUR_STEP_SEC);
   if (folded.length > 0) host.fourBars.set(productId, mergeRolled(host.fourBars.get(productId) ?? [], folded, FOUR_KEEP));
   const newest = merged[merged.length - 1]?.ts ?? mark.newestTs;
   host.seedMarks.set(productId, { ...mark, newestTs: newest });
@@ -2357,6 +2357,8 @@ const REST_HOUR_PAGE = 300 * HOUR_SEC;
 const HOUR_PAGE_CAP = hourPagesForKeep();
 /** One daily page plus the hour pages that fill FOUR_KEEP. A product is never split across runs. */
 export const SEED_REQUESTS_PER_PRODUCT = 1 + HOUR_PAGE_CAP;
+/** New products started in one run. 13, then 13, then 13, then the rest finishes the 50 in four runs. */
+export const SEED_PRODUCTS_PER_RUN = 13;
 
 export const SEED_CURSOR_KEY = "p6:seed:cursor";
 export function seedMarkKey(productId: string): string {
@@ -2406,17 +2408,29 @@ function rememberFourSeed(host: PaperHost, productId: string, bars: readonly Bar
  * A miss is an incident. It does not mark the product cold.
  * Orders the backfill cannot decide stay indeterminate.
  */
+function persistedMinute(host: PaperHost): number | null {
+  let max = -1;
+  for (const mid of host.book.mids.completed) {
+    const sec = Math.floor(mid.ts / 1000);
+    if (sec > max) max = sec;
+  }
+  for (const at of host.tapeWritten) if (at > max) max = at;
+  return max >= 0 ? max : null;
+}
+
 export async function backfillTapeIfNeeded(
   host: PaperHost,
   fetchImpl?: (url: string) => Promise<Pick<Response, "status" | "ok" | "json">>,
 ): Promise<void> {
-  if (!host.tapeHole || host.wsTape) return;
   const get = fetchImpl ?? backfillGet(host);
   const nowSec = Math.floor(host.clock() / 1000);
-  const latest = host.trades.reduce((max, trade) => Math.max(max, trade.tsSec), 0);
-  const from = host.tapeHoleFromSec ?? Math.max(latest, nowSec - 120);
-  if (from >= nowSec) {
-    markOrdersBeforeTape(host);
+  const persisted = persistedMinute(host);
+  const fromPersisted = persisted == null ? null : persisted + 60;
+  let from = host.tapeHoleFromSec ?? fromPersisted;
+  if (from != null && fromPersisted != null) from = Math.min(from, fromPersisted);
+  const until = host.wsTape && host.socketOpenedMs != null ? Math.floor(host.socketOpenedMs / 1000) : nowSec;
+  if (from == null || from >= until) {
+    if (host.tapeHole) markOrdersBeforeTape(host);
     host.tapeHole = false;
     return;
   }
@@ -2431,12 +2445,12 @@ export async function backfillTapeIfNeeded(
             const tsSec = Math.floor(Date.parse(row.time ?? "") / 1000);
             const price = Number(row.price);
             const size = Number(row.size);
-            if (!Number.isFinite(tsSec) || tsSec < from || tsSec > nowSec || !(price > 0) || !(size > 0)) continue;
+            if (!Number.isFinite(tsSec) || tsSec < from || tsSec >= until || !(price > 0) || !(size > 0)) continue;
             host.trades.push({ productId, tsSec, price, size, ...(row.side ? { side: row.side } : {}) });
           }
         }
       } else {
-        host.book.incidents.push(`tape backfill ${productId} ${response.status}`);
+        host.book.incidents.push(`tape backfill ${productId} ${statusNote(response)}`);
       }
     } catch (error) {
       host.book.incidents.push(`tape backfill ${productId} ${error instanceof Error ? error.message : "failed"}`);
@@ -2444,9 +2458,9 @@ export async function backfillTapeIfNeeded(
     const fromMinute = Math.floor(from / 60) * 60;
     const buckets = new Map<number, { tsSec: number; price: number; size: number }[]>();
     for (const trade of host.trades) {
-      if (trade.productId !== productId || trade.tsSec < from || trade.tsSec > nowSec) continue;
+      if (trade.productId !== productId || trade.tsSec < from || trade.tsSec >= until) continue;
       const minute = Math.floor(trade.tsSec / 60) * 60;
-      if (minute < fromMinute || minute >= nowSec) continue;
+      if (minute < fromMinute || minute >= until) continue;
       const bucket = buckets.get(minute);
       if (bucket) bucket.push(trade);
       else buckets.set(minute, [trade]);
@@ -2474,7 +2488,7 @@ export async function backfillTapeIfNeeded(
     }
     const covered = new Set(buckets.keys());
     const missing: number[] = [];
-    for (let minute = Math.floor(from / 60) * 60; minute < nowSec; minute += 60) {
+    for (let minute = Math.floor(from / 60) * 60; minute < until; minute += 60) {
       if (!covered.has(minute)) missing.push(minute);
     }
     if (missing.length > 0) candleGaps.push({ productId, missing, covered });
@@ -2485,14 +2499,14 @@ export async function backfillTapeIfNeeded(
       const end = gap.missing[gap.missing.length - 1]! + 59;
       const response = await get(historyCandleUrl(gap.productId, start, end, 60));
       if (!response.ok) {
-        host.book.incidents.push(`tape candle ${gap.productId} ${response.status}`);
+        host.book.incidents.push(`tape candle ${gap.productId} ${statusNote(response)}`);
         continue;
       }
       const rows = (await response.json()) as number[][];
       const bars = barsFromExchangeCandles(gap.productId, Array.isArray(rows) ? rows : []);
       for (const bar of bars) {
         const minute = Math.floor(bar.startSec / 60) * 60;
-        if (minute < Math.floor(from / 60) * 60 || minute >= nowSec || gap.covered.has(minute)) continue;
+        if (minute < Math.floor(from / 60) * 60 || minute >= until || gap.covered.has(minute)) continue;
         host.trades.push({ productId: gap.productId, tsSec: bar.startSec, price: bar.close, size: bar.volume });
         host.book.mids.completed.push({
           productId: gap.productId,
@@ -2509,9 +2523,18 @@ export async function backfillTapeIfNeeded(
       host.book.incidents.push(`tape candle ${gap.productId} ${error instanceof Error ? error.message : "failed"}`);
     }
   }
+  const fromMinute = Math.floor(from / 60) * 60;
+  for (const productId of host.products) {
+    let missing = 0;
+    for (let minute = fromMinute; minute < until; minute += 60) {
+      const covered = host.book.mids.completed.some((mid) => mid.productId === productId && Math.floor(mid.ts / 1000) === minute);
+      if (!covered) missing += 1;
+    }
+    if (missing > 0) host.book.incidents.push(`tape gap ${productId} ${missing}`);
+  }
   host.tapeHole = false;
   markOrdersBeforeTape(host);
-  console.log(`tape backfill from=${from} to=${nowSec} prints=${host.trades.length} minutes=${host.book.mids.completed.length}`);
+  console.log(`tape backfill from=${from} to=${until} prints=${host.trades.length} minutes=${host.book.mids.completed.length}`);
 }
 
 /** Orders placed before the restored tape, or before the 10-minute warm window when the tape is empty. */
@@ -2551,7 +2574,7 @@ async function pageHourSeed(host: PaperHost, productId: string, fetchImpl: SeedF
       : await (fetchImpl ?? hostGet(host, true))(historyCandleUrl(productId, start, end, HOUR_SEC));
     if (budgetHit(response)) return { reason: "budget", status: response.status };
     if (!response.ok) {
-      host.book.incidents.push(`4h seed rest ${productId} ${response.status}`);
+      host.book.incidents.push(`4h seed rest ${productId} ${statusNote(response)}`);
       stop = { reason: "http", status: response.status };
       break;
     }
@@ -2564,13 +2587,13 @@ async function pageHourSeed(host: PaperHost, productId: string, fetchImpl: SeedF
     const oldest = got[0]!.startSec;
     if (got.length < 300 && oldest > start) {
       for (const bar of got) hours.push({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume });
-      tail = contiguousTail(foldBars(hours, FOUR_STEP_SEC, HOUR_SEC), FOUR_STEP_SEC);
+      tail = contiguousTail(foldHours(hours, FOUR_STEP_SEC, HOUR_SEC), FOUR_STEP_SEC);
       stop = { reason: "listing", status: 200 };
       break;
     }
     const before = tail.length;
     for (const bar of got) hours.push({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume });
-    tail = contiguousTail(foldBars(hours, FOUR_STEP_SEC, HOUR_SEC), FOUR_STEP_SEC);
+    tail = contiguousTail(foldHours(hours, FOUR_STEP_SEC, HOUR_SEC), FOUR_STEP_SEC);
     if (tail.length <= before) {
       stop = { reason: "hole", status: 200 };
       break;
@@ -2581,7 +2604,7 @@ async function pageHourSeed(host: PaperHost, productId: string, fetchImpl: SeedF
   const keptHours = hours.slice().sort((a, b) => a.ts - b.ts).slice(-HOUR_KEEP);
   if (keptHours.length > 0) host.hourWarm.set(productId, keptHours);
   const fromStore = fourFromResearch(productId);
-  logFoldMismatches(host, productId, foldBars(hours, FOUR_STEP_SEC, HOUR_SEC), fromStore);
+  logFoldMismatches(host, productId, foldHours(hours, FOUR_STEP_SEC, HOUR_SEC), fromStore);
   rememberFourSeed(host, productId, tail, "rest_1h");
   const newest = keptHours[keptHours.length - 1]?.ts ?? tail[tail.length - 1]?.ts ?? 0;
   const oldestTs = hours.reduce((min, bar) => Math.min(min, bar.ts), newest);

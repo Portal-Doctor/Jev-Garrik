@@ -438,7 +438,7 @@ export async function releaseLease(
 }
 
 export interface InvocationResult {
-  action: RelayPlan["action"];
+  action: RelayPlan["action"] | "crash";
   applied: string[];
   socketGap: boolean;
   feedGapMs: number;
@@ -521,10 +521,10 @@ export async function runInvocation(opts: {
       }
     }
   };
-  const releaseFinal = async (at: number) => {
+  const releaseFinal = async (at: number, tookCrash = false) => {
+    opts.holder.releaseDeadline(tookCrash ? "crash" : undefined);
     const saved = await persistFinal();
     opts.holder.recordGap?.({ startMs: at, endMs: at, cause: saved ? "handover" : "save failed" });
-    opts.holder.releaseDeadline();
     await releaseLease(opts.kv, opts.self, "deadline", at, saved ? undefined : { saveFailed: true });
     return saved;
   };
@@ -582,6 +582,7 @@ export async function runInvocation(opts: {
       gap.cause = handoverCause(Math.max(0, gap.endMs - gap.startMs), feedOk);
     }
   }
+  const tookCrash = staged.some((gap) => gap.cause === "crash");
   flushStaged();
   const seeded = await opts.holder.applyDueBars();
   const appliedOf = () => [...new Set([...seeded, ...(opts.holder.appliedDuringRun?.() ?? [])])];
@@ -605,8 +606,15 @@ export async function runInvocation(opts: {
   }
   if (sampled) {
     const at = opts.deadlineMs - HANDOVER_MARGIN_MS;
-    const saved = await releaseFinal(at);
-    return { action: "handover", applied: appliedOf(), socketGap: false, feedGapMs, cause: saved ? (plan.cause ?? "handover") : "uncovered", holder: null };
+    const saved = await releaseFinal(at, tookCrash);
+    return {
+      action: tookCrash ? "crash" : "handover",
+      applied: appliedOf(),
+      socketGap: false,
+      feedGapMs,
+      cause: tookCrash ? "crash" : saved ? (plan.cause ?? "handover") : "uncovered",
+      holder: null,
+    };
   }
   await persistBook();
   await noteLeaseSave(opts.kv, nowMs);

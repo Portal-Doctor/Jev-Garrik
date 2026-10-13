@@ -758,6 +758,41 @@ test("a kill during overlap records the crash from the last save, not the lease 
   expect(rows.some((row) => row.cause === "handover")).toBe(false);
 });
 
+test("a crash takeover reports crash and releases the lease as a deadline", async () => {
+  const kv = memoryKv();
+  const start = 1_000_000;
+  expect(await tryAcquire(kv, "K", start + 30 * 60_000, start)).toBe(true);
+  await kv.del(LEASE_KEY);
+  const outcomes: string[] = [];
+  const gaps: string[] = [];
+  const next = await runInvocation({
+    kv,
+    self: "N",
+    nowMs: start + 60_000,
+    deadlineMs: start + 60_000 + 30 * 60_000,
+    holder: {
+      async warm() {},
+      async applyDueBars() {
+        return [];
+      },
+      releaseDeadline(cause?: string) {
+        if (cause) outcomes.push(cause);
+      },
+      async sampleUntil() {},
+      recordGap(gap) {
+        gaps.push(gap.cause);
+      },
+    },
+  });
+  expect(next.action).toBe("crash");
+  expect(next.cause).toBe("crash");
+  expect(outcomes).toEqual(["crash"]);
+  expect(gaps).toContain("crash");
+  expect(gaps.filter((cause) => cause === "handover")).toHaveLength(1);
+  const meta = JSON.parse((await kv.get(LEASE_META_KEY)) ?? "{}") as { release?: string };
+  expect(meta.release).toBe("deadline");
+});
+
 test("vol hours stay per product and gap share uses each week", () => {
   const t = 1_791_820_800;
   const bars = [];
