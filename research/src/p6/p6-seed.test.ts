@@ -234,6 +234,37 @@ test("a warm mark without FOUR_KEEP bars is stored short and the next run reseed
   expect(next.fourBars.get("BCH-USD")?.length ?? 0).toBeGreaterThanOrEqual(1000);
 });
 
+test("a flush that splits past 1 MB still marks a full 4h series warm", async () => {
+  const kv = memoryKv(() => NOW);
+  const host = startPaperHost(["BTC-USD"], {});
+  host.clock = () => NOW;
+  const pad = "x".repeat(900);
+  const rows = Array.from({ length: 1000 }, (_, index) => ({
+    ts: index * 14_400,
+    open: 1,
+    high: 2,
+    low: 1,
+    close: 1,
+    volume: 1,
+    pad,
+  }));
+  host.fourBars.set("BTC-USD", rows);
+  host.seedMarks.set("BTC-USD", { oldestTs: 0, newestTs: rows[rows.length - 1]!.ts, status: "warm", reason: "seeded" });
+  await persistSplit(kv, host);
+  const stored = JSON.parse((await kv.get(seedMarkKey("BTC-USD"))) ?? "{}") as { status: string };
+  const bars = JSON.parse((await kv.get("p6:bar4h:BTC-USD")) ?? "[]") as unknown[];
+  expect(bars).toHaveLength(1000);
+  expect(stored.status).toBe("warm");
+  expect(host.saveCommands).toBeGreaterThan(1);
+  await kv.set(seedMarkKey("BTC-USD"), JSON.stringify({ oldestTs: 0, newestTs: rows[rows.length - 1]!.ts, status: "short", reason: "short" }));
+  const again = startPaperHost(["BTC-USD"], {});
+  again.clock = () => NOW;
+  expect(await loadSplit(kv, again)).toBeTruthy();
+  expect(again.seedMarks.get("BTC-USD")?.status).toBe("warm");
+  expect(again.fourFlushed.has("BTC-USD")).toBe(true);
+  expect(again.cold.has("BTC-USD")).toBe(false);
+});
+
 test("a watcher does not seed or backfill before it holds the lease", async () => {
   const host = startPaperHost(["BTC-USD"], {});
   host.clock = () => NOW;

@@ -671,6 +671,7 @@ async function writeGroupedBars(kv: Kv, host: PaperHost, plan: FlushPlan): Promi
       continue;
     }
     await writeOwned(kv, host, key, encoded, group.px > 0 ? group.px : undefined);
+    if (key.startsWith("p6:bar4h:") && trimmed.length >= FOUR_KEEP) host.fourFlushed.add(key.slice("p6:bar4h:".length));
     host.saveCommands += 1;
     host.saveBytes += Buffer.byteLength(encoded);
   }
@@ -821,9 +822,13 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
         host.seedMarks.set(productId, { ...mark, status: "short", reason: "short" });
         continue;
       }
+      if (mark.status !== "cold" && bars.length >= FOUR_KEEP) {
+        host.seedMarks.set(productId, { ...mark, status: "warm", reason: mark.status === "warm" ? mark.reason : "seeded" });
+        host.fourFlushed.add(productId);
+        continue;
+      }
       host.seedMarks.set(productId, mark);
       if (mark.status === "cold") host.cold.add(productId);
-      if (mark.status === "warm" && bars.length >= FOUR_KEEP) host.fourFlushed.add(productId);
     }
     const lastRaw = byKey.get(LAST_RUN_KEY) ?? null;
     if (lastRaw) {
