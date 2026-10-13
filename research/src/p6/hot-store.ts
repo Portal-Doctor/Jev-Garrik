@@ -207,9 +207,66 @@ function leaseLost(error: unknown): boolean {
   return error instanceof Error && error.message.includes("lease lost");
 }
 
+function transportError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : "";
+  return message.includes("redis timeout") || message.includes("redis closed") || message.startsWith("redis ");
+}
+
 function writeIncident(host: PaperHost, error: unknown): void {
   const message = error instanceof Error ? error.message : "failed";
   host.book.incidents.push(message.startsWith("kv set") || message.includes("lease lost") ? message : `kv set ${message}`);
+}
+
+/** The next save of this product waits until this one finishes, including the append. */
+function withProduct(host: PaperHost, productId: string, fn: () => Promise<void>): Promise<void> {
+  const prev = host.productLocks.get(productId) ?? Promise.resolve();
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  host.productLocks.set(productId, prev.then(() => gate, () => gate));
+  return prev.then(fn, fn).finally(release);
+}
+
+/**
+ * Mark the row, then append. The mark is set before the await, so a second save
+ * does not send the same row. The append itself is idempotent if one still arrives.
+ */
+async function appendMarked(
+  kv: Kv,
+  host: PaperHost,
+  mark: string,
+  key: string,
+  member: unknown,
+  field: string,
+  id: string,
+  max: number,
+  px?: number,
+): Promise<void> {
+  if (host.persistedBars.has(mark)) return;
+  host.persistedBars.add(mark);
+  const payloadBytes = Buffer.byteLength(JSON.stringify(member));
+  try {
+    const result = await appendOwned(kv, host, key, member, field, id, max, px);
+    if (result === "lost") throw new Error("lease lost");
+    if (result === "oversize") {
+      host.persistedBars.delete(mark);
+      host.book.incidents.push(`kv value exceeds 1 MB ${key}`);
+      return;
+    }
+    host.saveCommands += 1;
+    host.saveBytes += payloadBytes;
+    if (result === "duplicate") host.duplicateAppends += 1;
+  } catch (error) {
+    host.persistedBars.delete(mark);
+    throw error;
+  }
+}
+
+async function noteWrite(host: PaperHost, bytes: number, write: () => Promise<void>): Promise<void> {
+  await write();
+  host.saveCommands += 1;
+  host.saveBytes += bytes;
 }
 
 /** One heartbeat write of the small book, then appends for bars that are not stored yet. A failed hot or warmup write still appends. */
@@ -220,9 +277,9 @@ export async function persistSplit(kv: Kv, host: PaperHost): Promise<void> {
     host.book.incidents.push(`heartbeat write ${bytes} exceeds 256 KB`);
   } else {
     try {
-      await writeOwned(kv, host, HOT_KEY, json);
+      await noteWrite(host, bytes, () => writeOwned(kv, host, HOT_KEY, json));
     } catch (error) {
-      if (leaseLost(error)) throw error;
+      if (leaseLost(error) || transportError(error)) throw error;
       writeIncident(host, error);
     }
   }
@@ -231,73 +288,55 @@ export async function persistSplit(kv: Kv, host: PaperHost): Promise<void> {
     for (const [productId, days] of host.warmup) {
       if (days.length === 0) continue;
       const payload = JSON.stringify(days);
-      if (Buffer.byteLength(payload) > VALUE_MAX_BYTES) {
+      const warmBytes = Buffer.byteLength(payload);
+      if (warmBytes > VALUE_MAX_BYTES) {
         host.book.incidents.push(`kv value exceeds 1 MB warmup ${productId}`);
         failed = true;
         continue;
       }
       try {
-        await writeOwned(kv, host, warmupKey(productId), payload);
+        await noteWrite(host, warmBytes, () => writeOwned(kv, host, warmupKey(productId), payload));
       } catch (error) {
-        if (leaseLost(error)) throw error;
+        if (leaseLost(error) || transportError(error)) throw error;
         writeIncident(host, error);
         failed = true;
       }
     }
     if (!failed) host.warmupStored = true;
   }
-  for (const bar of host.fifteen) {
-    const mark = `${bar.productId}:${bar.startSec}`;
-    if (host.persistedBars.has(`15:${mark}`)) continue;
-    const result = await appendOwned(kv, host, bar15Key(bar.productId, utcDay(bar.startSec)), bar, "startSec", String(bar.startSec), 96, BAR15_TTL_MS);
-    if (result === "lost") throw new Error("lease lost");
-    if (result === "oversize") host.book.incidents.push(`kv value exceeds 1 MB ${bar.productId}`);
-    else host.persistedBars.add(`15:${mark}`);
-  }
-  for (const [productId, rows] of host.fourBars) {
-    for (const bar of rows) {
-      const mark = `4h:${productId}:${bar.ts}`;
-      if (host.persistedBars.has(mark)) continue;
-      const result = await appendOwned(kv, host, bar4hKey(productId), bar, "ts", String(bar.ts), FOUR_KEEP);
-      if (result === "lost") throw new Error("lease lost");
-      if (result !== "oversize") host.persistedBars.add(mark);
+  const products = new Set<string>([
+    ...host.fifteen.map((bar) => bar.productId),
+    ...host.fourBars.keys(),
+    ...host.hourWarm.keys(),
+    ...host.dailyBars.keys(),
+    ...host.book.mids.completed.map((bar) => bar.productId),
+    ...host.trades.map((trade) => trade.productId),
+  ]);
+  await Promise.all([...products].map((productId) => withProduct(host, productId, async () => {
+    for (const bar of host.fifteen) {
+      if (bar.productId !== productId) continue;
+      await appendMarked(kv, host, `15:${productId}:${bar.startSec}`, bar15Key(productId, utcDay(bar.startSec)), bar, "startSec", String(bar.startSec), 96, BAR15_TTL_MS);
     }
-  }
-  for (const [productId, rows] of host.hourWarm) {
-    for (const bar of rows) {
-      const mark = `1h:${productId}:${bar.ts}`;
-      if (host.persistedBars.has(mark)) continue;
-      const result = await appendOwned(kv, host, bar1hKey(productId), bar, "ts", String(bar.ts), HOUR_KEEP);
-      if (result === "lost") throw new Error("lease lost");
-      if (result !== "oversize") host.persistedBars.add(mark);
+    for (const bar of host.fourBars.get(productId) ?? []) {
+      await appendMarked(kv, host, `4h:${productId}:${bar.ts}`, bar4hKey(productId), bar, "ts", String(bar.ts), FOUR_KEEP);
     }
-  }
-  for (const [productId, rows] of host.dailyBars) {
-    for (const bar of rows) {
-      const mark = `d1:${productId}:${bar.ts}`;
-      if (host.persistedBars.has(mark)) continue;
-      const result = await appendOwned(kv, host, d1Key(productId), bar, "ts", String(bar.ts), DAILY_CLOSE_DAYS);
-      if (result === "lost") throw new Error("lease lost");
-      if (result !== "oversize") host.persistedBars.add(mark);
+    for (const bar of host.hourWarm.get(productId) ?? []) {
+      await appendMarked(kv, host, `1h:${productId}:${bar.ts}`, bar1hKey(productId), bar, "ts", String(bar.ts), HOUR_KEEP);
     }
-  }
-  for (const bar of host.book.mids.completed) {
-    const mark = `m:${bar.productId}:${bar.ts}`;
-    if (host.persistedBars.has(mark)) continue;
-    const result = await appendOwned(kv, host, ringKey(bar.productId), bar, "ts", String(bar.ts), 120, RING_TTL_MS);
-    if (result === "lost") throw new Error("lease lost");
-    if (result !== "oversize") host.persistedBars.add(mark);
-  }
-  for (const trade of host.trades) {
-    const minute = Math.floor(trade.tsSec / 60) * 60;
-    const mark = `t:${trade.productId}:${trade.tsSec}:${trade.price}:${trade.size}`;
-    if (host.persistedBars.has(mark)) continue;
-    const id = `${trade.tsSec}:${trade.price}:${trade.size}`;
-    const result = await appendOwned(kv, host, tapeKey(trade.productId, minute), { ...trade, id }, "id", id, 0, TAPE_TTL_MS);
-    if (result === "lost") throw new Error("lease lost");
-    if (result === "oversize") host.book.incidents.push(`kv value exceeds 1 MB tape ${trade.productId}`);
-    else host.persistedBars.add(mark);
-  }
+    for (const bar of host.dailyBars.get(productId) ?? []) {
+      await appendMarked(kv, host, `d1:${productId}:${bar.ts}`, d1Key(productId), bar, "ts", String(bar.ts), DAILY_CLOSE_DAYS);
+    }
+    for (const bar of host.book.mids.completed) {
+      if (bar.productId !== productId) continue;
+      await appendMarked(kv, host, `m:${productId}:${bar.ts}`, ringKey(productId), bar, "ts", String(bar.ts), 120, RING_TTL_MS);
+    }
+    for (const trade of host.trades) {
+      if (trade.productId !== productId) continue;
+      const minute = Math.floor(trade.tsSec / 60) * 60;
+      const id = `${trade.tsSec}:${trade.price}:${trade.size}`;
+      await appendMarked(kv, host, `t:${productId}:${trade.tsSec}:${trade.price}:${trade.size}`, tapeKey(productId, minute), { ...trade, id }, "id", id, 0, TAPE_TTL_MS);
+    }
+  })));
 }
 
 function parseList<T>(raw: string | null): T[] {
@@ -353,9 +392,16 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
     for (const bar of hours) host.persistedBars.add(`1h:${productId}:${bar.ts}`);
     for (const bar of fours) host.persistedBars.add(`4h:${productId}:${bar.ts}`);
     for (const bar of daily) host.persistedBars.add(`d1:${productId}:${bar.ts}`);
-    rings.push(...parseList<PaperStateBody["rings"][number]>(byKey.get(ringKey(productId)) ?? null));
+    const ringsForProduct = parseList<PaperStateBody["rings"][number]>(byKey.get(ringKey(productId)) ?? null);
+    rings.push(...ringsForProduct);
+    for (const bar of ringsForProduct) host.persistedBars.add(`m:${productId}:${bar.ts}`);
     for (let i = TAPE_LOOKBACK_MIN - 1; i >= 0; i -= 1) {
-      tape.push(...parseList<PaperStateBody["tape"][number]>(byKey.get(tapeKey(productId, minute - i * 60)) ?? null));
+      const rows = parseList<PaperStateBody["tape"][number] & { id?: string }>(byKey.get(tapeKey(productId, minute - i * 60)) ?? null);
+      tape.push(...rows);
+      for (const trade of rows) {
+        const id = trade.id ?? `${trade.tsSec}:${trade.price}:${trade.size}`;
+        host.persistedBars.add(`t:${productId}:${id}`);
+      }
     }
   }
   return {

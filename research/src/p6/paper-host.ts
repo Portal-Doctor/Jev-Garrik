@@ -220,6 +220,14 @@ export interface PaperHost {
   feedCut: FeedCut | null;
   /** True when a buffered event is timestamped before feedCut.atMs. It does not change coverage. */
   overlapSeen: boolean;
+  /** One append at a time for each product. A second save of the same product waits. */
+  productLocks: Map<string, Promise<void>>;
+  /** Commands this process sent to store the book. */
+  saveCommands: number;
+  /** Payload bytes of those commands. */
+  saveBytes: number;
+  /** Appends sent for a row that was already stored. The target is 0. */
+  duplicateAppends: number;
 }
 
 export interface FeedCutTrade {
@@ -434,6 +442,10 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     socketOpenedMs: null,
     feedCut: null,
     overlapSeen: false,
+    productLocks: new Map(),
+    saveCommands: 0,
+    saveBytes: 0,
+    duplicateAppends: 0,
   };
 }
 
@@ -2173,13 +2185,12 @@ export async function seedFourHours(
     }
     const hours: BarOHLC[] = [];
     let tail: BarOHLC[] = [];
-    let end = nowSec;
+    let end = Math.floor(nowSec / HOUR_SEC) * HOUR_SEC - HOUR_SEC;
     try {
       for (let page = 0; page < REST_HOUR_PAGES; page += 1) {
-        const start = end - REST_HOUR_PAGE;
-        const inclusiveEnd = page === 0 ? end : end - HOUR_SEC;
-        if (inclusiveEnd < start) break;
-        const response = await fetchImpl(historyCandleUrl(productId, start, inclusiveEnd, HOUR_SEC));
+        const start = end - (REST_HOUR_PAGE - HOUR_SEC);
+        if (end < start) break;
+        const response = await fetchImpl(historyCandleUrl(productId, start, end, HOUR_SEC));
         if (!response.ok) {
           host.book.incidents.push(`4h seed rest ${productId} ${response.status}`);
           break;
@@ -2201,7 +2212,7 @@ export async function seedFourHours(
           break;
         }
         tail = nextTail;
-        end = start;
+        end = start - HOUR_SEC;
       }
       logFoldMismatches(host, productId, foldBars(hours, FOUR_STEP_SEC, HOUR_SEC), fromStore);
       rememberFourSeed(host, productId, tail, "rest_1h");

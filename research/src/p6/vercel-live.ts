@@ -8,6 +8,7 @@ import { loadSplit, persistSplit, warmupKey } from "./hot-store";
 import { acceptRestBar, attachMemberCloses, catchUpHistory, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
 import type { OhlcvBar } from "./rest-bars";
 import {
+  barMarker,
   commitBar,
   cronAuthorized,
   dashboard,
@@ -23,8 +24,14 @@ import {
   type Kv,
 } from "./relay";
 
-/** Watcher lease poll. Slower than the REST pace, and still under the 1s writer-switch rule. */
-export const LEASE_POLL_MS = 500;
+/** Watcher lease poll. Slow until 5s before the announced release, then fast. */
+export const LEASE_POLL_SLOW_MS = 15_000;
+export const LEASE_POLL_FAST_MS = 200;
+export const LEASE_POLL_FAST_BEFORE_MS = 5_000;
+
+export function leasePollWaitMs(nowMs: number, releaseAtMs: number): number {
+  return nowMs >= releaseAtMs - LEASE_POLL_FAST_BEFORE_MS ? LEASE_POLL_FAST_MS : LEASE_POLL_SLOW_MS;
+}
 
 /** Lease-checked hot write plus appends. The warmup key is not read on this path. */
 export async function persistRun(kv: Kv, host: PaperHost): Promise<void> {
@@ -36,8 +43,16 @@ export async function persistRun(kv: Kv, host: PaperHost): Promise<void> {
     const key = `${bar.productId}:${bar.startSec}`;
     if (seen.has(key) || host.persistedBars.has(`bar:${key}`)) continue;
     seen.add(key);
-    const result = await commitBar(kv, bar.productId, bar.startSec);
-    if (result === "applied" || result === "duplicate") host.persistedBars.add(`bar:${key}`);
+    host.persistedBars.add(`bar:${key}`);
+    try {
+      const result = await commitBar(kv, bar.productId, bar.startSec);
+      host.saveCommands += 1;
+      host.saveBytes += Buffer.byteLength(barMarker(bar.productId, bar.startSec));
+      if (result !== "applied" && result !== "duplicate") host.persistedBars.delete(`bar:${key}`);
+    } catch (error) {
+      host.persistedBars.delete(`bar:${key}`);
+      throw error;
+    }
   }
 }
 
@@ -134,27 +149,26 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
               return;
             }
           }
-          try {
-            await persistRun(kv, host);
-          } catch (error) {
+          void persistRun(kv, host).catch((error: unknown) => {
             const message = error instanceof Error ? error.message : "failed";
             host.book.incidents.push(message.startsWith("kv set") || message.includes("lease lost") ? message : `kv set ${message}`);
             if (message.includes("lease lost")) host.stopped = true;
-          }
+          });
         },
       });
     },
     watchUntil(untilMs: number) {
       host.bufferFeeds = true;
-      let lastPoll = 0;
+      let nextPoll = 0;
       return driveHost(host, untilMs, {
         applyBars: false,
         stopWhen: async () => {
           const now = host.clock();
-          if (lastPoll !== 0 && now - lastPoll < LEASE_POLL_MS) return false;
-          lastPoll = now;
+          if (now < nextPoll) return false;
           const lease = decodeLease(await kv.get(LEASE_KEY));
-          return !lease || lease.untilMs <= now;
+          const releaseAt = lease?.releaseAtMs ?? now;
+          nextPoll = now + leasePollWaitMs(now, releaseAt);
+          return !lease || lease.released === true || lease.untilMs <= now;
         },
       });
     },

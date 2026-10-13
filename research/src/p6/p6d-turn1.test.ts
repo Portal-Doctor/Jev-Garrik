@@ -154,8 +154,11 @@ test("a failed state write is an incident", async () => {
   expect(host.book.incidents.some((row) => row.includes("kv set"))).toBe(true);
 });
 
-test("redis:// is refused off localhost", () => {
-  expect(() => assertRedisTransport("redis://redis.example:6379")).toThrow(/rediss:\/\//);
+test("redis:// with a password is allowed off localhost", () => {
+  const remote = assertRedisTransport("redis://:secret@x.upstash.io:6379");
+  expect(remote.tls).toBe(false);
+  expect(remote.host).toBe("x.upstash.io");
+  expect(remote.password).toBe("secret");
   expect(assertRedisTransport("redis://127.0.0.1:6379").tls).toBe(false);
   expect(assertRedisTransport("rediss://redis.example:6380").tls).toBe(true);
   expect(assertRedisTransport("redis://localhost:6379").host).toBe("localhost");

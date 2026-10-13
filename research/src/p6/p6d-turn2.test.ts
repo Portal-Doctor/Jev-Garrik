@@ -30,7 +30,6 @@ import {
   markOrdersBeforeTape,
   replayHandover,
   resyncBooksFromRest,
-  REST_PACE_MS,
   rollSettled,
   SAVE_HEARTBEAT_MS,
   seedFourHours,
@@ -39,9 +38,9 @@ import {
 } from "./paper-host";
 import { readFileSync } from "node:fs";
 import type { Book } from "./engine";
-import { decodeLease, HOT_KEY, LEASE_KEY, LEASE_META_KEY, memoryKv, renewLease, runInvocation, tryAcquire } from "./relay";
+import { decodeLease, HOT_KEY, HANDOVER_MARGIN_MS, LEASE_KEY, LEASE_META_KEY, memoryKv, releaseLease, renewLease, runInvocation, tryAcquire } from "./relay";
 import { stampP6Record } from "./stamp-records";
-import { hostHolder, LEASE_POLL_MS, persistRun } from "./vercel-live";
+import { hostHolder, LEASE_POLL_FAST_MS, LEASE_POLL_SLOW_MS, leasePollWaitMs, persistRun } from "./vercel-live";
 
 test("a failed save keeps the lease, and a lost lease stops the holder", async () => {
   let now = 8_000_000;
@@ -380,15 +379,16 @@ test("the live host does not walk up to .git", () => {
   expect(source.includes("repoRoot")).toBe(false);
   const pick = readFileSync(new URL("./select.ts", import.meta.url), "utf8");
   expect(pick.includes("readForwardPick(root = repoRoot())")).toBe(false);
-  expect(LEASE_POLL_MS).toBe(500);
-  expect(LEASE_POLL_MS).toBeGreaterThan(REST_PACE_MS);
-  expect(LEASE_POLL_MS).toBeLessThan(1_000);
+  expect(LEASE_POLL_SLOW_MS).toBe(15_000);
+  expect(LEASE_POLL_FAST_MS).toBe(200);
+  expect(leasePollWaitMs(0, 60_000)).toBe(LEASE_POLL_SLOW_MS);
+  expect(leasePollWaitMs(55_000, 60_000)).toBe(LEASE_POLL_FAST_MS);
 });
 
 test("REST 1h candles seed 200 contiguous 4h bars and a short product is flagged", async () => {
   const host = startPaperHost(["AAA-USD"], {});
   host.products = ["AAA-USD", "BBB-USD"];
-  const end = Math.floor(Date.parse("2026-10-12T00:00:00.000Z") / 1000);
+  const end = Math.floor(Date.parse("2026-10-12T11:35:00.000Z") / 1000);
   host.clock = () => end * 1000;
   await seedFourHours(host, async (url) => {
     const parsed = new URL(url);
@@ -397,7 +397,8 @@ test("REST 1h candles seed 200 contiguous 4h bars and a short product is flagged
     const stop = Number(parsed.searchParams.get("end"));
     const rows: number[][] = [];
     const limit = product === "BBB-USD" ? start + 10 * 3_600 : stop;
-    for (let ts = Math.floor(start / 3_600) * 3_600; ts <= Math.min(stop, limit); ts += 3_600) {
+    for (let ts = start; ts <= Math.min(stop, limit); ts += 3_600) {
+      if (ts % 3_600 !== 0 || rows.length >= 300) break;
       rows.push([ts, 1, 2, 1.1, 1.5, 3]);
     }
     return { ok: true, status: 200, json: async () => rows };
@@ -592,4 +593,87 @@ test("the next holder records a failed final save as an uncovered gap", async ()
   expect(host.book.incidents).toContain("save failed");
   expect(host.gaps.some((gap) => gap.cause === "uncovered")).toBe(true);
   expect(host.book.working[0]?.status).toBe("indeterminate");
+});
+
+test("overlapping saves append a row once", async () => {
+  const kv = memoryKv();
+  const host = startPaperHost(["ETH-USD"], {});
+  const start = Math.floor(Date.parse("2026-10-12T00:00:00.000Z") / 1000);
+  host.clock = () => (start + 900) * 1000;
+  host.fifteen.push({ productId: "ETH-USD", startSec: start, open: 1, high: 1, low: 1, close: 1, volume: 1 });
+  await Promise.all([persistSplit(kv, host), persistSplit(kv, host)]);
+  const stored = JSON.parse((await kv.get(bar15Key("ETH-USD", "2026-10-12"))) ?? "[]") as { startSec: number }[];
+  expect(stored).toHaveLength(1);
+  expect(host.duplicateAppends).toBe(0);
+  const commands = host.saveCommands;
+  await persistSplit(kv, host);
+  expect(host.duplicateAppends).toBe(0);
+  expect(host.saveCommands).toBe(commands + 1);
+});
+
+test("a lost lease is not retried and a redis timeout is a write failure", async () => {
+  let lostCalls = 0;
+  const lost = await runInvocation({
+    kv: memoryKv(),
+    self: "K",
+    nowMs: 0,
+    deadlineMs: 1_800_000,
+    clock: () => 0,
+    holder: {
+      async warm() {},
+      async applyDueBars() {
+        return [];
+      },
+      releaseDeadline() {},
+      async sampleUntil() {},
+      async persist() {
+        lostCalls += 1;
+        throw new Error("lease lost");
+      },
+    },
+  });
+  expect(lostCalls).toBe(1);
+  expect(lost.cause).toBe("uncovered");
+
+  let reads = 0;
+  let timeoutCalls = 0;
+  const timed = await runInvocation({
+    kv: memoryKv(),
+    self: "K",
+    nowMs: 0,
+    deadlineMs: 1_800_000,
+    clock: () => {
+      reads += 1;
+      return reads * 900_000;
+    },
+    holder: {
+      async warm() {},
+      async applyDueBars() {
+        return [];
+      },
+      releaseDeadline() {},
+      async sampleUntil() {},
+      async persist() {
+        timeoutCalls += 1;
+        throw new Error("redis timeout");
+      },
+    },
+  });
+  expect(timeoutCalls).toBeGreaterThan(1);
+  expect(timed.cause).toBe("uncovered");
+});
+
+test("releaseLease does not write lease meta unless it holds the token", async () => {
+  const kv = memoryKv();
+  expect(await tryAcquire(kv, "W", 2_000_000, 1_000)).toBe(true);
+  expect(decodeLease(await kv.get(LEASE_KEY))?.releaseAtMs).toBe(2_000_000 - HANDOVER_MARGIN_MS);
+  const acquired = await kv.get(LEASE_META_KEY);
+  await kv.del(LEASE_KEY);
+  await releaseLease(kv, "K", "deadline", 50_000, { saveFailed: true });
+  expect(await kv.get(LEASE_META_KEY)).toBe(acquired);
+  expect(await tryAcquire(kv, "W", 3_000_000, 2_000)).toBe(true);
+  const held = await kv.get(LEASE_META_KEY);
+  await releaseLease(kv, "K", "deadline", 60_000, { saveFailed: true });
+  expect(await kv.get(LEASE_META_KEY)).toBe(held);
+  expect(decodeLease(await kv.get(LEASE_KEY))?.holder).toBe("W");
 });

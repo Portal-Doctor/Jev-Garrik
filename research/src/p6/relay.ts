@@ -118,6 +118,10 @@ export interface Lease {
   savedAtMs?: number;
   /** The final book write failed. The next holder treats the handover as uncovered. */
   saveFailed?: boolean;
+  /** Set as the holder's last write. The watcher takes over when it sees this. */
+  released?: boolean;
+  /** Planned release, getDeadline() minus 60s. The watcher polls faster near this time. */
+  releaseAtMs?: number;
 }
 
 export function encodeLease(lease: Lease): string {
@@ -135,6 +139,8 @@ export function decodeLease(raw: string | null): Lease | null {
     ...(body.token ? { token: body.token } : {}),
     ...(body.savedAtMs != null ? { savedAtMs: body.savedAtMs } : {}),
     ...(body.saveFailed ? { saveFailed: true } : {}),
+    ...(body.released ? { released: true } : {}),
+    ...(body.releaseAtMs != null ? { releaseAtMs: body.releaseAtMs } : {}),
   };
 }
 
@@ -225,7 +231,7 @@ export function planRelay(opts: {
 }): RelayPlan {
   const every = opts.cronEveryMs ?? CRON_EVERY_MS;
   const lease = opts.lease;
-  const held = lease != null && lease.untilMs > opts.nowMs;
+  const held = lease != null && lease.released !== true && lease.untilMs > opts.nowMs;
   if (held && lease!.holder === opts.self && opts.nowMs >= opts.deadlineMs - HANDOVER_MARGIN_MS) {
     return { action: "handover", socketGap: false, feedGapMs: 0, cause: null };
   }
@@ -258,11 +264,12 @@ export function planRelay(opts: {
 export async function tryAcquire(kv: Kv, self: string, untilMs: number, nowMs = Date.now()): Promise<boolean> {
   const raw = await kv.get(LEASE_KEY);
   const current = decodeLease(raw);
-  if (current && current.untilMs > nowMs && current.holder !== self) return false;
+  if (current && current.released !== true && current.untilMs > nowMs && current.holder !== self) return false;
   const ttl = leasePx(untilMs, nowMs);
-  const token = current && current.holder === self && current.token ? current.token : `${self}:${nowMs}`;
-  const savedAtMs = current && current.holder === self && current.savedAtMs != null ? current.savedAtMs : nowMs;
-  const next = encodeLease({ holder: self, untilMs, release: "none", token, savedAtMs });
+  const same = current && current.holder === self && current.released !== true;
+  const token = same && current!.token ? current!.token : `${self}:${nowMs}`;
+  const savedAtMs = same && current!.savedAtMs != null ? current!.savedAtMs : nowMs;
+  const next = encodeLease({ holder: self, untilMs, release: "none", token, savedAtMs, releaseAtMs: untilMs - HANDOVER_MARGIN_MS });
   const won = await kv.cas(LEASE_KEY, raw, next, { px: ttl });
   if (!won) return false;
   await kv.set(LEASE_META_KEY, next);
@@ -308,21 +315,23 @@ export async function releaseLease(
 ): Promise<void> {
   const raw = await kv.get(LEASE_KEY);
   const current = decodeLease(raw);
-  if (current && current.holder !== self) return;
+  if (!current || current.holder !== self || !current.token) return;
   const next = encodeLease({
-    holder: current?.holder ?? self,
-    token: current?.token ?? self,
+    holder: current.holder,
+    token: current.token,
     untilMs: nowMs,
     release,
-    ...(current?.savedAtMs != null ? { savedAtMs: current.savedAtMs } : {}),
+    released: true,
+    ...(current.releaseAtMs != null ? { releaseAtMs: current.releaseAtMs } : {}),
+    ...(current.savedAtMs != null ? { savedAtMs: current.savedAtMs } : {}),
     ...(opts?.saveFailed ? { saveFailed: true } : {}),
   });
-  if (current) {
-    const won = await kv.cas(LEASE_KEY, raw, next);
-    if (!won) return;
-    await kv.del(LEASE_KEY);
-  }
+  const won = await kv.cas(LEASE_KEY, raw, next);
+  if (!won) return;
+  const still = decodeLease(await kv.get(LEASE_KEY));
+  if (!still || still.token !== current.token) return;
   await kv.set(LEASE_META_KEY, next);
+  await kv.del(LEASE_KEY);
 }
 
 export interface InvocationResult {
@@ -374,9 +383,11 @@ export async function runInvocation(opts: {
     for (const gap of staged) opts.holder.recordGap?.(gap);
     staged.length = 0;
   };
+  const leaseLostError = (error: unknown) => error instanceof Error && error.message.includes("lease lost");
   const writeFailure = (error: unknown) => {
+    if (leaseLostError(error)) return false;
     const message = error instanceof Error ? error.message : "failed";
-    return message.includes("lease lost") || message.includes("kv set") || message.includes("256 KB") || message.includes("1 MB");
+    return message.includes("kv set") || message.includes("256 KB") || message.includes("1 MB") || message.includes("redis timeout") || message.includes("redis closed") || message.startsWith("redis ");
   };
   // A failed book write is an incident. It must not skip the lease release or kill the holder.
   const persistBook = async () => {
@@ -395,6 +406,7 @@ export async function runInvocation(opts: {
         await opts.holder.persist?.();
         return true;
       } catch (error) {
+        if (leaseLostError(error)) return false;
         if (!writeFailure(error)) throw error;
         const now = opts.clock ? opts.clock() : Date.now();
         if (now >= limit) return false;
@@ -601,16 +613,9 @@ export function redisEndpoint(url: string, timeoutMs = Number(process.env.REDIS_
   };
 }
 
-function localRedisHost(host: string): boolean {
-  const name = host.replace(/^\[|\]$/g, "");
-  return name === "localhost" || name === "127.0.0.1" || name === "::1";
-}
-
-/** Plain redis:// is only for localhost. Any other host must be rediss://. */
+/** redis:// or rediss://. A password may travel with either. rediss:// is TLS. */
 export function assertRedisTransport(url: string): RedisEndpoint {
-  const endpoint = redisEndpoint(url);
-  if (!endpoint.tls && !localRedisHost(endpoint.host)) throw new Error("REDIS_URL must be rediss:// for a host other than localhost");
-  return endpoint;
+  return redisEndpoint(url);
 }
 
 const OWNED_SET_LUA = [
