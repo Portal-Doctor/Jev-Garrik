@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { coldProducts, coldReasons, createRestRun, isCold, limited, resetRestLimit, restStats } from "./rest-limit";
+import { BACKFILL_CAP, OPERATING_CAP, REST_HARD_CAP, SEED_BUDGET, coldProducts, coldReasons, createRestRun, isCold, limited, resetRestLimit, restStats } from "./rest-limit";
 
 const host = "https://api.exchange.coinbase.com";
 
@@ -132,6 +132,57 @@ test("two runs do not share counters", async () => {
   expect(restStats(a).n).toBe(2);
   expect(restStats(b).n).toBe(1);
   expect(isCold("AAA-USD", a)).toBe(false);
+});
+
+test("a spent budget does not mark the product cold, and live confirms still send", async () => {
+  let now = 0;
+  const run = createRestRun(1_000_000_000, {
+    now: () => now,
+    sleep: async (ms) => {
+      now += ms;
+    },
+    rand: () => 0,
+    fetch: async () => new Response("[]", { status: 200 }),
+  });
+  for (let i = 0; i < SEED_BUDGET; i += 1) {
+    const response = await limited(`${host}/products/BTC-USD/candles?granularity=86400`, run, { seed: true });
+    expect(response.status).toBe(200);
+  }
+  const seedStop = await limited(`${host}/products/ETH-USD/candles?granularity=86400`, run, { seed: true });
+  expect(seedStop.headers.get("x-p6-budget")).toBe("seed");
+  expect(seedStop.status).toBe(429);
+  expect(isCold("ETH-USD", run)).toBe(false);
+  expect(restStats(run).n).toBe(SEED_BUDGET);
+
+  while (restStats(run).n < OPERATING_CAP) {
+    const response = await limited(`${host}/products/SOL-USD/candles`, run);
+    expect(response.status).toBe(200);
+  }
+  const booksStop = await limited(`${host}/products/SOL-USD/book?level=2`, run);
+  expect(booksStop.headers.get("x-p6-budget")).toBe("reserve");
+  expect(isCold("SOL-USD", run)).toBe(false);
+  expect(restStats(run).n).toBe(OPERATING_CAP);
+
+  const backfill = await limited(`${host}/products/BTC-USD/trades`, run, { backfill: true, cold: false });
+  expect(backfill.status).toBe(200);
+  while (restStats(run).n < BACKFILL_CAP) {
+    await limited(`${host}/products/BTC-USD/trades`, run, { backfill: true, cold: false });
+  }
+  const backfillStop = await limited(`${host}/products/ADA-USD/trades`, run, { backfill: true, cold: false });
+  expect(backfillStop.headers.get("x-p6-budget")).toBe("reserve");
+  expect(isCold("ADA-USD", run)).toBe(false);
+  expect(restStats(run).n).toBe(BACKFILL_CAP);
+
+  const live = await limited(`${host}/products/BTC-USD/candles?granularity=900`, run, { live: true });
+  expect(live.status).toBe(200);
+  while (restStats(run).n < REST_HARD_CAP) {
+    await limited(`${host}/products/BTC-USD/candles?granularity=900`, run, { live: true });
+  }
+  const liveStop = await limited(`${host}/products/DOGE-USD/candles?granularity=900`, run, { live: true });
+  expect(liveStop.headers.get("x-p6-budget")).toBe("hard");
+  expect(isCold("DOGE-USD", run)).toBe(false);
+  expect(isCold("BTC-USD", run)).toBe(false);
+  expect(restStats(run).n).toBe(REST_HARD_CAP);
 });
 
 test("no raw fetch( outside rest-limit.ts", () => {

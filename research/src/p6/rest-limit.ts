@@ -10,6 +10,13 @@ export const REST_MAX_ATTEMPTS = 5;
 export const REST_HARD_CAP = 400;
 export const REST_RESERVE = 150;
 export const SEED_BUDGET = REST_HARD_CAP - REST_RESERVE;
+/** Live 15m confirms keep this many requests after every other call has stopped. */
+export const LIVE_FLOOR = 50;
+/** /trades and 1m candle backfill keep this many after books and catch-up stop. */
+export const BACKFILL_RESERVE = 50;
+export const BACKFILL_CAP = REST_HARD_CAP - LIVE_FLOOR;
+/** Books, catch-up, and hour deltas stop here. Seed stops earlier, at SEED_BUDGET. */
+export const OPERATING_CAP = BACKFILL_CAP - BACKFILL_RESERVE;
 export const REST_DEADLINE_MARGIN_MS = 90_000;
 export const REST_JITTER_CAP_MS = 8_000;
 
@@ -169,18 +176,21 @@ export function seedBudgetStopped(response: Pick<Response, "headers">): boolean 
   return response.headers.get("x-p6-budget") === "seed";
 }
 
-async function once(state: RestRun, url: string, seed: boolean, mark: boolean): Promise<Response> {
+function budgetStop(kind: "reserve" | "hard"): Response {
+  return new Response("", { status: 429, headers: { "x-p6-budget": kind } });
+}
+
+async function once(state: RestRun, url: string, seed: boolean, mark: boolean, live: boolean, backfill: boolean): Promise<Response> {
   const product = productIdFromUrl(url);
   if (seed && state.seedUsed >= state.seedBudget) return seedStopped();
   let last: Response | null = null;
   for (let attempt = 0; attempt < REST_MAX_ATTEMPTS; attempt += 1) {
     const now = state.deps.now();
     if (now >= state.deps.deadlineMs() - REST_DEADLINE_MARGIN_MS) break;
-    if (seed && state.seedUsed >= state.seedBudget) return seedStopped();
-    if (state.stats.n >= REST_HARD_CAP) {
-      if (product) markCold(product, state, "cap");
-      return last ?? new Response("", { status: 429 });
-    }
+    if (seed && (state.seedUsed >= state.seedBudget || state.stats.n >= state.seedBudget)) return seedStopped();
+    if (!live && !backfill && state.stats.n >= OPERATING_CAP) return budgetStop("reserve");
+    if (!live && state.stats.n >= BACKFILL_CAP) return budgetStop("reserve");
+    if (state.stats.n >= REST_HARD_CAP) return budgetStop("hard");
     await takeToken(state);
     state.stats.n += 1;
     if (seed) state.seedUsed += 1;
@@ -212,11 +222,13 @@ async function once(state: RestRun, url: string, seed: boolean, mark: boolean): 
 }
 
 /** Serial on this run. A second run has its own lane. `cold: false` still returns a 4xx and does not retry it. */
-export function limited(url: string, run?: RestRun, opts?: { seed?: boolean; cold?: boolean }): Promise<Response> {
+export function limited(url: string, run?: RestRun, opts?: { seed?: boolean; cold?: boolean; live?: boolean; backfill?: boolean }): Promise<Response> {
   const state = runOf(run);
   const seed = opts?.seed === true;
   const mark = opts?.cold !== false;
-  const task = state.lane.then(() => once(state, url, seed, mark));
+  const live = opts?.live === true;
+  const backfill = opts?.backfill === true;
+  const task = state.lane.then(() => once(state, url, seed, mark, live, backfill));
   state.lane = task.then(
     () => undefined,
     () => undefined,
@@ -225,6 +237,6 @@ export function limited(url: string, run?: RestRun, opts?: { seed?: boolean; col
 }
 
 /** Default transport for the public market-data call sites. Pass the host's run. */
-export function coinbaseGet(url: string, run?: RestRun, opts?: { seed?: boolean; cold?: boolean }): Promise<Response> {
+export function coinbaseGet(url: string, run?: RestRun, opts?: { seed?: boolean; cold?: boolean; live?: boolean; backfill?: boolean }): Promise<Response> {
   return limited(url, run, opts);
 }

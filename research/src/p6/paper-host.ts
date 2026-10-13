@@ -1748,6 +1748,7 @@ export async function catchUpHistory(
     for (const span of planHistorySpans(cursor, newest)) {
       try {
         const response = await get(fifteenMinuteUrl(productId, span.startSec, span.endSec));
+        if (budgetHit(response)) break;
         if (response.status === 429 || !response.ok) {
           host.book.incidents.push(`history rest ${productId} ${span.startSec} ${response.status}`);
           markCold(productId, host.restRun, response.status === 429 ? "retries" : `http-${response.status}`);
@@ -1774,7 +1775,7 @@ export async function catchUpHistory(
 
 export async function fetchRestBar(productId: string, startSec: number, run?: RestRun): Promise<RestRead> {
   try {
-    const response = await coinbaseGet(fifteenMinuteUrl(productId, startSec, startSec), run);
+    const response = await coinbaseGet(fifteenMinuteUrl(productId, startSec, startSec), run, { live: true });
     if (response.status === 429) return { bar: null, status: 429, retryAfterMs: retryAfterMs(response.headers.get("retry-after")) };
     if (!response.ok) return { bar: null, status: response.status, retryAfterMs: 0 };
     const rows = (await response.json()) as number[][];
@@ -2179,7 +2180,7 @@ function hostGet(host: PaperHost, seed = false): (url: string) => Promise<Respon
 
 /** Tape and 1m backfill. A miss does not mark the product cold. */
 function backfillGet(host: PaperHost): (url: string) => Promise<Response> {
-  return (url) => coinbaseGet(url, host.restRun, { cold: false });
+  return (url) => coinbaseGet(url, host.restRun, { cold: false, backfill: true });
 }
 
 function latestTs(rows: readonly { ts: number }[]): number {
@@ -2364,8 +2365,9 @@ export function seedMarkKey(productId: string): string {
 
 type SeedFetch = (url: string) => Promise<Pick<Response, "status" | "ok" | "json"> & { headers?: { get(name: string): string | null } }>;
 
-function budgetHit(response: { headers?: { get(name: string): string | null } }): boolean {
-  return response.headers?.get("x-p6-budget") === "seed";
+function budgetHit(response: { status?: number; headers?: { get(name: string): string | null } }): boolean {
+  const kind = response.headers?.get("x-p6-budget");
+  return kind === "seed" || kind === "reserve" || kind === "hard";
 }
 
 async function countedSeedFetch(host: PaperHost, url: string, fetchImpl: SeedFetch): Promise<Awaited<ReturnType<SeedFetch>>> {
@@ -2477,6 +2479,7 @@ export async function backfillTapeIfNeeded(
   }
   host.tapeHole = false;
   markOrdersBeforeTape(host);
+  console.log(`tape backfill from=${from} to=${nowSec} prints=${host.trades.length} minutes=${host.book.mids.completed.length}`);
 }
 
 /** Orders placed before the restored tape, or before the 10-minute warm window when the tape is empty. */
