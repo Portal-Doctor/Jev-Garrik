@@ -2225,7 +2225,7 @@ export async function seedBudgeted(host: PaperHost, fetchImpl?: SeedFetch): Prom
   const order = host.seedCursor.order;
   for (let index = 0; index < host.seedCursor.idx && index < order.length; index += 1) {
     const prior = order[index]!;
-    if (host.seedMarks.get(prior)?.status === "warm") await seedHourDelta(host, prior, fetchImpl);
+    if (storedSeriesWarm(host, prior)) await seedHourDelta(host, prior, fetchImpl);
   }
   let added = 0;
   while (host.seedCursor.idx < order.length) {
@@ -2233,12 +2233,12 @@ export async function seedBudgeted(host: PaperHost, fetchImpl?: SeedFetch): Prom
     if (host.restRun.seedBudget - host.restRun.seedUsed < SEED_REQUESTS_PER_PRODUCT) break;
     const productId = order[host.seedCursor.idx]!;
     const mark = host.seedMarks.get(productId);
-    if (mark?.status === "warm") {
-      await seedHourDelta(host, productId, fetchImpl);
+    if (mark?.status === "cold" && mark.reason !== "retries" && mark.reason !== "cap") {
       host.seedCursor.idx += 1;
       continue;
     }
-    if (mark?.status === "cold" && mark.reason !== "retries" && mark.reason !== "cap") {
+    if (storedSeriesWarm(host, productId)) {
+      await seedHourDelta(host, productId, fetchImpl);
       host.seedCursor.idx += 1;
       continue;
     }
@@ -2337,6 +2337,24 @@ async function seedHourDelta(host: PaperHost, productId: string, fetchImpl?: See
   host.seedMarks.set(productId, { ...mark, newestTs: newest });
 }
 
+/** Warm, or a stored contiguous tail of FOUR_KEEP bars. Either one skips a full re-fetch. */
+function storedSeriesWarm(host: PaperHost, productId: string): boolean {
+  const mark = host.seedMarks.get(productId);
+  if (mark?.status === "cold") return false;
+  const bars = host.fourBars.get(productId) ?? [];
+  if (fourSeriesReady(bars) && mark?.status !== "warm") {
+    const tail = contiguousTail(bars, FOUR_STEP_SEC);
+    host.seedMarks.set(productId, {
+      oldestTs: mark?.oldestTs || tail[0]?.ts || 0,
+      newestTs: mark?.newestTs || tail[tail.length - 1]?.ts || 0,
+      status: "warm",
+      reason: "seeded",
+    });
+    host.fourFlushed.add(productId);
+  }
+  return mark?.status === "warm" || fourSeriesReady(bars);
+}
+
 /** Bars walking backward from the newest, each exactly `stepSec` after the previous. A hole ends the tail. */
 export function contiguousTail<T extends { ts: number }>(bars: readonly T[], stepSec: number): T[] {
   if (bars.length === 0) return [];
@@ -2351,6 +2369,11 @@ export function contiguousTail<T extends { ts: number }>(bars: readonly T[], ste
 }
 
 const FOUR_STEP_SEC = 14_400;
+
+/** The contiguous 4h tail is long enough to trade. A hole keeps the series short. */
+export function fourSeriesReady(bars: readonly { ts: number }[]): boolean {
+  return contiguousTail(bars, FOUR_STEP_SEC).length >= FOUR_KEEP;
+}
 const HOUR_SEC = 3_600;
 const DAY_SEC = 86_400;
 const REST_HOUR_PAGE = 300 * HOUR_SEC;

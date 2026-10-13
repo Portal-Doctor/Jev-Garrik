@@ -7,6 +7,7 @@ import type { BarOHLC } from "../p3/signals";
 import { paperPnl } from "./engine";
 import {
   FOUR_KEEP,
+  fourSeriesReady,
   HOUR_KEEP,
   SEED_CURSOR_KEY,
   seedMarkKey,
@@ -499,24 +500,50 @@ function noteValue(host: PaperHost, value: string): void {
   if (bytes > host.maxValueBytes) host.maxValueBytes = bytes;
 }
 
+/**
+ * Marks to publish with this flush. This does not change host.seedMarks.
+ * A warm mark is published only when its 4h bars are in this same write, or were committed earlier.
+ * A full series whose bars are not in this write is left untouched, so a flush cannot store `short` over it.
+ */
 function marksForFlush(host: PaperHost, barKeys: ReadonlySet<string>): [string, SeedMark][] {
   const out: [string, SeedMark][] = [];
   for (const [id, mark] of host.seedMarks) {
-    if (mark.status !== "warm") {
+    if (mark.status === "cold") {
       out.push([id, mark]);
       continue;
     }
-    const series = host.fourBars.get(id) ?? [];
-    const withBars = barKeys.has(bar4hKey(id)) || host.fourFlushed.has(id);
-    if (!withBars || series.length < FOUR_KEEP) {
-      const short: SeedMark = { ...mark, status: "short", reason: "short" };
-      host.seedMarks.set(id, short);
+    const ready = fourSeriesReady(host.fourBars.get(id) ?? []);
+    const committed = barKeys.has(bar4hKey(id)) || host.fourFlushed.has(id);
+    if (ready && committed) {
+      const warm: SeedMark = mark.status === "warm" ? mark : { ...mark, status: "warm", reason: "seeded" };
+      out.push([id, warm]);
+      continue;
+    }
+    if (!ready) {
+      const short: SeedMark = mark.status === "short" ? mark : { ...mark, status: "short", reason: "short" };
       out.push([id, short]);
       continue;
     }
-    out.push([id, mark]);
   }
   return out;
+}
+
+/** Warm marks whose 4h bars have already been committed. This is the count Redis holds after a flush. */
+export function warmReadyCount(host: PaperHost): number {
+  let count = 0;
+  for (const [id, mark] of host.seedMarks) {
+    if (mark.status !== "warm" || !host.fourFlushed.has(id)) continue;
+    if (fourSeriesReady(host.fourBars.get(id) ?? [])) count += 1;
+  }
+  return count;
+}
+
+function promoteFlushed(host: PaperHost, productId: string): void {
+  host.fourFlushed.add(productId);
+  const mark = host.seedMarks.get(productId);
+  if (!mark || mark.status === "cold" || mark.status === "warm") return;
+  if (!fourSeriesReady(host.fourBars.get(productId) ?? [])) return;
+  host.seedMarks.set(productId, { ...mark, status: "warm", reason: "seeded" });
 }
 
 function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>): { key: string; value: string }[] {
@@ -671,9 +698,17 @@ async function writeGroupedBars(kv: Kv, host: PaperHost, plan: FlushPlan): Promi
       continue;
     }
     await writeOwned(kv, host, key, encoded, group.px > 0 ? group.px : undefined);
-    if (key.startsWith("p6:bar4h:") && trimmed.length >= FOUR_KEEP) host.fourFlushed.add(key.slice("p6:bar4h:".length));
     host.saveCommands += 1;
     host.saveBytes += Buffer.byteLength(encoded);
+    if (!key.startsWith("p6:bar4h:") || !fourSeriesReady(trimmed as { ts: number }[])) continue;
+    const productId = key.slice("p6:bar4h:".length);
+    promoteFlushed(host, productId);
+    const mark = host.seedMarks.get(productId);
+    if (!mark || mark.status !== "warm") continue;
+    const markJson = JSON.stringify(mark);
+    await writeOwned(kv, host, seedMarkKey(productId), markJson);
+    host.saveCommands += 1;
+    host.saveBytes += Buffer.byteLength(markJson);
   }
 }
 
@@ -711,7 +746,9 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
     for (const minute of plan.minutes) host.tapeWritten.add(minute);
     const flushed = JSON.parse(plan.payload) as { bars?: { key: string }[] };
     for (const bar of flushed.bars ?? []) {
-      if (bar.key.startsWith("p6:bar4h:")) host.fourFlushed.add(bar.key.slice("p6:bar4h:".length));
+      if (!bar.key.startsWith("p6:bar4h:")) continue;
+      const productId = bar.key.slice("p6:bar4h:".length);
+      if (fourSeriesReady(host.fourBars.get(productId) ?? [])) promoteFlushed(host, productId);
     }
     host.closingMarks = host.closingMarks.filter((bar) => !host.persistedBars.has(`bar:${bar.productId}:${bar.startSec}`));
     host.saveCommands += 1;
@@ -815,14 +852,22 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
     }
     for (const productId of products) {
       const raw = byKey.get(seedMarkKey(productId)) ?? null;
-      if (!raw) continue;
-      const mark = JSON.parse(raw) as SeedMark;
       const bars = fourBars.find(([id]) => id === productId)?.[1] ?? [];
-      if (mark.status === "warm" && bars.length < FOUR_KEEP) {
+      const ready = fourSeriesReady(bars);
+      if (!raw) {
+        if (!ready) continue;
+        const newest = bars[bars.length - 1]!.ts;
+        const oldest = bars[0]!.ts;
+        host.seedMarks.set(productId, { oldestTs: oldest, newestTs: newest, status: "warm", reason: "seeded" });
+        host.fourFlushed.add(productId);
+        continue;
+      }
+      const mark = JSON.parse(raw) as SeedMark;
+      if (mark.status === "warm" && !ready) {
         host.seedMarks.set(productId, { ...mark, status: "short", reason: "short" });
         continue;
       }
-      if (mark.status !== "cold" && bars.length >= FOUR_KEEP) {
+      if (mark.status !== "cold" && ready) {
         host.seedMarks.set(productId, { ...mark, status: "warm", reason: mark.status === "warm" ? mark.reason : "seeded" });
         host.fourFlushed.add(productId);
         continue;

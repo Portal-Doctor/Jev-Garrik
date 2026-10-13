@@ -1,16 +1,18 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "bun:test";
 import type { MinuteRow } from "../data/candles";
+import { rootHash } from "../data/hash";
+import { scanCandleFiles } from "../data/manifest-file";
 import { deriveBars } from "../data/derive";
 import { readPairMonth } from "../data/store";
 import { ema, wilderAtr } from "../p2/indicators";
 import type { SourceDay } from "../p3/bar-access";
 import type { DailyBar } from "../p3/classes";
 import { classCSetups, type BarOHLC } from "../p3/signals";
-import { vetoFromBtc } from "./generate";
-import { FOUR_KEEP } from "./warm-caps";
+import { hourAtrAt, vetoFromBtc } from "./generate";
+import { FOUR_KEEP, HOUR_KEEP } from "./warm-caps";
 
 /** Frozen offline candle snapshot. The files are gitignored; the hash is not. */
 const SNAPSHOT_HASH = "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8";
@@ -44,10 +46,11 @@ function priceOf(value: string | null): number {
   return Number(value);
 }
 
-test("the pin names the frozen candle snapshot hash", () => {
-  const manifest = JSON.parse(readFileSync(new URL("../../data/data-manifest.json", import.meta.url), "utf8")) as { dataRootHash: string };
-  expect(manifest.dataRootHash).toBe(SNAPSHOT_HASH);
-  if (!storePresent) console.log("pin table not measured: research/data/candles/BTC-USD is absent");
+test.skipIf(!storePresent)("the pin checks the candle store hash on disk", () => {
+  const dataDir = fileURLToPath(new URL("../../data", import.meta.url));
+  const files = scanCandleFiles(dataDir);
+  expect(files.length).toBeGreaterThan(0);
+  expect(rootHash(files)).toBe(SNAPSHOT_HASH);
 });
 
 test.skipIf(!storePresent)("capped 4h bars match full history over the last 7 days", () => {
@@ -73,8 +76,16 @@ test.skipIf(!storePresent)("capped 4h bars match full history over the last 7 da
     const capEma200 = ema(cap.map((bar) => bar.close), 200);
     const fullEma50 = ema(full.map((bar) => bar.close), 50);
     const capEma50 = ema(cap.map((bar) => bar.close), 50);
-    const fullAtr = wilderAtr(full.map((bar) => bar.high), full.map((bar) => bar.low), full.map((bar) => bar.close), 14);
-    const capAtr = wilderAtr(cap.map((bar) => bar.high), cap.map((bar) => bar.low), cap.map((bar) => bar.close), 14);
+    const hourFull = deriveBars(minutes, "1h", first, WINDOW_END)
+      .filter((bar) => !bar.empty && bar.close != null && bar.high != null && bar.low != null && bar.open != null)
+      .map((bar) => ({
+        ts: bar.openTs,
+        open: priceOf(bar.open),
+        high: priceOf(bar.high),
+        low: priceOf(bar.low),
+        close: priceOf(bar.close),
+        volume: priceOf(bar.volume),
+      }));
     const ema200Diffs: number[] = [];
     const ema50Diffs: number[] = [];
     const atrDiffs: number[] = [];
@@ -98,14 +109,16 @@ test.skipIf(!storePresent)("capped 4h bars match full history over the last 7 da
       const d50 = bps(e50c, e50f);
       ema200Diffs.push(d200);
       ema50Diffs.push(d50);
-      if (d200 < 1 && 1 - d200 < 1) flags.push(`ema200 ${bar.ts} margin ${(1 - d200).toFixed(4)}bp`);
-      if (d50 < 0.1 && 0.1 - d50 < 1) flags.push(`ema50 ${bar.ts} margin ${(0.1 - d50).toFixed(4)}bp`);
-      const atrF = fullAtr[fullAt];
-      const atrC = capAtr[capAt!];
-      if (atrF != null && atrC != null && atrF > 0) {
+      if (d200 < 1 && 1 - d200 < 0.05) flags.push(`ema200 ${bar.ts} margin ${(1 - d200).toFixed(4)}bp`);
+      if (d50 < 0.1 && 0.1 - d50 < 0.02) flags.push(`ema50 ${bar.ts} margin ${(0.1 - d50).toFixed(4)}bp`);
+      const decisionTs = bar.ts + 14_400;
+      const visible = hourFull.filter((hour) => hour.ts + 3_600 <= decisionTs);
+      const atrF = hourAtrAt(visible, decisionTs);
+      const atrC = hourAtrAt(visible.slice(-HOUR_KEEP), decisionTs);
+      if (atrF > 0) {
         const rel = Math.abs(atrC - atrF) / atrF;
         atrDiffs.push(rel);
-        expect(rel, `${productId} atr ${bar.ts}`).toBeLessThan(0.005);
+        expect(rel, `${productId} atr1h ${bar.ts}`).toBeLessThan(0.005);
       }
       const fullBits = [bar.close > e50f, bar.close > e200f, e50f > e200f, bar.close < e50f];
       const capBits = [bar.close > e50c, bar.close > e200c, e50c > e200c, bar.close < e50c];

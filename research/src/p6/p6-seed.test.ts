@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { memoryKv } from "./relay";
-import { LAST_RUN_KEY, loadSplit, persistSplit } from "./hot-store";
+import { LAST_RUN_KEY, loadSplit, persistSplit, warmReadyCount } from "./hot-store";
 import { SEED_BUDGET } from "./rest-limit";
 import { hostHolder } from "./vercel-live";
 import { acceptRestBar, backfillTapeIfNeeded, installPaperState, seedBudgeted, seedFourHours, seedMarkKey, SEED_PRODUCTS_PER_RUN, SEED_REQUESTS_PER_PRODUCT, startPaperHost } from "./paper-host";
@@ -211,6 +211,7 @@ test("a warm mark without FOUR_KEEP bars is stored short and the next run reseed
   await persistSplit(kv, host);
   const stored = JSON.parse((await kv.get(seedMarkKey("BCH-USD"))) ?? "{}") as { status: string };
   expect(stored.status).toBe("short");
+  expect(host.seedMarks.get("BCH-USD")?.status).toBe("warm");
   await kv.set(seedMarkKey("BCH-USD"), JSON.stringify({ oldestTs: 1, newestTs: 3_600, status: "warm", reason: "seeded" }));
   await kv.del("p6:bar4h:BCH-USD");
   const next = startPaperHost(["BCH-USD"], {});
@@ -255,6 +256,7 @@ test("a flush that splits past 1 MB still marks a full 4h series warm", async ()
   const bars = JSON.parse((await kv.get("p6:bar4h:BTC-USD")) ?? "[]") as unknown[];
   expect(bars).toHaveLength(1000);
   expect(stored.status).toBe("warm");
+  expect(host.seedMarks.get("BTC-USD")?.status).toBe("warm");
   expect(host.saveCommands).toBeGreaterThan(1);
   await kv.set(seedMarkKey("BTC-USD"), JSON.stringify({ oldestTs: 0, newestTs: rows[rows.length - 1]!.ts, status: "short", reason: "short" }));
   const again = startPaperHost(["BTC-USD"], {});
@@ -289,3 +291,124 @@ test("bars accepted while sampling are reported", () => {
   acceptRestBar(host, { productId: "BTC-USD", startSec: 1_700_000_000, open: 1, high: 1, low: 1, close: 1, volume: 1 });
   expect(holder.appliedDuringRun()).toEqual(["BTC-USD:1700000000"]);
 });
+
+function seededCandles(url: string) {
+  const parsed = new URL(url);
+  const gran = Number(parsed.searchParams.get("granularity"));
+  const start = Number(parsed.searchParams.get("start"));
+  const end = Number(parsed.searchParams.get("end"));
+  if (gran === 86_400) return { ok: true, status: 200, json: async () => [candle(start)] };
+  const rows: number[][] = [];
+  for (let ts = start; ts <= end && rows.length < 300; ts += 3_600) rows.push(candle(ts));
+  return { ok: true, status: 200, json: async () => rows };
+}
+
+/** One product's 4h JSON is near 1 MB, so a run of 13 splits the flush. */
+function widenFourBars(host: ReturnType<typeof startPaperHost>): void {
+  const pad = "x".repeat(900);
+  for (const [id, rows] of host.fourBars) {
+    host.fourBars.set(
+      id,
+      rows.map((bar) => ({ ...bar, pad })) as typeof rows,
+    );
+  }
+}
+
+async function redisWarm(kv: ReturnType<typeof memoryKv>, ids: readonly string[]): Promise<number> {
+  let warm = 0;
+  for (const id of ids) {
+    const raw = await kv.get(seedMarkKey(id));
+    if (!raw) continue;
+    if ((JSON.parse(raw) as { status: string }).status === "warm") warm += 1;
+  }
+  return warm;
+}
+
+test("a split flush across four runs seeds about 13 products a run and all 50 are warm", async () => {
+  const ids = Array.from({ length: 50 }, (_, index) => `P${String(index).padStart(2, "0")}-USD`);
+  const kv = memoryKv(() => NOW);
+  const added: number[] = [];
+  const warmLog: number[] = [];
+  const warmRedis: number[] = [];
+  for (let run = 0; run < 4; run += 1) {
+    const host = startPaperHost(ids, {});
+    host.clock = () => NOW;
+    if (run > 0) {
+      const saved = await loadSplit(kv, host);
+      expect(saved).toBeTruthy();
+      installPaperState(host, saved!);
+    }
+    const before = host.seedCursor.idx;
+    await seedBudgeted(host, async (url) => seededCandles(url));
+    widenFourBars(host);
+    host.warmupStored = true;
+    const commands = host.saveCommands;
+    await persistSplit(kv, host);
+    expect(host.saveCommands - commands).toBeGreaterThan(1);
+    expect(host.book.incidents.some((row) => row.includes("exceeds 1 MB"))).toBe(false);
+    const logged = warmReadyCount(host);
+    const stored = await redisWarm(kv, ids);
+    const last = JSON.parse((await kv.get(LAST_RUN_KEY)) ?? "{}") as { warm: number };
+    expect(logged).toBe(stored);
+    expect(last.warm).toBe(stored);
+    for (const [id, mark] of host.seedMarks) {
+      if ((host.fourBars.get(id)?.length ?? 0) < 1000) continue;
+      expect(mark.status).toBe("warm");
+      const raw = JSON.parse((await kv.get(seedMarkKey(id))) ?? "{}") as { status: string };
+      expect(raw.status).toBe("warm");
+    }
+    added.push(host.seedCursor.idx - before);
+    warmLog.push(logged);
+    warmRedis.push(stored);
+  }
+  expect(added).toEqual([13, 13, 13, 11]);
+  expect(warmLog).toEqual([13, 26, 39, 50]);
+  expect(warmRedis).toEqual([13, 26, 39, 50]);
+}, 60_000);
+
+test("taking the lease reloads marks and does not refetch a stored 1000-bar series", async () => {
+  const ids = Array.from({ length: 50 }, (_, index) => `P${String(index).padStart(2, "0")}-USD`);
+  const kv = memoryKv(() => NOW);
+  const seedOnce = async () => {
+    const host = startPaperHost(ids, {});
+    host.clock = () => NOW;
+    const saved = await loadSplit(kv, host);
+    if (saved) installPaperState(host, saved);
+    await seedBudgeted(host, async (url) => seededCandles(url));
+    widenFourBars(host);
+    host.warmupStored = true;
+    await persistSplit(kv, host);
+    return host;
+  };
+  await seedOnce();
+  const watcher = startPaperHost(ids, {});
+  watcher.clock = () => NOW;
+  const holder = hostHolder(watcher, kv);
+  await holder.warm();
+  expect(watcher.seedCursor.idx).toBe(13);
+  const second = await seedOnce();
+  expect(second.seedCursor.idx).toBe(26);
+  const poisoned = second.seedCursor.order.slice(13, 26);
+  for (const id of poisoned) {
+    const mark = JSON.parse((await kv.get(seedMarkKey(id))) ?? "{}") as { status: string };
+    expect(mark.status).toBe("warm");
+    await kv.set(seedMarkKey(id), JSON.stringify({ ...mark, status: "short", reason: "short" }));
+    expect(watcher.seedMarks.get(id)?.status).not.toBe("warm");
+  }
+  await holder.reload();
+  expect(watcher.seedCursor.idx).toBe(26);
+  for (const id of poisoned) {
+    expect(watcher.seedMarks.get(id)?.status).toBe("warm");
+    expect(watcher.fourBars.get(id)?.length ?? 0).toBeGreaterThanOrEqual(1000);
+  }
+  const calls = new Map<string, number>();
+  await seedBudgeted(watcher, async (url) => {
+    const id = new URL(url).pathname.split("/")[2] ?? "";
+    calls.set(id, (calls.get(id) ?? 0) + 1);
+    return seededCandles(url);
+  });
+  for (const id of poisoned) expect(calls.get(id) ?? 0).toBeLessThanOrEqual(1);
+  const reseeded = [...calls.entries()].filter(([, n]) => n > 2);
+  expect(reseeded).toHaveLength(13);
+  expect(watcher.seedCursor.idx).toBe(39);
+}, 60_000);

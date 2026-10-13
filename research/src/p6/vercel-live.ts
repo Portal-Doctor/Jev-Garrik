@@ -4,7 +4,7 @@
  */
 
 import type { SourceDay } from "../p3/bar-access";
-import { loadSplit, persistSplit, warmupKey } from "./hot-store";
+import { loadSplit, persistSplit, warmReadyCount, warmupKey } from "./hot-store";
 import { acceptRestBar, attachMemberCloses, backfillTapeIfNeeded, catchUpHistory, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
 import { createRestRun, restLogLine } from "./rest-limit";
 import type { OhlcvBar } from "./rest-bars";
@@ -74,6 +74,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       attachMemberCloses(host);
     },
     async reload() {
+      host.seedChecked = false;
       const saved = await loadSplit(kv, host);
       if (!saved) return;
       installPaperState(host, saved);
@@ -157,7 +158,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
         });
       } finally {
         const cold = [...host.seedMarks.entries()].filter(([, mark]) => mark.status === "cold").map(([id, mark]) => ({ id, reason: mark.reason }));
-        const warm = [...host.seedMarks.values()].filter((mark) => mark.status === "warm").length;
+        const warm = warmReadyCount(host);
         console.log(`redis cmds=${host.saveCommands}, bytes=${host.saveBytes}, duplicates=${host.duplicateAppends}`);
         console.log(restLogLine(host.restRun, { warm, total: host.products.length, seedIdx: host.seedCursor.idx, cold }));
       }
