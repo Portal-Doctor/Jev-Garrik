@@ -5,10 +5,10 @@
 
 import type { SourceDay } from "../p3/bar-access";
 import { loadSplit, persistSplit, warmupKey } from "./hot-store";
-import { acceptRestBar, attachMemberCloses, catchUpHistory, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
+import { acceptRestBar, attachMemberCloses, backfillTapeIfNeeded, catchUpHistory, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
+import { beginRestRun, restLogLine } from "./rest-limit";
 import type { OhlcvBar } from "./rest-bars";
 import {
-  barMarker,
   commitBar,
   cronAuthorized,
   dashboard,
@@ -16,7 +16,6 @@ import {
   HOT_KEY,
   LEASE_KEY,
   MAX_DURATION_MS,
-  renewLease,
   runInvocation,
   WARMUP_KEY,
   type Dashboard,
@@ -33,27 +32,20 @@ export function leasePollWaitMs(nowMs: number, releaseAtMs: number): number {
   return nowMs >= releaseAtMs - LEASE_POLL_FAST_BEFORE_MS ? LEASE_POLL_FAST_MS : LEASE_POLL_SLOW_MS;
 }
 
-/** Lease-checked hot write plus appends. The warmup key is not read on this path. */
+/** One lease-checked flush. Bar markers ride in that same EVAL. */
 export async function persistRun(kv: Kv, host: PaperHost): Promise<void> {
-  const pending = host.fifteen.slice();
-  host.fifteen = retainFifteens(host.fifteen, Math.floor(host.clock() / 1000));
-  await persistSplit(kv, host);
-  const seen = new Set<string>();
-  for (const bar of pending) {
-    const key = `${bar.productId}:${bar.startSec}`;
-    if (seen.has(key) || host.persistedBars.has(`bar:${key}`)) continue;
-    seen.add(key);
-    host.persistedBars.add(`bar:${key}`);
-    try {
-      const result = await commitBar(kv, bar.productId, bar.startSec);
-      host.saveCommands += 1;
-      host.saveBytes += Buffer.byteLength(barMarker(bar.productId, bar.startSec));
-      if (result !== "applied" && result !== "duplicate") host.persistedBars.delete(`bar:${key}`);
-    } catch (error) {
-      host.persistedBars.delete(`bar:${key}`);
-      throw error;
-    }
+  const nowSec = Math.floor(host.clock() / 1000);
+  const kept = retainFifteens(host.fifteen, nowSec);
+  const keptIds = new Set(kept.map((bar) => `${bar.productId}:${bar.startSec}`));
+  for (const bar of host.fifteen) {
+    const id = `${bar.productId}:${bar.startSec}`;
+    if (keptIds.has(id)) continue;
+    if (host.persistedBars.has(`bar:${id}`)) continue;
+    if (host.closingMarks.some((row) => row.productId === bar.productId && row.startSec === bar.startSec)) continue;
+    host.closingMarks.push({ productId: bar.productId, startSec: bar.startSec });
   }
+  host.fifteen = kept;
+  await persistSplit(kv, host);
 }
 
 function rememberPersistedBars(host: PaperHost): void {
@@ -71,12 +63,12 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
   sampleUntil(untilMs: number): Promise<void>;
   watchUntil(untilMs: number): Promise<void>;
 } {
+  host.kv = kv;
   return {
     async warm() {
       const saved = await loadSplit(kv, host);
       if (saved) installPaperState(host, saved);
       await loadWarmup(kv, host);
-      markOrdersBeforeTape(host);
       rememberPersistedBars(host);
       if (host.restWarm && (host.warmup.size === 0 || [...host.products].some((id) => (host.hourWarm.get(id)?.length ?? 0) === 0 || (host.fourBars.get(id)?.length ?? 0) < 200))) {
         await warmSeriesFromRest(host);
@@ -88,7 +80,6 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       const saved = await loadSplit(kv, host);
       if (!saved) return;
       installPaperState(host, saved);
-      markOrdersBeforeTape(host);
       rememberPersistedBars(host);
       attachMemberCloses(host);
     },
@@ -114,6 +105,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       return persistRun(kv, host);
     },
     recordGap(gap) {
+      if (gap.cause === "crash" || gap.cause === "kill") host.tapeHole = true;
       if (gap.cause === "save failed") {
         host.gaps.push({ ...gap, cause: "uncovered" });
         host.book.incidents.push("save failed");
@@ -134,28 +126,25 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
     async sampleUntil(untilMs: number) {
       const lease = decodeLease(await kv.get(LEASE_KEY));
       if (lease?.token) host.leaseToken = lease.token;
-      return driveHost(host, untilMs, {
-        persist: () => persistRun(kv, host),
-        onBar: async (bar) => {
-          const result = await commitBar(kv, bar.productId, bar.startSec);
-          if (result === "applied" || result === "duplicate") host.persistedBars.add(`bar:${bar.productId}:${bar.startSec}`);
-        },
-        heartbeat: async () => {
-          if (host.leaseToken) {
-            const renewed = await renewLease(kv, host.clock(), host.leaseToken ?? undefined);
-            if (!renewed) {
-              host.stopped = true;
-              host.book.incidents.push("lease lost");
-              return;
+      if (host.tapeHole) await backfillTapeIfNeeded(host);
+      else markOrdersBeforeTape(host);
+      try {
+        await driveHost(host, untilMs, {
+          persist: () => persistRun(kv, host),
+          heartbeat: async () => {
+            try {
+              await persistRun(kv, host);
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : "failed";
+              host.book.incidents.push(message.startsWith("kv set") || message.includes("lease lost") ? message : `kv set ${message}`);
+              if (message.includes("lease lost")) host.stopped = true;
             }
-          }
-          void persistRun(kv, host).catch((error: unknown) => {
-            const message = error instanceof Error ? error.message : "failed";
-            host.book.incidents.push(message.startsWith("kv set") || message.includes("lease lost") ? message : `kv set ${message}`);
-            if (message.includes("lease lost")) host.stopped = true;
-          });
-        },
-      });
+          },
+        });
+      } finally {
+        console.log(`redis cmds=${host.saveCommands}, bytes=${host.saveBytes}, duplicates=${host.duplicateAppends}`);
+        console.log(restLogLine());
+      }
     },
     watchUntil(untilMs: number) {
       host.bufferFeeds = true;
@@ -178,7 +167,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
 async function loadWarmup(kv: Kv, host: PaperHost): Promise<void> {
   const missing = [...new Set([...host.products, "BTC-USD"])].filter((id) => (host.warmup.get(id)?.length ?? 0) === 0);
   if (missing.length === 0) return;
-  const values = await Promise.all(missing.map((id) => kv.get(warmupKey(id))));
+  const values = await kv.mget(missing.map((id) => warmupKey(id)));
   missing.forEach((id, index) => {
     const raw = values[index];
     if (!raw) return;
@@ -262,6 +251,7 @@ export async function handleEngineRequest(
   if (request.method !== "GET" && request.method !== "POST") return new Response("method", { status: 405 });
   const nowMs = deps?.nowMs ?? Date.now();
   const deadlineMs = deps?.deadlineMs ?? nowMs + MAX_DURATION_MS;
+  beginRestRun(deadlineMs);
   const self = deps?.self ?? `cron-${nowMs}`;
   const host = deps?.holder ? null : startPaperHost((env.P6_PRODUCTS ?? "BTC-USD").split(",").filter(Boolean), env);
   if (host) host.restWarm = true;

@@ -68,6 +68,13 @@ export function productBookUrl(productId: string): string {
   return url;
 }
 
+/** Public trades. Used only to rebuild a tape hole of at most two minutes. */
+export function productTradesUrl(productId: string, limit = 1000): string {
+  const url = `https://api.exchange.coinbase.com/products/${encodeURIComponent(productId)}/trades?limit=${limit}`;
+  assertMarketDataUrl(url);
+  return url;
+}
+
 /** Public level-2 book. A takeover rebuilds the full price ladder from this, then resyncs. */
 export function productBookLevel2Url(productId: string): string {
   const url = `https://api.exchange.coinbase.com/products/${encodeURIComponent(productId)}/book?level=2`;
@@ -113,6 +120,7 @@ export interface TradePrint {
   tsSec: number;
   price: number;
   size: number;
+  side?: string;
 }
 
 /** 15m bars built from trades. A cross-check and a fallback, not the signal source. */

@@ -46,6 +46,12 @@ export interface Kv {
     member: string,
     opts: { id: string; field: string; max?: number; px?: number },
   ): Promise<number>;
+  /** One EVAL: check the lease token, renew it, then write the flush. 1 applied, 0 lost, 3 over 1 MB (nothing written). */
+  ownedFlush(leaseKey: string, token: string, nowMs: number, payload: string): Promise<number>;
+  /** One command for many string keys. */
+  mget(keys: string[]): Promise<(string | null)[]>;
+  /** One command. Each entry is the JSON text of one list element, oldest first. */
+  readLists(keys: string[]): Promise<string[][]>;
 }
 
 export function memoryKv(clock: () => number = Date.now): Kv {
@@ -59,7 +65,7 @@ export function memoryKv(clock: () => number = Date.now): Kv {
     }
     return row;
   };
-  return {
+  const kv: Kv = {
     async get(key) {
       return live(key)?.value ?? null;
     },
@@ -100,7 +106,101 @@ export function memoryKv(clock: () => number = Date.now): Kv {
       rows.set(key, { value: encoded, expiresAt: opts.px != null ? clock() + opts.px : null });
       return 1;
     },
+    async ownedFlush(leaseKey, token, nowMs, payload) {
+      if (Buffer.byteLength(payload) <= VALUE_MAX_BYTES) {
+        const hot = (JSON.parse(payload) as { hot?: string }).hot ?? "";
+        if (hot !== "" && Buffer.byteLength(hot) <= VALUE_MAX_BYTES) await kv.ownedSet(leaseKey, token, HOT_KEY, hot);
+      }
+      return applyMemoryFlush(rows, clock, leaseKey, token, nowMs, payload);
+    },
+    async mget(keys) {
+      return Promise.all(keys.map(async (key) => live(key)?.value ?? null));
+    },
+    async readLists(keys) {
+      return keys.map((key) => listItems(live(key)?.value ?? null));
+    },
   };
+  return kv;
+}
+
+function listItems(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((row) => (typeof row === "string" ? row : JSON.stringify(row)));
+  } catch {
+    return [];
+  }
+}
+
+/** Memory stand-in for FLUSH_LUA. A bad token or a value over 1 MB writes nothing. */
+export function applyMemoryFlush(
+  rows: Map<string, { value: string; expiresAt: number | null }>,
+  clock: () => number,
+  leaseKey: string,
+  token: string,
+  nowMs: number,
+  payload: string,
+): number {
+  const current = rows.get(leaseKey);
+  if (!current || (current.expiresAt != null && current.expiresAt <= clock())) return 0;
+  const lease = decodeLease(current.value);
+  if (!lease || lease.token !== token || lease.release !== "none") return 0;
+  if (Buffer.byteLength(payload) > VALUE_MAX_BYTES) return 3;
+  const body = JSON.parse(payload) as FlushBody;
+  const values = [
+    body.hot ?? "",
+    ...(body.tapes ?? []).map((row) => row.value),
+    ...(body.rings ?? []).map((row) => row.value),
+    ...(body.bars ?? []).map((row) => row.value),
+    ...(body.marks ?? []).map((row) => row.value),
+    ...(body.warm ?? []).map((row) => row.value),
+  ];
+  if (values.some((value) => Buffer.byteLength(value) > VALUE_MAX_BYTES)) return 3;
+  const staged = new Map<string, { value: string; px: number }>();
+  const currentRaw = (key: string): string | null => staged.get(key)?.value ?? rows.get(key)?.value ?? null;
+  for (const bar of body.bars ?? []) {
+    const list = listItems(currentRaw(bar.key)).map((row) => JSON.parse(row) as Record<string, unknown>);
+    if (!list.some((row) => String(row[bar.field]) === bar.id)) list.push(JSON.parse(bar.value) as Record<string, unknown>);
+    const max = bar.max ?? 0;
+    const trimmed = max > 0 && list.length > max ? list.slice(list.length - max) : list;
+    const encoded = JSON.stringify(trimmed);
+    if (Buffer.byteLength(encoded) > VALUE_MAX_BYTES) return 3;
+    staged.set(bar.key, { value: encoded, px: bar.px ?? 0 });
+  }
+  for (const ring of body.rings ?? []) {
+    const list = listItems(currentRaw(ring.key)).map((row) => JSON.parse(row) as Record<string, unknown>);
+    if (!list.some((row) => String(row.ts) === ring.id)) list.push(JSON.parse(ring.value) as Record<string, unknown>);
+    const trimmed = list.length > 120 ? list.slice(list.length - 120) : list;
+    const encoded = JSON.stringify(trimmed);
+    if (Buffer.byteLength(encoded) > VALUE_MAX_BYTES) return 3;
+    staged.set(ring.key, { value: encoded, px: ring.px ?? 0 });
+  }
+  const ttl = Math.min(LEASE_TTL_MS, Math.max(1, lease.untilMs - nowMs));
+  const next = encodeLease({ ...lease, savedAtMs: nowMs });
+  const exp = clock() + ttl;
+  rows.set(leaseKey, { value: next, expiresAt: exp });
+  rows.set(LEASE_META_KEY, { value: next, expiresAt: null });
+  if (body.hot) rows.set(HOT_KEY, { value: body.hot, expiresAt: null });
+  for (const tape of body.tapes ?? []) rows.set(tape.key, { value: tape.value, expiresAt: clock() + tape.px });
+  for (const [key, row] of staged) rows.set(key, { value: row.value, expiresAt: row.px > 0 ? clock() + row.px : null });
+  for (const mark of body.marks ?? []) {
+    if (!rows.get(mark.key)) rows.set(mark.key, { value: mark.value, expiresAt: null });
+  }
+  for (const warm of body.warm ?? []) {
+    if (!rows.get(warm.key)) rows.set(warm.key, { value: warm.value, expiresAt: null });
+  }
+  return 1;
+}
+
+interface FlushBody {
+  hot?: string;
+  tapes?: { key: string; value: string; px: number }[];
+  rings?: { key: string; value: string; id: string; px: number }[];
+  bars?: { key: string; value: string; id: string; field: string; max: number; px: number }[];
+  marks?: { key: string; value: string }[];
+  warm?: { key: string; value: string }[];
 }
 
 /** PX for a live lease. Never longer than the function deadline, and never longer than LEASE_TTL_MS. */
@@ -553,7 +653,9 @@ export function encodeCommand(parts: readonly string[]): string {
   return out;
 }
 
-/** A small subset of RESP: bulk strings, simple strings, integers, and nil. */
+/** A small subset of RESP: bulk strings, simple strings, integers, arrays, and nil. */
+export type RedisReply = string | null | RedisReply[];
+
 export function decodeReply(raw: string): string | null {
   if (raw.startsWith("$-1")) return null;
   if (raw.startsWith("+") || raw.startsWith(":")) return raw.slice(1, raw.indexOf("\r\n"));
@@ -567,11 +669,26 @@ export function decodeReply(raw: string): string | null {
 }
 
 /** One complete reply, or null when the buffer is short. */
-export function takeReply(buf: string): { reply: string | null; rest: string } | null {
+export function takeReply(buf: string): { reply: RedisReply; rest: string } | null {
   if (buf.startsWith("$-1")) {
     const end = "$-1\r\n".length;
     if (buf.length < end) return null;
     return { reply: null, rest: buf.slice(end) };
+  }
+  if (buf.startsWith("*")) {
+    const nl = buf.indexOf("\r\n");
+    if (nl < 0) return null;
+    const count = Number(buf.slice(1, nl));
+    if (count < 0) return { reply: null, rest: buf.slice(nl + 2) };
+    let rest = buf.slice(nl + 2);
+    const items: RedisReply[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const part = takeReply(rest);
+      if (!part) return null;
+      items.push(part.reply);
+      rest = part.rest;
+    }
+    return { reply: items, rest };
   }
   if (buf.startsWith("+") || buf.startsWith(":") || buf.startsWith("-")) {
     const nl = buf.indexOf("\r\n");
@@ -659,6 +776,120 @@ const OWNED_APPEND_LUA = [
   "return 1",
 ].join("\n");
 
+const FLUSH_LUA = [
+  "local raw = redis.call('GET', KEYS[1])",
+  "if not raw then return 0 end",
+  "local ok, lease = pcall(cjson.decode, raw)",
+  "if not ok or type(lease) ~= 'table' then return 0 end",
+  "if lease['token'] ~= ARGV[1] or lease['release'] ~= 'none' then return 0 end",
+  "if string.len(ARGV[2]) > 1048576 then return 3 end",
+  "local okb, body = pcall(cjson.decode, ARGV[2])",
+  "if not okb or type(body) ~= 'table' then return 3 end",
+  "local function big(s) return type(s) == 'string' and string.len(s) > 1048576 end",
+  "if big(body['hot']) then return 3 end",
+  "local function scan(list, field) ",
+  "  if type(list) ~= 'table' then return false end",
+  "  for _, row in ipairs(list) do",
+  "    if type(row) == 'table' and big(row[field or 'value']) then return true end",
+  "  end",
+  "  return false",
+  "end",
+  "if scan(body['tapes']) or scan(body['rings']) or scan(body['bars']) or scan(body['marks']) or scan(body['warm']) then return 3 end",
+  "local pending = {}",
+  "local function remember(key, encoded, px)",
+  "  if string.len(encoded) > 1048576 then return false end",
+  "  pending[key] = {encoded, px or 0}",
+  "  return true",
+  "end",
+  "local function current_raw(key)",
+  "  if pending[key] then return pending[key][1] end",
+  "  local cur = redis.call('GET', key)",
+  "  if type(cur) == 'string' then return cur end",
+  "  return nil",
+  "end",
+  "if type(body['bars']) == 'table' then",
+  "  for _, bar in ipairs(body['bars']) do",
+  "    local cur = current_raw(bar['key'])",
+  "    local arr = {}",
+  "    if type(cur) == 'string' and cur ~= '' then",
+  "      local oka, parsed = pcall(cjson.decode, cur)",
+  "      if oka and type(parsed) == 'table' then arr = parsed end",
+  "    end",
+  "    local found = false",
+  "    for _, item in ipairs(arr) do",
+  "      if type(item) == 'table' and tostring(item[bar['field']]) == tostring(bar['id']) then found = true; break end",
+  "    end",
+  "    if not found then",
+  "      local okm, member = pcall(cjson.decode, bar['value'])",
+  "      if okm and type(member) == 'table' then table.insert(arr, member) end",
+  "    end",
+  "    local maxn = tonumber(bar['max']) or 0",
+  "    while maxn > 0 and #arr > maxn do table.remove(arr, 1) end",
+  "    if not remember(bar['key'], cjson.encode(arr), tonumber(bar['px']) or 0) then return 3 end",
+  "  end",
+  "end",
+  "local now = tonumber(ARGV[3])",
+  "local ttl = tonumber(lease['untilMs']) - now",
+  "if ttl < 1 then ttl = 1 end",
+  "if ttl > 180000 then ttl = 180000 end",
+  "lease['savedAtMs'] = now",
+  "local encodedLease = cjson.encode(lease)",
+  "redis.call('SET', KEYS[1], encodedLease, 'PX', ttl)",
+  "redis.call('SET', 'p6:lease-meta', encodedLease)",
+  "if type(body['hot']) == 'string' and body['hot'] ~= '' then redis.call('SET', 'p6:hot', body['hot']) end",
+  "if type(body['tapes']) == 'table' then",
+  "  for _, tape in ipairs(body['tapes']) do",
+  "    redis.call('SET', tape['key'], tape['value'], 'PX', tonumber(tape['px']) or 7200000)",
+  "  end",
+  "end",
+  "if type(body['rings']) == 'table' then",
+  "  for _, ring in ipairs(body['rings']) do",
+  "    local typ = redis.call('TYPE', ring['key'])",
+  "    local kind = type(typ) == 'table' and typ['ok'] or typ",
+  "    if kind ~= 'list' and kind ~= 'none' then redis.call('DEL', ring['key']) end",
+  "    local rows = redis.call('LRANGE', ring['key'], 0, -1)",
+  "    local seen = false",
+  "    for _, row in ipairs(rows) do",
+  "      local okr, item = pcall(cjson.decode, row)",
+  "      if okr and type(item) == 'table' and tostring(item['ts']) == tostring(ring['id']) then seen = true; break end",
+  "    end",
+  "    if not seen then redis.call('RPUSH', ring['key'], ring['value']) end",
+  "    redis.call('LTRIM', ring['key'], -120, -1)",
+  "    redis.call('PEXPIRE', ring['key'], tonumber(ring['px']) or 7200000)",
+  "  end",
+  "end",
+  "for key, row in pairs(pending) do",
+  "  local px = tonumber(row[2]) or 0",
+  "  if px > 0 then redis.call('SET', key, row[1], 'PX', px) else redis.call('SET', key, row[1]) end",
+  "end",
+  "if type(body['marks']) == 'table' then",
+  "  for _, mark in ipairs(body['marks']) do",
+  "    redis.call('SET', mark['key'], mark['value'], 'NX')",
+  "  end",
+  "end",
+  "if type(body['warm']) == 'table' then",
+  "  for _, warm in ipairs(body['warm']) do",
+  "    if redis.call('EXISTS', warm['key']) == 0 then redis.call('SET', warm['key'], warm['value']) end",
+  "  end",
+  "end",
+  "return 1",
+].join("\n");
+
+const READ_LISTS_LUA = [
+  "local out = {}",
+  "for i = 1, #KEYS do",
+  "  local typ = redis.call('TYPE', KEYS[i])",
+  "  local kind = type(typ) == 'table' and typ['ok'] or typ",
+  "  if kind == 'list' then",
+  "    out[i] = cjson.encode(redis.call('LRANGE', KEYS[i], 0, -1))",
+  "  else",
+  "    local raw = redis.call('GET', KEYS[i])",
+  "    out[i] = raw or '[]'",
+  "  end",
+  "end",
+  "return out",
+].join("\n");
+
 const CAS_LUA = [
   "local cur = redis.call('GET', KEYS[1])",
   "if ARGV[1] == '1' then",
@@ -680,7 +911,7 @@ const CAS_LUA = [
 export function redisKvFromUrl(url: string): Kv {
   const endpoint = assertRedisTransport(url);
   type Waiter = {
-    resolve: (reply: string | null) => void;
+    resolve: (reply: RedisReply) => void;
     reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
     done: boolean;
@@ -725,7 +956,7 @@ export function redisKvFromUrl(url: string): Kv {
     }
   };
 
-  const writeCommand = (parts: string[]): Promise<string | null> => {
+  const writeCommand = (parts: string[]): Promise<RedisReply> => {
     const current = socket;
     if (!current) return Promise.reject(new Error("redis closed"));
     return new Promise((resolve, reject) => {
@@ -807,13 +1038,14 @@ export function redisKvFromUrl(url: string): Kv {
     await opening;
   };
 
-  const send = async (parts: string[]): Promise<string | null> => {
+  const send = async (parts: string[]): Promise<RedisReply> => {
     await ensure();
     return writeCommand(parts);
   };
+  const asString = (reply: RedisReply): string | null => (typeof reply === "string" ? reply : null);
   return {
     async get(key) {
-      return send(["GET", key]);
+      return asString(await send(["GET", key]));
     },
     async set(key, value, opts) {
       const parts = ["SET", key, value];
@@ -849,6 +1081,32 @@ export function redisKvFromUrl(url: string): Kv {
       ]);
       const code = Number(reply);
       return code === 1 || code === 2 || code === 3 ? code : 0;
+    },
+    async ownedFlush(leaseKey, token, nowMs, payload) {
+      const reply = await send(["EVAL", FLUSH_LUA, "1", leaseKey, token, payload, String(nowMs)]);
+      const code = Number(reply);
+      return code === 1 || code === 3 ? code : 0;
+    },
+    async mget(keys) {
+      if (keys.length === 0) return [];
+      const reply = await send(["MGET", ...keys]);
+      if (!Array.isArray(reply)) return keys.map(() => null);
+      return reply.map((item) => (typeof item === "string" ? item : null));
+    },
+    async readLists(keys) {
+      if (keys.length === 0) return [];
+      const reply = await send(["EVAL", READ_LISTS_LUA, String(keys.length), ...keys]);
+      if (!Array.isArray(reply)) return keys.map(() => []);
+      return reply.map((item) => {
+        if (typeof item !== "string") return [];
+        try {
+          const parsed = JSON.parse(item) as unknown;
+          if (!Array.isArray(parsed)) return [];
+          return parsed.map((row) => (typeof row === "string" ? row : JSON.stringify(row)));
+        } catch {
+          return [];
+        }
+      });
     },
   };
 }

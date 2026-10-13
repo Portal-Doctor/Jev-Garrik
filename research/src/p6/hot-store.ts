@@ -13,7 +13,7 @@ import {
   type PaperStateBody,
   retainDailyCloses,
 } from "./paper-host";
-import { HOT_KEY, LEASE_KEY, VALUE_MAX_BYTES, type Kv } from "./relay";
+import { barMarker, HOT_KEY, LEASE_KEY, VALUE_MAX_BYTES, type Kv } from "./relay";
 
 /** Heartbeat payload cap. A larger write is an incident and is not sent. */
 export const HOT_MAX_BYTES = 256 * 1024;
@@ -61,8 +61,44 @@ export function ringKey(productId: string): string {
   return `p6:ring1m:${productId}`;
 }
 
-export function tapeKey(productId: string, minute: number): string {
-  return `p6:tape:${productId}:${minute}`;
+/** One closed minute, every product, as one string block. */
+export function tapeKey(minute: number): string {
+  return `p6:tape:${minute}`;
+}
+
+export const FILLS_KEY = "p6:fills";
+export const LEDGER_KEY = "p6:ledger";
+
+export function tapeBlock(trades: readonly { productId: string; tsSec: number; price: number; size: number; side?: string }[]): string {
+  const byProduct = new Map<string, string[]>();
+  for (const trade of trades) {
+    const row = `${trade.tsSec},${trade.price},${trade.size},${trade.side ?? ""}`;
+    const list = byProduct.get(trade.productId) ?? [];
+    list.push(row);
+    byProduct.set(trade.productId, list);
+  }
+  const body: Record<string, string> = {};
+  for (const [productId, rows] of [...byProduct.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) body[productId] = rows.join(";");
+  return JSON.stringify(body);
+}
+
+export function tradesFromBlock(minuteRaw: string | null): { productId: string; tsSec: number; price: number; size: number; side?: string }[] {
+  if (!minuteRaw) return [];
+  const body = JSON.parse(minuteRaw) as Record<string, string>;
+  if (!body || Array.isArray(body)) return [];
+  const out: { productId: string; tsSec: number; price: number; size: number; side?: string }[] = [];
+  for (const [productId, packed] of Object.entries(body)) {
+    if (typeof packed !== "string" || packed === "") continue;
+    for (const row of packed.split(";")) {
+      const [ts, price, size, side] = row.split(",");
+      const tsSec = Number(ts);
+      const px = Number(price);
+      const sz = Number(size);
+      if (!Number.isFinite(tsSec) || !Number.isFinite(px) || !Number.isFinite(sz)) continue;
+      out.push({ productId, tsSec, price: px, size: sz, ...(side ? { side } : {}) });
+    }
+  }
+  return out;
 }
 
 /** One product's daily warmup. A single blob of every product exceeds the 1 MB value guard. */
@@ -112,6 +148,7 @@ interface HotBody {
   ema200: [string, "seeded" | "live"][];
   fourSeedThrough: [string, number][];
   overlapSeen: boolean;
+  working?: PaperStateBody["working"];
 }
 
 export function captureHot(host: PaperHost): HotBody {
@@ -154,6 +191,7 @@ export function captureHot(host: PaperHost): HotBody {
     ema200: [...host.ema200.entries()],
     fourSeedThrough: [...host.fourSeedThrough.entries()],
     overlapSeen: host.overlapSeen,
+    ...(book.working.length > 0 ? { working: book.working } : {}),
   };
 }
 
@@ -263,80 +301,330 @@ async function appendMarked(
   }
 }
 
-async function noteWrite(host: PaperHost, bytes: number, write: () => Promise<void>): Promise<void> {
-  await write();
-  host.saveCommands += 1;
-  host.saveBytes += bytes;
+interface FlushPiece {
+  key: string;
+  value: string;
+  id: string;
+  field: string;
+  max: number;
+  px: number;
+  mark: string;
 }
 
-/** One heartbeat write of the small book, then appends for bars that are not stored yet. A failed hot or warmup write still appends. */
-export async function persistSplit(kv: Kv, host: PaperHost): Promise<void> {
-  const json = JSON.stringify(captureHot(host));
-  const bytes = Buffer.byteLength(json);
-  if (bytes > HOT_MAX_BYTES) {
-    host.book.incidents.push(`heartbeat write ${bytes} exceeds 256 KB`);
-  } else {
+interface FlushPlan {
+  payload: string;
+  bytes: number;
+  marks: string[];
+  minute: number | null;
+}
+
+function queueFlush(host: PaperHost, fn: () => Promise<void>): Promise<void> {
+  const prev = host.flushChain;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const run = prev.then(fn, fn).finally(release);
+  host.flushChain = prev.then(() => gate, () => gate);
+  return run;
+}
+
+/** Fills and the ledger are written before the next event, not on the 60s flush. */
+export async function writeThroughBook(kv: Kv, host: PaperHost): Promise<void> {
+  while (host.fillStored < host.book.legs.length) {
+    const leg = host.book.legs[host.fillStored]!;
+    const result = await appendOwned(kv, host, FILLS_KEY, leg, "id", leg.id, 0);
+    if (result === "lost") throw new Error("lease lost");
+    if (result === "oversize") {
+      host.book.incidents.push("kv value exceeds 1 MB p6:fills");
+      return;
+    }
+    host.fillStored += 1;
+    if (result !== "duplicate") {
+      host.saveCommands += 1;
+      host.saveBytes += Buffer.byteLength(JSON.stringify(leg));
+    }
+  }
+  while (host.ledgerStored < host.book.closed.length) {
+    const trade = host.book.closed[host.ledgerStored]!;
+    const result = await appendOwned(kv, host, LEDGER_KEY, trade, "id", trade.id, 0);
+    if (result === "lost") throw new Error("lease lost");
+    if (result === "oversize") {
+      host.book.incidents.push("kv value exceeds 1 MB p6:ledger");
+      return;
+    }
+    host.ledgerStored += 1;
+    if (result !== "duplicate") {
+      host.saveCommands += 1;
+      host.saveBytes += Buffer.byteLength(JSON.stringify(trade));
+    }
+  }
+}
+
+export function kickDurable(host: PaperHost): void {
+  if (!host.kv || !host.leaseToken) return;
+  const kv = host.kv;
+  host.durableChain = host.durableChain.then(() => writeThroughBook(kv, host), () => writeThroughBook(kv, host));
+}
+
+function buildFlush(host: PaperHost): FlushPlan {
+  const nowSec = Math.floor(host.clock() / 1000);
+  const openMinute = Math.floor(nowSec / 60) * 60;
+  const marks: string[] = [];
+  const bars: FlushPiece[] = [];
+  const rings: { key: string; value: string; id: string; px: number }[] = [];
+  const claim = (mark: string, piece: FlushPiece) => {
+    if (host.persistedBars.has(mark)) return;
+    host.persistedBars.add(mark);
+    marks.push(mark);
+    bars.push(piece);
+  };
+  for (const bar of host.closingMarks) {
+    const marker = `bar:${bar.productId}:${bar.startSec}`;
+    if (host.persistedBars.has(marker)) continue;
+    host.persistedBars.add(marker);
+    marks.push(marker);
+  }
+  for (const bar of host.fifteen) {
+    claim(`15:${bar.productId}:${bar.startSec}`, {
+      key: bar15Key(bar.productId, utcDay(bar.startSec)),
+      value: JSON.stringify(bar),
+      id: String(bar.startSec),
+      field: "startSec",
+      max: 96,
+      px: BAR15_TTL_MS,
+      mark: `15:${bar.productId}:${bar.startSec}`,
+    });
+    const marker = `bar:${bar.productId}:${bar.startSec}`;
+    if (!host.persistedBars.has(marker)) {
+      host.persistedBars.add(marker);
+      marks.push(marker);
+    }
+  }
+  for (const [productId, rows] of host.fourBars) {
+    for (const bar of rows) {
+      claim(`4h:${productId}:${bar.ts}`, {
+        key: bar4hKey(productId),
+        value: JSON.stringify(bar),
+        id: String(bar.ts),
+        field: "ts",
+        max: FOUR_KEEP,
+        px: 0,
+        mark: `4h:${productId}:${bar.ts}`,
+      });
+    }
+  }
+  for (const [productId, rows] of host.hourWarm) {
+    for (const bar of rows) {
+      claim(`1h:${productId}:${bar.ts}`, {
+        key: bar1hKey(productId),
+        value: JSON.stringify(bar),
+        id: String(bar.ts),
+        field: "ts",
+        max: HOUR_KEEP,
+        px: 0,
+        mark: `1h:${productId}:${bar.ts}`,
+      });
+    }
+  }
+  for (const [productId, rows] of host.dailyBars) {
+    for (const bar of rows) {
+      claim(`d1:${productId}:${bar.ts}`, {
+        key: d1Key(productId),
+        value: JSON.stringify(bar),
+        id: String(bar.ts),
+        field: "ts",
+        max: DAILY_CLOSE_DAYS,
+        px: 0,
+        mark: `d1:${productId}:${bar.ts}`,
+      });
+    }
+  }
+  for (const bar of host.book.mids.completed) {
+    const mark = `m:${bar.productId}:${bar.ts}`;
+    if (host.persistedBars.has(mark)) continue;
+    host.persistedBars.add(mark);
+    marks.push(mark);
+    rings.push({ key: ringKey(bar.productId), value: JSON.stringify(bar), id: String(bar.ts), px: RING_TTL_MS });
+  }
+  let minute: number | null = null;
+  const tapes: { key: string; value: string; px: number }[] = [];
+  const lastClosed = openMinute - 60;
+  if (lastClosed >= 0 && !host.tapeWritten.has(lastClosed)) {
+    const rows = host.trades.filter((trade) => Math.floor(trade.tsSec / 60) * 60 === lastClosed);
+    if (rows.length > 0) {
+      minute = lastClosed;
+      tapes.push({ key: tapeKey(lastClosed), value: tapeBlock(rows), px: TAPE_TTL_MS });
+    }
+  }
+  const hotJson = JSON.stringify(captureHot(host));
+  const hotBytes = Buffer.byteLength(hotJson);
+  let hot: string | undefined;
+  if (hotBytes > HOT_MAX_BYTES) host.book.incidents.push(`heartbeat write ${hotBytes} exceeds 256 KB`);
+  else hot = hotJson;
+  const seenMark = new Set<string>();
+  const marksOut: { key: string; value: string }[] = [];
+  for (const bar of [...host.closingMarks, ...host.fifteen]) {
+    const marker = `bar:${bar.productId}:${bar.startSec}`;
+    if (!marks.includes(marker) || seenMark.has(marker)) continue;
+    seenMark.add(marker);
+    marksOut.push({ key: `p6:bar:${bar.productId}:${bar.startSec}`, value: barMarker(bar.productId, bar.startSec) });
+  }
+  const payload = JSON.stringify({
+    ...(hot ? { hot } : {}),
+    tapes,
+    rings,
+    bars: bars.map(({ key, value, id, field, max, px }) => ({ key, value, id, field, max, px })),
+    marks: marksOut,
+  });
+  return { payload, bytes: Buffer.byteLength(payload), marks, minute };
+}
+
+async function writeWarmupOnce(kv: Kv, host: PaperHost): Promise<void> {
+  if (host.warmupStored || host.warmup.size === 0) return;
+  let failed = false;
+  for (const [productId, days] of host.warmup) {
+    if (days.length === 0 || host.warmupDone.has(productId)) continue;
+    const payload = JSON.stringify(days);
+    if (Buffer.byteLength(payload) > VALUE_MAX_BYTES) {
+      host.book.incidents.push(`kv value exceeds 1 MB warmup ${productId}`);
+      failed = true;
+      continue;
+    }
     try {
-      await noteWrite(host, bytes, () => writeOwned(kv, host, HOT_KEY, json));
+      await writeOwned(kv, host, warmupKey(productId), payload);
+      host.warmupDone.add(productId);
+      host.saveCommands += 1;
+      host.saveBytes += Buffer.byteLength(payload);
     } catch (error) {
       if (leaseLost(error) || transportError(error)) throw error;
       writeIncident(host, error);
+      failed = true;
     }
   }
-  if (!host.warmupStored && host.warmup.size > 0) {
-    let failed = false;
-    for (const [productId, days] of host.warmup) {
-      if (days.length === 0) continue;
-      const payload = JSON.stringify(days);
-      const warmBytes = Buffer.byteLength(payload);
-      if (warmBytes > VALUE_MAX_BYTES) {
-        host.book.incidents.push(`kv value exceeds 1 MB warmup ${productId}`);
-        failed = true;
-        continue;
-      }
-      try {
-        await noteWrite(host, warmBytes, () => writeOwned(kv, host, warmupKey(productId), payload));
-      } catch (error) {
-        if (leaseLost(error) || transportError(error)) throw error;
-        writeIncident(host, error);
-        failed = true;
-      }
-    }
-    if (!failed) host.warmupStored = true;
+  if (!failed) host.warmupStored = true;
+}
+
+function payloadTooBig(plan: FlushPlan): boolean {
+  if (plan.bytes <= VALUE_MAX_BYTES) return false;
+  const body = JSON.parse(plan.payload) as { hot?: string; tapes?: { value: string }[]; bars?: { value: string }[]; rings?: { value: string }[] };
+  const values = [body.hot ?? "", ...(body.tapes ?? []).map((row) => row.value), ...(body.bars ?? []).map((row) => row.value), ...(body.rings ?? []).map((row) => row.value)];
+  return values.some((value) => Buffer.byteLength(value) > VALUE_MAX_BYTES);
+}
+
+function releaseMarks(host: PaperHost, marks: string[]): void {
+  for (const mark of marks) host.persistedBars.delete(mark);
+}
+
+async function applyUnowned(kv: Kv, host: PaperHost, plan: FlushPlan): Promise<void> {
+  const body = JSON.parse(plan.payload) as {
+    hot?: string;
+    tapes?: { key: string; value: string; px: number }[];
+    rings?: { key: string; value: string; id: string; px: number }[];
+    bars?: { key: string; value: string; id: string; field: string; max: number; px: number }[];
+    marks?: { key: string; value: string }[];
+    warm?: { key: string; value: string }[];
+  };
+  if (body.hot) {
+    const wrote = await kv.set(HOT_KEY, body.hot);
+    if (!wrote) throw new Error("kv set p6:hot failed");
   }
-  const products = new Set<string>([
-    ...host.fifteen.map((bar) => bar.productId),
-    ...host.fourBars.keys(),
-    ...host.hourWarm.keys(),
-    ...host.dailyBars.keys(),
-    ...host.book.mids.completed.map((bar) => bar.productId),
-    ...host.trades.map((trade) => trade.productId),
-  ]);
-  await Promise.all([...products].map((productId) => withProduct(host, productId, async () => {
-    for (const bar of host.fifteen) {
-      if (bar.productId !== productId) continue;
-      await appendMarked(kv, host, `15:${productId}:${bar.startSec}`, bar15Key(productId, utcDay(bar.startSec)), bar, "startSec", String(bar.startSec), 96, BAR15_TTL_MS);
+  for (const tape of body.tapes ?? []) {
+    const wrote = await kv.set(tape.key, tape.value, { px: tape.px });
+    if (!wrote) throw new Error(`kv set ${tape.key} failed`);
+  }
+  for (const bar of body.bars ?? []) {
+    const result = await appendOwned(kv, host, bar.key, JSON.parse(bar.value) as unknown, bar.field, bar.id, bar.max, bar.px || undefined);
+    if (result === "oversize") {
+      host.book.incidents.push(`kv value exceeds 1 MB ${bar.key}`);
+      continue;
     }
-    for (const bar of host.fourBars.get(productId) ?? []) {
-      await appendMarked(kv, host, `4h:${productId}:${bar.ts}`, bar4hKey(productId), bar, "ts", String(bar.ts), FOUR_KEEP);
+    if (result === "duplicate") host.duplicateAppends += 0;
+  }
+  for (const ring of body.rings ?? []) {
+    const result = await appendOwned(kv, host, ring.key, JSON.parse(ring.value) as unknown, "ts", ring.id, 120, ring.px);
+    if (result === "oversize") host.book.incidents.push(`kv value exceeds 1 MB ${ring.key}`);
+  }
+  for (const mark of body.marks ?? []) {
+    if (await kv.get(mark.key)) continue;
+    await kv.set(mark.key, mark.value);
+  }
+}
+
+async function writeGroupedBars(kv: Kv, host: PaperHost, plan: FlushPlan): Promise<void> {
+  const body = JSON.parse(plan.payload) as { bars?: { key: string; value: string; id: string; field: string; max: number; px: number }[] };
+  const groups = new Map<string, { field: string; max: number; px: number; rows: Record<string, unknown>[] }>();
+  for (const bar of body.bars ?? []) {
+    const group = groups.get(bar.key) ?? { field: bar.field, max: bar.max, px: bar.px, rows: [] };
+    group.rows.push(JSON.parse(bar.value) as Record<string, unknown>);
+    groups.set(bar.key, group);
+  }
+  for (const [key, group] of groups) {
+    const current = await kv.get(key);
+    const list = current ? (JSON.parse(current) as Record<string, unknown>[]) : [];
+    for (const row of group.rows) {
+      if (list.some((item) => String(item[group.field]) === String(row[group.field]))) continue;
+      list.push(row);
     }
-    for (const bar of host.hourWarm.get(productId) ?? []) {
-      await appendMarked(kv, host, `1h:${productId}:${bar.ts}`, bar1hKey(productId), bar, "ts", String(bar.ts), HOUR_KEEP);
+    const trimmed = group.max > 0 && list.length > group.max ? list.slice(list.length - group.max) : list;
+    const encoded = JSON.stringify(trimmed);
+    if (Buffer.byteLength(encoded) > VALUE_MAX_BYTES) {
+      host.book.incidents.push(`kv value exceeds 1 MB ${key}`);
+      continue;
     }
-    for (const bar of host.dailyBars.get(productId) ?? []) {
-      await appendMarked(kv, host, `d1:${productId}:${bar.ts}`, d1Key(productId), bar, "ts", String(bar.ts), DAILY_CLOSE_DAYS);
+    await writeOwned(kv, host, key, encoded, group.px > 0 ? group.px : undefined);
+    host.saveCommands += 1;
+    host.saveBytes += Buffer.byteLength(encoded);
+  }
+}
+
+async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
+  if (host.kv && host.leaseToken) await host.durableChain;
+  await writeWarmupOnce(kv, host);
+  let plan = buildFlush(host);
+  if (plan.bytes > VALUE_MAX_BYTES && !payloadTooBig(plan)) {
+    await writeGroupedBars(kv, host, plan);
+    const seeded = plan.marks.filter((mark) => !mark.startsWith("bar:"));
+    plan = buildFlush(host);
+    plan.marks.push(...seeded);
+  }
+  if (plan.bytes > VALUE_MAX_BYTES || payloadTooBig(plan)) {
+    releaseMarks(host, plan.marks);
+    host.book.incidents.push("kv value exceeds 1 MB");
+    return;
+  }
+  try {
+    if (!host.leaseToken) {
+      await applyUnowned(kv, host, plan);
+    } else {
+      const code = await kv.ownedFlush(LEASE_KEY, host.leaseToken, host.clock(), plan.payload);
+      if (code === 0) throw new Error("lease lost");
+      if (code === 3) {
+        releaseMarks(host, plan.marks);
+        host.book.incidents.push("kv value exceeds 1 MB");
+        return;
+      }
+      const body = JSON.parse(plan.payload) as { warm?: unknown[] };
+      if ((body.warm ?? []).length > 0) host.warmupStored = true;
     }
-    for (const bar of host.book.mids.completed) {
-      if (bar.productId !== productId) continue;
-      await appendMarked(kv, host, `m:${productId}:${bar.ts}`, ringKey(productId), bar, "ts", String(bar.ts), 120, RING_TTL_MS);
-    }
-    for (const trade of host.trades) {
-      if (trade.productId !== productId) continue;
-      const minute = Math.floor(trade.tsSec / 60) * 60;
-      const id = `${trade.tsSec}:${trade.price}:${trade.size}`;
-      await appendMarked(kv, host, `t:${productId}:${trade.tsSec}:${trade.price}:${trade.size}`, tapeKey(productId, minute), { ...trade, id }, "id", id, 0, TAPE_TTL_MS);
-    }
-  })));
+    if (plan.minute != null) host.tapeWritten.add(plan.minute);
+    host.closingMarks = host.closingMarks.filter((bar) => !host.persistedBars.has(`bar:${bar.productId}:${bar.startSec}`));
+    host.saveCommands += 1;
+    host.saveBytes += plan.bytes;
+  } catch (error) {
+    releaseMarks(host, plan.marks);
+    if (leaseLost(error) || transportError(error)) throw error;
+    writeIncident(host, error);
+  }
+}
+
+/**
+ * One flush for every product. With a lease token this is one EVAL: the token
+ * is checked, the lease is renewed, then hot, the last closed tape minute,
+ * the ring, and any closed bars are written. A value over 1 MB is not written.
+ */
+export function persistSplit(kv: Kv, host: PaperHost): Promise<void> {
+  return queueFlush(host, () => persistSplitBody(kv, host));
 }
 
 function parseList<T>(raw: string | null): T[] {
@@ -345,25 +633,27 @@ function parseList<T>(raw: string | null): T[] {
   return Array.isArray(parsed) ? parsed : [];
 }
 
-/** Rebuild the host from the split keys. Warmup is not read here. */
+/** Rebuild the host from one MGET of hot and the last 10 tape minutes, plus the bar strings in that same read. */
 export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody | null> {
-  const raw = await kv.get(HOT_KEY);
-  if (!raw) return null;
-  const hot = JSON.parse(raw) as HotBody;
-  const products = [...new Set([...(hot.products ?? []), ...host.products])];
   const nowSec = Math.floor(host.clock() / 1000);
   const today = Math.floor(nowSec / 86400) * 86400;
   const days: string[] = [];
   for (let i = 0; i < 8; i += 1) days.push(new Date((today - i * 86400) * 1000).toISOString().slice(0, 10));
   const minute = Math.floor(nowSec / 60) * 60;
-  const keys: string[] = [];
+  const products = [...new Set(host.products)];
+  const tapeMinutes: number[] = [];
+  for (let i = 0; i < TAPE_LOOKBACK_MIN; i += 1) tapeMinutes.push(minute - i * 60);
+  const keys: string[] = [HOT_KEY, FILLS_KEY, LEDGER_KEY];
+  for (const at of tapeMinutes) keys.push(tapeKey(at));
   for (const productId of products) {
     for (const day of days) keys.push(bar15Key(productId, day));
-    keys.push(bar4hKey(productId), bar1hKey(productId), d1Key(productId), ringKey(productId));
-    for (let i = 0; i < TAPE_LOOKBACK_MIN; i += 1) keys.push(tapeKey(productId, minute - i * 60));
+    keys.push(bar4hKey(productId), bar1hKey(productId), d1Key(productId));
   }
-  const values = await Promise.all(keys.map((key) => kv.get(key)));
+  const values = await kv.mget(keys);
   const byKey = new Map(keys.map((key, index) => [key, values[index] ?? null]));
+  const raw = byKey.get(HOT_KEY) ?? null;
+  if (!raw) return null;
+  const hot = JSON.parse(raw) as HotBody;
   const fifteen: PaperStateBody["fifteen"] = [];
   const hourWarm: [string, BarOHLC[]][] = [];
   const fourBars: [string, BarOHLC[]][] = [];
@@ -392,20 +682,31 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
     for (const bar of hours) host.persistedBars.add(`1h:${productId}:${bar.ts}`);
     for (const bar of fours) host.persistedBars.add(`4h:${productId}:${bar.ts}`);
     for (const bar of daily) host.persistedBars.add(`d1:${productId}:${bar.ts}`);
-    const ringsForProduct = parseList<PaperStateBody["rings"][number]>(byKey.get(ringKey(productId)) ?? null);
-    rings.push(...ringsForProduct);
-    for (const bar of ringsForProduct) host.persistedBars.add(`m:${productId}:${bar.ts}`);
-    for (let i = TAPE_LOOKBACK_MIN - 1; i >= 0; i -= 1) {
-      const rows = parseList<PaperStateBody["tape"][number] & { id?: string }>(byKey.get(tapeKey(productId, minute - i * 60)) ?? null);
-      tape.push(...rows);
-      for (const trade of rows) {
-        const id = trade.id ?? `${trade.tsSec}:${trade.price}:${trade.size}`;
-        host.persistedBars.add(`t:${productId}:${id}`);
-      }
-    }
   }
+  const ringKeys = products.map((productId) => ringKey(productId));
+  const ringRows = await kv.readLists(ringKeys);
+  ringRows.forEach((rows, index) => {
+    const productId = products[index]!;
+    for (const rawRow of rows) {
+      const bar = JSON.parse(rawRow) as PaperStateBody["rings"][number];
+      rings.push(bar);
+      host.persistedBars.add(`m:${productId}:${bar.ts}`);
+    }
+  });
+  for (const at of [...tapeMinutes].sort((a, b) => a - b)) {
+    const rows = tradesFromBlock(byKey.get(tapeKey(at)) ?? null);
+    if (rows.length > 0) host.tapeWritten.add(at);
+    tape.push(...rows);
+  }
+  const legs = parseList<NonNullable<PaperStateBody["legs"]>[number]>(byKey.get(FILLS_KEY) ?? null);
+  const ledger = parseList<PaperStateBody["closed"][number]>(byKey.get(LEDGER_KEY) ?? null);
+  host.fillStored = legs.length;
+  host.ledgerStored = ledger.length > 0 ? ledger.length : (hot.closed ?? []).length;
+  host.seedChecked = true;
   return {
     ...hot,
+    ...(ledger.length > 0 ? { closed: ledger } : {}),
+    legs,
     fifteen,
     hourWarm,
     fourBars,
