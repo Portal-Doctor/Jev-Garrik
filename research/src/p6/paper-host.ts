@@ -2420,6 +2420,7 @@ export async function backfillTapeIfNeeded(
     host.tapeHole = false;
     return;
   }
+  const candleGaps: { productId: string; missing: number[]; covered: Set<number> }[] = [];
   for (const productId of host.products) {
     try {
       const response = await get(productTradesUrl(productId));
@@ -2476,23 +2477,25 @@ export async function backfillTapeIfNeeded(
     for (let minute = Math.floor(from / 60) * 60; minute < nowSec; minute += 60) {
       if (!covered.has(minute)) missing.push(minute);
     }
-    if (missing.length === 0) continue;
+    if (missing.length > 0) candleGaps.push({ productId, missing, covered });
+  }
+  for (const gap of candleGaps) {
     try {
-      const start = missing[0]!;
-      const end = missing[missing.length - 1]! + 59;
-      const response = await get(historyCandleUrl(productId, start, end, 60));
+      const start = gap.missing[0]!;
+      const end = gap.missing[gap.missing.length - 1]! + 59;
+      const response = await get(historyCandleUrl(gap.productId, start, end, 60));
       if (!response.ok) {
-        host.book.incidents.push(`tape candle ${productId} ${response.status}`);
+        host.book.incidents.push(`tape candle ${gap.productId} ${response.status}`);
         continue;
       }
       const rows = (await response.json()) as number[][];
-      const bars = barsFromExchangeCandles(productId, Array.isArray(rows) ? rows : []);
+      const bars = barsFromExchangeCandles(gap.productId, Array.isArray(rows) ? rows : []);
       for (const bar of bars) {
         const minute = Math.floor(bar.startSec / 60) * 60;
-        if (minute < Math.floor(from / 60) * 60 || minute >= nowSec || covered.has(minute)) continue;
-        host.trades.push({ productId, tsSec: bar.startSec, price: bar.close, size: bar.volume });
+        if (minute < Math.floor(from / 60) * 60 || minute >= nowSec || gap.covered.has(minute)) continue;
+        host.trades.push({ productId: gap.productId, tsSec: bar.startSec, price: bar.close, size: bar.volume });
         host.book.mids.completed.push({
-          productId,
+          productId: gap.productId,
           ts: bar.startSec * 1000,
           open: bar.open,
           high: bar.high,
@@ -2500,10 +2503,10 @@ export async function backfillTapeIfNeeded(
           close: bar.close,
           volumeBase: bar.volume,
         });
-        covered.add(minute);
+        gap.covered.add(minute);
       }
     } catch (error) {
-      host.book.incidents.push(`tape candle ${productId} ${error instanceof Error ? error.message : "failed"}`);
+      host.book.incidents.push(`tape candle ${gap.productId} ${error instanceof Error ? error.message : "failed"}`);
     }
   }
   host.tapeHole = false;

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Book } from "./engine";
-import { FILLS_KEY, loadSplit, persistSplit, tapeKey, writeThroughBook } from "./hot-store";
+import { FILLS_KEY, loadSplit, persistSplit, ringKey, tapeKey, writeThroughBook } from "./hot-store";
 import { backfillTapeIfNeeded, installPaperState, startPaperHost } from "./paper-host";
 import { decodeLease, HOT_KEY, LEASE_KEY, memoryKv, tryAcquire, VALUE_MAX_BYTES } from "./relay";
 
@@ -133,4 +133,46 @@ test("a crash keeps the fills, loses at most 120s of tape, and backfills it", as
   expect(successor.trades.some((trade) => trade.tsSec === lostSec && trade.price === 11)).toBe(true);
   expect(successor.book.working[0]?.status).toBe("indeterminate");
   expect(await kv.get(FILLS_KEY)).toContain("fill-1");
+});
+
+test("an oversized bar flush still stores the 1m ring and every closed tape minute", async () => {
+  const now = 1_700_000_000_000 - (1_700_000_000_000 % 60_000);
+  const kv = memoryKv(() => now);
+  expect(await tryAcquire(kv, "K", now + 3_600_000, now)).toBe(true);
+  const host = startPaperHost(["BTC-USD"], {});
+  host.clock = () => now;
+  host.leaseToken = decodeLease(await kv.get(LEASE_KEY))?.token ?? null;
+  const open = Math.floor(now / 1000);
+  const older = open - 120;
+  const newer = open - 60;
+  host.trades.push({ productId: "BTC-USD", tsSec: older + 5, price: 10, size: 1, side: "buy" });
+  host.trades.push({ productId: "BTC-USD", tsSec: newer + 5, price: 11, size: 2, side: "sell" });
+  host.book.mids.completed.push({ productId: "BTC-USD", ts: older * 1000, open: 10, high: 10, low: 10, close: 10, volumeBase: 1 });
+  for (let i = 0; i < 12_000; i += 1) {
+    host.fifteen.push({ productId: "BTC-USD", startSec: 1_600_000_000 + i * 900, open: 1, high: 1, low: 1, close: 1, volume: 1 });
+  }
+  await persistSplit(kv, host);
+  const ring = await kv.readLists([ringKey("BTC-USD")]);
+  expect(ring[0]?.some((row) => row.includes(String(older * 1000)))).toBe(true);
+  expect(await kv.get(tapeKey(older))).toContain("10");
+  expect(await kv.get(tapeKey(newer))).toContain("11");
+});
+
+test("a second load does not rewind a seed cursor this run already advanced", async () => {
+  const now = 1_700_000_000_000;
+  const kv = memoryKv(() => now);
+  expect(await tryAcquire(kv, "K", now + 60_000, now)).toBe(true);
+  const host = startPaperHost(["BTC-USD"], {});
+  host.clock = () => now;
+  host.leaseToken = decodeLease(await kv.get(LEASE_KEY))?.token ?? null;
+  host.seedCursor = { order: ["BTC-USD", "ETH-USD"], idx: 1, runId: "seed-1" };
+  host.seedMarks.set("BTC-USD", { oldestTs: 1, newestTs: 2, status: "warm", reason: "seeded" });
+  await persistSplit(kv, host);
+  expect(await loadSplit(kv, host)).toBeTruthy();
+  expect(host.seedCursor.idx).toBe(1);
+  host.seedCursor.idx = 2;
+  host.seedMarks.set("ETH-USD", { oldestTs: 1, newestTs: 3, status: "warm", reason: "seeded" });
+  await loadSplit(kv, host);
+  expect(host.seedCursor.idx).toBe(2);
+  expect(host.seedMarks.get("ETH-USD")?.newestTs).toBe(3);
 });

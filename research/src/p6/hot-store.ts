@@ -321,7 +321,7 @@ interface FlushPlan {
   payload: string;
   bytes: number;
   marks: string[];
-  minute: number | null;
+  minutes: number[];
 }
 
 function queueFlush(host: PaperHost, fn: () => Promise<void>): Promise<void> {
@@ -453,15 +453,17 @@ function buildFlush(host: PaperHost): FlushPlan {
     marks.push(mark);
     rings.push({ key: ringKey(bar.productId), value: JSON.stringify(bar), id: String(bar.ts), px: RING_TTL_MS });
   }
-  let minute: number | null = null;
   const tapes: { key: string; value: string; px: number }[] = [];
-  const lastClosed = openMinute - 60;
-  if (lastClosed >= 0 && !host.tapeWritten.has(lastClosed)) {
-    const rows = host.trades.filter((trade) => Math.floor(trade.tsSec / 60) * 60 === lastClosed);
-    if (rows.length > 0) {
-      minute = lastClosed;
-      tapes.push({ key: tapeKey(lastClosed), value: tapeBlock(rows), px: TAPE_TTL_MS });
-    }
+  const pendingMinutes = new Set<number>();
+  for (const trade of host.trades) {
+    const at = Math.floor(trade.tsSec / 60) * 60;
+    if (at >= 0 && at < openMinute && !host.tapeWritten.has(at)) pendingMinutes.add(at);
+  }
+  const minutes = [...pendingMinutes].sort((a, b) => a - b);
+  for (const at of minutes) {
+    const rows = host.trades.filter((trade) => Math.floor(trade.tsSec / 60) * 60 === at);
+    if (rows.length === 0) continue;
+    tapes.push({ key: tapeKey(at), value: tapeBlock(rows), px: TAPE_TTL_MS });
   }
   const hotJson = JSON.stringify(captureHot(host));
   const hotBytes = Buffer.byteLength(hotJson);
@@ -489,7 +491,7 @@ function buildFlush(host: PaperHost): FlushPlan {
     marks: marksOut,
     extra,
   });
-  return { payload, bytes: Buffer.byteLength(payload), marks, minute };
+  return { payload, bytes: Buffer.byteLength(payload), marks, minutes };
 }
 
 function noteValue(host: PaperHost, value: string): void {
@@ -646,7 +648,9 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
   let plan = buildFlush(host);
   if (plan.bytes > VALUE_MAX_BYTES && !payloadTooBig(plan)) {
     await writeGroupedBars(kv, host, plan);
-    const seeded = plan.marks.filter((mark) => !mark.startsWith("bar:"));
+    const rings = plan.marks.filter((mark) => mark.startsWith("m:"));
+    releaseMarks(host, rings);
+    const seeded = plan.marks.filter((mark) => !mark.startsWith("bar:") && !mark.startsWith("m:"));
     plan = buildFlush(host);
     plan.marks.push(...seeded);
   }
@@ -669,7 +673,7 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
       const body = JSON.parse(plan.payload) as { warm?: unknown[] };
       if ((body.warm ?? []).length > 0) host.warmupStored = true;
     }
-    if (plan.minute != null) host.tapeWritten.add(plan.minute);
+    for (const minute of plan.minutes) host.tapeWritten.add(minute);
     host.closingMarks = host.closingMarks.filter((bar) => !host.persistedBars.has(`bar:${bar.productId}:${bar.startSec}`));
     host.saveCommands += 1;
     host.saveBytes += plan.bytes;
@@ -764,17 +768,19 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
   const ledger = parseList<PaperStateBody["closed"][number]>(byKey.get(LEDGER_KEY) ?? null);
   host.fillStored = legs.length;
   host.ledgerStored = ledger.length > 0 ? ledger.length : (hot.closed ?? []).length;
-  const cursorRaw = byKey.get(SEED_CURSOR_KEY) ?? null;
-  if (cursorRaw) {
-    const cursor = JSON.parse(cursorRaw) as { order?: string[]; idx?: number; runId?: string };
-    if (Array.isArray(cursor.order)) host.seedCursor = { order: cursor.order, idx: cursor.idx ?? 0, runId: cursor.runId ?? "" };
+  if (!host.seedChecked) {
+    const cursorRaw = byKey.get(SEED_CURSOR_KEY) ?? null;
+    if (cursorRaw) {
+      const cursor = JSON.parse(cursorRaw) as { order?: string[]; idx?: number; runId?: string };
+      if (Array.isArray(cursor.order)) host.seedCursor = { order: cursor.order, idx: cursor.idx ?? 0, runId: cursor.runId ?? "" };
+    }
+    for (const productId of products) {
+      const raw = byKey.get(seedMarkKey(productId)) ?? null;
+      if (!raw) continue;
+      host.seedMarks.set(productId, JSON.parse(raw) as SeedMark);
+    }
+    host.seedChecked = true;
   }
-  for (const productId of products) {
-    const raw = byKey.get(seedMarkKey(productId)) ?? null;
-    if (!raw) continue;
-    host.seedMarks.set(productId, JSON.parse(raw) as SeedMark);
-  }
-  host.seedChecked = true;
   return {
     ...hot,
     ...(ledger.length > 0 ? { closed: ledger } : {}),
