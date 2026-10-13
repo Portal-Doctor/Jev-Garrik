@@ -154,27 +154,34 @@ function command(url: string, parts: readonly string[]): Promise<Reply> {
     const auth = target.username && target.password ? ["AUTH", target.username, target.password] : target.password ? ["AUTH", target.password] : null;
     if (auth) pending.push(encode(auth));
     pending.push(encode(parts));
+    let authed = !auth;
+    let settled = false;
     const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
       socket.destroy();
       reject(error);
     };
-    socket.on("error", fail);
+    socket.on("error", (error) => {
+      if (settled) return;
+      fail(error);
+    });
     socket.on("data", (chunk: Buffer) => {
+      if (settled) return;
       buf += chunk.toString("utf8");
       try {
-        const first = take(buf);
-        if (!first) return;
-        if (auth) {
+        if (!authed) {
+          const first = take(buf);
+          if (!first) return;
           if (first.reply !== "OK") return fail(new Error("redis auth failed"));
           buf = first.rest;
-          const second = take(buf);
-          if (!second) return;
-          socket.end();
-          resolve(second.reply);
-          return;
+          authed = true;
         }
-        socket.end();
-        resolve(first.reply);
+        const body = take(buf);
+        if (!body) return;
+        settled = true;
+        resolve(body.reply);
+        queueMicrotask(() => socket.destroy());
       } catch (error) {
         fail(error instanceof Error ? error : new Error(String(error)));
       }

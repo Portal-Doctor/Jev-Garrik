@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { dashboardAuthorized, openDashboardKv, readP6Dashboard } from "./dashboard-read";
 import { memoryKv } from "./relay";
@@ -28,6 +29,32 @@ test("the page path only reads Redis", async () => {
   expect(view.incidents[0]).toBe("see [url]");
   expect((view.lastRun?.pnl as { equityUsd: number }).equityUsd).toBe(8000);
   await expect(openDashboardKv("redis://:pw@127.0.0.1:1").set("p6:hot", "{}")).rejects.toThrow(/read-only/);
+});
+
+test("a large mget split across packets is still the snapshot", async () => {
+  const body = "x".repeat(8_000);
+  const payload = `+OK\r\n*1\r\n$${body.length}\r\n${body}\r\n`;
+  let chunks = 0;
+  const server = createServer((socket) => {
+    socket.write(payload.slice(0, 12));
+    setTimeout(() => {
+      chunks += 1;
+      socket.write(payload.slice(12));
+    }, 30);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  const sockets: Socket[] = [];
+  server.on("connection", (socket) => sockets.push(socket));
+  try {
+    const got = await openDashboardKv(`redis://:pw@127.0.0.1:${port}`).get("p6:lastRun");
+    expect(chunks).toBe(1);
+    expect(got).toBe(body);
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test("the page does not import the cron secret, auth, or a Redis write", () => {
