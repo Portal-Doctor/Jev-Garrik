@@ -2440,9 +2440,38 @@ export async function backfillTapeIfNeeded(
     } catch (error) {
       host.book.incidents.push(`tape backfill ${productId} ${error instanceof Error ? error.message : "failed"}`);
     }
-    const covered = new Set(
-      host.trades.filter((trade) => trade.productId === productId).map((trade) => Math.floor(trade.tsSec / 60) * 60),
-    );
+    const fromMinute = Math.floor(from / 60) * 60;
+    const buckets = new Map<number, { tsSec: number; price: number; size: number }[]>();
+    for (const trade of host.trades) {
+      if (trade.productId !== productId || trade.tsSec < from || trade.tsSec > nowSec) continue;
+      const minute = Math.floor(trade.tsSec / 60) * 60;
+      if (minute < fromMinute || minute >= nowSec) continue;
+      const bucket = buckets.get(minute);
+      if (bucket) bucket.push(trade);
+      else buckets.set(minute, [trade]);
+    }
+    for (const [minute, bucket] of buckets) {
+      if (host.book.mids.completed.some((mid) => mid.productId === productId && mid.ts === minute * 1000)) continue;
+      const ordered = bucket.slice().sort((a, b) => a.tsSec - b.tsSec);
+      let high = ordered[0]!.price;
+      let low = high;
+      let volume = 0;
+      for (const trade of ordered) {
+        if (trade.price > high) high = trade.price;
+        if (trade.price < low) low = trade.price;
+        volume += trade.size;
+      }
+      host.book.mids.completed.push({
+        productId,
+        ts: minute * 1000,
+        open: ordered[0]!.price,
+        high,
+        low,
+        close: ordered[ordered.length - 1]!.price,
+        volumeBase: volume,
+      });
+    }
+    const covered = new Set(buckets.keys());
     const missing: number[] = [];
     for (let minute = Math.floor(from / 60) * 60; minute < nowSec; minute += 60) {
       if (!covered.has(minute)) missing.push(minute);

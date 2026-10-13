@@ -112,6 +112,32 @@ test("a crash hole longer than two minutes is rebuilt from trades and 1m candles
   expect(host.cold.has("BTC-USD")).toBe(false);
 });
 
+test("trades in the hole become 1m bars and a covered minute skips candles", async () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  const now = NOW;
+  host.clock = () => now;
+  host.tapeHole = true;
+  host.wsTape = false;
+  const from = Math.floor(now / 1000) - 120;
+  host.tapeHoleFromSec = from;
+  const minute = Math.floor(from / 60) * 60;
+  const rows: { time: string; price: string; size: string; side: string }[] = [];
+  for (let ts = minute; ts < Math.floor(now / 1000); ts += 60) {
+    rows.push({ time: new Date((ts + 5) * 1000).toISOString(), price: "100", size: "1", side: "buy" });
+    rows.push({ time: new Date((ts + 50) * 1000).toISOString(), price: "110", size: "2", side: "sell" });
+  }
+  const urls: string[] = [];
+  await backfillTapeIfNeeded(host, async (url) => {
+    urls.push(url);
+    if (url.includes("/trades")) return { ok: true, status: 200, json: async () => rows };
+    return { ok: true, status: 200, json: async () => [] };
+  });
+  expect(urls.some((url) => url.includes("granularity=60"))).toBe(false);
+  const first = host.book.mids.completed.find((mid) => mid.ts === minute * 1000);
+  expect(first).toMatchObject({ open: 100, high: 110, low: 100, close: 110, volumeBase: 3 });
+  expect(host.book.mids.completed.length).toBeGreaterThanOrEqual(2);
+});
+
 test("bars accepted while sampling are reported", () => {
   const host = startPaperHost(["BTC-USD"], {});
   host.products = [];
