@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { BACKFILL_CAP, OPERATING_CAP, REST_HARD_CAP, SEED_BUDGET, coldProducts, coldReasons, createRestRun, isCold, limited, resetRestLimit, restStats } from "./rest-limit";
+import { BACKFILL_CAP, OPERATING_CAP, REST_HARD_CAP, SEED_BUDGET, coldProducts, coldReasons, createRestRun, isCold, limited, markCold, resetRestLimit, restLogLine, restStats } from "./rest-limit";
 
 const host = "https://api.exchange.coinbase.com";
 
@@ -183,6 +183,15 @@ test("a spent budget does not mark the product cold, and live confirms still sen
   expect(isCold("DOGE-USD", run)).toBe(false);
   expect(isCold("BTC-USD", run)).toBe(false);
   expect(restStats(run).n).toBe(REST_HARD_CAP);
+});
+
+test("the run log line lists cold ids", () => {
+  const run = createRestRun(Number.POSITIVE_INFINITY);
+  markCold("IP-USD", run, "http-404");
+  markCold("CRV-USD", run, "hole");
+  expect(restLogLine(run, { warm: 41, total: 50, seedIdx: 43 })).toBe(
+    "rest n=0, 429=0, waited_ms=0, cold=[CRV-USD,IP-USD] warm=41/50 seed_idx=43",
+  );
 });
 
 test("no raw fetch( outside rest-limit.ts", () => {

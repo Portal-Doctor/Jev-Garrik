@@ -162,7 +162,7 @@ function command(url: string, parts: readonly string[]): Promise<Reply> {
       socket.destroy();
       reject(error);
     };
-    socket.on("error", (error) => {
+    socket.on("error", (error: Error) => {
       if (settled) return;
       fail(error);
     });
