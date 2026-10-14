@@ -11,6 +11,7 @@ import {
   HOUR_KEEP,
   SEED_CURSOR_KEY,
   seedMarkKey,
+  seedRetryList,
   type DailyClose,
   type SeedMark,
   type PaperHost,
@@ -853,8 +854,10 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
   if (!host.seedChecked) {
     const cursorRaw = byKey.get(SEED_CURSOR_KEY) ?? null;
     if (cursorRaw) {
-      const cursor = JSON.parse(cursorRaw) as { order?: string[]; idx?: number; runId?: string };
-      if (Array.isArray(cursor.order)) host.seedCursor = { order: cursor.order, idx: cursor.idx ?? 0, runId: cursor.runId ?? "" };
+      const cursor = JSON.parse(cursorRaw) as { order?: string[]; idx?: number; runId?: string; retry?: unknown };
+      if (Array.isArray(cursor.order)) {
+        host.seedCursor = { order: cursor.order, idx: cursor.idx ?? 0, runId: cursor.runId ?? "", retry: seedRetryList(cursor) };
+      }
     }
     for (const productId of products) {
       const raw = byKey.get(seedMarkKey(productId)) ?? null;

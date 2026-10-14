@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { LAST_RUN_KEY, bar4hKey, loadSplit, persistSplit } from "./hot-store";
-import { FOUR_KEEP, installPaperState, seedBudgeted, seedMarkKey, startPaperHost, type PaperHost } from "./paper-host";
+import { FOUR_KEEP, installPaperState, seedBudgeted, seedMarkKey, SEED_CURSOR_KEY, startPaperHost, type PaperHost } from "./paper-host";
 import { memoryKv } from "./relay";
 import {
   REST_DEADLINE_MARGIN_MS,
@@ -302,7 +302,10 @@ test("S: a product being seeded is not stored and is retried after a transient f
     host.seedCursor = { order: ["BTC-USD"], idx: 0, runId: "s" };
     await seedBudgeted(host);
     expect(sent).toBe(mode === "deadline" ? 0 : REST_MAX_ATTEMPTS);
-    expect(host.seedCursor.idx).toBe(0);
+    expect(host.seedCursor.idx).toBe(1);
+    expect(host.seedCursor.retry).toEqual(["BTC-USD"]);
+    expect(host.seedCursor.order).toEqual(["BTC-USD"]);
+    expect(host.seedCursor.runId).toBe("s");
     expect(host.seedMarks.has("BTC-USD")).toBe(false);
     expect(host.cold.has("BTC-USD")).toBe(true);
     host.warmupStored = true;
@@ -319,11 +322,13 @@ test("S: a product being seeded is not stored and is retried after a transient f
     const saved = await loadSplit(kv, next);
     expect(saved).toBeTruthy();
     if (saved) installPaperState(next, saved);
-    expect(next.seedCursor.idx).toBe(0);
+    expect(next.seedCursor.idx).toBe(1);
+    expect(next.seedCursor.retry).toEqual(["BTC-USD"]);
     expect(next.cold.has("BTC-USD")).toBe(false);
     await seedBudgeted(next);
     expect(retried).toBeGreaterThan(0);
     expect(next.seedMarks.get("BTC-USD")).toMatchObject({ status: "warm", reason: "seeded" });
+    expect(next.seedCursor.retry).toEqual([]);
     expect(next.cold.has("BTC-USD")).toBe(false);
   }
 });
@@ -336,6 +341,78 @@ test("a 404 on the first seed walk still stores cold and advances the cursor", a
   await seedBudgeted(host);
   expect(host.seedMarks.get("GONE-USD")).toMatchObject({ status: "cold", reason: "http-404" });
   expect(host.seedCursor.idx).toBe(1);
+  expect(host.seedCursor.retry).toEqual([]);
+});
+
+test("a persistent 503 or throw seeds the products behind it and retries the failed one", async () => {
+  const order = ["BAD", "AAA", "BBB", "CCC"];
+  for (const mode of ["503", "throw"] as const) {
+    const kv = memoryKv(() => NOW);
+    const calls = new Map<string, number>(order.map((id) => [id, 0]));
+    let badHealthy = false;
+    let runId = "";
+    for (let run = 0; run < 3; run += 1) {
+      const beforeBad = calls.get("BAD") ?? 0;
+      const host = startPaperHost(order, {});
+      host.clock = () => NOW;
+      quiet(host.restRun, async (url) => {
+        const id = decodeURIComponent(new URL(url).pathname.split("/")[2] ?? "");
+        calls.set(id, (calls.get(id) ?? 0) + 1);
+        if (id === "BAD" && !badHealthy) {
+          if (mode === "throw") throw new Error("fetch failed");
+          return new Response("", { status: 503 });
+        }
+        return seededPage(url);
+      }, NOW, NOW + 800_000);
+      const saved = await loadSplit(kv, host);
+      if (saved) installPaperState(host, saved);
+      if (host.seedCursor.order.length === 0) host.seedCursor = { order: [...order], idx: 0, runId: "starve", retry: [] };
+      await seedBudgeted(host);
+      expect(host.seedCursor.order).toEqual(order);
+      expect(host.seedCursor.runId).toBe("starve");
+      expect(host.seedCursor.retry).toEqual(["BAD"]);
+      expect(host.seedCursor.idx).toBe(order.length);
+      expect(host.seedMarks.has("BAD")).toBe(false);
+      expect(host.cold.has("BAD")).toBe(true);
+      for (const id of ["AAA", "BBB", "CCC"]) {
+        expect(host.seedMarks.get(id)).toMatchObject({ status: "warm", reason: "seeded" });
+      }
+      expect((calls.get("BAD") ?? 0) - beforeBad).toBe(REST_MAX_ATTEMPTS);
+      host.warmupStored = true;
+      await persistSplit(kv, host);
+      expect(await kv.get(seedMarkKey("BAD"))).toBeNull();
+      const stored = JSON.parse((await kv.get(SEED_CURSOR_KEY)) ?? "{}") as { order?: string[]; runId?: string; retry?: string[]; idx?: number };
+      expect(stored.order).toEqual(order);
+      expect(stored.runId).toBe("starve");
+      expect(stored.retry).toEqual(["BAD"]);
+      runId = stored.runId ?? "";
+    }
+    expect(runId).toBe("starve");
+    for (const id of ["AAA", "BBB", "CCC"]) expect((calls.get(id) ?? 0)).toBeGreaterThan(0);
+
+    badHealthy = true;
+    const host = startPaperHost(order, {});
+    host.clock = () => NOW;
+    quiet(host.restRun, async (url) => {
+      const id = decodeURIComponent(new URL(url).pathname.split("/")[2] ?? "");
+      calls.set(id, (calls.get(id) ?? 0) + 1);
+      return seededPage(url);
+    }, NOW, NOW + 800_000);
+    const saved = await loadSplit(kv, host);
+    expect(saved).toBeTruthy();
+    if (saved) installPaperState(host, saved);
+    expect(host.seedCursor.retry).toEqual(["BAD"]);
+    expect(host.cold.has("BAD")).toBe(false);
+    await seedBudgeted(host);
+    expect(host.seedMarks.get("BAD")).toMatchObject({ status: "warm", reason: "seeded" });
+    expect(host.seedCursor.retry).toEqual([]);
+    expect(host.seedCursor.order).toEqual(order);
+    expect(host.seedCursor.runId).toBe("starve");
+    expect(host.cold.has("BAD")).toBe(false);
+    for (const id of ["AAA", "BBB", "CCC"]) {
+      expect(host.seedMarks.get(id)).toMatchObject({ status: "warm", reason: "seeded" });
+    }
+  }
 });
 
 test("the default fetch aborts a hung call inside the deadline margin", async () => {
