@@ -53,7 +53,11 @@ export interface RestRun {
 }
 
 /** Abort a hung public GET. Injected test transports are not wrapped. */
-export function fetchWithTimeout(url: string, timeoutMs = REST_FETCH_TIMEOUT_MS, fetchImpl: typeof fetch = globalThis.fetch): Promise<Response> {
+export function fetchWithTimeout(
+  url: string,
+  timeoutMs = REST_FETCH_TIMEOUT_MS,
+  fetchImpl: (url: string, init?: RequestInit) => Promise<Response> = globalThis.fetch,
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetchImpl(url, { signal: controller.signal }).finally(() => clearTimeout(timer));

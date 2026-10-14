@@ -23,11 +23,25 @@ function candles(productId: string): string {
   return `${EXCHANGE}/products/${productId}/candles`;
 }
 
-function quiet(run: RestRun, fetchImpl: (url: string) => Promise<Response>, now = 0, deadlineMs = 1_000_000_000_000): void {
-  run.deps.now = () => now;
-  run.deps.sleep = async () => undefined;
-  run.deps.rand = () => 0;
-  run.deps.deadlineMs = () => deadlineMs;
+/** Sleep moves the clock. A fixed `now` never leaves the 1s send window, so the fifth attempt would wait forever. */
+function movingClock(start = 0, deadlineMs = 1_000_000_000_000): Pick<RestRun["deps"], "now" | "sleep" | "rand" | "deadlineMs"> {
+  let now = start;
+  return {
+    now: () => now,
+    sleep: async (ms) => {
+      now += ms;
+    },
+    rand: () => 0,
+    deadlineMs: () => deadlineMs,
+  };
+}
+
+function quiet(run: RestRun, fetchImpl: (url: string) => Promise<Response>, start = 0, deadlineMs = 1_000_000_000_000): void {
+  const clock = movingClock(start, deadlineMs);
+  run.deps.now = clock.now;
+  run.deps.sleep = clock.sleep;
+  run.deps.rand = clock.rand;
+  run.deps.deadlineMs = clock.deadlineMs;
   run.deps.fetch = fetchImpl;
 }
 
@@ -78,9 +92,7 @@ async function expectStillWarm(kv: ReturnType<typeof memoryKv>, productId: strin
 test("five injected throws mark retries for this run only", async () => {
   let calls = 0;
   const run = createRestRun(1_000_000_000_000, {
-    now: () => 0,
-    sleep: async () => undefined,
-    rand: () => 0,
+    ...movingClock(),
     fetch: async () => {
       calls += 1;
       throw new Error("injected");
@@ -96,9 +108,7 @@ test("five injected throws mark retries for this run only", async () => {
 test("five 503s mark retries for this run only", async () => {
   let calls = 0;
   const run = createRestRun(1_000_000_000_000, {
-    now: () => 0,
-    sleep: async () => undefined,
-    rand: () => 0,
+    ...movingClock(),
     fetch: async () => {
       calls += 1;
       return new Response("", { status: 503 });
@@ -113,9 +123,7 @@ test("five 503s mark retries for this run only", async () => {
 test("a deadline before any request does not mark cold", async () => {
   let calls = 0;
   const run = createRestRun(1_000_000, {
-    now: () => 1_000_000,
-    sleep: async () => undefined,
-    rand: () => 0,
+    ...movingClock(1_000_000, 1_000_000),
     fetch: async () => {
       calls += 1;
       return new Response("ok", { status: 200 });
@@ -130,9 +138,7 @@ test("a deadline before any request does not mark cold", async () => {
 
 test("cold:false never marks cold after throws, 503s, or a deadline mid-retry", async () => {
   const thrown = createRestRun(1_000_000_000_000, {
-    now: () => 0,
-    sleep: async () => undefined,
-    rand: () => 0,
+    ...movingClock(),
     fetch: async () => {
       throw new Error("injected");
     },
@@ -143,9 +149,7 @@ test("cold:false never marks cold after throws, 503s, or a deadline mid-retry", 
   expect(isCold("BTC-USD", thrown)).toBe(false);
 
   const unavailable = createRestRun(1_000_000_000_000, {
-    now: () => 0,
-    sleep: async () => undefined,
-    rand: () => 0,
+    ...movingClock(),
     fetch: async () => new Response("", { status: 503 }),
   });
   const missed = await limited(`${EXCHANGE}/products/ETH-USD/candles?granularity=60`, unavailable, { cold: false, backfill: true });
@@ -274,7 +278,7 @@ test("a 404 is still stored as a durable cold mark", async () => {
 test("the default fetch aborts a hung call inside the deadline margin", async () => {
   expect(REST_FETCH_TIMEOUT_MS).toBe(20_000);
   expect(REST_FETCH_TIMEOUT_MS).toBeLessThan(REST_DEADLINE_MARGIN_MS);
-  const fetchImpl: typeof fetch = (_url, init) =>
+  const fetchImpl = (_url: string, init?: RequestInit): Promise<Response> =>
     new Promise((_resolve, reject) => {
       const signal = init?.signal;
       if (!signal) {
