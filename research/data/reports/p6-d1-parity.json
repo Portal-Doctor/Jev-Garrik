@@ -1,0 +1,13 @@
+{
+  "commitSha": "7496b723cf0015afa67ca9cd2ab0bdb76b2d9ad2",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T11:30:12.007Z",
+  "phaseId": "P6",
+  "supersedes": "research/data/reports/p6-wide-parity.json",
+  "supersedesSha256": "c8e598b2abd31126f3cdf5197ff64592fb640b4ccc4fdbadc097cec9e97d1edd",
+  "candleStoreHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "dailyRootHash": "76c41956e5575bb2c3223d168e4c3dd62dbd3725d583aac717ad15a931ef4ad4",
+  "dailyFiles": 18204,
+  "dailyHashInput": "sha256 of each daily candles sqlite, then rootHash of sorted path TAB sha256 lines",
+  "missingMonth": "a path listed in research/data/daily/data-manifest.json and absent on disk throws missing data file"
+}

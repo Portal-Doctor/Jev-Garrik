@@ -1,0 +1,19 @@
+{
+  "commitSha": "d6c77d7e7a5853bb7ee5b967fb3bea557052aff0",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T01:39:06.909Z",
+  "phaseId": "P6",
+  "registrationSha256": "f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d",
+  "amendment1Sha256": "e0948e26f2bbe2ec7c113d23db8b4dbb9daed70a9d2cef0e3f0a0c49f70d7760",
+  "amendment1File": "research/data/reports/p4-amendment-1.json",
+  "metricFile": "research/data/registration-sources/p6-metric-definitions.md",
+  "metricSha256": "1ddfd23d3f21552398cd2e9f11a392fc4652da1537ca04b1e2c6536b93420789",
+  "rearm": "the 10R pause re-fires only on a new trough below the prior one, or on a 10R drawdown from a new peak; the 20R kill is measured from the original peak.",
+  "approvedBy": "Brian",
+  "approvedAt": "2026-10-12T01:23:00Z",
+  "registrationEdited": false,
+  "amendment1Edited": false,
+  "approval": "approved",
+  "kellyIncluded": false,
+  "note": "Amendment 2 is the frozen metric definitions plus the confirmed 1c pause re-arm. The Architect Kelly ruling is recorded separately and is not part of this amendment."
+}

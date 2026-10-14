@@ -1,0 +1,14 @@
+{
+  "capturedAt": "2026-10-12T20:38:59.609Z",
+  "url": "wss://advanced-trade-ws.coinbase.com",
+  "product": "BTC-USD",
+  "channels": ["heartbeats", "level2", "market_trades"],
+  "note": "Two public sockets opened together. sequence_num is per socket and both start at 0. market_trades replays the same recent trade ids on each socket.",
+  "a": { "sequenceStart": 0, "sequenceEnd": 78 },
+  "b": { "sequenceStart": 0, "sequenceEnd": 77 },
+  "trades": [
+    { "trade_id": "1105150330", "time": "2026-10-12T20:38:53.4175Z", "price": "82979.98" },
+    { "trade_id": "1105150329", "time": "2026-10-12T20:38:52.891592Z", "price": "82979.98" },
+    { "trade_id": "1105150328", "time": "2026-10-12T20:38:50.689864Z", "price": "82979.98" }
+  ]
+}

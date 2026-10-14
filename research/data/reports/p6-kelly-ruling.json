@@ -1,0 +1,16 @@
+{
+  "commitSha": "d6c77d7e7a5853bb7ee5b967fb3bea557052aff0",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T01:39:06.909Z",
+  "phaseId": "P6",
+  "role": "architect-ruling",
+  "relayedBy": "Jimmy",
+  "partOfAmendment2": false,
+  "registrationEdited": false,
+  "registeredRiskUsd": 60,
+  "registeredSource": "research/data/reports/p4-registration.json risk.riskUsd",
+  "registrationSha256": "f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d",
+  "text": "Every class A-E trades at $20 risk from forward bar 1. The hard-coded $60 is a defect. kellyRiskUsd stays $20 until a class is promoted. The forward gate is mean net R > 0, L80 > 0, and Holm over the 5 streams. After promotion, risk is min(0.75%, half-Kelly) on forward realized net R only. P5 data never sizes a forward trade. Recompute at each weekly review (Monday 00:00 UTC cutoff) and hold until the next review. Drop back to $20 if the forward bound goes <= 0. Sizing may go under $20 below the cap. Architect wrote '(default 13)'.",
+  "default13Parameter": "default13Usd",
+  "default13Applied": false
+}

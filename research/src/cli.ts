@@ -47,6 +47,10 @@ import { assertScanSchema } from "./p3/scan-schema";
 import { survivorshipReport } from "./p3/survivorship";
 import { buildP5Report } from "./p5/run";
 import { assertP5OutputPath, P5_V31_RESULTS } from "./p5/output";
+import { assertNoLiveEndpoint, replayInjected, type ForwardEvent } from "./p6/engine";
+import { runPublicPaper } from "./p6/paper-host";
+import { startDateReport } from "./p6/select";
+import { P6_STAMP_COMMANDS, stampP6Record, type P6StampCommand } from "./p6/stamp-records";
 
 const started = boot();
 if (!started.ok) {
@@ -121,6 +125,36 @@ async function main(): Promise<void> {
     case "p5":
       p5();
       return;
+    case "p6-replay":
+      p6Replay();
+      return;
+    case "p6-stamp-amendment-2":
+    case "p6-stamp-amendment-2a":
+    case "p6-stamp-amendment-2a-approval":
+    case "p6-stamp-kelly-ruling":
+    case "p6-stamp-kelly-status":
+    case "p6-stamp-amendment-2b":
+    case "p6-stamp-amendment-2b-approval":
+    case "p6-stamp-amendment-v6":
+    case "p6-stamp-amendment-v6-approval":
+    case "p6-stamp-amendment-v61":
+    case "p6-stamp-amendment-v61-approval":
+    case "p6-stamp-amendment-v61-cite":
+    case "p6-stamp-amendment-v62":
+    case "p6-stamp-amendment-v62-approval":
+    case "p6-stamp-kelly-superseding":
+    case "p6-stamp-forward-a":
+    case "p6-stamp-wide-parity":
+    case "p6-stamp-d1-parity":
+    case "p6-stamp-kelly-ruling-superseded":
+      stampP6(command);
+      return;
+    case "p6-paper":
+      await runPaper();
+      return;
+    case "p6-start-date":
+      p6StartDate();
+      return;
     case "jev-smoke":
       await writeJevSmoke();
       return;
@@ -130,7 +164,7 @@ async function main(): Promise<void> {
       return;
     default:
       throw new Error(
-        "usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | p5 | jev-smoke",
+        `usage: snapshot | download | download-daily | lift-d2 | part-a | probe | derive | derive-new | ticks | coverage | seal-snapshot | p1-report | stats-fetch | stats-convert | universe-cut | refresh-reports | geometry | p5 | jev-smoke | p6-replay | p6-paper | p6-start-date | ${P6_STAMP_COMMANDS.join(" | ")}`,
       );
   }
 }
@@ -583,6 +617,50 @@ function writeGeometry(): void {
     writeJson(join(paths.reports, name), body);
   }
   console.log(`geometry names ${scan.warmup.names} fifteen ${fifteen.dataRootHash} daily ${daily.dataRootHash}`);
+}
+
+function stampP6(command: string): void {
+  const written = stampP6Record(command as P6StampCommand, repoDataDir());
+  console.log(`${command} ${written.sha256}`);
+}
+
+async function runPaper(): Promise<void> {
+  const args = process.argv.slice(3);
+  if (args.includes("--listen")) throw new Error("monitoring is files under data/runtime");
+  const valued = new Set(["--status-dir", "--for-ms", "--log"]);
+  const products: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (valued.has(arg)) {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--")) continue;
+    products.push(arg);
+  }
+  const dirFlag = args.indexOf("--status-dir");
+  const statusDir = dirFlag >= 0 && args[dirFlag + 1] ? args[dirFlag + 1]! : join(realDataDir(), "runtime", "p6-paper");
+  const forFlag = args.indexOf("--for-ms");
+  const forMs = forFlag >= 0 ? Number(args[forFlag + 1]) : undefined;
+  const logFlag = args.indexOf("--log");
+  const logPath = logFlag >= 0 ? args[logFlag + 1] : undefined;
+  await runPublicPaper({ products, statusDir, forMs, logPath });
+}
+
+function p6StartDate(): void {
+  const goLive = process.argv[3];
+  if (!goLive || !/^\d{4}-\d{2}-\d{2}/.test(goLive)) throw new Error("usage: p6-start-date <YYYY-MM-DD>");
+  console.log(JSON.stringify(startDateReport(goLive)));
+}
+
+function p6Replay(): void {
+  const file = process.argv[3];
+  if (!file) throw new Error("usage: p6-replay <events.json>");
+  const text = readFileSync(file, "utf8");
+  assertNoLiveEndpoint(text);
+  const events = JSON.parse(text) as ForwardEvent[];
+  const book = replayInjected(events);
+  console.log(JSON.stringify({ closed: book.closed.length, open: book.positions.length, packets: book.packets.length, rejected: book.rejected.length }));
 }
 
 function p5(): void {

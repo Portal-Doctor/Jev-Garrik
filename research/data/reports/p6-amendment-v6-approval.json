@@ -1,0 +1,26 @@
+{
+  "commitSha": "a06cf1f054ffe349cb2645d190180b0cb2f0fab9",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T14:49:28.625Z",
+  "phaseId": "P6",
+  "approvedBy": "Brian",
+  "approvedAt": "2026-10-12T13:45:00Z",
+  "confirmedBy": [
+    "Quant",
+    "Trader"
+  ],
+  "approvalOf": "wording",
+  "rule": "D orders touching a gap are indeterminate. s_live and gap-17 snapshots fall back to the REST product book, flagged. Jev skips packets with a missing 1m bar; these count as indeterminate, and the week is flagged if more than 5% are skipped. Stops are stop-first on the REST 15m bar. If a gap covers a stop level, the stop fills at the first available price after the gap, using the existing gap-fill convention, and is logged as a gap fill. The stale-feed and 5%-missing kills stay as registered. Gap caps: at most 1% of time gapped per week; no single gap over 15 min; no-go if the gap rate in top-decile realized-vol hours exceeds 2x the overall rate. The soak lasts at least 7 days, and the same caps run as a weekly forward monitor that flags that week's Jev and D stats.",
+  "registrationSha256": "f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d",
+  "amendment1Sha256": "e0948e26f2bbe2ec7c113d23db8b4dbb9daed70a9d2cef0e3f0a0c49f70d7760",
+  "amendment2Sha256": "bfa6efb2e0e4b12034e34e8481256bb26b6c36a24e3e3a92c5300be9eaf496eb",
+  "amendment2aSha256": "99cab8986102bfddb9dd6579fcb99ffd83ed89f065c009811633e19bd59283a0",
+  "amendment2bSha256": "6bfa199e5d70660e887f73e006a548a4b4f803e8f9a7922dc755ff0966154f34",
+  "bindsToFileHash": false,
+  "note": "Brian approved the wording at 8:45 AM CT on 2026-10-12. This record does not bind that approval to a file hash he has not seen.",
+  "registrationEdited": false,
+  "amendment1Edited": false,
+  "amendment2Edited": false,
+  "amendment2aEdited": false,
+  "amendment2bEdited": false
+}

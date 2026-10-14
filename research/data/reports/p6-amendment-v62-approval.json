@@ -1,0 +1,19 @@
+{
+  "commitSha": "5b8b360aeaf5265240978d0e3622ed0e2efdf9c1",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T23:14:47.221Z",
+  "phaseId": "P6",
+  "approvedBy": "Brian",
+  "approvedAt": "2026-10-12T22:23:00Z",
+  "confirmedBy": [
+    "Quant",
+    "Trader"
+  ],
+  "approvalOf": "wording",
+  "rule": "This rewords the V6.1 handover rule. The V6.1 files are not edited. A handover is handover_micro, covered and excluded from the 1% weekly gap cap, only when all of the following hold. The incoming instance's own socket for each product ran with no sequence_num hole from at least 60 seconds before the outgoing instance's last frame until after takeover. Proof of that run is the incoming instance's own socket. Sequence numbers are not compared across sockets. The writer switch took under 1 second. The buffer did not overflow. The engine resumes on the incoming stream at the first event after the last event the outgoing writer processed. That cut is matched by exchange identifiers, trade_id per product, or exchange time plus price plus size, and never by socket sequence_num. Events before the cut are skipped as duplicates. Every event after the cut is evaluated for stops and trade-through. If the cut cannot be matched without ambiguity, the handover is uncovered. The handover_micro count is logged per week. The incoming instance may also record whether it saw an event timestamped before the outgoing instance's last frame. That check does not by itself change the covered result.",
+  "bindsToFileHash": false,
+  "amendmentV61Sha256": "bb0c02bda3a8acab7f4f2127462b78b9e63792a88155c2ea08eba054e7bd0af1",
+  "amendmentV61Edited": false,
+  "amendmentV6Edited": false,
+  "note": "Brian approved this wording. Quant and Trader's conditions are in the rule. The optional pre-frame timestamp check is recorded and does not by itself change the covered result. This record does not bind the approval to a file hash, and it does not edit the V6.1 files."
+}

@@ -108,7 +108,7 @@ export interface TradeRow extends ClosedTrade {
   purged: boolean;
 }
 
-interface ASignal {
+export interface ASignal {
   lookback: 20 | 55;
   date: string;
   entryDate: string;
@@ -129,7 +129,7 @@ interface PairState {
   bars: PxBar[];
 }
 
-interface WeekBook {
+export interface WeekBook {
   date: string;
   selected: Set<string>;
   held: Set<string>;
@@ -196,7 +196,7 @@ function emaPoint(inputs: ClassBarInputs): Map<string, { e50: number | null; e20
   return out;
 }
 
-function collectA(
+export function collectA(
   productId: string,
   inputs: ClassBarInputs,
   atrByDate: Map<string, number>,
@@ -364,6 +364,15 @@ function aCandidates(state: PairState, lookback: 20 | 55, k: number): BookCandid
     entryTs: row.entryTs,
     stopDistance: k * row.atr,
   }));
+}
+
+/** The P5 week book: top 20 percent, score above 0, at most four names, and the top 40 percent held set. */
+export function weekSelection(date: string, rows: readonly { id: string; date: string; score: number; member: boolean }[]): WeekBook {
+  return {
+    date,
+    selected: new Set(classBSelected(rows).map((row) => row.id)),
+    held: new Set(rows.filter((row) => classBHeld(rows, row.id)).map((row) => row.id)),
+  };
 }
 
 function bCandidates(state: PairState, weeks: readonly WeekBook[], veto: (date: string) => boolean): BookCandidate[] {
@@ -640,14 +649,7 @@ export function buildP5Report(stamp: ArtifactStamp, dataDir: string): Record<str
     list.push(row);
     byWeek.set(row.date, list);
   }
-  const weeks: WeekBook[] = [...byWeek.keys()].sort().map((date) => {
-    const rows = byWeek.get(date)!;
-    return {
-      date,
-      selected: new Set(classBSelected(rows).map((row) => row.id)),
-      held: new Set(rows.filter((row) => classBHeld(rows, row.id)).map((row) => row.id)),
-    };
-  });
+  const weeks: WeekBook[] = [...byWeek.keys()].sort().map((date) => weekSelection(date, byWeek.get(date)!));
   const ordered = [...states.values()].sort((a, b) => (a.productId < b.productId ? -1 : 1));
   for (const state of ordered) {
     log(`p5 bars ${state.productId}`);

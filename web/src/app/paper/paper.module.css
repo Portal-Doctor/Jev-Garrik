@@ -226,6 +226,10 @@
   color: var(--pnl-neg);
 }
 
+.muted {
+  color: var(--muted);
+}
+
 /* Live mids plus buy and sell book share. Both move on each quote heartbeat. */
 .heartbeat {
   padding: 10px 24px 12px;

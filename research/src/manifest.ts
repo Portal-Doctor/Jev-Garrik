@@ -6,6 +6,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface ArtifactStamp {
   commitSha: string;
@@ -32,7 +33,12 @@ export function stampArtifact(opts: {
   };
 }
 
-export function repoRoot(start: string = import.meta.dir): string {
+/** Directory of this module. `import.meta.url` is the bundled path; Bun's `import.meta.dir` is not. */
+function moduleDir(): string {
+  return fileURLToPath(new URL(".", import.meta.url));
+}
+
+export function repoRoot(start: string = moduleDir()): string {
   let dir = start;
   for (;;) {
     if (existsSync(join(dir, ".git"))) return dir;

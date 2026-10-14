@@ -1,0 +1,132 @@
+{
+  "commitSha": "c13d05890c80631a2ede258ffbd87364c0257ab1",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T04:01:24.746Z",
+  "phaseId": "P6",
+  "span": "2025-11-11 through 2026-10-05",
+  "storeHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "storeHashFiles": 6396,
+  "storeHashInput": "sha256 of each candles sqlite, then rootHash of sorted path TAB sha256 lines",
+  "comparable": 338,
+  "diffs": 0,
+  "matched": 338,
+  "exits": {
+    "A stop": 26,
+    "A 10-day": 51,
+    "A trail stop": 17,
+    "A 30-day": 12,
+    "B held-set": 184,
+    "B disaster stop": 48
+  },
+  "gapFillStops": 0,
+  "books": [
+    {
+      "book": "A20-k2",
+      "published": 66,
+      "windowMarked": 5,
+      "comparable": 61,
+      "matched": 61,
+      "diffs": 0,
+      "aPublished": 24,
+      "aCovered": 24,
+      "exits": {
+        "A stop": 8,
+        "A 10-day": 9,
+        "A trail stop": 3,
+        "A 30-day": 2,
+        "B held-set": 31,
+        "B disaster stop": 8
+      }
+    },
+    {
+      "book": "A20-k2.5",
+      "published": 65,
+      "windowMarked": 5,
+      "comparable": 60,
+      "matched": 60,
+      "diffs": 0,
+      "aPublished": 23,
+      "aCovered": 23,
+      "exits": {
+        "A stop": 6,
+        "A 10-day": 10,
+        "A trail stop": 3,
+        "A 30-day": 2,
+        "B held-set": 31,
+        "B disaster stop": 8
+      }
+    },
+    {
+      "book": "A20-k3",
+      "published": 64,
+      "windowMarked": 5,
+      "comparable": 59,
+      "matched": 59,
+      "diffs": 0,
+      "aPublished": 23,
+      "aCovered": 23,
+      "exits": {
+        "A stop": 2,
+        "A 10-day": 13,
+        "A trail stop": 4,
+        "A 30-day": 2,
+        "B held-set": 30,
+        "B disaster stop": 8
+      }
+    },
+    {
+      "book": "A55-k2",
+      "published": 58,
+      "windowMarked": 5,
+      "comparable": 53,
+      "matched": 53,
+      "diffs": 0,
+      "aPublished": 16,
+      "aCovered": 16,
+      "exits": {
+        "A 10-day": 5,
+        "A stop": 5,
+        "A trail stop": 2,
+        "A 30-day": 2,
+        "B held-set": 31,
+        "B disaster stop": 8
+      }
+    },
+    {
+      "book": "A55-k2.5",
+      "published": 58,
+      "windowMarked": 5,
+      "comparable": 53,
+      "matched": 53,
+      "diffs": 0,
+      "aPublished": 16,
+      "aCovered": 16,
+      "exits": {
+        "A 10-day": 6,
+        "A stop": 4,
+        "A trail stop": 2,
+        "A 30-day": 2,
+        "B held-set": 31,
+        "B disaster stop": 8
+      }
+    },
+    {
+      "book": "A55-k3",
+      "published": 57,
+      "windowMarked": 5,
+      "comparable": 52,
+      "matched": 52,
+      "diffs": 0,
+      "aPublished": 16,
+      "aCovered": 16,
+      "exits": {
+        "A 10-day": 8,
+        "A trail stop": 3,
+        "A stop": 1,
+        "A 30-day": 2,
+        "B held-set": 30,
+        "B disaster stop": 8
+      }
+    }
+  ]
+}

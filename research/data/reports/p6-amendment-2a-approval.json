@@ -1,0 +1,18 @@
+{
+  "commitSha": "79eebb38ddc99e1e08ec0e6cf587af228ed5deb7",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T02:06:51.478Z",
+  "phaseId": "P6",
+  "amendment2aSha256": "99cab8986102bfddb9dd6579fcb99ffd83ed89f065c009811633e19bd59283a0",
+  "amendment2aFile": "research/data/reports/p6-amendment-2a.json",
+  "approvedBy": "Brian",
+  "approvedAt": "2026-10-12T01:49:00Z",
+  "confirmedBy": [
+    "Quant",
+    "Trader"
+  ],
+  "commit": "79eebb38ddc99e1e08ec0e6cf587af228ed5deb7",
+  "registrationEdited": false,
+  "amendment1Edited": false,
+  "amendment2Edited": false
+}

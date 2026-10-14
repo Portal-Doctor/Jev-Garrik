@@ -44,6 +44,67 @@ export function deriveBars(
   return bars;
 }
 
+export interface FoldBar {
+  ts: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+/**
+ * Fold child bars into UTC buckets. A bucket is kept when any child traded.
+ * A fully empty bucket is dropped. That is the same rule aggregate() uses for minutes,
+ * and the same series deriveBars keeps after it drops empty bars.
+ * Callers keep the returned bars in order. A missing bucket is a no-trade hole.
+ * It does not discard the older bars. foldedCovers is that check.
+ */
+export function foldHours<T extends FoldBar>(bars: readonly T[], spanSec: number, childSec: number): T[] {
+  const need = spanSec / childSec;
+  if (!(need >= 1) || need !== Math.floor(need)) return [];
+  const byTs = new Map<number, T>();
+  for (const bar of bars) byTs.set(bar.ts, bar);
+  const starts = [...new Set(bars.map((bar) => Math.floor(bar.ts / spanSec) * spanSec))].sort((a, b) => a - b);
+  const out: T[] = [];
+  for (const start of starts) {
+    const filled: T[] = [];
+    for (let ts = start; ts < start + spanSec; ts += childSec) {
+      const row = byTs.get(ts);
+      if (row) filled.push(row);
+    }
+    if (filled.length === 0) continue;
+    filled.sort((a, b) => a.ts - b.ts);
+    const first = filled[0]!;
+    const last = filled[filled.length - 1]!;
+    out.push({
+      ...first,
+      ts: start,
+      open: first.open,
+      high: Math.max(...filled.map((bar) => bar.high)),
+      low: Math.min(...filled.map((bar) => bar.low)),
+      close: last.close,
+      volume: filled.reduce((sum, bar) => sum + bar.volume, 0),
+    });
+  }
+  return out;
+}
+
+/**
+ * True when `bars` is the offline fold: at least `keep` buckets, each step a
+ * positive multiple of `stepSec`. A wider step is a dropped empty bucket.
+ * An off-grid timestamp is not that hole, so the series does not cover.
+ */
+export function foldedCovers(bars: readonly { ts: number }[], stepSec: number, keep: number): boolean {
+  if (!(stepSec > 0) || bars.length < keep) return false;
+  const ordered = bars.slice().sort((a, b) => a.ts - b.ts);
+  for (let index = 1; index < ordered.length; index += 1) {
+    const gap = ordered[index]!.ts - ordered[index - 1]!.ts;
+    if (gap < stepSec || gap % stepSec !== 0) return false;
+  }
+  return true;
+}
+
 function aggregate(byMinute: Map<number, MinuteRow>, open: number, end: number, timeframe: Timeframe): DerivedBar {
   const filled: MinuteRow[] = [];
   let emptyMinutes = 0;

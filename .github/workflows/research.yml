@@ -22,6 +22,21 @@ jobs:
       - name: typecheck
         run: bunx tsc --noEmit -p research/tsconfig.json
 
+  web:
+    name: next build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: install web
+        working-directory: web
+        run: bun install --frozen-lockfile
+      - name: next build
+        working-directory: web
+        run: bun run build
+
   cb-guard:
     name: cb unchanged vs main
     runs-on: ubuntu-latest

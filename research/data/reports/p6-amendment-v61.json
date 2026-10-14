@@ -1,0 +1,22 @@
+{
+  "commitSha": "cd8f13c8920cc77dbb962b283547e3665630e3e8",
+  "dataRootHash": "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8",
+  "createdAt": "2026-10-12T19:42:47.520Z",
+  "phaseId": "P6",
+  "registrationSha256": "f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d",
+  "amendment1Sha256": "e0948e26f2bbe2ec7c113d23db8b4dbb9daed70a9d2cef0e3f0a0c49f70d7760",
+  "amendment2Sha256": "bfa6efb2e0e4b12034e34e8481256bb26b6c36a24e3e3a92c5300be9eaf496eb",
+  "amendment2aSha256": "99cab8986102bfddb9dd6579fcb99ffd83ed89f065c009811633e19bd59283a0",
+  "amendment2bSha256": "6bfa199e5d70660e887f73e006a548a4b4f803e8f9a7922dc755ff0966154f34",
+  "amendmentV6Sha256": "8f66b3f91ca73eca4a7b574c7b66c706e562e4b85cc9e190f81158771f01e1f0",
+  "amendmentV6File": "research/data/reports/p6-amendment-v6.json",
+  "rule": "A handover is handover_micro, covered and excluded from the 1% weekly gap cap, only when its duration is under 1 second and the level2 sequence numbers and market_trades trade ids are contiguous across the handover. The incoming instance checks those values against the last ones stored in Redis. Otherwise the handover is uncovered and counts toward the 1% cap, the 15-minute cap, and the stale-feed rules, whatever its duration. After a handover, replay the buffered messages in sequence order. Evaluate stops and trade-through fills on each message using the exchange trade timestamp. A crossed stop fills at the first trade at or through it and is tagged handover_micro. If the order or the timestamps cannot be guaranteed, the handover is uncovered and those messages are not applied. Log the handover_micro count per week.",
+  "live": true,
+  "featureFlag": false,
+  "registrationEdited": false,
+  "amendment1Edited": false,
+  "amendment2Edited": false,
+  "amendment2aEdited": false,
+  "amendment2bEdited": false,
+  "amendmentV6Edited": false
+}
