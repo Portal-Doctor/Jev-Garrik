@@ -19,6 +19,11 @@ export const BACKFILL_CAP = REST_HARD_CAP - LIVE_FLOOR;
 export const OPERATING_CAP = BACKFILL_CAP - BACKFILL_RESERVE;
 export const REST_DEADLINE_MARGIN_MS = 90_000;
 export const REST_JITTER_CAP_MS = 8_000;
+/**
+ * One public candles call. Same 20s as the candle downloader.
+ * It sits inside the 90s deadline margin, so a hung socket cannot hold the lane until the platform kills the run.
+ */
+export const REST_FETCH_TIMEOUT_MS = 20_000;
 
 export interface RestStats {
   n: number;
@@ -47,11 +52,18 @@ export interface RestRun {
   onCold?: (id: string, reason: string) => void;
 }
 
+/** Abort a hung public GET. Injected test transports are not wrapped. */
+export function fetchWithTimeout(url: string, timeoutMs = REST_FETCH_TIMEOUT_MS, fetchImpl: typeof fetch = globalThis.fetch): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetchImpl(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 const defaults: RestLimitDeps = {
   now: () => Date.now(),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   rand: () => Math.random(),
-  fetch: (url) => fetch(url),
+  fetch: (url) => fetchWithTimeout(url),
   deadlineMs: () => Number.POSITIVE_INFINITY,
 };
 
@@ -190,6 +202,7 @@ async function once(state: RestRun, url: string, seed: boolean, mark: boolean, l
   const product = productIdFromUrl(url);
   if (seed && state.seedUsed >= state.seedBudget) return seedStopped();
   let last: Response | null = null;
+  let requested = false;
   for (let attempt = 0; attempt < REST_MAX_ATTEMPTS; attempt += 1) {
     const now = state.deps.now();
     if (now >= state.deps.deadlineMs() - REST_DEADLINE_MARGIN_MS) break;
@@ -201,6 +214,7 @@ async function once(state: RestRun, url: string, seed: boolean, mark: boolean, l
     state.stats.n += 1;
     if (seed) state.seedUsed += 1;
     state.sentAt.push(state.deps.now());
+    requested = true;
     let response: Response;
     try {
       response = await state.deps.fetch(url);
@@ -223,11 +237,12 @@ async function once(state: RestRun, url: string, seed: boolean, mark: boolean, l
     }
     await pause(state, fullJitterMs(attempt, state.deps.rand));
   }
-  if (product) markCold(product, state, "retries");
+  // A deadline break before any send is not this product's failure. `cold: false` (tape and 1m backfill) never marks cold.
+  if (mark && product && requested) markCold(product, state, "retries");
   return last ?? new Response("", { status: 429 });
 }
 
-/** Serial on this run. A second run has its own lane. `cold: false` still returns a 4xx and does not retry it. */
+/** Serial on this run. A second run has its own lane. `cold: false` returns a 4xx without retrying it, and does not mark cold after a failed retry. */
 export function limited(url: string, run?: RestRun, opts?: { seed?: boolean; cold?: boolean; live?: boolean; backfill?: boolean }): Promise<Response> {
   const state = runOf(run);
   const seed = opts?.seed === true;

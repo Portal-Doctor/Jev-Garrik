@@ -393,6 +393,22 @@ function boundHost(host: PaperHost): void {
   }
 }
 
+/**
+ * Skip the product for this run. `retries` and `cap` leave the stored seed mark alone,
+ * so a warm or durable-cold product is still that mark on the next load.
+ */
+export function applyRestCold(host: PaperHost, productId: string, reason: string): void {
+  host.cold.add(productId);
+  if (reason === "retries" || reason === "cap") return;
+  const prev = host.seedMarks.get(productId);
+  host.seedMarks.set(productId, {
+    oldestTs: prev?.oldestTs ?? 0,
+    newestTs: prev?.newestTs ?? 0,
+    status: "cold",
+    reason,
+  });
+}
+
 export function startPaperHost(products: readonly string[], env: Record<string, string | undefined> = process.env): PaperHost {
   const safety = assertSafeToStart(env);
   if (!safety.ok) throw new Error(safety.reason);
@@ -537,9 +553,7 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     fourFlushed: new Set(),
   };
   host.restRun = createRestRun(Number.POSITIVE_INFINITY, {}, (id, reason) => {
-    host.cold.add(id);
-    const prev = host.seedMarks.get(id);
-    host.seedMarks.set(id, { oldestTs: prev?.oldestTs ?? 0, newestTs: prev?.newestTs ?? 0, status: "cold", reason });
+    applyRestCold(host, id, reason);
   });
   return host;
 }
