@@ -2173,9 +2173,27 @@ export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHo
 /** Daily and 1h history from public REST, stored on the host. There is no local candle store on Vercel. */
 const HISTORY_GAP_SEC = 7 * 86_400;
 
+/**
+ * A 4xx other than 429 is a real refusal (404 delisted). 5xx, a thrown fetch (599),
+ * the pre-request deadline 429, and any other non-response are retried next run.
+ */
+function transientSeedFailure(status: number): boolean {
+  if (status === 429 || status === 599) return true;
+  if (status >= 500 && status < 600) return true;
+  if (status >= 400 && status < 500) return false;
+  return true;
+}
+
+function transientColdReason(reason: string): boolean {
+  if (reason === "retries") return true;
+  const match = /^http-(\d+)$/.exec(reason);
+  return match != null && transientSeedFailure(Number(match[1]));
+}
+
 function noteCold(host: PaperHost, productId: string, reason = "cold"): void {
   host.cold.add(productId);
   if (!host.restRun.cold.has(productId)) host.restRun.cold.set(productId, reason);
+  if (transientColdReason(reason)) return;
   const prev = host.seedMarks.get(productId);
   host.seedMarks.set(productId, {
     oldestTs: prev?.oldestTs ?? 0,
@@ -2262,18 +2280,20 @@ export async function seedBudgeted(host: PaperHost, fetchImpl?: SeedFetch): Prom
       host.restRun.seedUsed = before;
       break;
     }
+    if (dailyStop === "retry") break;
     const stop = await pageHourSeed(host, productId, fetchImpl, true);
     if (stop.reason === "budget") {
       host.restRun.seedUsed = before;
       break;
     }
+    if (stop.reason === "retry") break;
     host.seedCursor.idx += 1;
     added += 1;
   }
 }
 
 /** Full daily history. Stop at the listing, an empty page, or a gap. A warm series fetches only the delta. */
-async function seedDailyProduct(host: PaperHost, productId: string, fetchImpl?: SeedFetch): Promise<"ok" | "budget" | "cold"> {
+async function seedDailyProduct(host: PaperHost, productId: string, fetchImpl?: SeedFetch): Promise<"ok" | "budget" | "cold" | "retry"> {
   const nowSec = Math.floor(host.clock() / 1000);
   const existing = host.warmup.get(productId) ?? [];
   const last = latestTs(existing);
@@ -2288,11 +2308,22 @@ async function seedDailyProduct(host: PaperHost, productId: string, fetchImpl?: 
   for (let page = 0; page < (delta ? 1 : 40); page += 1) {
     const start = delta ? last + DAY_SEC : Math.max(0, end - 299 * DAY_SEC);
     if (start > end) break;
-    const response = await seedCall(host, historyCandleUrl(productId, start, end, DAY_SEC), fetchImpl);
+    let response: Awaited<ReturnType<typeof seedCall>>;
+    try {
+      response = await seedCall(host, historyCandleUrl(productId, start, end, DAY_SEC), fetchImpl);
+    } catch {
+      host.book.incidents.push(`history daily ${productId} failed`);
+      noteCold(host, productId, "http-599");
+      return "retry";
+    }
     if (budgetHit(response)) return "budget";
     if (!response.ok) {
       host.book.incidents.push(`history daily ${productId} ${statusNote(response)}`);
-      noteCold(host, productId, response.status >= 400 && response.status < 500 ? `http-${response.status}` : "daily");
+      if (transientSeedFailure(response.status)) {
+        noteCold(host, productId, `http-${response.status}`);
+        return "retry";
+      }
+      noteCold(host, productId, `http-${response.status}`);
       return "cold";
     }
     const rows = (await response.json()) as number[][];
@@ -2609,7 +2640,7 @@ export function markOrdersBeforeTape(host: PaperHost): void {
 }
 
 interface PageStop {
-  reason: "listing" | "hole" | "empty" | "http" | "budget" | "ok";
+  reason: "listing" | "hole" | "empty" | "http" | "budget" | "ok" | "retry";
   status: number;
 }
 
@@ -2629,12 +2660,23 @@ async function pageHourSeed(host: PaperHost, productId: string, fetchImpl: SeedF
   for (let page = 0; page < HOUR_PAGE_CAP; page += 1) {
     const start = end - (REST_HOUR_PAGE - HOUR_SEC);
     if (end < start) break;
-    const response = budget
-      ? await seedCall(host, historyCandleUrl(productId, start, end, HOUR_SEC), fetchImpl)
-      : await (fetchImpl ?? hostGet(host, true))(historyCandleUrl(productId, start, end, HOUR_SEC));
+    let response: Awaited<ReturnType<typeof seedCall>>;
+    try {
+      response = budget
+        ? await seedCall(host, historyCandleUrl(productId, start, end, HOUR_SEC), fetchImpl)
+        : await (fetchImpl ?? hostGet(host, true))(historyCandleUrl(productId, start, end, HOUR_SEC));
+    } catch {
+      host.book.incidents.push(`4h seed rest ${productId} failed`);
+      noteCold(host, productId, "http-599");
+      return { reason: "retry", status: 599 };
+    }
     if (budgetHit(response)) return { reason: "budget", status: response.status };
     if (!response.ok) {
       host.book.incidents.push(`4h seed rest ${productId} ${statusNote(response)}`);
+      if (transientSeedFailure(response.status)) {
+        noteCold(host, productId, `http-${response.status}`);
+        return { reason: "retry", status: response.status };
+      }
       stop = { reason: "http", status: response.status };
       break;
     }

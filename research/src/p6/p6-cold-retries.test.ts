@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { LAST_RUN_KEY, bar4hKey, loadSplit, persistSplit } from "./hot-store";
-import { FOUR_KEEP, installPaperState, seedMarkKey, startPaperHost, type PaperHost } from "./paper-host";
+import { FOUR_KEEP, installPaperState, seedBudgeted, seedMarkKey, startPaperHost, type PaperHost } from "./paper-host";
 import { memoryKv } from "./relay";
 import {
   REST_DEADLINE_MARGIN_MS,
@@ -273,6 +273,69 @@ test("a 404 is still stored as a durable cold mark", async () => {
   expect(await loadSplit(kv, next)).toBeTruthy();
   expect(next.seedMarks.get("GONE-USD")).toMatchObject({ status: "cold", reason: "http-404" });
   expect(next.cold.has("GONE-USD")).toBe(true);
+});
+
+function seededPage(url: string): Response {
+  const parsed = new URL(url);
+  const gran = Number(parsed.searchParams.get("granularity"));
+  const start = Number(parsed.searchParams.get("start"));
+  const end = Number(parsed.searchParams.get("end"));
+  if (gran === 86_400) return new Response(JSON.stringify([[start, 99, 101, 100, 100.5, 10]]), { status: 200 });
+  const rows: number[][] = [];
+  for (let ts = start; ts <= end && rows.length < 300; ts += 3_600) rows.push([ts, 99, 101, 100, 100.5, 10]);
+  return new Response(JSON.stringify(rows), { status: 200 });
+}
+
+test("S: a product being seeded is not stored and is retried after a transient failure", async () => {
+  for (const mode of ["throw", "503", "deadline"] as const) {
+    const kv = memoryKv(() => NOW);
+    const host = startPaperHost(["BTC-USD"], {});
+    host.clock = () => NOW;
+    let sent = 0;
+    const failing = async () => {
+      sent += 1;
+      if (mode === "throw") throw new Error("fetch failed");
+      if (mode === "503") return new Response("", { status: 503 });
+      return seededPage("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=3600&start=0&end=0");
+    };
+    quiet(host.restRun, failing, NOW, mode === "deadline" ? NOW + 60_000 : NOW + 800_000);
+    host.seedCursor = { order: ["BTC-USD"], idx: 0, runId: "s" };
+    await seedBudgeted(host);
+    expect(sent).toBe(mode === "deadline" ? 0 : REST_MAX_ATTEMPTS);
+    expect(host.seedCursor.idx).toBe(0);
+    expect(host.seedMarks.has("BTC-USD")).toBe(false);
+    expect(host.cold.has("BTC-USD")).toBe(true);
+    host.warmupStored = true;
+    await persistSplit(kv, host);
+    expect(await kv.get(seedMarkKey("BTC-USD"))).toBeNull();
+
+    const next = startPaperHost(["BTC-USD"], {});
+    next.clock = () => NOW;
+    let retried = 0;
+    quiet(next.restRun, async (url) => {
+      retried += 1;
+      return seededPage(url);
+    }, NOW, NOW + 800_000);
+    const saved = await loadSplit(kv, next);
+    expect(saved).toBeTruthy();
+    if (saved) installPaperState(next, saved);
+    expect(next.seedCursor.idx).toBe(0);
+    expect(next.cold.has("BTC-USD")).toBe(false);
+    await seedBudgeted(next);
+    expect(retried).toBeGreaterThan(0);
+    expect(next.seedMarks.get("BTC-USD")).toMatchObject({ status: "warm", reason: "seeded" });
+    expect(next.cold.has("BTC-USD")).toBe(false);
+  }
+});
+
+test("a 404 on the first seed walk still stores cold and advances the cursor", async () => {
+  const host = startPaperHost(["GONE-USD"], {});
+  host.clock = () => NOW;
+  quiet(host.restRun, async () => new Response("", { status: 404 }), NOW, NOW + 800_000);
+  host.seedCursor = { order: ["GONE-USD"], idx: 0, runId: "gone" };
+  await seedBudgeted(host);
+  expect(host.seedMarks.get("GONE-USD")).toMatchObject({ status: "cold", reason: "http-404" });
+  expect(host.seedCursor.idx).toBe(1);
 });
 
 test("the default fetch aborts a hung call inside the deadline margin", async () => {
