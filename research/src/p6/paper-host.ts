@@ -2309,25 +2309,42 @@ async function seedDailyProduct(host: PaperHost, productId: string, fetchImpl?: 
   return "ok";
 }
 
-/** A warm product fetches only the hours after its watermark. */
+/** A warm product fetches only the hours after the newer of its watermark and its last stored hour. */
 async function seedHourDelta(host: PaperHost, productId: string, fetchImpl?: SeedFetch): Promise<void> {
   const mark = host.seedMarks.get(productId);
   if (!mark || !(mark.newestTs > 0)) return;
   const nowSec = Math.floor(host.clock() / 1000);
-  const start = mark.newestTs + HOUR_SEC;
+  const storedHour = (host.hourWarm.get(productId) ?? []).reduce((max, bar) => Math.max(max, bar.ts), 0);
+  const start = Math.max(mark.newestTs, storedHour) + HOUR_SEC;
   if (start > nowSec) return;
-  const url = historyCandleUrl(productId, start, nowSec, HOUR_SEC);
-  const response = fetchImpl ? await fetchImpl(url) : await coinbaseGet(url, host.restRun);
-  if (budgetHit(response) || !response.ok) return;
-  const rows = (await response.json()) as number[][];
-  const got = barsFromExchangeCandles(productId, Array.isArray(rows) ? rows : []).map((bar) => ({
-    ts: bar.startSec,
-    open: bar.open,
-    high: bar.high,
-    low: bar.low,
-    close: bar.close,
-    volume: bar.volume,
-  }));
+  const got: BarOHLC[] = [];
+  let cursor = start;
+  while (cursor <= nowSec) {
+    const pageEnd = Math.min(nowSec, cursor + (REST_HOUR_PAGE - HOUR_SEC));
+    const response = fetchImpl
+      ? await fetchImpl(historyCandleUrl(productId, cursor, pageEnd, HOUR_SEC))
+      : await coinbaseGet(historyCandleUrl(productId, cursor, pageEnd, HOUR_SEC), host.restRun);
+    if (budgetHit(response)) {
+      host.book.incidents.push(`hour delta ${productId} budget`);
+      break;
+    }
+    if (!response.ok) {
+      host.book.incidents.push(`hour delta ${productId} ${statusNote(response)}`);
+      break;
+    }
+    const rows = (await response.json()) as number[][];
+    const page = barsFromExchangeCandles(productId, Array.isArray(rows) ? rows : []).map((bar) => ({
+      ts: bar.startSec,
+      open: bar.open,
+      high: bar.high,
+      low: bar.low,
+      close: bar.close,
+      volume: bar.volume,
+    }));
+    got.push(...page);
+    if (pageEnd >= nowSec) break;
+    cursor = pageEnd + HOUR_SEC;
+  }
   if (got.length === 0) return;
   const merged = mergeRolled(host.hourWarm.get(productId) ?? [], got, HOUR_KEEP);
   host.hourWarm.set(productId, merged);
@@ -2583,16 +2600,16 @@ interface PageStop {
 }
 
 /**
- * Page 1h candles backward. Stop on an empty page, on the listing (a short page whose
- * oldest candle is after the requested start), or when the contiguous 4h tail does not grow.
- * The page cap is what FOUR_KEEP needs, not a walk back to the listing of a liquid name.
- * A no-trade hole still keeps every non-empty folded bucket. When that series covers
- * FOUR_KEEP, the product is warm. Nothing is invented across the hole.
+ * Page 1h candles backward. Stop on an empty page, on a REST error, or when a page
+ * adds no folded buckets. A short page may be a no-trade hole, so the previous page
+ * is what confirms a listing. Keep paging past no-trade holes until the folded
+ * series covers FOUR_KEEP. Nothing is invented across the hole.
  */
 async function pageHourSeed(host: PaperHost, productId: string, fetchImpl: SeedFetch | undefined, budget: boolean): Promise<PageStop> {
   const nowSec = Math.floor(host.clock() / 1000);
   const hours: BarOHLC[] = [];
   let tail: BarOHLC[] = [];
+  let foldedCount = 0;
   let end = Math.floor(nowSec / HOUR_SEC) * HOUR_SEC - HOUR_SEC;
   let stop: PageStop = { reason: "ok", status: 200 };
   for (let page = 0; page < HOUR_PAGE_CAP; page += 1) {
@@ -2615,19 +2632,36 @@ async function pageHourSeed(host: PaperHost, productId: string, fetchImpl: SeedF
     }
     const oldest = got[0]!.startSec;
     if (got.length < 300 && oldest > start) {
+      // A no-trade hole at the start of the page looks like a listing. Keep the
+      // candles and ask for the previous page. An empty page is the real listing.
       for (const bar of got) hours.push({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume });
-      tail = contiguousTail(foldHours(hours, FOUR_STEP_SEC, HOUR_SEC), FOUR_STEP_SEC);
-      stop = { reason: "listing", status: 200 };
-      break;
+      const foldedNow = foldHours(hours, FOUR_STEP_SEC, HOUR_SEC);
+      tail = contiguousTail(foldedNow, FOUR_STEP_SEC);
+      foldedCount = foldedNow.length;
+      if (foldedCount >= FOUR_KEEP) break;
+      end = start - HOUR_SEC;
+      continue;
     }
-    const before = tail.length;
-    for (const bar of got) hours.push({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume });
-    tail = contiguousTail(foldHours(hours, FOUR_STEP_SEC, HOUR_SEC), FOUR_STEP_SEC);
-    if (tail.length <= before) {
+    const newestGot = got[got.length - 1]!.startSec;
+    let internalGap = false;
+    for (let index = 1; index < got.length; index += 1) {
+      if (got[index]!.startSec - got[index - 1]!.startSec > HOUR_SEC) internalGap = true;
+    }
+    const added = got.map((bar) => ({ ts: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume }));
+    hours.push(...added);
+    const foldedNow = foldHours(hours, FOUR_STEP_SEC, HOUR_SEC);
+    const nextTail = contiguousTail(foldedNow, FOUR_STEP_SEC);
+    // A page whose newest candle sits well before the requested end, with no
+    // missing hour inside it, is shifted data. A no-trade hole is missing hours,
+    // and the next page still reaches its own end, so the walk continues.
+    const shifted = nextTail.length <= tail.length && !internalGap && end - newestGot > 6 * HOUR_SEC;
+    if (shifted || foldedNow.length <= foldedCount) {
       stop = { reason: "hole", status: 200 };
       break;
     }
-    if (tail.length >= FOUR_KEEP) break;
+    tail = nextTail;
+    foldedCount = foldedNow.length;
+    if (foldedCount >= FOUR_KEEP) break;
     end = start - HOUR_SEC;
   }
   const folded = foldHours(hours, FOUR_STEP_SEC, HOUR_SEC);

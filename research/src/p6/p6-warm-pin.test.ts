@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import type { MinuteRow } from "../data/candles";
 import { rootHash } from "../data/hash";
 import { scanCandleFiles } from "../data/manifest-file";
-import { deriveBars } from "../data/derive";
+import { deriveBars, foldHours } from "../data/derive";
 import { readPairMonth } from "../data/store";
 import { ema, wilderAtr } from "../p2/indicators";
 import type { SourceDay } from "../p3/bar-access";
@@ -175,3 +175,70 @@ test.skipIf(!hashMatches)("capped 4h bars match full history over the last 7 day
   }
   console.log(rows.join("\n"));
 }, 180_000);
+
+test("a committed mid-series hole keeps EMA200 within 1bp and zero decision diffs", () => {
+  const start = Date.parse("2024-06-01T00:00:00.000Z") / 1000;
+  const bars = 1_600;
+  const holeAt = 1_200;
+  const hours: { ts: number; open: number; high: number; low: number; close: number; volume: number }[] = [];
+  for (let index = 0; index < bars * 4; index += 1) {
+    const bucket = Math.floor(index / 4);
+    if (bucket >= holeAt && bucket < holeAt + 3) continue;
+    const close = 100 + index * 0.01 + Math.sin(index / 18) * 3;
+    hours.push({ ts: start + index * 3_600, open: close - 0.4, high: close + 0.6, low: close - 0.8, close, volume: 10 + (index % 5) });
+  }
+  const full = foldHours(hours, 14_400, 3_600);
+  const cap = full.slice(-FOUR_KEEP);
+  const gapAt = full.findIndex((bar, index) => index > 0 && bar.ts - full[index - 1]!.ts > 14_400);
+  expect(gapAt).toBeGreaterThan(0);
+  expect(gapAt).toBeLessThan(full.length - 1);
+  expect(cap.some((bar) => bar.ts === full[gapAt - 1]!.ts)).toBe(true);
+  expect(cap.some((bar) => bar.ts === full[gapAt]!.ts)).toBe(true);
+  expect(full[gapAt]!.ts - full[gapAt - 1]!.ts).toBe(4 * 14_400);
+  const fullEma200 = ema(full.map((bar) => bar.close), 200);
+  const capEma200 = ema(cap.map((bar) => bar.close), 200);
+  const fullEma50 = ema(full.map((bar) => bar.close), 50);
+  const capEma50 = ema(cap.map((bar) => bar.close), 50);
+  const capIndex = new Map(cap.map((bar, index) => [bar.ts, index]));
+  const window = cap.slice(-42);
+  const diffs: number[] = [];
+  let sawTrue = false;
+  let sawFalse = false;
+  for (const bar of window) {
+    const fullAt = full.findIndex((row) => row.ts === bar.ts);
+    const capAt = capIndex.get(bar.ts)!;
+    const e200f = fullEma200[fullAt]!;
+    const e200c = capEma200[capAt]!;
+    const e50f = fullEma50[fullAt]!;
+    const e50c = capEma50[capAt]!;
+    const diff = bps(e200c, e200f);
+    diffs.push(diff);
+    const fullBits = [bar.close > e50f, bar.close > e200f, e50f > e200f, bar.close < e50f];
+    const capBits = [bar.close > e50c, bar.close > e200c, e50c > e200c, bar.close < e50c];
+    if (fullBits.some(Boolean)) sawTrue = true;
+    if (fullBits.some((bit) => !bit)) sawFalse = true;
+    expect(capBits, `${bar.ts}`).toEqual(fullBits);
+  }
+  expect(window.length).toBe(42);
+  expect(Math.max(...diffs)).toBeLessThan(1);
+  expect(sawTrue).toBe(true);
+  expect(sawFalse).toBe(true);
+  const days = new Map<string, DailyBar>();
+  for (const bar of full) {
+    const date = new Date(bar.ts * 1000).toISOString().slice(0, 10);
+    const row = days.get(date);
+    if (!row) days.set(date, { date, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume });
+    else {
+      row.high = Math.max(row.high, bar.high);
+      row.low = Math.min(row.low, bar.low);
+      row.close = bar.close;
+      row.volume += bar.volume;
+    }
+  }
+  const daily = [...days.values()];
+  const dailyAtr = wilderAtr(daily.map((bar) => bar.high), daily.map((bar) => bar.low), daily.map((bar) => bar.close), 14);
+  const key = (row: { entryTs: number; stopBps: number; targetBps: number }) => `${row.entryTs}|${row.stopBps}|${row.targetBps}`;
+  const fullEntries = classCSetups("ICP-USD", daily, full, () => true, dailyAtr).map(key);
+  const capEntries = classCSetups("ICP-USD", daily, cap, () => true, dailyAtr).map(key);
+  expect(capEntries).toEqual(fullEntries);
+});
