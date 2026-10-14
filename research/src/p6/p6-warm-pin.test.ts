@@ -17,8 +17,12 @@ import { FOUR_KEEP, HOUR_KEEP } from "./warm-caps";
 /** Frozen offline candle snapshot. The files are gitignored; the hash is not. */
 const SNAPSHOT_HASH = "1ccc8879994d100896844b53a878e6570102046b35ebd6e40250857924eb30a8";
 const candleRoot = fileURLToPath(new URL("../../data/candles", import.meta.url));
+const dataDir = fileURLToPath(new URL("../../data", import.meta.url));
 const btcDir = join(candleRoot, "BTC-USD");
 const storePresent = existsSync(btcDir);
+const diskFiles = storePresent ? scanCandleFiles(dataDir) : [];
+const diskHash = diskFiles.length > 0 ? rootHash(diskFiles) : null;
+const hashMatches = diskHash === SNAPSHOT_HASH;
 const WINDOW_START = Date.parse("2026-10-04T00:00:00.000Z") / 1000;
 const WINDOW_END = Date.parse("2026-10-11T00:00:00.000Z") / 1000;
 const NAMES = ["BTC-USD", "ETH-USD", "SOL-USD", "ADA-USD", "AAVE-USD", "LINK-USD", "DOGE-USD", "XRP-USD", "AVAX-USD", "LTC-USD", "CRV-USD", "TRUMP-USD"];
@@ -47,13 +51,11 @@ function priceOf(value: string | null): number {
 }
 
 test.skipIf(!storePresent)("the pin checks the candle store hash on disk", () => {
-  const dataDir = fileURLToPath(new URL("../../data", import.meta.url));
-  const files = scanCandleFiles(dataDir);
-  expect(files.length).toBeGreaterThan(0);
-  expect(rootHash(files)).toBe(SNAPSHOT_HASH);
+  expect(diskFiles.length).toBeGreaterThan(0);
+  expect(diskHash).toBe(SNAPSHOT_HASH);
 });
 
-test.skipIf(!storePresent)("capped 4h bars match full history over the last 7 days", () => {
+test.skipIf(!hashMatches)("capped 4h bars match full history over the last 7 days", () => {
   const rows: string[] = [];
   for (const productId of NAMES) {
     const minutes = minutesOf(productId);

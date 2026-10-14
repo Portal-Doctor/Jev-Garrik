@@ -3,7 +3,7 @@ import { memoryKv } from "./relay";
 import { LAST_RUN_KEY, loadSplit, persistSplit, warmReadyCount } from "./hot-store";
 import { SEED_BUDGET } from "./rest-limit";
 import { hostHolder } from "./vercel-live";
-import { acceptRestBar, backfillTapeIfNeeded, installPaperState, seedBudgeted, seedFourHours, seedMarkKey, SEED_PRODUCTS_PER_RUN, SEED_REQUESTS_PER_PRODUCT, startPaperHost } from "./paper-host";
+import { acceptRestBar, backfillTapeIfNeeded, fourSeriesReady, installPaperState, seedBudgeted, seedFourHours, seedMarkKey, SEED_PRODUCTS_PER_RUN, SEED_REQUESTS_PER_PRODUCT, startPaperHost } from "./paper-host";
 import { hourPagesForKeep } from "./warm-caps";
 
 const NOW = Date.parse("2026-10-12T12:00:00.000Z");
@@ -29,6 +29,38 @@ test("a product listed 30 days ago stops on the short page", async () => {
   expect(calls).toBeLessThanOrEqual(3);
   expect(host.seedMarks.get("THIN-USD")?.reason).toBe("listing");
   expect(host.cold.has("THIN-USD")).toBe(true);
+});
+
+test("a no-trade hole keeps both sides of the offline fold and the series is warm", async () => {
+  const host = startPaperHost(["ICP-USD"], {});
+  host.clock = () => NOW;
+  const end0 = Math.floor(NOW / 1000 / 3_600) * 3_600 - 3_600;
+  const bucket = Math.floor(end0 / 14_400) * 14_400;
+  const tailStart = bucket - 949 * 14_400;
+  const gapStart = tailStart - 12 * 3_600;
+  let calls = 0;
+  await seedFourHours(host, async (url) => {
+    calls += 1;
+    const parsed = new URL(url);
+    const start = Number(parsed.searchParams.get("start"));
+    const end = Number(parsed.searchParams.get("end"));
+    const rows: number[][] = [];
+    for (let ts = start; ts <= end && rows.length < 300; ts += 3_600) {
+      if (ts >= gapStart && ts < tailStart) continue;
+      rows.push(candle(ts));
+    }
+    return { ok: true, status: 200, json: async () => rows };
+  });
+  const bars = host.fourBars.get("ICP-USD") ?? [];
+  const ordered = bars.slice().sort((a, b) => a.ts - b.ts);
+  expect(host.cold.has("ICP-USD")).toBe(false);
+  expect(host.seedMarks.get("ICP-USD")).toMatchObject({ status: "warm", reason: "seeded" });
+  expect(bars.length).toBeGreaterThanOrEqual(1000);
+  expect(fourSeriesReady(bars)).toBe(true);
+  expect(ordered.some((bar) => bar.ts < gapStart)).toBe(true);
+  expect(ordered.some((bar) => bar.ts >= tailStart)).toBe(true);
+  expect(ordered.some((bar, index) => index > 0 && bar.ts - ordered[index - 1]!.ts > 14_400)).toBe(true);
+  expect(calls).toBeLessThanOrEqual(1 + hourPagesForKeep());
 });
 
 test("a hole costs one page past the gap and then stops", async () => {

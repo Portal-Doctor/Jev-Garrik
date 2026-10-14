@@ -26,7 +26,7 @@ import { completedDays, deriveForwardBook, forwardBarAnnotation, generateForward
 import { buildJevPackets, freshJevMeter, type JevMeter } from "./jev-shadow";
 import type { Kv } from "./relay";
 import { kickDurable } from "./hot-store";
-import { foldHours } from "../data/derive";
+import { foldedCovers, foldHours } from "../data/derive";
 import { budgetStopLabel, coinbaseGet, createRestRun, isCold, markCold, type RestRun } from "./rest-limit";
 import { FOUR_KEEP, HOUR_KEEP, hourPagesForKeep, WARM } from "./warm-caps";
 import { MISSED_SEND_STALE_QUOTE, STALE_QUOTE_MS } from "./legs";
@@ -2337,7 +2337,7 @@ async function seedHourDelta(host: PaperHost, productId: string, fetchImpl?: See
   host.seedMarks.set(productId, { ...mark, newestTs: newest });
 }
 
-/** Warm, or a stored contiguous tail of FOUR_KEEP bars. Either one skips a full re-fetch. */
+/** Warm, or a stored series of FOUR_KEEP 4h bars. Either one skips a full re-fetch. */
 function storedSeriesWarm(host: PaperHost, productId: string): boolean {
   const mark = host.seedMarks.get(productId);
   if (mark?.status === "cold") return false;
@@ -2370,9 +2370,13 @@ export function contiguousTail<T extends { ts: number }>(bars: readonly T[], ste
 
 const FOUR_STEP_SEC = 14_400;
 
-/** The contiguous 4h tail is long enough to trade. A hole keeps the series short. */
+/**
+ * FOUR_KEEP 4h bars. Exact spacing, or the offline fold: empty buckets dropped,
+ * neighbors kept, so a no-trade hole does not throw away the older bars.
+ */
 export function fourSeriesReady(bars: readonly { ts: number }[]): boolean {
-  return contiguousTail(bars, FOUR_STEP_SEC).length >= FOUR_KEEP;
+  if (contiguousTail(bars, FOUR_STEP_SEC).length >= FOUR_KEEP) return true;
+  return foldedCovers(bars, FOUR_STEP_SEC, FOUR_KEEP);
 }
 const HOUR_SEC = 3_600;
 const DAY_SEC = 86_400;
@@ -2582,6 +2586,8 @@ interface PageStop {
  * Page 1h candles backward. Stop on an empty page, on the listing (a short page whose
  * oldest candle is after the requested start), or when the contiguous 4h tail does not grow.
  * The page cap is what FOUR_KEEP needs, not a walk back to the listing of a liquid name.
+ * A no-trade hole still keeps every non-empty folded bucket. When that series covers
+ * FOUR_KEEP, the product is warm. Nothing is invented across the hole.
  */
 async function pageHourSeed(host: PaperHost, productId: string, fetchImpl: SeedFetch | undefined, budget: boolean): Promise<PageStop> {
   const nowSec = Math.floor(host.clock() / 1000);
@@ -2624,13 +2630,20 @@ async function pageHourSeed(host: PaperHost, productId: string, fetchImpl: SeedF
     if (tail.length >= FOUR_KEEP) break;
     end = start - HOUR_SEC;
   }
+  const folded = foldHours(hours, FOUR_STEP_SEC, HOUR_SEC);
+  const covered = folded.slice(-FOUR_KEEP);
   const keptHours = hours.slice().sort((a, b) => a.ts - b.ts).slice(-HOUR_KEEP);
   if (keptHours.length > 0) host.hourWarm.set(productId, keptHours);
   const fromStore = fourFromResearch(productId);
-  logFoldMismatches(host, productId, foldHours(hours, FOUR_STEP_SEC, HOUR_SEC), fromStore);
-  rememberFourSeed(host, productId, tail, "rest_1h");
-  const newest = keptHours[keptHours.length - 1]?.ts ?? tail[tail.length - 1]?.ts ?? 0;
+  logFoldMismatches(host, productId, folded, fromStore);
+  rememberFourSeed(host, productId, covered, "rest_1h");
+  const newest = keptHours[keptHours.length - 1]?.ts ?? covered[covered.length - 1]?.ts ?? 0;
   const oldestTs = hours.reduce((min, bar) => Math.min(min, bar.ts), newest);
+  if (foldedCovers(covered, FOUR_STEP_SEC, FOUR_KEEP)) {
+    host.seedMarks.set(productId, { oldestTs, newestTs: newest, status: "warm", reason: "seeded" });
+    host.book.incidents.push(`4h seed rest ${productId} ${covered.length} seed_src=rest_1h`);
+    return { reason: "ok", status: 200 };
+  }
   if (stop.reason === "listing" || stop.reason === "hole" || stop.reason === "empty" || stop.reason === "http" || tail.length < FOUR_HOUR_EMA_BARS) {
     const reason = stop.reason === "ok" ? "short" : stop.reason === "http" ? `http-${stop.status}` : stop.reason === "empty" ? "listing" : stop.reason;
     if (tail.length < FOUR_HOUR_EMA_BARS) host.book.incidents.push(`4h seed short ${productId} ${tail.length}`);
@@ -2651,23 +2664,30 @@ async function seedCall(host: PaperHost, url: string, fetchImpl?: SeedFetch): Pr
 }
 
 /**
- * 4h seed. Use the research store only when its contiguous tail has 200 bars.
- * Otherwise one paged 1h walk fills both hourWarm and the 4h series.
- * A product whose contiguous tail stays under 200 is flagged. Nothing is invented across a hole.
+ * 4h seed. Use the research store when its offline fold covers FOUR_KEEP, or when
+ * its contiguous tail has 200 bars. Otherwise one paged 1h walk fills both
+ * hourWarm and the 4h series. A product whose folded series stays under 200
+ * is flagged. A no-trade hole drops empty buckets and keeps the neighbors.
  */
 export async function seedFourHours(host: PaperHost, fetchImpl?: SeedFetch): Promise<void> {
   for (const productId of host.products) {
     const existing = contiguousTail(host.fourBars.get(productId) ?? [], FOUR_STEP_SEC);
-    if (existing.length >= FOUR_KEEP) {
+    if (existing.length >= FOUR_KEEP || fourSeriesReady(host.fourBars.get(productId) ?? [])) {
       if (!host.ema200.has(productId)) host.ema200.set(productId, "seeded");
-      if (!host.fourSeedThrough.has(productId)) host.fourSeedThrough.set(productId, existing[existing.length - 1]!.ts);
+      if (!host.fourSeedThrough.has(productId)) host.fourSeedThrough.set(productId, existing[existing.length - 1]?.ts ?? host.fourBars.get(productId)?.at(-1)?.ts ?? 0);
       if (!host.seedMarks.has(productId)) {
-        host.seedMarks.set(productId, { oldestTs: existing[0]!.ts, newestTs: existing[existing.length - 1]!.ts, status: "warm", reason: "seeded" });
+        const bars = host.fourBars.get(productId) ?? existing;
+        host.seedMarks.set(productId, { oldestTs: bars[0]!.ts, newestTs: bars[bars.length - 1]!.ts, status: "warm", reason: "seeded" });
       }
       continue;
     }
     const fromStore = fourFromResearch(productId);
     const storeTail = contiguousTail(fromStore, FOUR_STEP_SEC);
+    const storeSeries = fromStore.slice(-FOUR_KEEP);
+    if (!fetchImpl && foldedCovers(storeSeries, FOUR_STEP_SEC, FOUR_KEEP)) {
+      rememberFourSeed(host, productId, storeSeries, "research");
+      continue;
+    }
     if (storeTail.length >= FOUR_HOUR_EMA_BARS && !fetchImpl) {
       rememberFourSeed(host, productId, storeTail.slice(-FOUR_KEEP), "research");
       continue;

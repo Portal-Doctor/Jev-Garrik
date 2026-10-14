@@ -706,6 +706,12 @@ async function writeGroupedBars(kv: Kv, host: PaperHost, plan: FlushPlan): Promi
     const mark = host.seedMarks.get(productId);
     if (!mark || mark.status !== "warm") continue;
     const markJson = JSON.stringify(mark);
+    // Ordered after the bar key. One Redis command sets one key, and a second
+    // EVAL that carried both would put a near-1 MB bar plus the mark over the
+    // 1 MB payload limit. A crash between the two leaves the mark short (or
+    // absent). loadSplit promotes a series of FOUR_KEEP contiguous 4h bars,
+    // or an offline fold that still covers FOUR_KEEP, so the next process
+    // does not re-fetch.
     await writeOwned(kv, host, seedMarkKey(productId), markJson);
     host.saveCommands += 1;
     host.saveBytes += Buffer.byteLength(markJson);

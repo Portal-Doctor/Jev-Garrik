@@ -55,7 +55,10 @@ export interface FoldBar {
 
 /**
  * Fold child bars into UTC buckets. A bucket is kept when any child traded.
- * A fully empty bucket is dropped. That is the same rule aggregate() uses for minutes.
+ * A fully empty bucket is dropped. That is the same rule aggregate() uses for minutes,
+ * and the same series deriveBars keeps after it drops empty bars.
+ * Callers keep the returned bars in order. A missing bucket is a no-trade hole.
+ * It does not discard the older bars. foldedCovers is that check.
  */
 export function foldHours<T extends FoldBar>(bars: readonly T[], spanSec: number, childSec: number): T[] {
   const need = spanSec / childSec;
@@ -85,6 +88,21 @@ export function foldHours<T extends FoldBar>(bars: readonly T[], spanSec: number
     });
   }
   return out;
+}
+
+/**
+ * True when `bars` is the offline fold: at least `keep` buckets, each step a
+ * positive multiple of `stepSec`. A wider step is a dropped empty bucket.
+ * An off-grid timestamp is not that hole, so the series does not cover.
+ */
+export function foldedCovers(bars: readonly { ts: number }[], stepSec: number, keep: number): boolean {
+  if (!(stepSec > 0) || bars.length < keep) return false;
+  const ordered = bars.slice().sort((a, b) => a.ts - b.ts);
+  for (let index = 1; index < ordered.length; index += 1) {
+    const gap = ordered[index]!.ts - ordered[index - 1]!.ts;
+    if (gap < stepSec || gap % stepSec !== 0) return false;
+  }
+  return true;
 }
 
 function aggregate(byMinute: Map<number, MinuteRow>, open: number, end: number, timeframe: Timeframe): DerivedBar {
