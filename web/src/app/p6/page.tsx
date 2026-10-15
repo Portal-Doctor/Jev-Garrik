@@ -12,6 +12,12 @@ function usd(value: unknown): string {
   return `${sign}${n.toFixed(2)}`;
 }
 
+function jevUsd(value: unknown): string {
+  const n = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(n)) return "-";
+  return `$${n.toFixed(4)}`;
+}
+
 function toneOf(value: unknown): number | undefined {
   const n = typeof value === "number" ? value : Number.NaN;
   if (!Number.isFinite(n) || n === 0) return 0;
@@ -94,6 +100,7 @@ export default async function P6DashboardPage() {
     pairBackstopUsd?: number;
   } | null;
   const rest = (last?.rest ?? {}) as { n?: number; r429?: number; waitedMs?: number };
+  const jev = (last?.jev ?? null) as { totalUsd?: number; todayUsd?: number; calls?: number } | null;
   const redis = (last?.redis ?? {}) as { cmds?: number; bytes?: number; maxValueBytes?: number };
   const cold = Array.isArray(last?.cold) ? (last.cold as { id?: string; reason?: string }[]) : [];
   const warm = typeof last?.warm === "number" ? last.warm : 0;
@@ -207,6 +214,12 @@ export default async function P6DashboardPage() {
         <Stat label="Redis cmds" value={String(redis.cmds ?? 0)} />
         <Stat label="Month" value={`${(month / 1_000_000).toFixed(2)}M / ${(budget / 1_000_000).toFixed(0)}M`} tone={proj === "red" ? -1 : proj === "amber" ? 0 : 1} />
         <Stat label="Max value" value={String(redis.maxValueBytes ?? 0)} />
+      </section>
+
+      <section className={styles.equityStrip}>
+        <Stat label="Jev spend" value={jevUsd(jev?.totalUsd)} />
+        <Stat label="Jev today" value={jevUsd(jev?.todayUsd)} />
+        <Stat label="Jev calls" value={String(jev?.calls ?? 0)} />
       </section>
 
       <section style={{ padding: "12px 24px" }}>

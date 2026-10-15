@@ -93,15 +93,40 @@ export interface JevMeter {
   month: string;
   capUsd: 5;
   monthCapUsd: 100;
+  /** Successful shadow calls that committed a charge. */
+  calls: number;
+  /** Spend whose UTC day is `today`. */
+  todayUsd: number;
+  /** UTC day `YYYY-MM-DD`, or empty before the first charge. */
+  today: string;
 }
 
 /** The cumulative P6 cap stays $5. The month cap is the soak's $100. No call is made here. */
 export function freshJevMeter(cumulativeUsd = 0): JevMeter {
   if (cumulativeUsd < 0 || cumulativeUsd > JEV_CUMULATIVE_CAP_USD) throw new Error("jev spend cap");
-  return { cumulativeUsd, monthUsd: 0, month: "", capUsd: 5, monthCapUsd: JEV_MONTH_CAP_USD };
+  return { cumulativeUsd, monthUsd: 0, month: "", capUsd: 5, monthCapUsd: JEV_MONTH_CAP_USD, calls: 0, todayUsd: 0, today: "" };
 }
 
-/** Refuse a charge that would pass either cap. The host does not call this until a live Jev call exists. */
+/** True when a positive charge still fits both caps. Does not modify `meter`. */
+export function jevSpendFits(meter: JevMeter, month: string): boolean {
+  try {
+    noteJevSpend(meter, 1e-9, month);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Commit one call. `todayUsd` resets when the UTC day changes. Throws when a cap would be passed. */
+export function chargeJevCall(meter: JevMeter, costUsd: number, nowMs: number): JevMeter {
+  const day = new Date(nowMs).toISOString().slice(0, 10);
+  const month = day.slice(0, 7);
+  const base: JevMeter = meter.today === day ? meter : { ...meter, today: day, todayUsd: 0 };
+  const next = noteJevSpend(base, costUsd, month);
+  return { ...next, calls: (base.calls ?? 0) + 1, today: day, todayUsd: (base.todayUsd ?? 0) + costUsd };
+}
+
+/** Refuse a charge that would pass either cap. The shadow drain checks this before a call and commits after. */
 export function noteJevSpend(meter: JevMeter, costUsd: number, month: string): JevMeter {
   if (!(costUsd > 0)) throw new Error("jev spend must be positive");
   const monthUsd = meter.month === month ? meter.monthUsd : 0;
@@ -114,5 +139,8 @@ export function noteJevSpend(meter: JevMeter, costUsd: number, month: string): J
     month,
     capUsd: 5,
     monthCapUsd: JEV_MONTH_CAP_USD,
+    calls: meter.calls ?? 0,
+    todayUsd: meter.todayUsd ?? 0,
+    today: meter.today ?? "",
   };
 }

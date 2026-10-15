@@ -1,0 +1,77 @@
+{
+  "pair": "ETH-USD",
+  "note": "Recorded-shape Advanced Trade frames. Prices are a fixed fixture, not a live capture.",
+  "messages": [
+    {
+      "at": 1700000040100,
+      "msg": { "channel": "heartbeats", "events": [{ "current_time": "2023-11-14T16:53:20.100Z" }] }
+    },
+    {
+      "at": 1700000041000,
+      "msg": {
+        "channel": "l2_data",
+        "sequence_num": 1,
+        "events": [
+          {
+            "type": "snapshot",
+            "product_id": "ETH-USD",
+            "updates": [
+              { "side": "bid", "price_level": "100", "new_quantity": "5" },
+              { "side": "bid", "price_level": "99", "new_quantity": "4" },
+              { "side": "bid", "price_level": "98", "new_quantity": "3" },
+              { "side": "bid", "price_level": "97", "new_quantity": "2" },
+              { "side": "bid", "price_level": "96", "new_quantity": "1" },
+              { "side": "offer", "price_level": "101", "new_quantity": "1" },
+              { "side": "offer", "price_level": "102", "new_quantity": "1" },
+              { "side": "offer", "price_level": "103", "new_quantity": "1" },
+              { "side": "offer", "price_level": "104", "new_quantity": "1" },
+              { "side": "offer", "price_level": "105", "new_quantity": "1" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "at": 1700000042000,
+      "msg": {
+        "channel": "market_trades",
+        "events": [
+          {
+            "type": "update",
+            "trades": [{ "product_id": "ETH-USD", "price": "100.5", "size": "2", "side": "SELL", "time": "2023-11-14T16:53:22.000Z", "trade_id": "1" }]
+          }
+        ]
+      }
+    },
+    {
+      "at": 1700000043000,
+      "msg": {
+        "channel": "market_trades",
+        "events": [
+          {
+            "type": "update",
+            "trades": [{ "product_id": "ETH-USD", "price": "100", "size": "1", "side": "BUY", "time": "2023-11-14T16:53:23.000Z", "trade_id": "2" }]
+          }
+        ]
+      }
+    },
+    {
+      "at": 1700000101000,
+      "msg": { "channel": "heartbeats", "events": [{ "current_time": "2023-11-14T16:54:21.000Z" }] }
+    },
+    {
+      "at": 1700000102000,
+      "msg": {
+        "channel": "l2_data",
+        "sequence_num": 2,
+        "events": [
+          {
+            "type": "update",
+            "product_id": "ETH-USD",
+            "updates": [{ "side": "bid", "price_level": "100.2", "new_quantity": "5" }]
+          }
+        ]
+      }
+    }
+  ]
+}

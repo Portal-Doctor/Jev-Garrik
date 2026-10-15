@@ -82,6 +82,10 @@ test("the page does not import the cron secret, auth, or a Redis write", () => {
   expect(page.includes("last?.completed")).toBe(true);
   expect(page.includes("kill R")).toBe(true);
   expect(page.includes("Arrival delay bps")).toBe(true);
+  expect(page.includes("Jev spend")).toBe(true);
+  expect(page.includes("Jev today")).toBe(true);
+  expect(page.includes("Jev calls")).toBe(true);
+  expect(page.includes("last?.jev")).toBe(true);
   expect(page.includes("muted")).toBe(true);
 });
 
