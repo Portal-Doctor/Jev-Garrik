@@ -741,6 +741,7 @@ async function writeGroupedBars(kv: Kv, host: PaperHost, plan: FlushPlan): Promi
 }
 
 async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
+  if (host.stopped) throw new Error("lease lost");
   if (host.kv && host.leaseToken) await host.durableChain;
   await writeWarmupOnce(kv, host);
   let plan = buildFlush(host);

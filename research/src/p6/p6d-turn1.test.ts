@@ -84,7 +84,7 @@ test("the heartbeat saves state and renews the lease", async () => {
   host.rest.clear();
   host.clock = () => now;
   expect(await tryAcquire(kv, "h", now + 1_800_000, now)).toBe(true);
-  const pending = hostHolder(host, kv).sampleUntil(now + SAVE_HEARTBEAT_MS + 1);
+  const pending = hostHolder(host, kv, [], "h").sampleUntil(now + SAVE_HEARTBEAT_MS + 1);
   await new Promise((resolve) => setTimeout(resolve, 300));
   now += SAVE_HEARTBEAT_MS + 1;
   await pending;
