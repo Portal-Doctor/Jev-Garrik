@@ -60,7 +60,7 @@ test("a failed save keeps the lease, and a lost lease stops the holder", async (
     return owned(leaseKey, token, key, value, opts);
   };
   const start = now;
-  const pending = hostHolder(host, kv).sampleUntil(start + SAVE_HEARTBEAT_MS * 2 + 10);
+  const pending = hostHolder(host, kv, [], "K").sampleUntil(start + SAVE_HEARTBEAT_MS * 2 + 10);
   await new Promise((resolve) => setTimeout(resolve, 250));
   now = start + SAVE_HEARTBEAT_MS + 1;
   await new Promise((resolve) => setTimeout(resolve, 400));

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { FILLS_KEY, LAST_RUN_KEY, bar4hKey, loadSplit, persistSplit, writeThroughBook } from "./hot-store";
 import { FOUR_KEEP, catchUpHistory, installPaperState, seedBudgeted, seedMarkKey, SEED_CURSOR_KEY, startPaperHost, type PaperHost } from "./paper-host";
-import { decodeLease, LEASE_KEY, memoryKv, tryAcquire } from "./relay";
+import { decodeLease, HOT_KEY, LEASE_KEY, memoryKv, tryAcquire } from "./relay";
 import { hostHolder } from "./vercel-live";
 import type { LegLog } from "./legs";
 import {
@@ -524,7 +524,7 @@ test("a hung product renews the lease and the run's saves persist", async () => 
       }
       return new Response("[]", { status: 200 });
     };
-    const holder = hostHolder(host, kv);
+    const holder = hostHolder(host, kv, [], "cron");
     await holder.sampleUntil(NOW);
     expect(host.book.incidents.some((row) => row.includes("lease lost"))).toBe(false);
     const lease = decodeLease(await kv.get(LEASE_KEY));
@@ -549,3 +549,54 @@ test("a hung product renews the lease and the run's saves persist", async () => 
     expect(await kv.get(FILLS_KEY)).toContain(`fill-${mode}`);
   }
 }, 20_000);
+
+test("a stopped holder does not adopt the new lease or overwrite its book", async () => {
+  let now = NOW;
+  const kv = memoryKv(() => now);
+  expect(await tryAcquire(kv, "self", NOW + 1_800_000, NOW)).toBe(true);
+  const ownToken = decodeLease(await kv.get(LEASE_KEY))?.token ?? null;
+  expect(ownToken).toBeTruthy();
+  await kv.del(LEASE_KEY);
+  now += 1;
+  expect(await tryAcquire(kv, "other", now + 1_800_000, now)).toBe(true);
+  const thief = startPaperHost(["BTC-USD"], {});
+  thief.clock = () => now;
+  thief.products = [];
+  thief.shards = [];
+  thief.openSockets = [];
+  thief.leaseToken = decodeLease(await kv.get(LEASE_KEY))?.token ?? null;
+  thief.book.incidents.push("thief");
+  await persistSplit(kv, thief);
+  const before = decodeLease(await kv.get(LEASE_KEY));
+  const hotBefore = await kv.get(HOT_KEY);
+  expect(hotBefore).toContain("thief");
+  expect(before?.holder).toBe("other");
+  expect(before?.token ?? null).toBe(thief.leaseToken);
+
+  const host = startPaperHost(["BTC-USD"], {});
+  host.clock = () => now;
+  host.products = [];
+  host.shards = [];
+  host.openSockets = [];
+  host.rest.clear();
+  host.leaseToken = ownToken;
+  host.stopped = true;
+  host.book.incidents.push("lease lost");
+  host.book.incidents.push("stale");
+  const holder = hostHolder(host, kv, [], "self");
+  await expect(holder.sampleUntil(now)).rejects.toThrow(/lease lost/);
+  expect(host.leaseToken).toBe(ownToken);
+  const after = decodeLease(await kv.get(LEASE_KEY));
+  expect(after?.holder).toBe("other");
+  expect(after?.token).toBe(before?.token);
+  expect(after?.savedAtMs).toBe(before?.savedAtMs);
+  expect(await kv.get(HOT_KEY)).toBe(hotBefore);
+
+  await expect(holder.confirmHandover()).resolves.toBe(false);
+  expect(host.leaseToken).toBe(ownToken);
+
+  host.leaseToken = thief.leaseToken;
+  await expect(persistSplit(kv, host)).rejects.toThrow(/lease lost/);
+  expect(await kv.get(HOT_KEY)).toBe(hotBefore);
+  expect(decodeLease(await kv.get(LEASE_KEY))?.savedAtMs).toBe(before?.savedAtMs);
+});

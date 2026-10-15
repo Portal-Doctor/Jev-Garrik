@@ -52,7 +52,7 @@ function rememberPersistedBars(host: PaperHost): void {
   for (const bar of host.fifteen) host.persistedBars.add(`${bar.productId}:${bar.startSec}`);
 }
 
-export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = []): {
+export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = [], self?: string): {
   warm(): Promise<void>;
   applyDueBars(): Promise<string[]>;
   releaseDeadline(cause?: string): void;
@@ -125,16 +125,21 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       host.gaps.push(gap);
     },
     async confirmHandover() {
-      const lease = decodeLease(await kv.get(LEASE_KEY));
-      if (lease?.token) host.leaseToken = lease.token;
-      if (!host.leaseToken) return false;
+      // A failed renew sets stopped. Never take the token that replaced us.
+      if (!host.stopped) {
+        const lease = decodeLease(await kv.get(LEASE_KEY));
+        if (lease?.token && self != null && lease.holder === self) host.leaseToken = lease.token;
+      }
+      if (host.stopped || !host.leaseToken) return false;
       const ok = replayHandover(host);
       if (!ok) await resyncBooksFromRest(host);
       return ok;
     },
     async sampleUntil(untilMs: number) {
-      const lease = decodeLease(await kv.get(LEASE_KEY));
-      if (lease?.token) host.leaseToken = lease.token;
+      if (!host.stopped) {
+        const lease = decodeLease(await kv.get(LEASE_KEY));
+        if (lease?.token && self != null && lease.holder === self) host.leaseToken = lease.token;
+      }
       host.runBaseFills = host.book.legs.length;
       host.runBaseDecisions = host.emitted.size;
       if (host.leaseToken && host.restWarm) {
@@ -281,7 +286,7 @@ export async function handleEngineRequest(
     });
     attachRestLease(host);
   }
-  const holder = deps?.holder ?? hostHolder(host!, kv);
+  const holder = deps?.holder ?? hostHolder(host!, kv, [], self);
   const result: InvocationResult = await runInvocation({
     kv,
     self,
