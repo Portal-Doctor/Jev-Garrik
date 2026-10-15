@@ -6,7 +6,6 @@
 
 import { FeatureAccumulator, topImbalance, type BookView } from "../../../cb/features";
 import { buildState, type MarketState } from "../../../cb/state";
-import { HEARTBEAT_GAP_MS } from "./mid-feed";
 
 export const JEV_SCHEMA = "jev-1m-v2.1";
 export const JEV_MINUTE_MS = 60_000;
@@ -74,7 +73,11 @@ interface ProductTape {
   bookUpSince: number | null;
   tradesUpSince: number | null;
   snapshot: boolean;
-  lastHeartbeatMs: number | null;
+  /** Minute start that `heartbeatAtMs` falls in. A later minute's beat is stored only after this minute is sealed. */
+  heartbeatMinuteTs: number | null;
+  heartbeatAtMs: number | null;
+  /** Timestamp of the latest socket close or heartbeat-gap fire. Judged per minute on [T, T+60000). */
+  downMs: number | null;
   lastMid: number | null;
   lastSpread: number;
   lastImb5: number;
@@ -162,13 +165,21 @@ export function returnBpsFromRing(ring: readonly { ts: number; mid: number }[], 
   return ((midNow - then) / then) * 10_000;
 }
 
-function heartbeatCovers(last: number | null, minuteTs: number, nowMs: number): boolean {
-  if (last == null) return false;
-  const minuteEnd = minuteTs + JEV_MINUTE_MS;
-  if (last >= minuteTs && last < minuteEnd) return true;
-  if (minuteEnd - last <= HEARTBEAT_GAP_MS && minuteEnd - last >= 0) return true;
-  if (last >= minuteEnd && last - minuteEnd <= HEARTBEAT_GAP_MS && nowMs - last <= HEARTBEAT_GAP_MS) return true;
-  return false;
+/** A heartbeat covers minute T only when its own timestamp is in [T, T+60000). T+60000 belongs to the next minute. */
+function heartbeatCovers(atMs: number | null, minuteTs: number): boolean {
+  if (atMs == null) return false;
+  return atMs >= minuteTs && atMs < minuteTs + JEV_MINUTE_MS;
+}
+
+function downDuring(downMs: number | null, minuteTs: number): boolean {
+  return downMs != null && downMs >= minuteTs && downMs < minuteTs + JEV_MINUTE_MS;
+}
+
+/** no_book_feed if any missing slot was book-down or never seen, otherwise no_trades_feed. */
+function missingSlotSub(bookDownOrUnseen: boolean, tradesDown: boolean): "no_book_feed" | "no_trades_feed" | undefined {
+  if (bookDownOrUnseen) return "no_book_feed";
+  if (tradesDown) return "no_trades_feed";
+  return undefined;
 }
 
 function freshProduct(): ProductTape {
@@ -178,7 +189,9 @@ function freshProduct(): ProductTape {
     bookUpSince: null,
     tradesUpSince: null,
     snapshot: false,
-    lastHeartbeatMs: null,
+    heartbeatMinuteTs: null,
+    heartbeatAtMs: null,
+    downMs: null,
     lastMid: null,
     lastSpread: 0,
     lastImb5: 0,
@@ -209,15 +222,18 @@ export class JevTape {
 
   /**
    * A heartbeat confirms the trades feed only. The book feed returns on a two-sided level2 event.
-   * Completed minutes are sealed here so a later beat cannot overwrite the one that covered the boundary.
+   * Minutes that have already ended are sealed before this beat is stored, so a beat at or after
+   * T+60000 is evidence for the next minute and cannot cover the one that just ended.
    */
   heartbeat(nowMs: number, productIds: readonly string[]): void {
     for (const productId of productIds) {
       const row = this.row(productId);
-      row.lastHeartbeatMs = nowMs;
+      const minute = Math.floor(nowMs / JEV_MINUTE_MS) * JEV_MINUTE_MS;
+      this.sealUntil(row, productId, minute, nowMs);
+      row.heartbeatMinuteTs = minute;
+      row.heartbeatAtMs = nowMs;
       row.tradesUp = true;
       if (row.tradesUpSince == null) row.tradesUpSince = nowMs;
-      this.sealUntil(row, productId, Math.floor(nowMs / JEV_MINUTE_MS) * JEV_MINUTE_MS, nowMs);
     }
   }
 
@@ -231,16 +247,20 @@ export class JevTape {
       row.tradesUp = false;
       row.bookUpSince = null;
       row.tradesUpSince = null;
-      row.lastHeartbeatMs = null;
+      row.heartbeatMinuteTs = null;
+      row.heartbeatAtMs = null;
+      row.downMs = nowMs;
     }
   }
 
   onBook(productId: string, nowMs: number, book: { bids: Map<string, number>; asks: Map<string, number> }): void {
     const view = bookView(book);
     if (!view) return;
-    const row = this.row(productId);
     const mid = view.mid();
     if (mid == null) return;
+    const row = this.row(productId);
+    const minute = Math.floor(nowMs / JEV_MINUTE_MS) * JEV_MINUTE_MS;
+    this.sealUntil(row, productId, minute, nowMs);
     row.snapshot = true;
     row.bookUp = true;
     if (row.bookUpSince == null) row.bookUpSince = nowMs;
@@ -255,8 +275,6 @@ export class JevTape {
     row.lastSpread = spread;
     row.lastImb5 = imb5;
     row.lastImb20 = imb20;
-    const minute = Math.floor(nowMs / JEV_MINUTE_MS) * JEV_MINUTE_MS;
-    this.sealUntil(row, productId, minute, nowMs);
     this.openForming(row, minute, mid, spread, imb5, imb20);
   }
 
@@ -264,12 +282,14 @@ export class JevTape {
     if (!(price > 0) || !(size > 0)) return;
     if (makerSide !== "BUY" && makerSide !== "SELL") return;
     const row = this.row(productId);
+    const minute = Math.floor(tsMs / JEV_MINUTE_MS) * JEV_MINUTE_MS;
+    const openTs = row.nextTs ?? row.forming?.ts ?? null;
+    if (openTs != null && minute > openTs && minute - openTs <= JEV_MINUTE_MS) this.sealUntil(row, productId, minute, tsMs);
     row.tradesUp = true;
     if (row.tradesUpSince == null) row.tradesUpSince = tsMs;
     const taker = makerSide === "BUY" ? "sell" : "buy";
     row.features.onTrade(tsMs, size, taker);
     const usd = price * size;
-    const minute = Math.floor(tsMs / JEV_MINUTE_MS) * JEV_MINUTE_MS;
     if (row.nextTs != null && minute < row.nextTs) return;
     if (row.forming?.ts === minute) {
       this.addFlow(row.forming, usd, taker);
@@ -299,16 +319,17 @@ export class JevTape {
     if (minutes.length >= JEV_MIN_PRESENT && present.has(slot14)) {
       return { ok: true, minutes: minutes.map(publicMinute) };
     }
-    let book = false;
-    let trades = false;
+    let bookDownOrUnseen = false;
+    let tradesDown = false;
     for (let i = 0; i < 15; i += 1) {
       const ts = barStartMs + i * JEV_MINUTE_MS;
       if (present.has(ts)) continue;
       const gap = row?.absent.get(ts) ?? "no_book_feed";
-      if (gap === "no_book_feed") book = true;
-      else if (gap === "no_trades_feed") trades = true;
+      if (gap === "no_book_feed") bookDownOrUnseen = true;
+      else if (gap === "no_trades_feed") tradesDown = true;
     }
-    return { ok: false, minutes: minutes.map(publicMinute), ...(book ? { sub: "no_book_feed" as const } : trades ? { sub: "no_trades_feed" as const } : {}) };
+    const sub = missingSlotSub(bookDownOrUnseen, tradesDown);
+    return { ok: false, minutes: minutes.map(publicMinute), ...(sub ? { sub } : {}) };
   }
 
   marketState(productId: string, nowMs: number): MarketState | null {
@@ -411,6 +432,12 @@ export class JevTape {
   }
 
   private sealOne(row: ProductTape, productId: string, ts: number, nowMs: number): void {
+    if (downDuring(row.downMs, ts)) {
+      if (row.forming?.ts === ts) row.forming = null;
+      row.absent.set(ts, "no_book_feed");
+      row.carryStreak = 0;
+      return;
+    }
     const forming = row.forming?.ts === ts ? row.forming : null;
     if (forming?.book) {
       row.forming = null;
@@ -437,7 +464,7 @@ export class JevTape {
       row.carryStreak = 0;
       return;
     }
-    // Stricter than a heartbeat landing within 15s after the end: both feeds must have been up for this whole minute.
+    // Both feeds must have been up from T, and the covering heartbeat must itself fall in [T, T+60000).
     // A reconnect after feedDown starts a new up-since and does not carry the gap, including slot 14.
     const upWholeMinute =
       row.bookUp &&
@@ -446,7 +473,8 @@ export class JevTape {
       row.bookUpSince <= ts &&
       row.tradesUpSince != null &&
       row.tradesUpSince <= ts;
-    const covered = upWholeMinute && heartbeatCovers(row.lastHeartbeatMs, ts, nowMs) && row.lastMid != null && row.carryStreak < JEV_CARRY_MAX;
+    const beat = row.heartbeatMinuteTs === ts ? row.heartbeatAtMs : null;
+    const covered = upWholeMinute && heartbeatCovers(beat, ts) && row.lastMid != null && row.carryStreak < JEV_CARRY_MAX;
     if (covered && row.lastMid != null) {
       row.minutes.push({
         productId,
@@ -468,6 +496,7 @@ export class JevTape {
     }
     const bookWhole = row.snapshot && row.bookUp && row.bookUpSince != null && row.bookUpSince <= ts;
     const tradesWhole = row.tradesUp && row.tradesUpSince != null && row.tradesUpSince <= ts;
+    // Sub-reason order: no_book_feed if the book was down or the minute was never seen, otherwise no_trades_feed.
     if (!bookWhole) row.absent.set(ts, "no_book_feed");
     else if (!tradesWhole) row.absent.set(ts, "no_trades_feed");
     else row.absent.set(ts, "carry_limit");

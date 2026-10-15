@@ -190,3 +190,56 @@ test("a minute that was fully down is not carried, including slot 14", () => {
   expect(missed.minutes.some((row) => row.ts === START + 14 * 60_000)).toBe(false);
   expect(missed.sub).toBe("no_book_feed");
 });
+
+function primeFeeds(tape: JevTape, minuteTs: number): void {
+  const at = minuteTs - 60_000 + 1_000;
+  tape.heartbeat(at, ["ETH-USD"]);
+  tape.onBook("ETH-USD", at + 1_000, book());
+  tape.onTrade("ETH-USD", at + 2_000, 100.5, 1, "SELL");
+  tape.closeThrough("ETH-USD", minuteTs);
+}
+
+test("a heartbeat covers only [T, T+60000), and a beat after the end does not", () => {
+  const minuteTs = START + 60_000;
+  const carried = new JevTape();
+  primeFeeds(carried, minuteTs);
+  carried.heartbeat(minuteTs + 59_999, ["ETH-USD"]);
+  carried.closeThrough("ETH-USD", minuteTs + 60_000);
+  const row = carried.assess("ETH-USD", START).minutes.find((item) => item.ts === minuteTs);
+  expect(row?.carried).toBe(true);
+  expect(row?.trades).toBe(0);
+
+  const kept = new JevTape();
+  primeFeeds(kept, minuteTs);
+  kept.heartbeat(minuteTs + 59_999, ["ETH-USD"]);
+  kept.heartbeat(minuteTs + 60_000, ["ETH-USD"]);
+  kept.closeThrough("ETH-USD", minuteTs + 60_000);
+  expect(kept.assess("ETH-USD", START).minutes.some((item) => item.ts === minuteTs && item.carried)).toBe(true);
+
+  const boundary = new JevTape();
+  primeFeeds(boundary, minuteTs);
+  boundary.heartbeat(minuteTs + 60_000, ["ETH-USD"]);
+  boundary.closeThrough("ETH-USD", minuteTs + 60_000);
+  expect(boundary.assess("ETH-USD", START).minutes.some((item) => item.ts === minuteTs)).toBe(false);
+
+  const late = new JevTape();
+  primeFeeds(late, minuteTs);
+  late.heartbeat(minuteTs + 60_001, ["ETH-USD"]);
+  late.closeThrough("ETH-USD", minuteTs + 60_000);
+  expect(late.assess("ETH-USD", START).minutes.some((item) => item.ts === minuteTs)).toBe(false);
+});
+
+test("a down event inside the minute stays absent after a reconnect", () => {
+  const minuteTs = START + 60_000;
+  const tape = new JevTape();
+  primeFeeds(tape, minuteTs);
+  tape.heartbeat(minuteTs + 1_000, ["ETH-USD"]);
+  tape.onBook("ETH-USD", minuteTs + 2_000, book());
+  tape.feedDown(minuteTs + 30_000, ["ETH-USD"]);
+  tape.heartbeat(minuteTs + 45_000, ["ETH-USD"]);
+  tape.onBook("ETH-USD", minuteTs + 46_000, book());
+  tape.closeThrough("ETH-USD", minuteTs + 60_000);
+  const window = tape.assess("ETH-USD", START);
+  expect(window.minutes.some((item) => item.ts === minuteTs)).toBe(false);
+  expect(window.sub).toBe("no_book_feed");
+});
