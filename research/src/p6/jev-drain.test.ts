@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { MarketState } from "../../../cb/state";
-import { callBudgetMs, drainJevShadow, freshJevSkip, liveJevCaller, readJevAnswer, scheduleLiveJev, skipShareReport, type JevDrainHost } from "./jev-call";
+import { callBudgetMs, drainJevShadow, freshJevSkip, readJevAnswer, scheduleLiveJev, skipShareReport, type JevDrainHost } from "./jev-call";
 import { JevTape } from "./jev-minute";
 import { freshJevMeter } from "./jev-shadow";
 
@@ -116,7 +116,12 @@ test("timeout, not_called, call_error, and invalid_response are separate shares"
   expect(shares.byReason.invalid_response).toBe(1);
   expect(shares.byTier.major).toBe(1);
   expect(readJevAnswer({ market_regime: { choice: "trend" }, direction_bias: { choice: "flat" }, toxic_flow_risk: { choice: "low" }, liquidity_stress: { choice: "calm" } })).toBeNull();
-  expect(await liveJevCaller(state(), 1000, {})).toEqual({ ok: false, reason: "not_called" });
+  const unwired = host();
+  unwired.jevCaller = undefined;
+  unwired.jevQueue.push({ pair: "ETH-USD", barStartSec: 5, state: state(), minutes: [] });
+  await drainJevShadow(unwired, NOW, NOW + 120_000);
+  expect(unwired.jevAnswers[0]?.reason).toBe("not_called");
+  expect(unwired.jevMeter.calls).toBe(0);
 });
 
 test("scheduling counts BTC even when the open pair is the only name with minutes", () => {

@@ -4,7 +4,6 @@
  */
 
 import type { MarketState } from "../../../cb/state";
-import { costUsdFromTokens } from "../../vendor/87b35d0/jev.ts";
 import { JEV_TIMEOUT_MS } from "../../vendor/87b35d0/config.ts";
 import { chargeJevCall, jevSpendFits, type JevMeter, type ShadowPacket } from "./jev-shadow";
 import { liquidityTier, scheduledPairs, type JevMinuteSummary, type JevTape } from "./jev-minute";
@@ -103,7 +102,7 @@ export function jevKey(pair: string, barStartSec: number): string {
 }
 
 /** Criteria match cb/model.ts. The instructions are the same four questions. */
-const JEV_QUESTIONS = {
+export const JEV_QUESTIONS = {
   market_regime: {
     type: "choice",
     instructions: {
@@ -175,48 +174,6 @@ export function readJevAnswer(answers: unknown): JevAnswer | null {
   const liquidity_stress = oneOf(body.liquidity_stress, ["normal", "stressed"] as const);
   if (!market_regime || !direction_bias || !toxic_flow_risk || !liquidity_stress) return null;
   return { market_regime, direction_bias, toxic_flow_risk, liquidity_stress };
-}
-
-function isAbort(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const name = (error as { name?: string }).name;
-  return name === "AbortError" || name === "TimeoutError";
-}
-
-/**
- * Live shadow call. No key means not_called and no network.
- * Tests pass a mock caller and do not set the key.
- */
-export async function liveJevCaller(state: MarketState, timeoutMs: number, env: NodeJS.ProcessEnv = process.env): Promise<JevCallOutcome> {
-  if (!env.TYPESAFE_AI_API_KEY) return { ok: false, reason: "not_called" };
-  if (!(timeoutMs > 0)) return { ok: false, reason: "timeout" };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const { experimental_evaluate } = await import("ai");
-    const { typeSafeAi } = await import("@ai-sdk/typesafe-ai");
-    const result = await experimental_evaluate({
-      model: typeSafeAi.evaluationModel("jev-latest"),
-      state: state as never,
-      questions: JEV_QUESTIONS as never,
-      maxRetries: 0,
-      abortSignal: controller.signal,
-    });
-    const answer = readJevAnswer(result.answers);
-    if (!answer) return { ok: false, reason: "invalid_response" };
-    const inputTokens = result.usage.inputTokens ?? null;
-    const outputTokens = result.usage.outputTokens ?? null;
-    const total = result.usage.totalTokens ?? (inputTokens != null && outputTokens != null ? inputTokens + outputTokens : null);
-    if (total == null || !(total > 0)) return { ok: false, reason: "invalid_response" };
-    const costUsd = costUsdFromTokens(total);
-    if (!(costUsd > 0)) return { ok: false, reason: "invalid_response" };
-    return { ok: true, answer, costUsd };
-  } catch (error) {
-    if (isAbort(error)) return { ok: false, reason: "timeout" };
-    return { ok: false, reason: "call_error" };
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 export interface JevDrainHost {
@@ -312,7 +269,15 @@ export async function drainJevShadow(host: JevDrainHost, nowMs: number, untilMs:
     dropQueued(host, "not_called");
     return;
   }
-  const caller = host.jevCaller ?? liveJevCaller;
+  const caller = host.jevCaller;
+  if (!caller) {
+    noteSkip(host.jevSkip, "not_called", liquidityTier(next.pair));
+    host.book.jevSkipped += 1;
+    host.book.incidents.push(`jev not_called ${next.pair} ${next.barStartSec}`);
+    remember(host, next, "not_called", null, 0);
+    dropQueued(host, "not_called");
+    return;
+  }
   let outcome: JevCallOutcome;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {

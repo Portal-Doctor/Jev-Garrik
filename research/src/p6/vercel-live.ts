@@ -241,6 +241,7 @@ export async function handleEngineRequest(
   env: Record<string, string | undefined>,
   deps?: {
     kv: Kv;
+    jevCaller?: PaperHost["jevCaller"];
     nowMs?: number;
     deadlineMs?: number;
     self?: string;
@@ -279,6 +280,7 @@ export async function handleEngineRequest(
     host.restRun = createRestRun(deadlineMs, {}, (id, reason) => {
       applyRestCold(host, id, reason);
     });
+    if (deps?.jevCaller) host.jevCaller = deps.jevCaller;
   }
   const holder = deps?.holder ?? hostHolder(host!, kv);
   const result: InvocationResult = await runInvocation({
