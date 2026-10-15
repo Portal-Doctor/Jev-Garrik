@@ -24,10 +24,10 @@ import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
 import { completedDays, deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
 import { buildJevPackets, freshJevMeter, type JevMeter } from "./jev-shadow";
-import type { Kv } from "./relay";
+import { renewLease, type Kv } from "./relay";
 import { kickDurable } from "./hot-store";
 import { foldedCovers, foldHours } from "../data/derive";
-import { budgetStopLabel, coinbaseGet, createRestRun, isCold, markCold, type RestRun } from "./rest-limit";
+import { budgetStopLabel, coinbaseGet, createRestRun, isCold, markCold, REST_FETCH_TIMEOUT_MS, type RestRun } from "./rest-limit";
 import { FOUR_KEEP, HOUR_KEEP, hourPagesForKeep, WARM } from "./warm-caps";
 import { MISSED_SEND_STALE_QUOTE, STALE_QUOTE_MS } from "./legs";
 import type { VolHour } from "./amendment-v6";
@@ -203,6 +203,10 @@ export interface PaperHost {
   jevMeter: JevMeter;
   /** Lease token this process acquired. A save without it does not claim the lease. */
   leaseToken: string | null;
+  /** Products that timed out this run. Later REST for them is not sent. */
+  restTimedOut: Set<string>;
+  /** host.clock() when the REST phase last renewed the lease. */
+  leaseRenewedMs: number;
   /** Set when the lease renew fails. The holder stops and does not write again. */
   stopped: boolean;
   /** ws after a live snapshot. rest_snapshot after a takeover rebuild, until the socket snapshots. */
@@ -529,6 +533,8 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     bufferFeeds: false,
     jevMeter: loadJevMeter(),
     leaseToken: null,
+    restTimedOut: new Set(),
+    leaseRenewedMs: 0,
     stopped: false,
     l2BookSrc: new Map(),
     overflowByDay: new Map(),
@@ -574,7 +580,37 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
   host.restRun = createRestRun(Number.POSITIVE_INFINITY, {}, (id, reason) => {
     applyRestCold(host, id, reason);
   });
+  attachRestLease(host);
   return host;
+}
+
+/**
+ * Renew during REST often enough that a 20s abort cannot leave the lease
+ * unextended for a full 60s. Checked before each attempt; the attempt itself
+ * may then block for REST_FETCH_TIMEOUT_MS.
+ */
+export const REST_LEASE_RENEW_MS = 60_000 - REST_FETCH_TIMEOUT_MS;
+
+/** Lease renew and the one-timeout skip, on this host's lane. */
+export function attachRestLease(host: PaperHost): void {
+  host.restRun.beforeFetch = () => renewHostLease(host);
+  host.restRun.skipProduct = (id) => host.restTimedOut.has(id);
+  host.restRun.noteTimeout = (id) => {
+    host.restTimedOut.add(id);
+  };
+  host.restRun.halted = () => host.stopped;
+}
+
+async function renewHostLease(host: PaperHost): Promise<void> {
+  if (!host.kv || !host.leaseToken || host.stopped) return;
+  const now = host.clock();
+  if (now - host.leaseRenewedMs < REST_LEASE_RENEW_MS) return;
+  const ok = await renewLease(host.kv, now, host.leaseToken);
+  host.leaseRenewedMs = now;
+  if (!ok) {
+    host.stopped = true;
+    host.book.incidents.push("lease lost");
+  }
 }
 
 function loadJevMeter(): JevMeter {
@@ -1758,6 +1794,8 @@ export async function catchUpHistory(
   const nowSec = Math.floor(host.clock() / 1000);
   const newest = Math.floor(nowSec / 900) * 900 - 900;
   for (const productId of host.products) {
+    if (host.stopped) return;
+    if (host.restTimedOut.has(productId)) continue;
     const origin = host.historyFrom.get(productId);
     const cursor = host.restCursor.get(productId) ?? origin;
     if (cursor == null || cursor > newest) continue;
@@ -2303,10 +2341,11 @@ async function seedWalkProduct(host: PaperHost, productId: string, fetchImpl?: S
 /**
  * Liquid names first. Whole products only. Stop when the remaining seed budget cannot
  * hold another product, and resume from the cursor on the next run.
- * A transient failure skips that product for this run and the walk continues.
- * The id stays on `seedCursor.retry` (order and runId are kept) and is tried
- * before the cursor walk next run. The cursor still advances: a product behind
- * it with no ready bars is never revisited.
+ * Warm hour deltas run before the retry list, so they do not spill into the
+ * requests catch-up keeps after the seed budget. A transient failure skips that
+ * product for this run and the walk continues. The id stays on `seedCursor.retry`
+ * (order and runId are kept) and is tried after the hour deltas. The cursor still
+ * advances: a product behind it with no ready bars is never revisited.
  */
 export async function seedBudgeted(host: PaperHost, fetchImpl?: SeedFetch): Promise<void> {
   host.seedCursor.retry = seedRetryList(host.seedCursor);
@@ -2316,7 +2355,14 @@ export async function seedBudgeted(host: PaperHost, fetchImpl?: SeedFetch): Prom
   }
   const order = host.seedCursor.order;
   const skipped = new Set<string>();
+  for (let index = 0; index < host.seedCursor.idx && index < order.length; index += 1) {
+    if (host.stopped) return;
+    const prior = order[index]!;
+    if (host.restTimedOut.has(prior) || host.seedCursor.retry!.includes(prior)) continue;
+    if (storedSeriesWarm(host, prior)) await seedHourDelta(host, prior, fetchImpl);
+  }
   for (const productId of host.seedCursor.retry.slice()) {
+    if (host.stopped) return;
     if (host.restRun.seedBudget - host.restRun.seedUsed < SEED_REQUESTS_PER_PRODUCT) break;
     if (durableCold(host, productId)) {
       forgetRetry(host, productId);
@@ -2334,13 +2380,9 @@ export async function seedBudgeted(host: PaperHost, fetchImpl?: SeedFetch): Prom
     }
     forgetRetry(host, productId);
   }
-  for (let index = 0; index < host.seedCursor.idx && index < order.length; index += 1) {
-    const prior = order[index]!;
-    if (skipped.has(prior) || host.seedCursor.retry!.includes(prior)) continue;
-    if (storedSeriesWarm(host, prior)) await seedHourDelta(host, prior, fetchImpl);
-  }
   let added = 0;
   while (host.seedCursor.idx < order.length) {
+    if (host.stopped) return;
     if (added >= SEED_PRODUCTS_PER_RUN) break;
     if (host.restRun.seedBudget - host.restRun.seedUsed < SEED_REQUESTS_PER_PRODUCT) break;
     const productId = order[host.seedCursor.idx]!;
@@ -2437,6 +2479,7 @@ async function seedDailyProduct(host: PaperHost, productId: string, fetchImpl?: 
 
 /** A warm product fetches only the hours after the newer of its watermark and its last stored hour. */
 async function seedHourDelta(host: PaperHost, productId: string, fetchImpl?: SeedFetch): Promise<void> {
+  if (host.stopped || host.restTimedOut.has(productId)) return;
   const mark = host.seedMarks.get(productId);
   if (!mark || !(mark.newestTs > 0)) return;
   const nowSec = Math.floor(host.clock() / 1000);
@@ -2606,6 +2649,8 @@ export async function backfillTapeIfNeeded(
   }
   const candleGaps: { productId: string; missing: number[]; covered: Set<number> }[] = [];
   for (const productId of host.products) {
+    if (host.stopped) return;
+    if (host.restTimedOut.has(productId)) continue;
     try {
       const response = await get(productTradesUrl(productId));
       if (response.ok) {
