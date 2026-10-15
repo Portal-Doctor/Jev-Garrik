@@ -1,6 +1,5 @@
 import { headers } from "next/headers";
-import { monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Dashboard } from "../../../../research/src/p6/dashboard-read";
-import { p6ViewAuthorized } from "../../../../research/src/p6/p6-login";
+import { dashboardAuthorized, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Dashboard } from "../../../../research/src/p6/dashboard-read";
 import { RunClock } from "./countdown";
 import styles from "../paper/paper.module.css";
 
@@ -59,15 +58,7 @@ function classTone(id: string, drawdownR: number): "green" | "yellow" | "red" {
 /** Read-only. The view token is not the cron secret. Nothing on this page writes Redis. */
 export default async function P6DashboardPage() {
   const headerList = await headers();
-  if (
-    !p6ViewAuthorized({
-      authorization: headerList.get("authorization"),
-      cookie: headerList.get("cookie"),
-      dashboardToken: process.env.DASHBOARD_TOKEN,
-      sessionSecret: process.env.P6_SESSION_SECRET,
-      now: Date.now(),
-    })
-  ) {
+  if (!dashboardAuthorized(headerList.get("authorization"), process.env.DASHBOARD_TOKEN)) {
     return (
       <main className={styles.top}>
         <h1>P6 paper</h1>
