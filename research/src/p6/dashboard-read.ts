@@ -3,6 +3,7 @@
  * This file does not import the host, the hot store, or the relay client.
  */
 
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { connect as connectNet, isIP } from "node:net";
 import { connect as connectTls } from "node:tls";
 import type { Kv } from "./relay";
@@ -14,9 +15,127 @@ export const LAST_RUN_KEY = "p6:lastRun";
 const HOT_KEY = "p6:hot";
 const LEASE_KEY = "p6:lease";
 
+/**
+ * How to open the dashboard.
+ *
+ * Path: GET /p6. A plain GET is enough. POST is not required and is not a login step.
+ * Query: put the dashboard token in the `token` parameter:
+ * https://<your-vercel-domain>/p6?token=<DASHBOARD_TOKEN>
+ * Do not send the token in the path. A valid `token` answers 302 to the same path with that
+ * parameter removed (other query parameters stay), and sets the cookie below.
+ * The follow-up GET carries the cookie and renders the page. The token does not stay in the
+ * address bar.
+ *
+ * Cookie name: p6_dash
+ * Attributes: HttpOnly; Secure; SameSite=Strict; Path=/p6; Max-Age=2592000 (30 days). No Domain.
+ * Value: hex HMAC-SHA256, keyed by DASHBOARD_TOKEN, over the fixed label "p6-dashboard-v1".
+ * The cookie is not the raw token. Rotating DASHBOARD_TOKEN invalidates existing cookies.
+ * There is no new environment variable.
+ *
+ * Precedence when Authorization, the cookie, and `?token=` are all present:
+ * - `?token=` present and equal to DASHBOARD_TOKEN: redirect and set the cookie.
+ *   A disagreeing Bearer or cookie is ignored on that response.
+ * - `?token=` present and wrong, empty, or malformed: 401. Bearer and cookie are not consulted.
+ * - `?token=` absent: allow when the Bearer token matches or the cookie matches.
+ *   A wrong Bearer does not reject a valid cookie. A wrong cookie does not reject a valid Bearer.
+ *   Both wrong, or both missing, is the same 401 as a missing token. The body is "unauthorized".
+ *
+ * Comparisons are SHA-256 digests checked with timingSafeEqual. The token and the cookie are not logged.
+ * These responses send Referrer-Policy: no-referrer and Cache-Control: no-store.
+ * This check is /p6 only. It does not authorize the engine or the cron route.
+ */
+export const P6_COOKIE_NAME = "p6_dash";
+export const P6_COOKIE_MAX_AGE = 2_592_000;
+export const P6_COOKIE_LABEL = "p6-dashboard-v1";
+
+function sameSecret(left: string, right: string): boolean {
+  return timingSafeEqual(createHash("sha256").update(left).digest(), createHash("sha256").update(right).digest());
+}
+
+/** Hex HMAC-SHA256 of the fixed label, keyed by the dashboard token. Not the raw token. */
+export function dashboardCookieValue(token: string): string {
+  return createHmac("sha256", token).update(P6_COOKIE_LABEL).digest("hex");
+}
+
+export function dashboardSetCookie(token: string): string {
+  return `${P6_COOKIE_NAME}=${dashboardCookieValue(token)}; HttpOnly; Secure; SameSite=Strict; Path=/p6; Max-Age=${P6_COOKIE_MAX_AGE}`;
+}
+
+export function readDashCookie(header: string | null): string | null {
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() !== P6_COOKIE_NAME) continue;
+    const raw = part.slice(eq + 1).trim();
+    if (!raw) return "";
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }
+  return null;
+}
+
 export function dashboardAuthorized(header: string | null, token: string | undefined): boolean {
-  if (!token) return false;
-  return header === `Bearer ${token}`;
+  if (!token || header == null) return false;
+  const prefix = "Bearer ";
+  if (!header.startsWith(prefix)) return false;
+  return sameSecret(header.slice(prefix.length), token);
+}
+
+export type DashboardAccess =
+  | { action: "allow" }
+  | { action: "deny" }
+  | { action: "redirect"; location: string; setCookie: string };
+
+export function dashboardAccess(input: {
+  authorization: string | null;
+  cookieHeader: string | null;
+  /** Null when `token` is absent. A present empty value is `""`. */
+  tokenParam: string | null;
+  searchParams?: URLSearchParams;
+  dashboardToken: string | undefined;
+}): DashboardAccess {
+  const token = input.dashboardToken;
+  if (!token) return { action: "deny" };
+  if (input.tokenParam !== null) {
+    if (!sameSecret(input.tokenParam, token)) return { action: "deny" };
+    const params = new URLSearchParams(input.searchParams ?? undefined);
+    params.delete("token");
+    const query = params.toString();
+    const location = query ? `/p6?${query}` : "/p6";
+    if (location.includes("\n") || location.includes("\r")) return { action: "deny" };
+    return { action: "redirect", location, setCookie: dashboardSetCookie(token) };
+  }
+  const bearer = dashboardAuthorized(input.authorization, token);
+  const cookie = readDashCookie(input.cookieHeader);
+  const cookieOk = cookie != null && cookie !== "" && sameSecret(cookie, dashboardCookieValue(token));
+  if (bearer || cookieOk) return { action: "allow" };
+  return { action: "deny" };
+}
+
+/** Proxy result for /p6. GET is enough. The status does not depend on POST. */
+export function applyDashboardProxy(request: Request, dashboardToken: string | undefined): { status: number; body: string | null; headers: Record<string, string> } {
+  const url = new URL(request.url);
+  const tokenParam = url.searchParams.has("token") ? (url.searchParams.get("token") ?? "") : null;
+  const access = dashboardAccess({
+    authorization: request.headers.get("authorization"),
+    cookieHeader: request.headers.get("cookie"),
+    tokenParam,
+    searchParams: url.searchParams,
+    dashboardToken,
+  });
+  const headers: Record<string, string> = {
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+  };
+  if (access.action === "deny") return { status: 401, body: "unauthorized", headers };
+  if (access.action === "redirect") {
+    return { status: 302, body: null, headers: { ...headers, Location: access.location, "Set-Cookie": access.setCookie } };
+  }
+  return { status: 200, body: null, headers };
 }
 
 function stripUrls(line: string): string {

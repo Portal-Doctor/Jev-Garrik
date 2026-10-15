@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { dashboardAuthorized, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Dashboard } from "../../../../research/src/p6/dashboard-read";
+import { dashboardAccess, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Dashboard } from "../../../../research/src/p6/dashboard-read";
 import { RunClock } from "./countdown";
 import styles from "../paper/paper.module.css";
 
@@ -61,10 +61,29 @@ function classTone(id: string, drawdownR: number): "green" | "yellow" | "red" {
   return drawdownR < 5 ? "green" : "red";
 }
 
-/** Read-only. The view token is not the cron secret. Nothing on this page writes Redis. */
-export default async function P6DashboardPage() {
+/** Read-only. The view token is not the cron secret. Nothing on this page writes Redis. Open with GET /p6; see dashboardAccess. */
+export default async function P6DashboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const headerList = await headers();
-  if (!dashboardAuthorized(headerList.get("authorization"), process.env.DASHBOARD_TOKEN)) {
+  const query = searchParams ? await searchParams : {};
+  const rawToken = query.token;
+  const tokenParam = rawToken == null ? null : Array.isArray(rawToken) ? (rawToken[0] ?? "") : rawToken;
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (typeof value === "string") params.append(key, value);
+    else if (Array.isArray(value)) for (const item of value) params.append(key, item);
+  }
+  const access = dashboardAccess({
+    authorization: headerList.get("authorization"),
+    cookieHeader: headerList.get("cookie"),
+    tokenParam,
+    searchParams: params,
+    dashboardToken: process.env.DASHBOARD_TOKEN,
+  });
+  if (access.action !== "allow") {
     return (
       <main className={styles.top}>
         <h1>P6 paper</h1>

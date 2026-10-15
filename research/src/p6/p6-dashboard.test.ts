@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
-import { dashboardAuthorized, openDashboardKv, readP6Dashboard } from "./dashboard-read";
+import { applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard } from "./dashboard-read";
+import { cronAuthorized } from "./relay";
 import { applyForward, paperPnl, replayInjected } from "./engine";
 import { delayBps } from "./legs";
 import { memoryKv } from "./relay";
@@ -12,6 +13,66 @@ test("the cron secret does not authorize the dashboard", () => {
   expect(dashboardAuthorized("Bearer view-token", "view-token")).toBe(true);
   expect(dashboardAuthorized("Bearer view-token", undefined)).toBe(false);
   expect(dashboardAuthorized(null, "view-token")).toBe(false);
+});
+
+test("GET /p6 accepts the bearer, the cookie, or a token query", () => {
+  const token = "view-token";
+  const cookie = `${P6_COOKIE_NAME}=${dashboardCookieValue(token)}`;
+  const other = `${P6_COOKIE_NAME}=${dashboardCookieValue("other-token")}`;
+  const header = applyDashboardProxy(new Request("https://example.test/p6", { headers: { authorization: "Bearer view-token" } }), token);
+  expect(header.status).toBe(200);
+  expect(header.headers["Cache-Control"]).toBe("no-store");
+  expect(header.headers["Referrer-Policy"]).toBe("no-referrer");
+
+  const fromCookie = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET", headers: { cookie } }), token);
+  expect(fromCookie.status).toBe(200);
+
+  const opened = applyDashboardProxy(new Request("https://example.test/p6?token=view-token&panel=spend", { method: "GET" }), token);
+  expect(opened.status).toBe(302);
+  expect(opened.headers.Location).toBe("/p6?panel=spend");
+  expect(opened.body).toBeNull();
+  const setCookie = opened.headers["Set-Cookie"] ?? "";
+  expect(setCookie.startsWith(`${P6_COOKIE_NAME}=${dashboardCookieValue(token)}`)).toBe(true);
+  expect(setCookie.includes("HttpOnly")).toBe(true);
+  expect(setCookie.includes("Secure")).toBe(true);
+  expect(setCookie.includes("SameSite=Strict")).toBe(true);
+  expect(setCookie.includes("Path=/p6")).toBe(true);
+  expect(setCookie.includes("Max-Age=2592000")).toBe(true);
+  expect(setCookie.includes(token)).toBe(false);
+  expect(opened.headers["Cache-Control"]).toBe("no-store");
+  expect(opened.headers["Referrer-Policy"]).toBe("no-referrer");
+
+  const wrong = applyDashboardProxy(new Request("https://example.test/p6?token=nope", { method: "GET", headers: { authorization: "Bearer view-token", cookie } }), token);
+  expect(wrong.status).toBe(401);
+  expect(wrong.body).toBe("unauthorized");
+  const empty = applyDashboardProxy(new Request("https://example.test/p6?token=", { method: "GET", headers: { cookie } }), token);
+  expect(empty.status).toBe(401);
+  const malformed = applyDashboardProxy(new Request("https://example.test/p6", { headers: { cookie: `${P6_COOKIE_NAME}=not-a-cookie` } }), token);
+  expect(malformed.status).toBe(401);
+  const tampered = dashboardCookieValue(token).slice(0, -1) + (dashboardCookieValue(token).endsWith("a") ? "b" : "a");
+  expect(applyDashboardProxy(new Request("https://example.test/p6", { headers: { cookie: `${P6_COOKIE_NAME}=${tampered}` } }), token).status).toBe(401);
+  expect(applyDashboardProxy(new Request("https://example.test/p6", { headers: { cookie: other } }), token).status).toBe(401);
+
+  const allValid = applyDashboardProxy(new Request("https://example.test/p6?token=view-token", { method: "GET", headers: { authorization: "Bearer view-token", cookie } }), token);
+  expect(allValid.status).toBe(302);
+  expect(allValid.headers.Location).toBe("/p6");
+  const bearerWins = applyDashboardProxy(new Request("https://example.test/p6", { headers: { authorization: "Bearer view-token", cookie: other } }), token);
+  expect(bearerWins.status).toBe(200);
+  const cookieWins = applyDashboardProxy(new Request("https://example.test/p6", { headers: { authorization: "Bearer nope", cookie } }), token);
+  expect(cookieWins.status).toBe(200);
+  expect(applyDashboardProxy(new Request("https://example.test/p6", { headers: { authorization: "Bearer nope", cookie: other } }), token).status).toBe(401);
+  expect(applyDashboardProxy(new Request("https://example.test/p6"), undefined).status).toBe(401);
+
+  expect(cronAuthorized("Bearer view-token", "cron-secret")).toBe(false);
+  expect(cronAuthorized(`Bearer ${token}`, "cron-secret")).toBe(false);
+  const root = join(import.meta.dir, "..", "..", "..");
+  const engine = readFileSync(join(root, "web/src/app/api/engine/route.ts"), "utf8");
+  const relay = readFileSync(join(import.meta.dir, "relay.ts"), "utf8");
+  const cron = relay.slice(relay.indexOf("export function cronAuthorized"));
+  expect(engine.includes(P6_COOKIE_NAME)).toBe(false);
+  expect(engine.includes("DASHBOARD_TOKEN")).toBe(false);
+  expect(cron.includes(P6_COOKIE_NAME)).toBe(false);
+  expect(cron.includes("token=")).toBe(false);
 });
 
 test("the page path only reads Redis", async () => {
@@ -78,6 +139,9 @@ test("the page does not import the cron secret, auth, or a Redis write", () => {
   }
   const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
   expect(page.includes("DASHBOARD_TOKEN")).toBe(true);
+  expect(page.includes("dashboardAccess")).toBe(true);
+  const proxy = readFileSync(join(root, "web/src/proxy.ts"), "utf8");
+  expect(proxy.includes("applyDashboardProxy")).toBe(true);
   expect(page.includes("readP6Dashboard")).toBe(true);
   expect(page.includes("last?.completed")).toBe(true);
   expect(page.includes("kill R")).toBe(true);
