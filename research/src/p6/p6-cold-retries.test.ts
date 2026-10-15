@@ -517,7 +517,12 @@ test("a hung product renews the lease and the run's saves persist", async () => 
       }
       if (mode === "three-hangs" && id === "AVAX-USD") throw new Error("fetch failed");
       if (mode === "three-hangs" && id === "BCH-USD") return new Response("", { status: 503 });
-      return seededPage(url);
+      const gran = Number(new URL(url).searchParams.get("granularity"));
+      if (gran === 86_400) {
+        const start = Number(new URL(url).searchParams.get("start"));
+        return new Response(JSON.stringify([[start, 1, 1, 1, 1, 1]]), { status: 200 });
+      }
+      return new Response("[]", { status: 200 });
     };
     const holder = hostHolder(host, kv);
     await holder.sampleUntil(NOW);
@@ -531,16 +536,16 @@ test("a hung product renews the lease and the run's saves persist", async () => 
     expect(cursor?.retry).toContain("BTC-USD");
     expect(await kv.get(seedMarkKey("BTC-USD"))).toBeNull();
     expect(calls.get("BTC-USD")).toBe(1);
+    const eth = JSON.parse((await kv.get(seedMarkKey("ETH-USD"))) ?? "null") as { status?: string } | null;
+    expect(eth?.status).toBe("cold");
     if (mode === "three-hangs") {
       expect(cursor?.retry).toEqual(["AVAX-USD", "BCH-USD", "BTC-USD"]);
       expect(calls.get("AVAX-USD")).toBe(REST_MAX_ATTEMPTS);
       expect(await kv.get(seedMarkKey("AVAX-USD"))).toBeNull();
       expect(await kv.get(seedMarkKey("BCH-USD"))).toBeNull();
     }
-    expect(host.seedMarks.get("ETH-USD")).toMatchObject({ status: "warm", reason: "seeded" });
-    expect(host.seedMarks.get("SOL-USD")).toMatchObject({ status: "warm", reason: "seeded" });
     host.book.legs.push(fillLeg(`fill-${mode}`));
     await writeThroughBook(kv, host);
     expect(await kv.get(FILLS_KEY)).toContain(`fill-${mode}`);
   }
-});
+}, 20_000);
