@@ -150,7 +150,7 @@ export function reserveJevCall(meter: JevMeter, nowMs: number, reserveUsd = JEV_
  * Throws when the actual cost is above the hold and the extra does not fit. The hold stays on the caller.
  */
 export function adjustJevReserve(meter: JevMeter, reservedUsd: number, actualUsd: number): JevMeter {
-  if (!(actualUsd > 0)) throw new Error("jev spend must be positive");
+  if (!(actualUsd >= 0) || !Number.isFinite(actualUsd)) throw new Error("jev spend must be positive");
   const delta = actualUsd - reservedUsd;
   if (delta > 1e-12) {
     const next = noteJevSpend(meter, delta, meter.month);

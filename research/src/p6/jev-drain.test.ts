@@ -126,8 +126,8 @@ test("timeout, not_called, call_error, and invalid_response are separate shares"
   bad.jevQueue.push({ pair: "ETH-USD", barStartSec: 3, state: state(), minutes: [] });
   await drainJevShadow(bad, NOW, NOW + 120_000);
   expect(bad.jevAnswers[0]?.reason).toBe("call_error");
-  expect(bad.jevAnswers[0]?.costUsd).toBeCloseTo(JEV_CALL_RESERVE_USD, 8);
-  expect(bad.jevMeter.cumulativeUsd).toBeCloseTo(JEV_CALL_RESERVE_USD, 8);
+  expect(bad.jevAnswers[0]?.costUsd).toBe(0);
+  expect(bad.jevMeter.cumulativeUsd).toBe(0);
   expect(bad.jevMeter.calls).toBe(0);
   expect(bad.book.incidents.join(" ")).not.toContain("socket reset");
 
@@ -147,6 +147,37 @@ test("timeout, not_called, call_error, and invalid_response are separate shares"
   await drainJevShadow(unwired, NOW, NOW + 120_000);
   expect(unwired.jevAnswers[0]?.reason).toBe("not_called");
   expect(unwired.jevMeter.calls).toBe(0);
+});
+
+test("a not_called caller refunds the hold and leaves the cap intact", async () => {
+  const previous = process.env.TYPESAFE_AI_API_KEY;
+  delete process.env.TYPESAFE_AI_API_KEY;
+  try {
+    const row = host();
+    row.jevCaller = async () => {
+      if (!process.env.TYPESAFE_AI_API_KEY) return { ok: false, reason: "not_called" };
+      throw new Error("the key must stay unset");
+    };
+    for (let i = 0; i < 120; i += 1) {
+      row.jevQueue.push({ pair: "ETH-USD", barStartSec: 100 + i, state: state(), minutes: [] });
+    }
+    for (let i = 0; i < 120; i += 1) await drainJevShadow(row, NOW, NOW + 120_000);
+    expect(row.jevSkip.byReason.not_called).toBe(120);
+    expect(row.book.jevSkipped).toBe(120);
+    expect(row.jevAnswers.every((item) => item.reason === "not_called" && item.costUsd === 0)).toBe(true);
+    expect(row.jevMeter.cumulativeUsd).toBe(0);
+    expect(row.jevMeter.calls).toBe(0);
+    row.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: 0.01 });
+    row.jevQueue.push({ pair: "ETH-USD", barStartSec: 300, state: state(), minutes: [] });
+    await drainJevShadow(row, NOW, NOW + 120_000);
+    expect(row.jevAnswers[row.jevAnswers.length - 1]?.reason).toBe("ok");
+    expect(row.jevMeter.calls).toBe(1);
+    expect(row.jevMeter.cumulativeUsd).toBeCloseTo(0.01, 8);
+    expect(row.jevMeter.capUsd - row.jevMeter.cumulativeUsd).toBeGreaterThan(4);
+  } finally {
+    if (previous === undefined) delete process.env.TYPESAFE_AI_API_KEY;
+    else process.env.TYPESAFE_AI_API_KEY = previous;
+  }
 });
 
 test("scheduling counts BTC even when the open pair is the only name with minutes", () => {

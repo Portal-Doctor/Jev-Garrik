@@ -325,6 +325,7 @@ export async function drainJevShadow(host: JevDrainHost, nowMs: number, untilMs:
   const reserved = JEV_CALL_RESERVE_USD;
   let outcome: JevCallOutcome;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let reachedNetwork = true;
   try {
     outcome = await Promise.race([
       caller(next.state, budget),
@@ -333,11 +334,17 @@ export async function drainJevShadow(host: JevDrainHost, nowMs: number, untilMs:
       }),
     ]);
   } catch {
+    reachedNetwork = false;
     outcome = { ok: false, reason: "call_error" };
   } finally {
     if (timer) clearTimeout(timer);
   }
   if (!outcome.ok) {
+    if (outcome.reason === "not_called" || !reachedNetwork) {
+      host.jevMeter = adjustJevReserve(host.jevMeter, reserved, 0);
+      skipOne(host, next, outcome.reason, 0);
+      return;
+    }
     const billed = chargeFailure(host, reserved, outcome.costUsd);
     skipOne(host, next, outcome.reason, billed);
     return;
