@@ -24,7 +24,7 @@ import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
 import { completedDays, deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
 import { freshJevMeter, type JevMeter } from "./jev-shadow";
-import { drainJevShadow, freshJevSkip, scheduleLiveJev, type JevCaller, type JevQueued, type JevSkipLedger, type JevStored } from "./jev-call";
+import { drainJevShadow, freshJevSkip, queuedForHandover, scheduleClosedJevBar, scheduleLiveJev, type JevCaller, type JevQueued, type JevSkipLedger, type JevStored } from "./jev-call";
 import { JevTape, type StoredJevMinute } from "./jev-minute";
 import type { Kv } from "./relay";
 import { kickDurable } from "./hot-store";
@@ -1312,7 +1312,7 @@ function pushBar(host: PaperHost, bar: OhlcvBar): void {
       host.dailyCloses.set(bar.productId, series);
       noteMemberDay(host.book, bar.productId, closeSource({ date, close: bar.close }));
     }
-    if (liveBar) scheduleLiveJev(host, bar.startSec);
+    if (scheduleClosedJevBar(bar.startSec, host.clock())) scheduleLiveJev(host, bar.startSec);
     rollSettled(host, bar.productId, nowSec);
     if ((live || dailyClose) && host.generatedSec !== nowSec) {
       host.generated = universeEntries(host, nowSec);
@@ -1541,6 +1541,7 @@ export interface PaperStateBody {
   jevAnswers?: JevStored[];
   jevSkip?: JevSkipLedger;
   jevBarSec?: number;
+  jevQueue?: JevQueued[];
   feedCut?: FeedCut | null;
   overflowByDay?: [string, number][];
   fourSeedSrc?: [string, "research" | "rest_1h"][];
@@ -1674,6 +1675,7 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     jevAnswers: host.jevAnswers.slice(-20),
     jevSkip: host.jevSkip,
     jevBarSec: host.book.jevBarSec,
+    jevQueue: queuedForHandover(host.jevQueue, host.jevDone),
     feedCut: host.feedCut ? { ...host.feedCut, trade: host.feedCut.trade ? { ...host.feedCut.trade } : null } : null,
     overflowByDay: [...host.overflowByDay.entries()],
     fourSeedSrc: [...host.fourSeedSrc.entries()],
@@ -1750,6 +1752,7 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   if (body.jevAnswers) host.jevAnswers = body.jevAnswers;
   if (body.jevSkip) host.jevSkip = body.jevSkip;
   if (body.jevBarSec != null) host.book.jevBarSec = body.jevBarSec;
+  if (body.jevQueue) host.jevQueue = queuedForHandover(body.jevQueue, host.jevDone);
   if (body.gaps) host.gaps = body.gaps.map((gap) => ({ ...gap }));
   if (body.dSubmitted != null) host.book.submittedByClass.D = body.dSubmitted;
   if (body.dIndeterminate != null) host.book.indeterminateByClass.D = body.dIndeterminate;
@@ -2169,6 +2172,7 @@ export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHo
             return;
           }
           const held = !host.kv || host.leaseToken != null;
+          host.jevTape.sealDue(now);
           if (apply && held) await sendDueEntries(host, now);
           if (apply && held) await drainJevShadow(host, now, untilMs);
           host.shards.forEach((_, index) => {

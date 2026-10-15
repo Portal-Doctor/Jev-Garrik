@@ -5,7 +5,7 @@
 
 import type { BarOHLC } from "../p3/signals";
 import { paperPnl } from "./engine";
-import { skipShareReport } from "./jev-call";
+import { queuedForHandover, skipShareReport } from "./jev-call";
 import {
   FOUR_KEEP,
   fourSeriesReady,
@@ -154,6 +154,7 @@ interface HotBody {
   jevAnswers?: PaperStateBody["jevAnswers"];
   jevSkip?: PaperStateBody["jevSkip"];
   jevBarSec?: PaperStateBody["jevBarSec"];
+  jevQueue?: PaperStateBody["jevQueue"];
   emitted: string[];
   weeks: PaperStateBody["weeks"];
   feedCut: PaperStateBody["feedCut"];
@@ -202,6 +203,7 @@ export function captureHot(host: PaperHost): HotBody {
     jevAnswers: host.jevAnswers.slice(-20),
     jevSkip: host.jevSkip,
     ...(host.book.jevBarSec != null ? { jevBarSec: host.book.jevBarSec } : {}),
+    jevQueue: queuedForHandover(host.jevQueue, host.jevDone),
     emitted: [...host.emitted].slice(-80),
     weeks: [...host.weeks.entries()],
     feedCut: host.feedCut,
@@ -594,6 +596,8 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
       totalUsd: host.jevMeter.cumulativeUsd,
       todayUsd: host.jevMeter.today === new Date(host.clock()).toISOString().slice(0, 10) ? host.jevMeter.todayUsd : 0,
       calls: host.jevMeter.calls ?? 0,
+      capUsd: host.jevMeter.capUsd,
+      byReason: { ...host.jevSkip.byReason },
       skips: skipShareReport(host.jevSkip),
     },
   };

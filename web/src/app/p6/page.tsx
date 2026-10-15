@@ -100,7 +100,13 @@ export default async function P6DashboardPage() {
     pairBackstopUsd?: number;
   } | null;
   const rest = (last?.rest ?? {}) as { n?: number; r429?: number; waitedMs?: number };
-  const jev = (last?.jev ?? null) as { totalUsd?: number; todayUsd?: number; calls?: number } | null;
+  const jev = (last?.jev ?? null) as {
+    totalUsd?: number;
+    todayUsd?: number;
+    calls?: number;
+    capUsd?: number;
+    byReason?: { no_1m_input?: number; not_called?: number; timeout?: number; call_error?: number; invalid_response?: number };
+  } | null;
   const redis = (last?.redis ?? {}) as { cmds?: number; bytes?: number; maxValueBytes?: number };
   const cold = Array.isArray(last?.cold) ? (last.cold as { id?: string; reason?: string }[]) : [];
   const warm = typeof last?.warm === "number" ? last.warm : 0;
@@ -220,6 +226,12 @@ export default async function P6DashboardPage() {
         <Stat label="Jev spend" value={jevUsd(jev?.totalUsd)} />
         <Stat label="Jev today" value={jevUsd(jev?.todayUsd)} />
         <Stat label="Jev calls" value={String(jev?.calls ?? 0)} />
+        <Stat label="Jev cap" value={jevUsd(jev?.capUsd)} />
+        <Stat label="no_1m_input" value={String(jev?.byReason?.no_1m_input ?? 0)} />
+        <Stat label="not_called" value={String(jev?.byReason?.not_called ?? 0)} />
+        <Stat label="timeout" value={String(jev?.byReason?.timeout ?? 0)} />
+        <Stat label="call_error" value={String(jev?.byReason?.call_error ?? 0)} />
+        <Stat label="invalid_response" value={String(jev?.byReason?.invalid_response ?? 0)} />
       </section>
 
       <section style={{ padding: "12px 24px" }}>

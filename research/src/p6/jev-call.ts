@@ -5,7 +5,7 @@
 
 import type { MarketState } from "../../../cb/state";
 import { JEV_TIMEOUT_MS } from "../../vendor/87b35d0/config.ts";
-import { chargeJevCall, jevSpendFits, type JevMeter, type ShadowPacket } from "./jev-shadow";
+import { adjustJevReserve, JEV_CALL_RESERVE_USD, reserveJevCall, type JevMeter, type ShadowPacket } from "./jev-shadow";
 import { liquidityTier, scheduledPairs, type JevMinuteSummary, type JevTape } from "./jev-minute";
 
 export const JEV_CALL_CAP_MS = JEV_TIMEOUT_MS;
@@ -25,7 +25,7 @@ export interface JevAnswer {
 
 export type JevCallOutcome =
   | { ok: true; answer: JevAnswer; costUsd: number }
-  | { ok: false; reason: Exclude<JevReason, "no_1m_input"> };
+  | { ok: false; reason: Exclude<JevReason, "no_1m_input">; costUsd?: number };
 
 export type JevCaller = (state: MarketState, timeoutMs: number) => Promise<JevCallOutcome>;
 
@@ -197,6 +197,37 @@ export interface JevDrainHost {
   };
 }
 
+const FIFTEEN_SEC = 900;
+
+/** Start of the 15m bar that most recently closed. Older catch-up bars are not a Jev window. */
+export function latestCompletedBarStartSec(nowMs: number): number {
+  const nowSec = Math.floor(nowMs / 1000);
+  return Math.floor(nowSec / FIFTEEN_SEC) * FIFTEEN_SEC - FIFTEEN_SEC;
+}
+
+/**
+ * True only for the latest completed 15m bar, however late it arrives.
+ * A bar still forming is false. An older catch-up bar is false so history is not sent to Jev.
+ */
+export function scheduleClosedJevBar(barStartSec: number, nowMs: number): boolean {
+  if (nowMs < (barStartSec + FIFTEEN_SEC) * 1000) return false;
+  return barStartSec === latestCompletedBarStartSec(nowMs);
+}
+
+/** Drop done keys and rows that cannot be drained. The handover stores this list. */
+export function queuedForHandover(rows: readonly JevQueued[], done: ReadonlySet<string>): JevQueued[] {
+  const out: JevQueued[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!row || typeof row.pair !== "string" || typeof row.barStartSec !== "number" || !row.state) continue;
+    const key = jevKey(row.pair, row.barStartSec);
+    if (done.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ pair: row.pair, barStartSec: row.barStartSec, state: row.state, minutes: Array.isArray(row.minutes) ? row.minutes : [] });
+  }
+  return out;
+}
+
 export function scheduleLiveJev(host: JevDrainHost, barStartSec: number): void {
   if (host.book.jevBarSec === barStartSec) return;
   host.book.jevBarSec = barStartSec;
@@ -247,6 +278,24 @@ function dropQueued(host: JevDrainHost, reason: Exclude<JevReason, "no_1m_input"
   }
 }
 
+function skipOne(host: JevDrainHost, row: JevQueued, reason: JevReason, costUsd: number, answer: JevAnswer | null = null): void {
+  noteSkip(host.jevSkip, reason, liquidityTier(row.pair));
+  host.book.jevSkipped += 1;
+  host.book.incidents.push(`jev ${reason} ${row.pair} ${row.barStartSec}`);
+  remember(host, row, reason, answer, costUsd);
+}
+
+/** A failed call that named its price settles to that price. An unpriced failure keeps the hold. */
+function chargeFailure(host: JevDrainHost, reservedUsd: number, costUsd: number | undefined): number {
+  if (!(costUsd != null && costUsd > 0)) return reservedUsd;
+  try {
+    host.jevMeter = adjustJevReserve(host.jevMeter, reservedUsd, costUsd);
+    return costUsd;
+  } catch {
+    return reservedUsd;
+  }
+}
+
 /** One shadow call, or none. Does not throw. Does not touch orders. */
 export async function drainJevShadow(host: JevDrainHost, nowMs: number, untilMs: number): Promise<void> {
   if (host.kv && host.leaseToken == null) return;
@@ -260,24 +309,20 @@ export async function drainJevShadow(host: JevDrainHost, nowMs: number, untilMs:
   const next = host.jevQueue[0];
   if (!next) return;
   host.jevQueue = host.jevQueue.slice(1);
-  const month = new Date(nowMs).toISOString().slice(0, 7);
-  if (!jevSpendFits(host.jevMeter, month)) {
-    noteSkip(host.jevSkip, "not_called", liquidityTier(next.pair));
-    host.book.jevSkipped += 1;
-    host.book.incidents.push(`jev not_called ${next.pair} ${next.barStartSec}`);
-    remember(host, next, "not_called", null, 0);
-    dropQueued(host, "not_called");
-    return;
-  }
   const caller = host.jevCaller;
   if (!caller) {
-    noteSkip(host.jevSkip, "not_called", liquidityTier(next.pair));
-    host.book.jevSkipped += 1;
-    host.book.incidents.push(`jev not_called ${next.pair} ${next.barStartSec}`);
-    remember(host, next, "not_called", null, 0);
+    skipOne(host, next, "not_called", 0);
     dropQueued(host, "not_called");
     return;
   }
+  try {
+    host.jevMeter = reserveJevCall(host.jevMeter, nowMs);
+  } catch {
+    skipOne(host, next, "not_called", 0);
+    dropQueued(host, "not_called");
+    return;
+  }
+  const reserved = JEV_CALL_RESERVE_USD;
   let outcome: JevCallOutcome;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -293,19 +338,15 @@ export async function drainJevShadow(host: JevDrainHost, nowMs: number, untilMs:
     if (timer) clearTimeout(timer);
   }
   if (!outcome.ok) {
-    noteSkip(host.jevSkip, outcome.reason, liquidityTier(next.pair));
-    host.book.jevSkipped += 1;
-    host.book.incidents.push(`jev ${outcome.reason} ${next.pair} ${next.barStartSec}`);
-    remember(host, next, outcome.reason, null, 0);
+    const billed = chargeFailure(host, reserved, outcome.costUsd);
+    skipOne(host, next, outcome.reason, billed);
     return;
   }
   try {
-    host.jevMeter = chargeJevCall(host.jevMeter, outcome.costUsd, nowMs);
+    host.jevMeter = adjustJevReserve(host.jevMeter, reserved, outcome.costUsd);
+    host.jevMeter = { ...host.jevMeter, calls: (host.jevMeter.calls ?? 0) + 1 };
   } catch {
-    noteSkip(host.jevSkip, "call_error", liquidityTier(next.pair));
-    host.book.jevSkipped += 1;
-    host.book.incidents.push(`jev call_error ${next.pair} ${next.barStartSec}`);
-    remember(host, next, "call_error", outcome.answer, 0);
+    skipOne(host, next, "call_error", reserved, outcome.answer);
     return;
   }
   remember(host, next, "ok", outcome.answer, outcome.costUsd);

@@ -70,6 +70,9 @@ interface PendingFlow {
 interface ProductTape {
   bookUp: boolean;
   tradesUp: boolean;
+  /** Clock when this feed last became up. Null while down. Carry requires both to be <= the minute start. */
+  bookUpSince: number | null;
+  tradesUpSince: number | null;
   snapshot: boolean;
   lastHeartbeatMs: number | null;
   lastMid: number | null;
@@ -172,6 +175,8 @@ function freshProduct(): ProductTape {
   return {
     bookUp: false,
     tradesUp: false,
+    bookUpSince: null,
+    tradesUpSince: null,
     snapshot: false,
     lastHeartbeatMs: null,
     lastMid: null,
@@ -202,24 +207,31 @@ export class JevTape {
     return row;
   }
 
+  /**
+   * A heartbeat confirms the trades feed only. The book feed returns on a two-sided level2 event.
+   * Completed minutes are sealed here so a later beat cannot overwrite the one that covered the boundary.
+   */
   heartbeat(nowMs: number, productIds: readonly string[]): void {
     for (const productId of productIds) {
       const row = this.row(productId);
       row.lastHeartbeatMs = nowMs;
       row.tradesUp = true;
-      if (row.snapshot) row.bookUp = true;
+      if (row.tradesUpSince == null) row.tradesUpSince = nowMs;
+      this.sealUntil(row, productId, Math.floor(nowMs / JEV_MINUTE_MS) * JEV_MINUTE_MS, nowMs);
     }
   }
 
-  /** The shard socket closed or the heartbeat gap fired. Later minutes are absent. */
+  /** The shard socket closed or the heartbeat gap fired. A minute already ended is sealed first. */
   feedDown(nowMs: number, productIds: readonly string[]): void {
     for (const productId of productIds) {
       const row = this.products.get(productId);
       if (!row) continue;
+      this.sealUntil(row, productId, Math.floor(nowMs / JEV_MINUTE_MS) * JEV_MINUTE_MS, nowMs);
       row.bookUp = false;
       row.tradesUp = false;
+      row.bookUpSince = null;
+      row.tradesUpSince = null;
       row.lastHeartbeatMs = null;
-      this.sealUntil(row, productId, Math.floor(nowMs / JEV_MINUTE_MS) * JEV_MINUTE_MS, nowMs);
     }
   }
 
@@ -231,6 +243,7 @@ export class JevTape {
     if (mid == null) return;
     row.snapshot = true;
     row.bookUp = true;
+    if (row.bookUpSince == null) row.bookUpSince = nowMs;
     row.lastView = view;
     row.features.onBook(nowMs, view);
     row.ring.push({ ts: nowMs, mid });
@@ -252,6 +265,7 @@ export class JevTape {
     if (makerSide !== "BUY" && makerSide !== "SELL") return;
     const row = this.row(productId);
     row.tradesUp = true;
+    if (row.tradesUpSince == null) row.tradesUpSince = tsMs;
     const taker = makerSide === "BUY" ? "sell" : "buy";
     row.features.onTrade(tsMs, size, taker);
     const usd = price * size;
@@ -268,6 +282,12 @@ export class JevTape {
     const row = this.products.get(productId);
     if (!row) return;
     this.sealUntil(row, productId, Math.floor(nowMs / JEV_MINUTE_MS) * JEV_MINUTE_MS, nowMs);
+  }
+
+  /** Seal every minute that has already ended. The drive tick calls this on each pace. */
+  sealDue(nowMs: number): void {
+    const end = Math.floor(nowMs / JEV_MINUTE_MS) * JEV_MINUTE_MS;
+    for (const [productId, row] of this.products) this.sealUntil(row, productId, end, nowMs);
   }
 
   assess(productId: string, barStartMs: number): JevWindow {
@@ -417,7 +437,16 @@ export class JevTape {
       row.carryStreak = 0;
       return;
     }
-    const covered = row.bookUp && row.tradesUp && heartbeatCovers(row.lastHeartbeatMs, ts, nowMs) && row.lastMid != null && row.carryStreak < JEV_CARRY_MAX;
+    // Stricter than a heartbeat landing within 15s after the end: both feeds must have been up for this whole minute.
+    // A reconnect after feedDown starts a new up-since and does not carry the gap, including slot 14.
+    const upWholeMinute =
+      row.bookUp &&
+      row.tradesUp &&
+      row.bookUpSince != null &&
+      row.bookUpSince <= ts &&
+      row.tradesUpSince != null &&
+      row.tradesUpSince <= ts;
+    const covered = upWholeMinute && heartbeatCovers(row.lastHeartbeatMs, ts, nowMs) && row.lastMid != null && row.carryStreak < JEV_CARRY_MAX;
     if (covered && row.lastMid != null) {
       row.minutes.push({
         productId,
@@ -437,8 +466,10 @@ export class JevTape {
       row.carryStreak += 1;
       return;
     }
-    if (!row.bookUp || !row.snapshot) row.absent.set(ts, "no_book_feed");
-    else if (!row.tradesUp) row.absent.set(ts, "no_trades_feed");
+    const bookWhole = row.snapshot && row.bookUp && row.bookUpSince != null && row.bookUpSince <= ts;
+    const tradesWhole = row.tradesUp && row.tradesUpSince != null && row.tradesUpSince <= ts;
+    if (!bookWhole) row.absent.set(ts, "no_book_feed");
+    else if (!tradesWhole) row.absent.set(ts, "no_trades_feed");
     else row.absent.set(ts, "carry_limit");
     row.carryStreak = 0;
   }

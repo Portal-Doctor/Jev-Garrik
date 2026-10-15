@@ -39,6 +39,12 @@ export function warmupLabel(day: number): "log-only" | "pooled baseline" | "per-
 export const JEV_WINDOW_MINUTES = 15;
 export const JEV_CUMULATIVE_CAP_USD = 5;
 export const JEV_MONTH_CAP_USD = 100;
+/**
+ * Held before a shadow call and settled to the real cost after.
+ * The spec names no per-call maximum. One million tokens at $0.042/Mtok is $0.042,
+ * so the hold is $0.05. A call that cannot hold this amount is not started.
+ */
+export const JEV_CALL_RESERVE_USD = 0.05;
 
 export interface JevMinute {
   ts: number;
@@ -126,7 +132,43 @@ export function chargeJevCall(meter: JevMeter, costUsd: number, nowMs: number): 
   return { ...next, calls: (base.calls ?? 0) + 1, today: day, todayUsd: (base.todayUsd ?? 0) + costUsd };
 }
 
-/** Refuse a charge that would pass either cap. The shadow drain checks this before a call and commits after. */
+function roundUsd(value: number): number {
+  return Math.round(value * 1e9) / 1e9;
+}
+
+/** Hold `JEV_CALL_RESERVE_USD` against both caps. Throws when the hold does not fit. The meter is not modified on throw. */
+export function reserveJevCall(meter: JevMeter, nowMs: number, reserveUsd = JEV_CALL_RESERVE_USD): JevMeter {
+  const day = new Date(nowMs).toISOString().slice(0, 10);
+  const month = day.slice(0, 7);
+  const base: JevMeter = meter.today === day ? meter : { ...meter, today: day, todayUsd: 0 };
+  const next = noteJevSpend(base, reserveUsd, month);
+  return { ...next, today: day, todayUsd: roundUsd((base.todayUsd ?? 0) + reserveUsd), calls: base.calls ?? 0 };
+}
+
+/**
+ * Move a hold to the actual cost. Refunds the difference when the call cost less.
+ * Throws when the actual cost is above the hold and the extra does not fit. The hold stays on the caller.
+ */
+export function adjustJevReserve(meter: JevMeter, reservedUsd: number, actualUsd: number): JevMeter {
+  if (!(actualUsd > 0)) throw new Error("jev spend must be positive");
+  const delta = actualUsd - reservedUsd;
+  if (delta > 1e-12) {
+    const next = noteJevSpend(meter, delta, meter.month);
+    return { ...next, todayUsd: roundUsd((meter.todayUsd ?? 0) + delta) };
+  }
+  if (delta < -1e-12) {
+    const refund = -delta;
+    return {
+      ...meter,
+      cumulativeUsd: roundUsd(meter.cumulativeUsd - refund),
+      monthUsd: roundUsd(meter.monthUsd - refund),
+      todayUsd: roundUsd(Math.max(0, (meter.todayUsd ?? 0) - refund)),
+    };
+  }
+  return meter;
+}
+
+/** Refuse a charge that would pass either cap. The shadow drain holds a reserve before a call and settles after. */
 export function noteJevSpend(meter: JevMeter, costUsd: number, month: string): JevMeter {
   if (!(costUsd > 0)) throw new Error("jev spend must be positive");
   const monthUsd = meter.month === month ? meter.monthUsd : 0;

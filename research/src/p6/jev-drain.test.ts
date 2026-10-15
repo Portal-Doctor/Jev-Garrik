@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test";
 import type { MarketState } from "../../../cb/state";
-import { callBudgetMs, drainJevShadow, freshJevSkip, readJevAnswer, scheduleLiveJev, skipShareReport, type JevDrainHost } from "./jev-call";
+import { callBudgetMs, drainJevShadow, freshJevSkip, readJevAnswer, scheduleClosedJevBar, scheduleLiveJev, skipShareReport, type JevCallOutcome, type JevDrainHost } from "./jev-call";
+import { captureHot, loadSplit } from "./hot-store";
 import { JevTape } from "./jev-minute";
-import { freshJevMeter } from "./jev-shadow";
+import { capturePaperState, installPaperState, startPaperHost } from "./paper-host";
+import { HOT_KEY, memoryKv } from "./relay";
+import { freshJevMeter, JEV_CALL_RESERVE_USD, noteJevSpend, type JevMeter } from "./jev-shadow";
 
 const NOW = Date.parse("2026-10-14T18:00:00.000Z");
 
@@ -29,6 +32,23 @@ function state(): MarketState {
   };
 }
 
+const ANSWER = { market_regime: "balance", direction_bias: "flat", toxic_flow_risk: "low", liquidity_stress: "normal" } as const;
+
+/** Cumulative room for exactly one reserve. A second hold does not fit. */
+function roomForOneReserve(): JevMeter {
+  const month = "2026-10";
+  let meter: JevMeter = { ...freshJevMeter(0), month, monthUsd: 0 };
+  for (;;) {
+    const once = noteJevSpend(meter, JEV_CALL_RESERVE_USD, month);
+    try {
+      noteJevSpend(once, JEV_CALL_RESERVE_USD, month);
+      meter = once;
+    } catch {
+      return { ...meter, calls: 0, today: "", todayUsd: 0 };
+    }
+  }
+}
+
 function host(): JevDrainHost & { calls: number } {
   const book = { jevPackets: 0, jevSkipped: 0, incidents: [] as string[], packets: [], positions: [{ productId: "ETH-USD" }] };
   const base: JevDrainHost & { calls: number } = {
@@ -52,7 +72,7 @@ test("the drain is shadow only, idempotent, and priced before the call", async (
   const row = host();
   row.jevCaller = async () => {
     row.calls += 1;
-    return { ok: true, answer: { market_regime: "balance", direction_bias: "flat", toxic_flow_risk: "low", liquidity_stress: "normal" }, costUsd: 0.01 };
+    return { ok: true, answer: ANSWER, costUsd: 0.01 };
   };
   row.jevQueue.push({ pair: "ETH-USD", barStartSec: 900, state: state(), minutes: [] });
   await drainJevShadow(row, NOW, NOW + 120_000);
@@ -88,6 +108,7 @@ test("timeout, not_called, call_error, and invalid_response are separate shares"
   expect(called).toBe(false);
   expect(late.book.jevSkipped).toBe(1);
   expect(late.jevAnswers[0]?.reason).toBe("timeout");
+  expect(late.jevMeter.cumulativeUsd).toBe(0);
 
   const capped = host();
   capped.jevMeter = freshJevMeter(5);
@@ -105,13 +126,17 @@ test("timeout, not_called, call_error, and invalid_response are separate shares"
   bad.jevQueue.push({ pair: "ETH-USD", barStartSec: 3, state: state(), minutes: [] });
   await drainJevShadow(bad, NOW, NOW + 120_000);
   expect(bad.jevAnswers[0]?.reason).toBe("call_error");
+  expect(bad.jevAnswers[0]?.costUsd).toBeCloseTo(JEV_CALL_RESERVE_USD, 8);
+  expect(bad.jevMeter.cumulativeUsd).toBeCloseTo(JEV_CALL_RESERVE_USD, 8);
+  expect(bad.jevMeter.calls).toBe(0);
   expect(bad.book.incidents.join(" ")).not.toContain("socket reset");
 
   const invalid = host();
   invalid.jevCaller = async () => ({ ok: false, reason: "invalid_response" });
   invalid.jevQueue.push({ pair: "ETH-USD", barStartSec: 4, state: state(), minutes: [] });
   await drainJevShadow(invalid, NOW, NOW + 120_000);
-  expect(invalid.jevMeter.cumulativeUsd).toBe(0);
+  expect(invalid.jevMeter.cumulativeUsd).toBeCloseTo(JEV_CALL_RESERVE_USD, 8);
+  expect(invalid.jevMeter.calls).toBe(0);
   const shares = skipShareReport(invalid.jevSkip);
   expect(shares.byReason.invalid_response).toBe(1);
   expect(shares.byTier.major).toBe(1);
@@ -144,4 +169,125 @@ test("scheduling counts BTC even when the open pair is the only name with minute
   expect(shares.byTier.btc).toBe(1);
   expect(shares.bySub.no_book_feed).toBe(0.5);
   expect(row.book.packets.every((packet) => packet.called === false)).toBe(true);
+});
+
+test("a priced failure settles to its cost and an unpriced timeout keeps the hold", async () => {
+  const priced = host();
+  priced.jevCaller = async () => ({ ok: false, reason: "invalid_response", costUsd: 0.02 });
+  priced.jevQueue.push({ pair: "ETH-USD", barStartSec: 6, state: state(), minutes: [] });
+  await drainJevShadow(priced, NOW, NOW + 120_000);
+  expect(priced.jevMeter.cumulativeUsd).toBeCloseTo(0.02, 8);
+  expect(priced.jevMeter.calls).toBe(0);
+  expect(priced.jevAnswers[0]?.costUsd).toBeCloseTo(0.02, 8);
+
+  const hung = host();
+  hung.jevCaller = () => new Promise<JevCallOutcome>(() => {});
+  hung.jevQueue.push({ pair: "ETH-USD", barStartSec: 7, state: state(), minutes: [] });
+  await drainJevShadow(hung, NOW, NOW + 60_000 + 30);
+  expect(hung.jevAnswers[0]?.reason).toBe("timeout");
+  expect(hung.jevMeter.cumulativeUsd).toBeCloseTo(JEV_CALL_RESERVE_USD, 8);
+  expect(hung.jevMeter.calls).toBe(0);
+});
+
+test("two drains cannot both pass the cap, and a kept hold blocks the next call", async () => {
+  const tight = host();
+  tight.jevMeter = roomForOneReserve();
+  let started = 0;
+  let release: (value: JevCallOutcome) => void = () => {};
+  tight.jevCaller = () => {
+    started += 1;
+    return new Promise((resolve) => {
+      release = resolve;
+    });
+  };
+  tight.jevQueue.push({ pair: "ETH-USD", barStartSec: 8, state: state(), minutes: [] });
+  tight.jevQueue.push({ pair: "ETH-USD", barStartSec: 9, state: state(), minutes: [] });
+  const first = drainJevShadow(tight, NOW, NOW + 120_000);
+  const second = drainJevShadow(tight, NOW, NOW + 120_000);
+  await Promise.resolve();
+  expect(started).toBe(1);
+  expect(tight.jevAnswers.some((row) => row.reason === "not_called")).toBe(true);
+  release({ ok: true, answer: ANSWER, costUsd: 0.01 });
+  await first;
+  await second;
+  expect(started).toBe(1);
+  expect(tight.jevMeter.calls).toBe(1);
+
+  const over = host();
+  over.jevMeter = roomForOneReserve();
+  over.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: JEV_CALL_RESERVE_USD + 1 });
+  over.jevQueue.push({ pair: "ETH-USD", barStartSec: 10, state: state(), minutes: [] });
+  over.jevQueue.push({ pair: "ETH-USD", barStartSec: 11, state: state(), minutes: [] });
+  await drainJevShadow(over, NOW, NOW + 120_000);
+  expect(over.jevAnswers[0]?.reason).toBe("call_error");
+  expect(over.jevMeter.calls).toBe(0);
+  const before = over.jevMeter.cumulativeUsd;
+  await drainJevShadow(over, NOW, NOW + 120_000);
+  expect(over.jevAnswers[1]?.reason).toBe("not_called");
+  expect(over.jevMeter.cumulativeUsd).toBeCloseTo(before, 8);
+});
+
+test("overlapping calls each settle to the real cost", async () => {
+  const row = host();
+  const waiting: Array<(value: JevCallOutcome) => void> = [];
+  row.jevCaller = () => new Promise((resolve) => waiting.push(resolve));
+  row.jevQueue.push({ pair: "ETH-USD", barStartSec: 12, state: state(), minutes: [] });
+  row.jevQueue.push({ pair: "ETH-USD", barStartSec: 13, state: state(), minutes: [] });
+  const first = drainJevShadow(row, NOW, NOW + 120_000);
+  const second = drainJevShadow(row, NOW, NOW + 120_000);
+  await Promise.resolve();
+  expect(waiting).toHaveLength(2);
+  expect(row.jevMeter.cumulativeUsd).toBeCloseTo(JEV_CALL_RESERVE_USD * 2, 8);
+  for (const go of waiting) go({ ok: true, answer: ANSWER, costUsd: 0.01 });
+  await first;
+  await second;
+  expect(row.jevMeter.cumulativeUsd).toBeCloseTo(0.02, 8);
+  expect(row.jevMeter.calls).toBe(2);
+  expect(row.jevMeter.todayUsd).toBeCloseTo(0.02, 8);
+});
+
+test("a queued packet survives handover and a late bar is only the latest completed window", async () => {
+  const bar = 1_700_000_100;
+  const late = (bar + 900 + 500) * 1000;
+  expect(scheduleClosedJevBar(bar, late)).toBe(true);
+  expect(scheduleClosedJevBar(bar - 900, late)).toBe(false);
+  expect(scheduleClosedJevBar(bar, bar * 1000)).toBe(false);
+
+  const host = startPaperHost(["ETH-USD"], {});
+  host.clock = () => NOW;
+  host.kv = memoryKv();
+  host.leaseToken = "held";
+  host.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: 0.01 });
+  for (const barStartSec of [21, 22, 23]) {
+    host.jevQueue.push({ pair: "ETH-USD", barStartSec, state: state(), minutes: [] });
+  }
+  await drainJevShadow(host, NOW, NOW + 120_000);
+  expect(host.jevAnswers).toHaveLength(1);
+  expect(host.jevQueue).toHaveLength(2);
+
+  const next = startPaperHost(["ETH-USD"], {});
+  next.clock = () => NOW;
+  next.kv = memoryKv();
+  next.leaseToken = "held";
+  next.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: 0.01 });
+  installPaperState(next, capturePaperState(host));
+  expect(next.jevQueue.map((row) => row.barStartSec)).toEqual([22, 23]);
+  expect(next.jevDone.has("ETH-USD:21")).toBe(true);
+  expect(next.jevTape.assess("ETH-USD", NOW).ok).toBe(false);
+
+  const kv = memoryKv();
+  await kv.set(HOT_KEY, JSON.stringify(captureHot(host)));
+  const again = startPaperHost(["ETH-USD"], {});
+  again.clock = () => NOW;
+  const loaded = await loadSplit(kv, again);
+  installPaperState(again, loaded!);
+  expect(again.jevQueue.map((row) => row.barStartSec)).toEqual([22, 23]);
+  again.kv = memoryKv();
+  again.leaseToken = "held";
+  again.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: 0.01 });
+  await drainJevShadow(again, NOW, NOW + 120_000);
+  await drainJevShadow(again, NOW, NOW + 120_000);
+  expect(again.jevQueue).toHaveLength(0);
+  expect(again.jevAnswers.map((row) => row.barStartSec).sort((a, b) => a - b)).toEqual([21, 22, 23]);
+  expect(again.jevAnswers.every((row) => row.reason === "ok")).toBe(true);
 });

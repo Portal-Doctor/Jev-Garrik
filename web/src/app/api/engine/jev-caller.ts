@@ -29,13 +29,11 @@ export async function liveJevCaller(state: MarketState, timeoutMs: number, env: 
       abortSignal: controller.signal,
     });
     const answer = readJevAnswer(result.answers);
-    if (!answer) return { ok: false, reason: "invalid_response" };
     const inputTokens = result.usage.inputTokens ?? null;
     const outputTokens = result.usage.outputTokens ?? null;
     const total = result.usage.totalTokens ?? (inputTokens != null && outputTokens != null ? inputTokens + outputTokens : null);
-    if (total == null || !(total > 0)) return { ok: false, reason: "invalid_response" };
-    const costUsd = costUsdFromTokens(total);
-    if (!(costUsd > 0)) return { ok: false, reason: "invalid_response" };
+    const costUsd = total != null && total > 0 ? costUsdFromTokens(total) : 0;
+    if (!answer || !(costUsd > 0)) return { ok: false, reason: "invalid_response", ...(costUsd > 0 ? { costUsd } : {}) };
     return { ok: true, answer, costUsd };
   } catch (error) {
     if (isAbort(error)) return { ok: false, reason: "timeout" };

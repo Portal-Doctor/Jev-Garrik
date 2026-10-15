@@ -139,10 +139,54 @@ test("public frames build a minute and the call margin matches the handover marg
   const drive = raw.slice(raw.indexOf("export async function driveHost"));
   const send = drive.indexOf("sendDueEntries");
   const drain = drive.indexOf("drainJevShadow");
+  const seal = drive.indexOf("sealDue");
   expect(send).toBeGreaterThan(0);
+  expect(seal).toBeGreaterThan(0);
+  expect(seal).toBeLessThan(drain);
   expect(drain).toBeGreaterThan(send);
   const vercel = JSON.parse(readFileSync(join(import.meta.dir, "../../../web/vercel.json"), "utf8")) as {
     functions: Record<string, { memory?: number }>;
   };
   expect(vercel.functions["src/app/api/engine/route.ts"]?.memory).toBeGreaterThanOrEqual(1024);
+});
+
+test("heartbeats seal a quiet minute without a book event, and the sixth stays absent", () => {
+  const tape = new JevTape();
+  tape.heartbeat(START + 1_000, ["ETH-USD"]);
+  tape.onBook("ETH-USD", START + 2_000, book());
+  tape.onTrade("ETH-USD", START + 3_000, 100.5, 1, "SELL");
+  for (let at = START + 10_000; at <= START + 7 * 60_000; at += 10_000) tape.heartbeat(at, ["ETH-USD"]);
+  const window = tape.assess("ETH-USD", START);
+  const carried = window.minutes.filter((row) => row.carried);
+  expect(carried).toHaveLength(5);
+  expect(window.minutes.some((row) => row.ts === START + 6 * 60_000)).toBe(false);
+  expect(window.ok).toBe(false);
+});
+
+test("a minute that was fully down is not carried, including slot 14", () => {
+  const down = new JevTape();
+  down.heartbeat(START + 1_000, ["ETH-USD"]);
+  down.onBook("ETH-USD", START + 2_000, book());
+  down.onTrade("ETH-USD", START + 3_000, 100.5, 1, "SELL");
+  down.feedDown(START + 70_000, ["ETH-USD"]);
+  down.heartbeat(START + 120_000 + 10_000, ["ETH-USD"]);
+  down.onBook("ETH-USD", START + 130_000 + 1_000, book());
+  const gap = down.assess("ETH-USD", START);
+  expect(gap.minutes.some((row) => row.ts === START + 60_000)).toBe(false);
+  expect(gap.minutes.some((row) => row.carried)).toBe(false);
+  expect(gap.sub).toBe("no_book_feed");
+
+  const slot = new JevTape();
+  for (let i = 0; i < 14; i += 1) {
+    const at = START + i * 60_000 + 1_000;
+    slot.heartbeat(at, ["ETH-USD"]);
+    slot.onBook("ETH-USD", at + 1_000, book());
+  }
+  slot.feedDown(START + 14 * 60_000 + 1_000, ["ETH-USD"]);
+  slot.heartbeat(START + 15 * 60_000 + 10_000, ["ETH-USD"]);
+  slot.onBook("ETH-USD", START + 15 * 60_000 + 11_000, book());
+  const missed = slot.assess("ETH-USD", START);
+  expect(missed.ok).toBe(false);
+  expect(missed.minutes.some((row) => row.ts === START + 14 * 60_000)).toBe(false);
+  expect(missed.sub).toBe("no_book_feed");
 });
