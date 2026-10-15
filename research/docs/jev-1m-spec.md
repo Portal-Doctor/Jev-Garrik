@@ -1,6 +1,8 @@
 # Jev 1m shadow input
 
-schema-version: jev-1m-v2
+schema-version: jev-1m-v2.1
+
+v2 SHA-256 46bfb2c1d0caa710ac2e20299bbd5e8b1eacd16def4498316eee6c443790cf6b superseded by v2.1.
 
 Frozen for the live shadow caller. v2 wins wherever it conflicts with v1. `cb/` is not edited. The formulas below are copied verbatim from `cb/state.ts`, `cb/features.ts`, and `cb/feed.ts`. The caller builds `MarketState` with `buildState` and those functions. It does not re-derive them.
 
@@ -37,7 +39,9 @@ Channel health, per product:
 
 - The book feed is up after a two-sided level2 snapshot or update, until the shard socket closes or the heartbeat gap fires.
 - The trades feed is up after a trade or a heartbeat on that shard, until the same down event.
-- A heartbeat covers a minute when it falls inside the minute, or within 15s before the minute ends, or within 15s after the end while the socket is still fresh.
+A minute is CARRIED only if, for that product, BOTH the book feed and the trades feed were continuously up from the minute start (T) to the minute end (T+60s). That means: no down event (socket close or heartbeat-gap fire) with a timestamp in [T, T+60s), both feeds were already up at T, and each feed has at least one heartbeat or message inside [T, T+60s). A heartbeat, snapshot or reconnect that arrives after T+60s never makes the minute carried or present. A minute that fails this is ABSENT. This applies to slot 14 at bar time as well, and the slot is never fabricated. A minute is judged only from the per-channel health timestamps recorded while it was live.
+
+The same wording applies to the book feed alone for a minute that has a real sample. That minute is present, and its trade fields are real zeros only if the trades feed was continuously up.
 - Carry requires the book feed, the trades feed, a covering heartbeat, and a last mid.
 - A minute with a book sample but no trades-feed confirmation is absent (`no_trades_feed`), not carried.
 - Both feeds down is `no_book_feed`.

@@ -8,7 +8,7 @@ import { FeatureAccumulator, topImbalance, type BookView } from "../../../cb/fea
 import { buildState, type MarketState } from "../../../cb/state";
 import { HEARTBEAT_GAP_MS } from "./mid-feed";
 
-export const JEV_SCHEMA = "jev-1m-v2";
+export const JEV_SCHEMA = "jev-1m-v2.1";
 export const JEV_MINUTE_MS = 60_000;
 export const JEV_WINDOW_MS = 15 * JEV_MINUTE_MS;
 export const JEV_MIN_PRESENT = 13;
