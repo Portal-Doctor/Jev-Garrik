@@ -268,6 +268,8 @@ export interface PaperHost {
   maxValueBytes: number;
   seedCursor: SeedCursor;
   seedMarks: Map<string, SeedMark>;
+  /** `p6:seed:wm:*` keys the next lease flush deletes. Empty after that flush succeeds. */
+  seedDropKeys: string[];
   /** Start of a crash hole, in seconds. Backfill covers this through now. */
   tapeHoleFromSec: number | null;
   /** running until the deadline release, then handover or crash. */
@@ -291,6 +293,11 @@ export interface SeedCursor {
    * field omit it; treat a missing list as empty.
    */
   retry?: string[];
+  /**
+   * One-shot cold-mark reset. Set only in the same flush that clears cold
+   * `p6:seed:wm:*` keys. While this is true, a later cold product is left cold.
+   */
+  coldReset?: boolean;
 }
 
 /** First-seen order, strings only. A missing or corrupt list is empty. */
@@ -304,6 +311,44 @@ export function seedRetryList(cursor: { retry?: unknown } | null | undefined): s
     retry.push(id);
   }
   return retry;
+}
+
+/** Exact env value that arms the one-shot cold reset. Anything else, including unset, is off. */
+export function coldResetEnabled(env: Record<string, string | undefined>): boolean {
+  return env.P6_RESET_COLD === "1";
+}
+
+/**
+ * Stage a one-shot clear of every cold seed mark onto the host.
+ * Returns the cleared ids, or null when this run must not reset.
+ * The caller persists through the lease flush and rolls this back if that write fails.
+ */
+export function stageColdReset(
+  host: PaperHost,
+  enabled: boolean,
+  self: string | undefined,
+  lease: { holder: string; token?: string; release: string } | null,
+): string[] | null {
+  if (!enabled || host.stopped || host.seedCursor.coldReset === true) return null;
+  if (!self || !lease || lease.release !== "none" || lease.holder !== self || !lease.token) return null;
+  if (host.leaseToken != null && host.leaseToken !== lease.token) return null;
+  host.leaseToken = lease.token;
+  const ids = [...host.seedMarks.entries()]
+    .filter(([, mark]) => mark.status === "cold")
+    .map(([id]) => id)
+    .sort();
+  const retry = seedRetryList(host.seedCursor);
+  const drops: string[] = [];
+  for (const id of ids) {
+    host.seedMarks.delete(id);
+    host.cold.delete(id);
+    host.restRun.cold.delete(id);
+    drops.push(seedMarkKey(id));
+    if (!retry.includes(id)) retry.push(id);
+  }
+  host.seedCursor = { ...host.seedCursor, retry, coldReset: true };
+  host.seedDropKeys = drops;
+  return ids;
 }
 
 export interface SeedMark {
@@ -570,6 +615,7 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     maxValueBytes: 0,
     seedCursor: { order: [], idx: 0, runId: "", retry: [] },
     seedMarks: new Map(),
+    seedDropKeys: [],
     tapeHoleFromSec: null,
     runOutcome: "running",
     runBaseFills: 0,

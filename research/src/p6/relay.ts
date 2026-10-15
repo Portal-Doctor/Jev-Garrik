@@ -192,6 +192,9 @@ export function applyMemoryFlush(
   for (const warm of body.warm ?? []) {
     if (!rows.get(warm.key)) rows.set(warm.key, { value: warm.value, expiresAt: null });
   }
+  for (const key of body.drop ?? []) {
+    if (key.startsWith("p6:seed:wm:")) rows.delete(key);
+  }
   for (const row of body.extra ?? []) rows.set(row.key, { value: row.value, expiresAt: null });
   return 1;
 }
@@ -204,6 +207,7 @@ interface FlushBody {
   marks?: { key: string; value: string }[];
   warm?: { key: string; value: string }[];
   extra?: { key: string; value: string }[];
+  drop?: string[];
 }
 
 /** PX for a live lease. Never longer than the function deadline, and never longer than LEASE_TTL_MS. */
@@ -465,6 +469,8 @@ export async function runInvocation(opts: {
     recordGap?(gap: { startMs: number; endMs: number; cause: string }): void;
     /** Load p6:state after this instance owns the lease, before it records or saves. */
     reload?(): Promise<void>;
+    /** One-shot cold reset. Runs only after this invocation holds the lease. */
+    resetCold?(): Promise<void>;
     /**
      * Replay the overlap buffer. True only when the incoming socket, the cut, and the
      * buffer satisfy the reworded handover rule.
@@ -575,6 +581,7 @@ export async function runInvocation(opts: {
     return { action: "duplicate", applied: [], socketGap: false, feedGapMs: 0, cause: "duplicate", holder: lease?.holder ?? null };
   }
   await opts.holder.reload?.();
+  await opts.holder.resetCold?.();
   if (opts.holder.confirmHandover) {
     const feedOk = await opts.holder.confirmHandover();
     for (const gap of staged) {
@@ -884,6 +891,11 @@ const FLUSH_LUA = [
   "if type(body['warm']) == 'table' then",
   "  for _, warm in ipairs(body['warm']) do",
   "    if redis.call('EXISTS', warm['key']) == 0 then redis.call('SET', warm['key'], warm['value']) end",
+  "  end",
+  "end",
+  "if type(body['drop']) == 'table' then",
+  "  for _, key in ipairs(body['drop']) do",
+  "    if type(key) == 'string' and string.sub(key, 1, 11) == 'p6:seed:wm:' then redis.call('DEL', key) end",
   "  end",
   "end",
   "if type(body['extra']) == 'table' then",

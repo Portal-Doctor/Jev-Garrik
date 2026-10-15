@@ -485,12 +485,14 @@ function buildFlush(host: PaperHost): FlushPlan {
   for (const ring of rings) noteValue(host, ring.value);
   const extra = flushExtra(host, hot ?? "", new Set(bars.map((bar) => bar.key)));
   for (const row of extra) noteValue(host, row.value);
+  const drop = (host.seedDropKeys ?? []).filter((key) => key.startsWith("p6:seed:wm:"));
   const payload = JSON.stringify({
     ...(hot ? { hot } : {}),
     tapes,
     rings,
     bars: bars.map(({ key, value, id, field, max, px }) => ({ key, value, id, field, max, px })),
     marks: marksOut,
+    ...(drop.length > 0 ? { drop } : {}),
     extra,
   });
   return { payload, bytes: Buffer.byteLength(payload), marks, minutes };
@@ -549,7 +551,8 @@ function promoteFlushed(host: PaperHost, productId: string): void {
 
 function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>): { key: string; value: string }[] {
   noteValue(host, hot);
-  const storedMarks = marksForFlush(host, barKeys);
+  const resetting = (host.seedDropKeys ?? []).some((key) => key.startsWith("p6:seed:wm:"));
+  const storedMarks = resetting ? [] : marksForFlush(host, barKeys);
   const cold = storedMarks
     .filter(([, mark]) => mark.status === "cold")
     .map(([id, mark]) => ({ id, reason: mark.reason }))
@@ -748,6 +751,7 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
         host.book.incidents.push("kv value exceeds 1 MB");
         return;
       }
+      host.seedDropKeys = [];
       const body = JSON.parse(plan.payload) as { warm?: unknown[] };
       if ((body.warm ?? []).length > 0) host.warmupStored = true;
     }
@@ -855,9 +859,15 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
   if (!host.seedChecked) {
     const cursorRaw = byKey.get(SEED_CURSOR_KEY) ?? null;
     if (cursorRaw) {
-      const cursor = JSON.parse(cursorRaw) as { order?: string[]; idx?: number; runId?: string; retry?: unknown };
+      const cursor = JSON.parse(cursorRaw) as { order?: string[]; idx?: number; runId?: string; retry?: unknown; coldReset?: unknown };
       if (Array.isArray(cursor.order)) {
-        host.seedCursor = { order: cursor.order, idx: cursor.idx ?? 0, runId: cursor.runId ?? "", retry: seedRetryList(cursor) };
+        host.seedCursor = {
+          order: cursor.order,
+          idx: cursor.idx ?? 0,
+          runId: cursor.runId ?? "",
+          retry: seedRetryList(cursor),
+          ...(cursor.coldReset === true ? { coldReset: true } : {}),
+        };
       }
     }
     for (const productId of products) {

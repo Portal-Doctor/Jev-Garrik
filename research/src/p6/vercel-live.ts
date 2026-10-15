@@ -5,7 +5,7 @@
 
 import type { SourceDay } from "../p3/bar-access";
 import { loadSplit, persistSplit, warmReadyCount, warmupKey } from "./hot-store";
-import { acceptRestBar, applyRestCold, attachMemberCloses, attachRestLease, backfillTapeIfNeeded, catchUpHistory, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
+import { acceptRestBar, applyRestCold, attachMemberCloses, attachRestLease, backfillTapeIfNeeded, catchUpHistory, coldResetEnabled, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, seedRetryList, stageColdReset, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
 import { createRestRun, restLogLine } from "./rest-limit";
 import type { OhlcvBar } from "./rest-bars";
 import {
@@ -60,6 +60,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
   persist(): Promise<void>;
   recordGap(gap: { startMs: number; endMs: number; cause: string }): void;
   reload(): Promise<void>;
+  resetCold(): Promise<void>;
   confirmHandover(): Promise<boolean>;
   sampleUntil(untilMs: number): Promise<void>;
   watchUntil(untilMs: number): Promise<void>;
@@ -80,6 +81,39 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       installPaperState(host, saved);
       rememberPersistedBars(host);
       attachMemberCloses(host);
+    },
+    async resetCold() {
+      if (!coldResetEnabled(process.env) || host.stopped) return;
+      const lease = decodeLease(await kv.get(LEASE_KEY));
+      const priorMarks = new Map(host.seedMarks);
+      const priorCold = new Set(host.cold);
+      const priorRest = new Map(host.restRun.cold);
+      const priorCursor = {
+        order: host.seedCursor.order.slice(),
+        idx: host.seedCursor.idx,
+        runId: host.seedCursor.runId,
+        retry: seedRetryList(host.seedCursor),
+        ...(host.seedCursor.coldReset === true ? { coldReset: true as const } : {}),
+      };
+      const priorDrops = host.seedDropKeys.slice();
+      const ids = stageColdReset(host, true, self, lease);
+      if (ids == null) return;
+      try {
+        await persistRun(kv, host);
+      } catch (error) {
+        host.seedMarks = priorMarks;
+        host.cold = priorCold;
+        host.restRun.cold = priorRest;
+        host.seedCursor = priorCursor;
+        host.seedDropKeys = priorDrops;
+        const message = error instanceof Error ? error.message : "";
+        if (message.includes("lease lost")) {
+          host.stopped = true;
+          return;
+        }
+        throw error;
+      }
+      console.log(`p6 cold reset ${ids.length}${ids.length > 0 ? `: ${ids.join(" ")}` : ""}`);
     },
     async applyDueBars() {
       const applied: string[] = [];
