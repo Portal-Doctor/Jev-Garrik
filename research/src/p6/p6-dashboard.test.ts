@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
+import { NextURL } from "../../../web/node_modules/next/dist/server/web/next-url.js";
+import { proxy } from "../../../web/src/proxy";
 import { applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard } from "./dashboard-read";
 import { cronAuthorized } from "./relay";
 import { applyForward, paperPnl, replayInjected } from "./engine";
@@ -73,6 +75,37 @@ test("GET /p6 accepts the bearer, the cookie, or a token query", () => {
   expect(engine.includes("DASHBOARD_TOKEN")).toBe(false);
   expect(cron.includes(P6_COOKIE_NAME)).toBe(false);
   expect(cron.includes("token=")).toBe(false);
+});
+
+test("GET /p6?token= uses an absolute Location that NextURL accepts", () => {
+  const previous = process.env.DASHBOARD_TOKEN;
+  process.env.DASHBOARD_TOKEN = "view-token";
+  try {
+    const request = new Request("https://dash.example/p6?token=view-token&panel=spend", { method: "GET" });
+    const response = proxy(request);
+    expect(response.status).toBe(302);
+    const location = response.headers.get("location");
+    expect(location).toBe("https://dash.example/p6?panel=spend");
+    const parsed = new NextURL(location ?? "", {
+      forceLocale: false,
+      headers: request.headers,
+    });
+    expect(parsed.pathname).toBe("/p6");
+    expect(String(parsed)).toContain("/p6?panel=spend");
+    const setCookie = response.headers.get("set-cookie") ?? "";
+    expect(setCookie.startsWith(`${P6_COOKIE_NAME}=`)).toBe(true);
+    expect(setCookie.includes("HttpOnly")).toBe(true);
+    expect(setCookie.includes("Secure")).toBe(true);
+    expect(setCookie.includes("SameSite=Strict")).toBe(true);
+    expect(setCookie.includes("Path=/p6")).toBe(true);
+    expect(setCookie.includes("view-token")).toBe(false);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(() => new NextURL("/p6", { forceLocale: false, headers: request.headers })).toThrow();
+  } finally {
+    if (previous === undefined) delete process.env.DASHBOARD_TOKEN;
+    else process.env.DASHBOARD_TOKEN = previous;
+  }
 });
 
 test("the page path only reads Redis", async () => {
