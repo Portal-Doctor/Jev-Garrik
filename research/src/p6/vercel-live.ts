@@ -5,7 +5,7 @@
 
 import type { SourceDay } from "../p3/bar-access";
 import { loadSplit, persistSplit, warmReadyCount, warmupKey } from "./hot-store";
-import { acceptRestBar, applyRestCold, attachMemberCloses, backfillTapeIfNeeded, catchUpHistory, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
+import { acceptRestBar, applyRestCold, attachMemberCloses, attachRestLease, backfillTapeIfNeeded, catchUpHistory, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
 import { createRestRun, restLogLine } from "./rest-limit";
 import type { OhlcvBar } from "./rest-bars";
 import {
@@ -279,6 +279,7 @@ export async function handleEngineRequest(
     host.restRun = createRestRun(deadlineMs, {}, (id, reason) => {
       applyRestCold(host, id, reason);
     });
+    attachRestLease(host);
   }
   const holder = deps?.holder ?? hostHolder(host!, kv);
   const result: InvocationResult = await runInvocation({

@@ -50,6 +50,14 @@ export interface RestRun {
   seedUsed: number;
   seedBudget: number;
   onCold?: (id: string, reason: string) => void;
+  /** Runs before each attempt. The host renews its lease here. */
+  beforeFetch?: () => Promise<void> | void;
+  /** True when this run should not call the product again. */
+  skipProduct?: (productId: string) => boolean;
+  /** Records a timeout so later calls for that product can be skipped. */
+  noteTimeout?: (productId: string) => void;
+  /** True when the holder has stopped and this attempt should not be sent. */
+  halted?: () => boolean;
 }
 
 /** Abort a hung public GET. Injected test transports are not wrapped. */
@@ -155,6 +163,14 @@ export function productIdFromUrl(url: string): string | null {
   }
 }
 
+export function isAbortError(error: unknown): boolean {
+  if (error == null || typeof error !== "object") return false;
+  const name = "name" in error ? String((error as { name?: unknown }).name ?? "") : "";
+  if (name === "AbortError") return true;
+  const message = "message" in error ? String((error as { message?: unknown }).message ?? "") : "";
+  return message.toLowerCase().includes("aborted");
+}
+
 function retryAfterMs(header: string | null): number | null {
   if (header == null || header === "") return null;
   const seconds = Number(header);
@@ -214,6 +230,9 @@ async function once(state: RestRun, url: string, seed: boolean, mark: boolean, l
     if (!live && !backfill && state.stats.n >= OPERATING_CAP) return budgetStop("reserve");
     if (!live && state.stats.n >= BACKFILL_CAP) return budgetStop("reserve");
     if (state.stats.n >= REST_HARD_CAP) return budgetStop("hard");
+    await state.beforeFetch?.();
+    if (state.halted?.()) return last ?? new Response("", { status: 599 });
+    if (product && state.skipProduct?.(product)) return new Response("", { status: 599 });
     await takeToken(state);
     state.stats.n += 1;
     if (seed) state.seedUsed += 1;
@@ -222,8 +241,14 @@ async function once(state: RestRun, url: string, seed: boolean, mark: boolean, l
     let response: Response;
     try {
       response = await state.deps.fetch(url);
-    } catch {
+    } catch (error) {
       last = new Response("", { status: 599 });
+      // One abort is enough. Further attempts would each block for the fetch timeout.
+      if (isAbortError(error)) {
+        if (product) state.noteTimeout?.(product);
+        if (mark && product && requested) markCold(product, state, "retries");
+        return last;
+      }
       await pause(state, fullJitterMs(attempt, state.deps.rand));
       continue;
     }
@@ -242,6 +267,7 @@ async function once(state: RestRun, url: string, seed: boolean, mark: boolean, l
     await pause(state, fullJitterMs(attempt, state.deps.rand));
   }
   // A deadline break before any send is not this product's failure. `cold: false` (tape and 1m backfill) never marks cold.
+  if (last?.status === 599 && product) state.noteTimeout?.(product);
   if (mark && product && requested) markCold(product, state, "retries");
   return last ?? new Response("", { status: 429 });
 }

@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
-import { LAST_RUN_KEY, bar4hKey, loadSplit, persistSplit } from "./hot-store";
-import { FOUR_KEEP, installPaperState, seedBudgeted, seedMarkKey, SEED_CURSOR_KEY, startPaperHost, type PaperHost } from "./paper-host";
-import { memoryKv } from "./relay";
+import { FILLS_KEY, LAST_RUN_KEY, bar4hKey, loadSplit, persistSplit, writeThroughBook } from "./hot-store";
+import { FOUR_KEEP, catchUpHistory, installPaperState, seedBudgeted, seedMarkKey, SEED_CURSOR_KEY, startPaperHost, type PaperHost } from "./paper-host";
+import { decodeLease, LEASE_KEY, memoryKv, tryAcquire } from "./relay";
+import { hostHolder } from "./vercel-live";
+import type { LegLog } from "./legs";
 import {
   REST_DEADLINE_MARGIN_MS,
   REST_FETCH_TIMEOUT_MS,
@@ -432,4 +434,113 @@ test("the default fetch aborts a hung call inside the deadline margin", async ()
   const started = Date.now();
   await expect(fetchWithTimeout("https://example.invalid/products/BTC-USD/candles", 40, fetchImpl)).rejects.toThrow(/abort/i);
   expect(Date.now() - started).toBeLessThan(2_000);
+});
+
+test("warm hour deltas run before the retry list so catch-up still reaches every warm product", async () => {
+  const warm = Array.from({ length: 30 }, (_, index) => `W${String(index).padStart(2, "0")}`);
+  const retry = Array.from({ length: 20 }, (_, index) => `R${String(index).padStart(2, "0")}`);
+  const products = [...warm, ...retry];
+  const host = startPaperHost(products, {});
+  host.clock = () => NOW;
+  const nowSec = Math.floor(NOW / 1000);
+  const newest15 = Math.floor(nowSec / 900) * 900 - 900;
+  for (const id of warm) {
+    host.seedMarks.set(id, { oldestTs: 1, newestTs: nowSec - 2 * 3_600, status: "warm", reason: "seeded" });
+    host.restCursor.set(id, newest15);
+  }
+  host.seedCursor = { order: products, idx: warm.length, runId: "y", retry: [...retry] };
+  const hour = new Set<string>();
+  const caught = new Set<string>();
+  let retryBeforeDeltas = false;
+  quiet(host.restRun, async (url) => {
+    const parsed = new URL(url);
+    const id = decodeURIComponent(parsed.pathname.split("/")[2] ?? "");
+    const gran = Number(parsed.searchParams.get("granularity"));
+    if (retry.includes(id) && hour.size < warm.length) retryBeforeDeltas = true;
+    if (gran === 3_600 && warm.includes(id)) hour.add(id);
+    if (gran === 900 && warm.includes(id)) caught.add(id);
+    return seededPage(url);
+  }, NOW, NOW + 800_000);
+  await seedBudgeted(host);
+  await catchUpHistory(host);
+  expect(retryBeforeDeltas).toBe(false);
+  expect(hour.size).toBe(warm.length);
+  expect(caught.size).toBe(warm.length);
+});
+
+function fillLeg(id: string): LegLog {
+  return {
+    id,
+    productId: "ETH-USD",
+    classId: "A",
+    side: "entry",
+    arrivalMid: 1,
+    arrivalBid: 1,
+    arrivalAsk: 1,
+    arrivalSnapshotTs: NOW,
+    orderSendTs: NOW,
+    decisionMid: 1,
+    activeStop: null,
+    triggerBarTs: null,
+    fillPrice: 1,
+    units: 1,
+    feesUsd: 0,
+  };
+}
+
+test("a hung product renews the lease and the run's saves persist", async () => {
+  for (const mode of ["one-hang", "three-hangs"] as const) {
+    const products = ["AVAX-USD", "BCH-USD", "BTC-USD", "ETH-USD", "SOL-USD"];
+    let now = NOW;
+    const kv = memoryKv(() => now);
+    expect(await tryAcquire(kv, "cron", NOW + 1_800_000, NOW)).toBe(true);
+    now = NOW + 130_000;
+    const host = startPaperHost(products, {});
+    host.clock = () => now;
+    host.restWarm = true;
+    host.shards = [];
+    host.openSockets = [];
+    host.seedCursor = { order: [...products], idx: 0, runId: "lease", retry: [] };
+    const calls = new Map<string, number>();
+    host.restRun.deps.now = () => now;
+    host.restRun.deps.sleep = async (ms) => {
+      now += ms;
+    };
+    host.restRun.deps.rand = () => 0;
+    host.restRun.deps.deadlineMs = () => NOW + 800_000;
+    host.restRun.deps.fetch = async (url) => {
+      const id = decodeURIComponent(new URL(url).pathname.split("/")[2] ?? "");
+      calls.set(id, (calls.get(id) ?? 0) + 1);
+      if (id === "BTC-USD") {
+        now += 100_000;
+        throw new DOMException("The operation was aborted", "AbortError");
+      }
+      if (mode === "three-hangs" && id === "AVAX-USD") throw new Error("fetch failed");
+      if (mode === "three-hangs" && id === "BCH-USD") return new Response("", { status: 503 });
+      return seededPage(url);
+    };
+    const holder = hostHolder(host, kv);
+    await holder.sampleUntil(NOW);
+    expect(host.book.incidents.some((row) => row.includes("lease lost"))).toBe(false);
+    const lease = decodeLease(await kv.get(LEASE_KEY));
+    expect(lease?.release).toBe("none");
+    expect(lease?.savedAtMs).toBeGreaterThanOrEqual(NOW + 130_000);
+    const cursor = JSON.parse((await kv.get(SEED_CURSOR_KEY)) ?? "null") as { retry?: string[]; order?: string[]; runId?: string } | null;
+    expect(cursor?.order).toEqual(products);
+    expect(cursor?.runId).toBe("lease");
+    expect(cursor?.retry).toContain("BTC-USD");
+    expect(await kv.get(seedMarkKey("BTC-USD"))).toBeNull();
+    expect(calls.get("BTC-USD")).toBe(1);
+    if (mode === "three-hangs") {
+      expect(cursor?.retry).toEqual(["AVAX-USD", "BCH-USD", "BTC-USD"]);
+      expect(calls.get("AVAX-USD")).toBe(REST_MAX_ATTEMPTS);
+      expect(await kv.get(seedMarkKey("AVAX-USD"))).toBeNull();
+      expect(await kv.get(seedMarkKey("BCH-USD"))).toBeNull();
+    }
+    expect(host.seedMarks.get("ETH-USD")).toMatchObject({ status: "warm", reason: "seeded" });
+    expect(host.seedMarks.get("SOL-USD")).toMatchObject({ status: "warm", reason: "seeded" });
+    host.book.legs.push(fillLeg(`fill-${mode}`));
+    await writeThroughBook(kv, host);
+    expect(await kv.get(FILLS_KEY)).toContain(`fill-${mode}`);
+  }
 });
