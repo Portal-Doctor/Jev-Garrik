@@ -1,10 +1,8 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
-import { NextURL } from "../../../web/node_modules/next/dist/server/web/next-url.js";
-import { proxy } from "../../../web/src/proxy";
-import { applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard } from "./dashboard-read";
+import { absoluteDashboardLocation, applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, dashboardSetCookie, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard } from "./dashboard-read";
 import { cronAuthorized } from "./relay";
 import { applyForward, paperPnl, replayInjected } from "./engine";
 import { delayBps } from "./legs";
@@ -77,7 +75,44 @@ test("GET /p6 accepts the bearer, the cookie, or a token query", () => {
   expect(cron.includes("token=")).toBe(false);
 });
 
-test("GET /p6?token= uses an absolute Location that NextURL accepts", () => {
+const nextUrlPath = join(import.meta.dir, "..", "..", "..", "web/node_modules/next/dist/server/web/next-url.js");
+
+test("GET /p6?token= Location is absolute, drops the token, and keeps the cookie", () => {
+  const token = "view-token";
+  const requestUrl = "https://dash.example/p6?token=view-token&panel=spend";
+  const opened = applyDashboardProxy(new Request(requestUrl, { method: "GET" }), token);
+  expect(opened.status).toBe(302);
+  const location = absoluteDashboardLocation(requestUrl, opened.headers.Location ?? "");
+  expect(location).toBe("https://dash.example/p6?panel=spend");
+  const parsed = new URL(location ?? "about:blank");
+  expect(parsed.pathname).toBe("/p6");
+  expect(parsed.searchParams.has("token")).toBe(false);
+  expect(parsed.searchParams.get("panel")).toBe("spend");
+  const bare = absoluteDashboardLocation("https://dash.example/p6?token=view-token", "/p6");
+  expect(bare).toBe("https://dash.example/p6");
+  expect(bare?.endsWith("/p6")).toBe(true);
+  const setCookie = opened.headers["Set-Cookie"] ?? "";
+  expect(setCookie).toBe(dashboardSetCookie(token));
+  expect(setCookie.includes("HttpOnly")).toBe(true);
+  expect(setCookie.includes("Secure")).toBe(true);
+  expect(setCookie.includes("SameSite=Strict")).toBe(true);
+  expect(setCookie.includes("Path=/p6")).toBe(true);
+  expect(setCookie.includes(token)).toBe(false);
+  expect(opened.headers["Cache-Control"]).toBe("no-store");
+  expect(opened.headers["Referrer-Policy"]).toBe("no-referrer");
+  expect(absoluteDashboardLocation(requestUrl, "//evil.example/p6")).toBeNull();
+  expect(absoluteDashboardLocation(requestUrl, "/elsewhere")).toBeNull();
+});
+
+test.skipIf(!existsSync(nextUrlPath))("NextURL accepts the absolute /p6 Location", async () => {
+  const nextUrlFile = nextUrlPath;
+  const proxyFile = join(import.meta.dir, "..", "..", "..", "web/src/proxy.ts");
+  const { NextURL } = (await import(nextUrlFile)) as {
+    NextURL: new (input: string, options?: { forceLocale?: boolean }) => { pathname: string };
+  };
+  const { proxy } = (await import(proxyFile)) as {
+    proxy: (request: Request) => { status: number; headers: Headers };
+  };
   const previous = process.env.DASHBOARD_TOKEN;
   process.env.DASHBOARD_TOKEN = "view-token";
   try {
@@ -90,14 +125,7 @@ test("GET /p6?token= uses an absolute Location that NextURL accepts", () => {
     expect(parsed.pathname).toBe("/p6");
     expect(String(parsed)).toContain("/p6?panel=spend");
     const setCookie = response.headers.get("set-cookie") ?? "";
-    expect(setCookie.startsWith(`${P6_COOKIE_NAME}=`)).toBe(true);
-    expect(setCookie.includes("HttpOnly")).toBe(true);
-    expect(setCookie.includes("Secure")).toBe(true);
-    expect(setCookie.includes("SameSite=Strict")).toBe(true);
-    expect(setCookie.includes("Path=/p6")).toBe(true);
-    expect(setCookie.includes("view-token")).toBe(false);
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(setCookie).toBe(dashboardSetCookie("view-token"));
     expect(() => new NextURL("/p6", { forceLocale: false })).toThrow();
   } finally {
     if (previous === undefined) delete process.env.DASHBOARD_TOKEN;

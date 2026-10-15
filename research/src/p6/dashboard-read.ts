@@ -116,6 +116,24 @@ export function dashboardAccess(input: {
   return { action: "deny" };
 }
 
+/**
+ * Next's middleware adapter parses Location with NextURL and throws on a relative URL.
+ * The path stays /p6. The origin comes from the request, never from a query parameter.
+ */
+export function absoluteDashboardLocation(requestUrl: string, location: string): string | null {
+  if (!location.startsWith("/p6") || location.startsWith("//")) return null;
+  let request: URL;
+  let absolute: URL;
+  try {
+    request = new URL(requestUrl);
+    absolute = new URL(location, request);
+  } catch {
+    return null;
+  }
+  if (absolute.origin !== request.origin || absolute.pathname !== "/p6") return null;
+  return absolute.toString();
+}
+
 /** Proxy result for /p6. GET is enough. The status does not depend on POST. */
 export function applyDashboardProxy(request: Request, dashboardToken: string | undefined): { status: number; body: string | null; headers: Record<string, string> } {
   const url = new URL(request.url);
