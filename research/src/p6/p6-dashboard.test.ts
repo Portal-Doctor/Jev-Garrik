@@ -86,10 +86,7 @@ test("GET /p6?token= uses an absolute Location that NextURL accepts", () => {
     expect(response.status).toBe(302);
     const location = response.headers.get("location");
     expect(location).toBe("https://dash.example/p6?panel=spend");
-    const parsed = new NextURL(location ?? "", {
-      forceLocale: false,
-      headers: request.headers,
-    });
+    const parsed = new NextURL(location ?? "", { forceLocale: false });
     expect(parsed.pathname).toBe("/p6");
     expect(String(parsed)).toContain("/p6?panel=spend");
     const setCookie = response.headers.get("set-cookie") ?? "";
@@ -101,7 +98,7 @@ test("GET /p6?token= uses an absolute Location that NextURL accepts", () => {
     expect(setCookie.includes("view-token")).toBe(false);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
-    expect(() => new NextURL("/p6", { forceLocale: false, headers: request.headers })).toThrow();
+    expect(() => new NextURL("/p6", { forceLocale: false })).toThrow();
   } finally {
     if (previous === undefined) delete process.env.DASHBOARD_TOKEN;
     else process.env.DASHBOARD_TOKEN = previous;
