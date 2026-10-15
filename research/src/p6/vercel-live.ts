@@ -5,7 +5,7 @@
 
 import type { SourceDay } from "../p3/bar-access";
 import { loadSplit, persistSplit, warmReadyCount, warmupKey } from "./hot-store";
-import { acceptRestBar, attachMemberCloses, backfillTapeIfNeeded, catchUpHistory, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
+import { acceptRestBar, applyRestCold, attachMemberCloses, backfillTapeIfNeeded, catchUpHistory, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
 import { createRestRun, restLogLine } from "./rest-limit";
 import type { OhlcvBar } from "./rest-bars";
 import {
@@ -277,14 +277,7 @@ export async function handleEngineRequest(
     host.deadlineMs = deadlineMs;
     host.runOutcome = "running";
     host.restRun = createRestRun(deadlineMs, {}, (id, reason) => {
-      host.cold.add(id);
-      const prev = host.seedMarks.get(id);
-      host.seedMarks.set(id, {
-        oldestTs: prev?.oldestTs ?? 0,
-        newestTs: prev?.newestTs ?? 0,
-        status: "cold",
-        reason,
-      });
+      applyRestCold(host, id, reason);
     });
   }
   const holder = deps?.holder ?? hostHolder(host!, kv);

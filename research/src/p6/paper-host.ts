@@ -281,6 +281,25 @@ export interface SeedCursor {
   order: string[];
   idx: number;
   runId: string;
+  /**
+   * Products whose last seed attempt was transient, in first-seen order.
+   * Tried before the cursor walk on the next run. Cursors saved before this
+   * field omit it; treat a missing list as empty.
+   */
+  retry?: string[];
+}
+
+/** First-seen order, strings only. A missing or corrupt list is empty. */
+export function seedRetryList(cursor: { retry?: unknown } | null | undefined): string[] {
+  if (!Array.isArray(cursor?.retry)) return [];
+  const seen = new Set<string>();
+  const retry: string[] = [];
+  for (const id of cursor.retry) {
+    if (typeof id !== "string" || id === "" || seen.has(id)) continue;
+    seen.add(id);
+    retry.push(id);
+  }
+  return retry;
 }
 
 export interface SeedMark {
@@ -391,6 +410,22 @@ function boundHost(host: PaperHost): void {
     host.rest.delete(key);
     if (host.rest.size <= MAX_REST_SLOTS) return;
   }
+}
+
+/**
+ * Skip the product for this run. `retries` and `cap` leave the stored seed mark alone,
+ * so a warm or durable-cold product is still that mark on the next load.
+ */
+export function applyRestCold(host: PaperHost, productId: string, reason: string): void {
+  host.cold.add(productId);
+  if (reason === "retries" || reason === "cap") return;
+  const prev = host.seedMarks.get(productId);
+  host.seedMarks.set(productId, {
+    oldestTs: prev?.oldestTs ?? 0,
+    newestTs: prev?.newestTs ?? 0,
+    status: "cold",
+    reason,
+  });
 }
 
 export function startPaperHost(products: readonly string[], env: Record<string, string | undefined> = process.env): PaperHost {
@@ -527,7 +562,7 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     runStartedMs: 0,
     deadlineMs: 0,
     maxValueBytes: 0,
-    seedCursor: { order: [], idx: 0, runId: "" },
+    seedCursor: { order: [], idx: 0, runId: "", retry: [] },
     seedMarks: new Map(),
     tapeHoleFromSec: null,
     runOutcome: "running",
@@ -537,9 +572,7 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     fourFlushed: new Set(),
   };
   host.restRun = createRestRun(Number.POSITIVE_INFINITY, {}, (id, reason) => {
-    host.cold.add(id);
-    const prev = host.seedMarks.get(id);
-    host.seedMarks.set(id, { oldestTs: prev?.oldestTs ?? 0, newestTs: prev?.newestTs ?? 0, status: "cold", reason });
+    applyRestCold(host, id, reason);
   });
   return host;
 }
@@ -2159,9 +2192,27 @@ export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHo
 /** Daily and 1h history from public REST, stored on the host. There is no local candle store on Vercel. */
 const HISTORY_GAP_SEC = 7 * 86_400;
 
+/**
+ * A 4xx other than 429 is a real refusal (404 delisted). 5xx, a thrown fetch (599),
+ * the pre-request deadline 429, and any other non-response are retried next run.
+ */
+function transientSeedFailure(status: number): boolean {
+  if (status === 429 || status === 599) return true;
+  if (status >= 500 && status < 600) return true;
+  if (status >= 400 && status < 500) return false;
+  return true;
+}
+
+function transientColdReason(reason: string): boolean {
+  if (reason === "retries") return true;
+  const match = /^http-(\d+)$/.exec(reason);
+  return match != null && transientSeedFailure(Number(match[1]));
+}
+
 function noteCold(host: PaperHost, productId: string, reason = "cold"): void {
   host.cold.add(productId);
   if (!host.restRun.cold.has(productId)) host.restRun.cold.set(productId, reason);
+  if (transientColdReason(reason)) return;
   const prev = host.seedMarks.get(productId);
   host.seedMarks.set(productId, {
     oldestTs: prev?.oldestTs ?? 0,
@@ -2213,18 +2264,79 @@ function liquidOrder(products: readonly string[]): string[] {
   return products.slice().sort((a, b) => (quote.get(b) ?? -1) - (quote.get(a) ?? -1) || (a < b ? -1 : 1));
 }
 
+function rememberRetry(host: PaperHost, productId: string): void {
+  const retry = seedRetryList(host.seedCursor);
+  if (!retry.includes(productId)) retry.push(productId);
+  host.seedCursor.retry = retry;
+}
+
+function forgetRetry(host: PaperHost, productId: string): void {
+  host.seedCursor.retry = seedRetryList(host.seedCursor).filter((id) => id !== productId);
+}
+
+function durableCold(host: PaperHost, productId: string): boolean {
+  const mark = host.seedMarks.get(productId);
+  return mark?.status === "cold" && mark.reason !== "retries" && mark.reason !== "cap";
+}
+
+/**
+ * One product's daily page, then its hour pages. A transient miss does not roll
+ * the seed counter back: those requests were sent. A budget stop does.
+ */
+async function seedWalkProduct(host: PaperHost, productId: string, fetchImpl?: SeedFetch): Promise<"ok" | "budget" | "cold" | "retry"> {
+  const before = host.restRun.seedUsed;
+  const dailyStop = await seedDailyProduct(host, productId, fetchImpl);
+  if (dailyStop === "budget") {
+    host.restRun.seedUsed = before;
+    return "budget";
+  }
+  if (dailyStop === "retry") return "retry";
+  const stop = await pageHourSeed(host, productId, fetchImpl, true);
+  if (stop.reason === "budget") {
+    host.restRun.seedUsed = before;
+    return "budget";
+  }
+  if (stop.reason === "retry") return "retry";
+  return stop.reason === "ok" ? "ok" : "cold";
+}
+
 /**
  * Liquid names first. Whole products only. Stop when the remaining seed budget cannot
  * hold another product, and resume from the cursor on the next run.
+ * A transient failure skips that product for this run and the walk continues.
+ * The id stays on `seedCursor.retry` (order and runId are kept) and is tried
+ * before the cursor walk next run. The cursor still advances: a product behind
+ * it with no ready bars is never revisited.
  */
 export async function seedBudgeted(host: PaperHost, fetchImpl?: SeedFetch): Promise<void> {
+  host.seedCursor.retry = seedRetryList(host.seedCursor);
   if (host.seedCursor.order.length === 0) {
     host.seedCursor.order = liquidOrder(host.products);
     host.seedCursor.runId = host.seedCursor.runId || `seed-${host.clock()}`;
   }
   const order = host.seedCursor.order;
+  const skipped = new Set<string>();
+  for (const productId of host.seedCursor.retry.slice()) {
+    if (host.restRun.seedBudget - host.restRun.seedUsed < SEED_REQUESTS_PER_PRODUCT) break;
+    if (durableCold(host, productId)) {
+      forgetRetry(host, productId);
+      continue;
+    }
+    if (storedSeriesWarm(host, productId)) {
+      forgetRetry(host, productId);
+      continue;
+    }
+    const outcome = await seedWalkProduct(host, productId, fetchImpl);
+    if (outcome === "budget") break;
+    if (outcome === "retry") {
+      skipped.add(productId);
+      continue;
+    }
+    forgetRetry(host, productId);
+  }
   for (let index = 0; index < host.seedCursor.idx && index < order.length; index += 1) {
     const prior = order[index]!;
+    if (skipped.has(prior) || host.seedCursor.retry!.includes(prior)) continue;
     if (storedSeriesWarm(host, prior)) await seedHourDelta(host, prior, fetchImpl);
   }
   let added = 0;
@@ -2232,34 +2344,37 @@ export async function seedBudgeted(host: PaperHost, fetchImpl?: SeedFetch): Prom
     if (added >= SEED_PRODUCTS_PER_RUN) break;
     if (host.restRun.seedBudget - host.restRun.seedUsed < SEED_REQUESTS_PER_PRODUCT) break;
     const productId = order[host.seedCursor.idx]!;
-    const mark = host.seedMarks.get(productId);
-    if (mark?.status === "cold" && mark.reason !== "retries" && mark.reason !== "cap") {
+    if (durableCold(host, productId)) {
+      forgetRetry(host, productId);
+      host.seedCursor.idx += 1;
+      continue;
+    }
+    if (skipped.has(productId)) {
       host.seedCursor.idx += 1;
       continue;
     }
     if (storedSeriesWarm(host, productId)) {
+      forgetRetry(host, productId);
       await seedHourDelta(host, productId, fetchImpl);
       host.seedCursor.idx += 1;
       continue;
     }
-    const before = host.restRun.seedUsed;
-    const dailyStop = await seedDailyProduct(host, productId, fetchImpl);
-    if (dailyStop === "budget") {
-      host.restRun.seedUsed = before;
-      break;
+    const outcome = await seedWalkProduct(host, productId, fetchImpl);
+    if (outcome === "budget") break;
+    if (outcome === "retry") {
+      rememberRetry(host, productId);
+      skipped.add(productId);
+      host.seedCursor.idx += 1;
+      continue;
     }
-    const stop = await pageHourSeed(host, productId, fetchImpl, true);
-    if (stop.reason === "budget") {
-      host.restRun.seedUsed = before;
-      break;
-    }
+    forgetRetry(host, productId);
     host.seedCursor.idx += 1;
     added += 1;
   }
 }
 
 /** Full daily history. Stop at the listing, an empty page, or a gap. A warm series fetches only the delta. */
-async function seedDailyProduct(host: PaperHost, productId: string, fetchImpl?: SeedFetch): Promise<"ok" | "budget" | "cold"> {
+async function seedDailyProduct(host: PaperHost, productId: string, fetchImpl?: SeedFetch): Promise<"ok" | "budget" | "cold" | "retry"> {
   const nowSec = Math.floor(host.clock() / 1000);
   const existing = host.warmup.get(productId) ?? [];
   const last = latestTs(existing);
@@ -2274,11 +2389,22 @@ async function seedDailyProduct(host: PaperHost, productId: string, fetchImpl?: 
   for (let page = 0; page < (delta ? 1 : 40); page += 1) {
     const start = delta ? last + DAY_SEC : Math.max(0, end - 299 * DAY_SEC);
     if (start > end) break;
-    const response = await seedCall(host, historyCandleUrl(productId, start, end, DAY_SEC), fetchImpl);
+    let response: Awaited<ReturnType<typeof seedCall>>;
+    try {
+      response = await seedCall(host, historyCandleUrl(productId, start, end, DAY_SEC), fetchImpl);
+    } catch {
+      host.book.incidents.push(`history daily ${productId} failed`);
+      noteCold(host, productId, "http-599");
+      return "retry";
+    }
     if (budgetHit(response)) return "budget";
     if (!response.ok) {
       host.book.incidents.push(`history daily ${productId} ${statusNote(response)}`);
-      noteCold(host, productId, response.status >= 400 && response.status < 500 ? `http-${response.status}` : "daily");
+      if (transientSeedFailure(response.status)) {
+        noteCold(host, productId, `http-${response.status}`);
+        return "retry";
+      }
+      noteCold(host, productId, `http-${response.status}`);
       return "cold";
     }
     const rows = (await response.json()) as number[][];
@@ -2595,7 +2721,7 @@ export function markOrdersBeforeTape(host: PaperHost): void {
 }
 
 interface PageStop {
-  reason: "listing" | "hole" | "empty" | "http" | "budget" | "ok";
+  reason: "listing" | "hole" | "empty" | "http" | "budget" | "ok" | "retry";
   status: number;
 }
 
@@ -2615,12 +2741,23 @@ async function pageHourSeed(host: PaperHost, productId: string, fetchImpl: SeedF
   for (let page = 0; page < HOUR_PAGE_CAP; page += 1) {
     const start = end - (REST_HOUR_PAGE - HOUR_SEC);
     if (end < start) break;
-    const response = budget
-      ? await seedCall(host, historyCandleUrl(productId, start, end, HOUR_SEC), fetchImpl)
-      : await (fetchImpl ?? hostGet(host, true))(historyCandleUrl(productId, start, end, HOUR_SEC));
+    let response: Awaited<ReturnType<typeof seedCall>>;
+    try {
+      response = budget
+        ? await seedCall(host, historyCandleUrl(productId, start, end, HOUR_SEC), fetchImpl)
+        : await (fetchImpl ?? hostGet(host, true))(historyCandleUrl(productId, start, end, HOUR_SEC));
+    } catch {
+      host.book.incidents.push(`4h seed rest ${productId} failed`);
+      noteCold(host, productId, "http-599");
+      return { reason: "retry", status: 599 };
+    }
     if (budgetHit(response)) return { reason: "budget", status: response.status };
     if (!response.ok) {
       host.book.incidents.push(`4h seed rest ${productId} ${statusNote(response)}`);
+      if (transientSeedFailure(response.status)) {
+        noteCold(host, productId, `http-${response.status}`);
+        return { reason: "retry", status: response.status };
+      }
       stop = { reason: "http", status: response.status };
       break;
     }

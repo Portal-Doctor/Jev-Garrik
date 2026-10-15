@@ -92,7 +92,7 @@ test("a recent no-trade hole does not stop the walk before 1000 folded bars", as
   expect(ordered.some((bar, index) => index > 0 && bar.ts - ordered[index - 1]!.ts > 14_400)).toBe(true);
 });
 
-test("a REST error marks the product cold and is not folded as a hole", async () => {
+test("a 503 during the 4h seed skips this run and stores no cold mark", async () => {
   const host = startPaperHost(["ERR-USD"], {});
   host.clock = () => NOW;
   let calls = 0;
@@ -107,7 +107,7 @@ test("a REST error marks the product cold and is not folded as a hole", async ()
     return { ok: true, status: 200, json: async () => rows };
   });
   expect(calls).toBe(2);
-  expect(host.seedMarks.get("ERR-USD")).toMatchObject({ status: "cold", reason: "http-503" });
+  expect(host.seedMarks.has("ERR-USD")).toBe(false);
   expect(host.cold.has("ERR-USD")).toBe(true);
 });
 
