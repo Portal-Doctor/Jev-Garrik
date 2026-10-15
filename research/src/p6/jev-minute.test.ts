@@ -13,6 +13,8 @@ function book(bid = "100", ask = "101"): { bids: Map<string, number>; asks: Map<
 }
 
 function fillFifteen(tape: JevTape, pair: string, skip = new Set<number>()): void {
+  tape.heartbeat(START - 1_000, [pair]);
+  tape.onBook(pair, START - 1_000, book());
   for (let i = 0; i < 15; i += 1) {
     const at = START + i * 60_000 + 1_000;
     if (skip.has(i)) continue;
@@ -36,10 +38,14 @@ test("a packet is the open pairs plus BTC, valid at 13 of 15 including slot 14",
   expect(full.minutes).toHaveLength(15);
   expect(full.minutes.every((row) => row.carried === false)).toBe(true);
   const dropped = new JevTape();
+  dropped.heartbeat(START - 1_000, ["ETH-USD"]);
+  dropped.onBook("ETH-USD", START - 1_000, book());
   dropped.heartbeat(START + 1_000, ["ETH-USD"]);
   dropped.onBook("ETH-USD", START + 2_000, book());
   dropped.feedDown(START + 60_000, ["ETH-USD"]);
   dropped.closeThrough("ETH-USD", START + 3 * 60_000);
+  dropped.heartbeat(START + 3 * 60_000 - 1_000, ["ETH-USD"]);
+  dropped.onBook("ETH-USD", START + 3 * 60_000 - 1_000, book());
   for (let i = 3; i < 15; i += 1) {
     const at = START + i * 60_000 + 1_000;
     dropped.heartbeat(at, ["ETH-USD"]);
@@ -48,6 +54,8 @@ test("a packet is the open pairs plus BTC, valid at 13 of 15 including slot 14",
   dropped.closeThrough("ETH-USD", START + 15 * 60_000);
   expect(dropped.assess("ETH-USD", START).ok).toBe(true);
   const noSlot = new JevTape();
+  noSlot.heartbeat(START - 1_000, ["ETH-USD"]);
+  noSlot.onBook("ETH-USD", START - 1_000, book());
   for (let i = 0; i < 14; i += 1) {
     const at = START + i * 60_000 + 1_000;
     noSlot.heartbeat(at, ["ETH-USD"]);
@@ -66,6 +74,8 @@ test("a packet is the open pairs plus BTC, valid at 13 of 15 including slot 14",
 
 test("the last mid carries for five quiet minutes and the sixth is absent", () => {
   const tape = new JevTape();
+  tape.heartbeat(START - 1_000, ["ETH-USD"]);
+  tape.onBook("ETH-USD", START - 1_000, book());
   const touch = (i: number) => {
     const at = START + i * 60_000 + 1_000;
     tape.heartbeat(at, ["ETH-USD"]);
@@ -93,6 +103,7 @@ test("the last mid carries for five quiet minutes and the sixth is absent", () =
 
 test("a minute with a book but no trades feed is no_trades_feed, and a down feed is absent", () => {
   const trades = new JevTape();
+  trades.onBook("ETH-USD", START - 1_000, book());
   for (let i = 0; i < 15; i += 1) trades.onBook("ETH-USD", START + i * 60_000 + 1_000, book());
   trades.closeThrough("ETH-USD", START + 15 * 60_000);
   expect(trades.assess("ETH-USD", START).sub).toBe("no_trades_feed");
@@ -121,6 +132,10 @@ test("public frames build a minute and the call margin matches the handover marg
   const host = startPaperHost(["ETH-USD"], {});
   const later = START + 61_000;
   host.clock = () => later;
+  applyPublic(host, 0, [
+    { kind: "heartbeat" },
+    { kind: "l2-snapshot", productId: "ETH-USD", bids: [["100", "5"], ["99", "4"]], asks: [["101", "1"], ["102", "1"]] },
+  ], START - 1_000);
   applyPublic(host, 0, [
     { kind: "heartbeat" },
     { kind: "l2-snapshot", productId: "ETH-USD", bids: [["100", "5"], ["99", "4"]], asks: [["101", "1"], ["102", "1"]] },
@@ -227,6 +242,58 @@ test("a heartbeat covers only [T, T+60000), and a beat after the end does not", 
   late.heartbeat(minuteTs + 60_001, ["ETH-USD"]);
   late.closeThrough("ETH-USD", minuteTs + 60_000);
   expect(late.assess("ETH-USD", START).minutes.some((item) => item.ts === minuteTs)).toBe(false);
+});
+
+test("a real minute is present only when both feeds were up from T", () => {
+  const late = new JevTape();
+  late.onBook("ETH-USD", START - 1_000, book());
+  for (let i = 0; i < 15; i += 1) {
+    const ts = START + i * 60_000;
+    late.onBook("ETH-USD", ts + 1_000, book());
+    late.onBook("ETH-USD", ts + 30_000, book());
+    if (i === 14) late.heartbeat(ts + 40_000, ["ETH-USD"]);
+  }
+  late.closeThrough("ETH-USD", START + 15 * 60_000);
+  const lateWindow = late.assess("ETH-USD", START);
+  expect(lateWindow.minutes).toHaveLength(0);
+  expect(lateWindow.sub).toBe("no_trades_feed");
+
+  const rebook = new JevTape();
+  rebook.heartbeat(START - 40_000, ["ETH-USD"]);
+  rebook.onBook("ETH-USD", START - 40_000, book());
+  rebook.feedDown(START - 30_000, ["ETH-USD"]);
+  rebook.onBook("ETH-USD", START + 20_000, book());
+  for (let i = 1; i < 15; i += 1) rebook.onBook("ETH-USD", START + i * 60_000 + 1_000, book());
+  rebook.closeThrough("ETH-USD", START + 15 * 60_000);
+  const rebookWindow = rebook.assess("ETH-USD", START);
+  expect(rebookWindow.minutes).toHaveLength(0);
+  expect(rebookWindow.sub).toBe("no_book_feed");
+
+  const both = new JevTape();
+  both.onBook("ETH-USD", START - 1_000, book());
+  for (let i = 0; i < 13; i += 1) both.onBook("ETH-USD", START + i * 60_000 + 1_000, book());
+  both.feedDown(START + 13 * 60_000 - 1_000, ["ETH-USD"]);
+  both.onBook("ETH-USD", START + 13 * 60_000 + 20_000, book());
+  both.onBook("ETH-USD", START + 14 * 60_000 + 20_000, book());
+  both.closeThrough("ETH-USD", START + 15 * 60_000);
+  expect(both.assess("ETH-USD", START).sub).toBe("no_book_feed");
+
+  const tradesOnly = new JevTape();
+  tradesOnly.onBook("ETH-USD", START - 1_000, book());
+  for (let i = 0; i < 15; i += 1) tradesOnly.onBook("ETH-USD", START + i * 60_000 + 1_000, book());
+  tradesOnly.closeThrough("ETH-USD", START + 15 * 60_000);
+  expect(tradesOnly.assess("ETH-USD", START).sub).toBe("no_trades_feed");
+
+  const minuteTs = START + 60_000;
+  const present = new JevTape();
+  primeFeeds(present, minuteTs);
+  present.heartbeat(minuteTs + 1_000, ["ETH-USD"]);
+  present.onBook("ETH-USD", minuteTs + 2_000, book());
+  present.onTrade("ETH-USD", minuteTs + 3_000, 100.5, 1, "SELL");
+  present.closeThrough("ETH-USD", minuteTs + 60_000);
+  const row = present.assess("ETH-USD", START).minutes.find((item) => item.ts === minuteTs);
+  expect(row?.carried).toBe(false);
+  expect(row?.trades).toBe(1);
 });
 
 test("a down event inside the minute stays absent after a reconnect", () => {

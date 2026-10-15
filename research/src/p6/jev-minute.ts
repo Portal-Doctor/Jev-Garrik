@@ -441,7 +441,14 @@ export class JevTape {
     const forming = row.forming?.ts === ts ? row.forming : null;
     if (forming?.book) {
       row.forming = null;
-      if (!forming.tradesFeed && !row.tradesUp) {
+      const bookSince = row.bookUp && row.bookUpSince != null && row.bookUpSince <= ts;
+      const tradesSince = row.tradesUp && row.tradesUpSince != null && row.tradesUpSince <= ts;
+      if (!bookSince) {
+        row.absent.set(ts, "no_book_feed");
+        row.carryStreak = 0;
+        return;
+      }
+      if (!tradesSince) {
         row.absent.set(ts, "no_trades_feed");
         row.carryStreak = 0;
         return;

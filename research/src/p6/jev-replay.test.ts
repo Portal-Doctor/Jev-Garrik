@@ -75,12 +75,9 @@ test("a recorded websocket fixture matches cb/state.ts", () => {
   );
   expect(reference).not.toBeNull();
   expect(tape.marketState(pair, now)).toEqual(reference);
-  const minute = START_MINUTE(tape, pair);
-  expect(minute.takerBuyUsd).toBe(201);
-  expect(minute.takerSellUsd).toBe(100);
-  expect(minute.trades).toBe(2);
-  expect(minute.carried).toBe(false);
-  expect(minute.imbalance5).toBeCloseTo(0.5, 8);
+  const window = tape.assess(pair, 1_700_000_040_000);
+  expect(window.minutes).toHaveLength(0);
+  expect(window.sub).toBe("no_book_feed");
 });
 
 test("carry stays at five and a packet still needs 13 of 15 including slot 14", () => {
@@ -124,6 +121,8 @@ test("carry stays at five and a packet still needs 13 of 15 including slot 14", 
   expect(held.assess("ETH-USD", start).minutes.some((row) => row.ts === start + JEV_MINUTE_MS && row.carried)).toBe(true);
 
   const dozen = new JevTape();
+  dozen.heartbeat(start + 3 * JEV_MINUTE_MS - 1_000, ["ETH-USD"]);
+  dozen.onBook("ETH-USD", start + 3 * JEV_MINUTE_MS - 1_000, levels);
   for (let i = 3; i < 15; i += 1) {
     const at = start + i * JEV_MINUTE_MS + 1_000;
     dozen.heartbeat(at, ["ETH-USD"]);
@@ -134,6 +133,8 @@ test("carry stays at five and a packet still needs 13 of 15 including slot 14", 
   expect(dozen.assess("ETH-USD", start).minutes).toHaveLength(12);
 
   const noSlot = new JevTape();
+  noSlot.heartbeat(start - 1_000, ["ETH-USD"]);
+  noSlot.onBook("ETH-USD", start - 1_000, levels);
   for (let i = 0; i < 14; i += 1) {
     const at = start + i * JEV_MINUTE_MS + 1_000;
     noSlot.heartbeat(at, ["ETH-USD"]);
@@ -147,9 +148,3 @@ test("carry stays at five and a packet still needs 13 of 15 including slot 14", 
   expect(missed.minutes.some((row) => row.ts === start + JEV_SLOT_LAST * JEV_MINUTE_MS)).toBe(false);
 });
 
-function START_MINUTE(tape: JevTape, pair: string): { takerBuyUsd: number; takerSellUsd: number; trades: number; carried: boolean; imbalance5: number } {
-  const window = tape.assess(pair, 1_700_000_040_000);
-  const row = window.minutes[0];
-  if (!row) throw new Error("fixture minute missing");
-  return row;
-}
