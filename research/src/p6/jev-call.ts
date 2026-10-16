@@ -194,6 +194,37 @@ export function normalizeJevSkip(ledger: Partial<JevSkipLedger> | undefined): Je
   };
 }
 
+function jevSkipUnused(ledger: JevSkipLedger): boolean {
+  if (ledger.jevDays.length > 0) return false;
+  if (ledger.weekOnTime !== 0 || ledger.weekCatchUp !== 0 || ledger.handoverMinutes !== 0) return false;
+  if (Object.values(ledger.byReason).some((count) => count !== 0)) return false;
+  if (Object.values(ledger.latency).some((count) => count !== 0)) return false;
+  return true;
+}
+
+/**
+ * Per UTC day, the row with the larger scheduled count wins, whole row.
+ * A tie keeps the installed row. The result is trimmed to 14 UTC days including the newest.
+ * A fresh ledger takes the snapshot's other fields. A ledger that already has days keeps its other fields,
+ * so a stale snapshot cannot replace them.
+ */
+export function mergeJevSkip(current: JevSkipLedger, incoming: Partial<JevSkipLedger> | undefined): JevSkipLedger {
+  const base = normalizeJevSkip(current);
+  const next = normalizeJevSkip(incoming);
+  const kept = jevSkipUnused(base) ? next : base;
+  const byDay = new Map<number, JevDayCount>();
+  for (const day of base.jevDays) byDay.set(day.dayMs, day);
+  for (const day of next.jevDays) {
+    const have = byDay.get(day.dayMs);
+    if (!have || (day.scheduled ?? 0) > (have.scheduled ?? 0)) byDay.set(day.dayMs, day);
+  }
+  const days = [...byDay.values()].sort((a, b) => a.dayMs - b.dayMs);
+  const newest = days.reduce((max, day) => Math.max(max, day.dayMs), 0);
+  const keepFrom = newest - 13 * JEV_DAY_MS;
+  const jevDays = newest === 0 ? [] : days.filter((day) => day.dayMs >= keepFrom);
+  return { ...kept, jevDays };
+}
+
 export function skipShareReport(ledger: JevSkipLedger, nowMs = 0): JevSkipReport {
   const row = normalizeJevSkip(ledger);
   const packets = Object.values(row.byTier).reduce((sum, item) => sum + item.packets, 0);

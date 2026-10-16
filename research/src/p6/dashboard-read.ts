@@ -8,6 +8,18 @@ import { connect as connectNet, isIP } from "node:net";
 import { connect as connectTls } from "node:tls";
 import type { Kv } from "./relay";
 import { commandBudget, healthStale, monthCommands, nextCronMs, projectionTone } from "./dashboard-format";
+import {
+  buildPnlBlock,
+  EQ_FIRST_KEY,
+  parseHourTrades,
+  parsePoint,
+  pnlMgetKeys,
+  type EqPoint,
+  type EqTrade,
+  type PnlBlock,
+} from "./pnl-block";
+
+export { type PnlBlock };
 
 export { commandBudget, healthStale, monthCommands, nextCronMs, projectionTone };
 
@@ -334,6 +346,67 @@ async function mgetRaw(url: string, keys: string[]): Promise<(string | null)[]> 
   const reply = await command(url, ["MGET", ...keys]);
   if (!Array.isArray(reply)) return keys.map(() => null);
   return reply.map((item) => (typeof item === "string" ? item : null));
+}
+
+function numField(row: Record<string, unknown>, key: string): number | null {
+  const value = row[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Second read of a page load. One MGET of the hourly equity keys, the per-hour trade lists, and p6:eq:first.
+ * Does not read p6:fills or p6:ledger. A book reset must delete p6:eq:* (deferred; not built).
+ */
+export async function readPnlWindows(kv: Pick<Kv, "mget">, nowMs: number): Promise<{
+  first: EqPoint | null;
+  points: EqPoint[];
+  trades: Map<number, EqTrade[] | null>;
+}> {
+  const keys = pnlMgetKeys(nowMs);
+  const values = await kv.mget(keys);
+  const points: EqPoint[] = [];
+  const trades = new Map<number, EqTrade[] | null>();
+  let first: EqPoint | null = null;
+  keys.forEach((key, index) => {
+    const raw = values[index] ?? null;
+    if (key === EQ_FIRST_KEY) {
+      first = parsePoint(raw, 0);
+      if (first) first = { ...first, hourStartSec: Math.floor(first.ts / 3_600_000) * 3600 };
+      return;
+    }
+    if (key.startsWith("p6:eq:tr:")) {
+      const hour = Number(key.slice("p6:eq:tr:".length));
+      trades.set(hour, parseHourTrades(raw));
+      return;
+    }
+    if (key.startsWith("p6:eq:")) {
+      const hour = Number(key.slice("p6:eq:".length));
+      const point = parsePoint(raw, hour);
+      if (point) points.push(point);
+    }
+  });
+  return { first, points, trades };
+}
+
+/** Dashboard mget plus the equity mget. Both are reads. */
+export async function readP6Page(kv: Pick<Kv, "mget">, nowMs: number): Promise<{ view: DashboardView; block: PnlBlock }> {
+  const [view, equity] = await Promise.all([readP6Dashboard(kv), readPnlWindows(kv, nowMs)]);
+  const last = view.lastRun;
+  const pnl = last && typeof last.pnl === "object" && last.pnl != null ? (last.pnl as Record<string, unknown>) : null;
+  const block = buildPnlBlock({
+    nowMs,
+    lastEndMs: last && typeof last.end === "number" ? last.end : null,
+    equityNow: pnl ? numField(pnl, "equityUsd") : null,
+    realizedNow: pnl ? numField(pnl, "realizedUsd") : null,
+    unrealizedNow: pnl ? numField(pnl, "unrealizedUsd") : null,
+    feesNow: pnl ? numField(pnl, "feesUsd") : null,
+    spreadNow: pnl ? numField(pnl, "spreadSlipUsd") : null,
+    openPositions: view.positions.length,
+    first: equity.first,
+    points: equity.points,
+    trades: equity.trades,
+  });
+  return { view, block };
 }
 
 /** A Kv that can only MGET. Every write throws before a socket opens. */

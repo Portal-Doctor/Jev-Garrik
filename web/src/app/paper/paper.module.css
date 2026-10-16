@@ -184,6 +184,51 @@
   border-color: rgba(156, 163, 175, 0.3);
 }
 
+.pnlBlock {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.pnlStale {
+  background: #4b5563;
+  color: #e5e7eb;
+}
+
+.pnlHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+
+.pnlTitle {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.pnlGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.pnlTile {
+  flex: 1 1 220px;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.pnlWindow {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
 /* ---- equity strip ---- */
 .equityStrip {
   display: flex;

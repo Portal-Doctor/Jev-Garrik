@@ -5,6 +5,7 @@ import {
   archiveJevLegacy,
   drainJevShadow,
   freshJevSkip,
+  mergeJevSkip,
   noteOnTimePacket,
   scheduleLiveJev,
   trailingSkipGate,
@@ -12,7 +13,7 @@ import {
   type JevReason,
 } from "./jev-call";
 import { hotSnapshot } from "./hot-store";
-import { installPaperState, startPaperHost } from "./paper-host";
+import { capturePaperState, installPaperState, startPaperHost } from "./paper-host";
 
 const DAY = 86_400_000;
 const NOW = Date.parse("2026-10-16T18:00:00.000Z");
@@ -232,6 +233,52 @@ test("install max-merges the watermark per pair", () => {
   expect(host.jevThrough["BTC-USD"]).toBe(5_000);
   expect(host.jevThrough["ETH-USD"]).toBe(200);
   expect(host.jevThrough["SOL-USD"]).toBe(50);
+});
+
+test("scheduled survives capture then install", () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  noteOnTimePacket(host.jevSkip, TODAY, "scheduled");
+  noteOnTimePacket(host.jevSkip, TODAY, "scheduled");
+  const body = capturePaperState(host);
+  const next = startPaperHost(["BTC-USD"], {});
+  installPaperState(next, body);
+  expect(next.jevSkip.jevDays.find((row) => row.dayMs === TODAY)?.scheduled).toBe(2);
+});
+
+test("install merges jevSkip days and keeps the 14-day bound", () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  installPaperState(host, {
+    jevSkip: { ...freshJevSkip(), jevDays: [day(0, 10, 4), day(-1, 8, 1), day(-10, 3, 1)] },
+  });
+  installPaperState(host, {
+    jevSkip: { ...freshJevSkip(), jevDays: [day(0, 10, 0), day(-3, 2, 0), day(-20, 99, 0)] },
+  });
+  const today = host.jevSkip.jevDays.find((row) => row.dayMs === TODAY);
+  expect(today?.scheduled).toBe(10);
+  expect(today?.skipped).toBe(4);
+  expect(host.jevSkip.jevDays.find((row) => row.dayMs === TODAY - DAY)?.scheduled).toBe(8);
+  expect(host.jevSkip.jevDays.find((row) => row.dayMs === TODAY - 3 * DAY)?.scheduled).toBe(2);
+  expect(host.jevSkip.jevDays.find((row) => row.dayMs === TODAY - 10 * DAY)?.scheduled).toBe(3);
+  expect(host.jevSkip.jevDays.find((row) => row.dayMs === TODAY - 20 * DAY)).toBeUndefined();
+
+  installPaperState(host, { jevSkip: { ...freshJevSkip(), jevDays: [day(0, 12, 1)] } });
+  expect(host.jevSkip.jevDays.find((row) => row.dayMs === TODAY)?.scheduled).toBe(12);
+  expect(host.jevSkip.jevDays.find((row) => row.dayMs === TODAY)?.skipped).toBe(1);
+
+  const wide = startPaperHost(["BTC-USD"], {});
+  installPaperState(wide, {
+    jevSkip: { ...freshJevSkip(), jevDays: Array.from({ length: 20 }, (_, index) => day(-index, 1, 0)) },
+  });
+  expect(wide.jevSkip.jevDays).toHaveLength(14);
+  expect(wide.jevSkip.jevDays.some((row) => row.dayMs === TODAY - 14 * DAY)).toBe(false);
+  expect(wide.jevSkip.jevDays.some((row) => row.dayMs === TODAY - 13 * DAY)).toBe(true);
+
+  const lower = mergeJevSkip(
+    { ...freshJevSkip(), jevDays: Array.from({ length: 7 }, (_, index) => day(-index, 50, 5)) },
+    { ...freshJevSkip(), jevDays: [day(0, 1, 0)] },
+  );
+  expect(lower.jevDays.find((row) => row.dayMs === TODAY)?.scheduled).toBe(50);
+  expect(lower.jevDays).toHaveLength(7);
 });
 
 function state(): MarketState {

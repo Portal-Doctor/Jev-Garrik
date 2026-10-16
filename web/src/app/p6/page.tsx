@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
-import { dashboardAccess, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Dashboard } from "../../../../research/src/p6/dashboard-read";
+import { dashboardAccess, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Page } from "../../../../research/src/p6/dashboard-read";
+import { concentrationText, formatCt, N_NOTE, PNL_START_USD, signedPct, signedUsd, wlText, type PnlBlock } from "../../../../research/src/p6/pnl-block";
 import { RunClock } from "./countdown";
 import styles from "../paper/paper.module.css";
 
@@ -61,6 +62,63 @@ function classTone(id: string, drawdownR: number): "green" | "yellow" | "red" {
   return drawdownR < 5 ? "green" : "red";
 }
 
+function PnlStrip({ block }: { block: PnlBlock }) {
+  const start = PNL_START_USD.toLocaleString("en-US");
+  return (
+    <section className={`${styles.pnlBlock} ${block.stale ? styles.pnlStale : ""}`}>
+      <div className={styles.pnlHead}>
+        <span className={styles.pnlTitle}>PAPER - no capital at risk</span>
+        <span className={styles.sub}>{block.paperStartMs == null ? "paper start —" : `paper start ${formatCt(block.paperStartMs, true)}`}</span>
+        <span className={styles.sub}>
+          last updated {block.lastUpdatedMs == null ? "—" : formatCt(block.lastUpdatedMs, false)}
+          {block.stale ? " · stale" : ""}
+        </span>
+      </div>
+      <div className={styles.pnlGrid}>
+        {block.tiles.map((tile) => (
+          <div key={tile.id} className={styles.pnlTile}>
+            <span className={styles.pnlWindow}>{tile.id}</span>
+            {tile.status === "no-data" ? (
+              <span className={styles.sub}>no data yet</span>
+            ) : (
+              <>
+                <span className={toneClass(tile.totalUsd)}>
+                  Total P/L {tile.totalUsd == null ? "-" : signedUsd(tile.totalUsd)} {tile.totalPct == null ? "" : signedPct(tile.totalPct)} of ${start} start
+                </span>
+                <span className={styles.sub}>
+                  realized <span className={toneClass(tile.realizedUsd)}>{tile.realizedUsd == null ? "-" : signedUsd(tile.realizedUsd)}</span>
+                  {tile.realizedPct == null ? "" : ` ${signedPct(tile.realizedPct)}`}
+                  {" + unrealized "}
+                  <span className={toneClass(tile.unrealizedDelta)}>{tile.unrealizedDelta == null ? "-" : signedUsd(tile.unrealizedDelta)}</span>
+                </span>
+                <span className={styles.sub}>
+                  open now: {block.openPositions} positions, unrealized {block.openUnrealized == null ? "-" : signedUsd(block.openUnrealized)}
+                </span>
+                <span className={styles.sub}>
+                  fees paid {tile.feesUsd == null ? "-" : signedUsd(tile.feesUsd)} · spread+slippage paid {tile.spreadSlipUsd == null ? "-" : signedUsd(tile.spreadSlipUsd)} · included above
+                </span>
+                <span>
+                  {wlText(tile.wins, tile.losses)}
+                  {tile.closedN < 30 ? ` · ${N_NOTE}` : ""}
+                </span>
+                <span className={styles.sub}>hourly drawdown {tile.drawdownUsd == null ? "-" : signedUsd(tile.drawdownUsd)}</span>
+                <span className={styles.sub}>{concentrationText(tile.concentrationPct)}</span>
+                {tile.since ? <span className={styles.sub}>{tile.since}</span> : null}
+                {tile.partial ? <span className={styles.sub}>partial</span> : null}
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function toneClass(value: number | null): string {
+  if (value == null || value === 0) return "";
+  return value > 0 ? styles.pos : styles.neg;
+}
+
 /** Read-only. The view token is not the cron secret. Nothing on this page writes Redis. Open with GET /p6; see dashboardAccess. */
 export default async function P6DashboardPage({
   searchParams,
@@ -102,7 +160,7 @@ export default async function P6DashboardPage({
       </main>
     );
   }
-  const view = await readP6Dashboard(openDashboardKv(url));
+  const { view, block } = await readP6Page(openDashboardKv(url), Date.now());
   const last = view.lastRun;
   const pnl = (last?.pnl ?? null) as {
     equityUsd?: number;
@@ -153,6 +211,7 @@ export default async function P6DashboardPage({
 
   return (
     <main>
+      <PnlStrip block={block} />
       <header className={styles.top}>
         <div className={styles.title}>
           <h1>
