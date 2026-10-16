@@ -125,6 +125,7 @@ export default async function P6DashboardPage({
     calls?: number;
     capUsd?: number;
     byReason?: { no_1m_input?: number; not_called?: number; timeout?: number; call_error?: number; invalid_response?: number };
+    latency?: { le60?: number; le300?: number; le600?: number };
   } | null;
   const redis = (last?.redis ?? {}) as { cmds?: number; bytes?: number; maxValueBytes?: number };
   const cold = Array.isArray(last?.cold) ? (last.cold as { id?: string; reason?: string }[]) : [];
@@ -251,6 +252,9 @@ export default async function P6DashboardPage({
         <Stat label="timeout" value={String(jev?.byReason?.timeout ?? 0)} />
         <Stat label="call_error" value={String(jev?.byReason?.call_error ?? 0)} />
         <Stat label="invalid_response" value={String(jev?.byReason?.invalid_response ?? 0)} />
+        <Stat label="latency <=60s" value={String(jev?.latency?.le60 ?? 0)} />
+        <Stat label="latency <=300s" value={String(jev?.latency?.le300 ?? 0)} />
+        <Stat label="latency <=600s" value={String(jev?.latency?.le600 ?? 0)} />
       </section>
 
       <section style={{ padding: "12px 24px" }}>

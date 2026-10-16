@@ -76,6 +76,15 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
     },
     async reload() {
       host.seedChecked = false;
+      if (!host.stopped && self) {
+        const lease = decodeLease(await kv.get(LEASE_KEY));
+        if (lease?.token && lease.holder === self && lease.release === "none" && lease.untilMs > host.clock()) {
+          host.leaseToken = lease.token;
+          if (host.holderId == null) host.holderId = self;
+          if (host.leaseFromMs == null) host.leaseFromMs = lease.acquiredAtMs ?? host.clock();
+          host.leaseUntilMs = lease.untilMs;
+        }
+      }
       const saved = await loadSplit(kv, host);
       if (!saved) return;
       installPaperState(host, saved);
@@ -162,7 +171,12 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       // A failed renew sets stopped. Never take the token that replaced us.
       if (!host.stopped) {
         const lease = decodeLease(await kv.get(LEASE_KEY));
-        if (lease?.token && self != null && lease.holder === self) host.leaseToken = lease.token;
+        if (lease?.token && self != null && lease.holder === self) {
+          host.leaseToken = lease.token;
+          if (host.holderId == null) host.holderId = self;
+          if (host.leaseFromMs == null) host.leaseFromMs = lease.acquiredAtMs ?? host.clock();
+          host.leaseUntilMs = lease.untilMs;
+        }
       }
       if (host.stopped || !host.leaseToken) return false;
       const ok = replayHandover(host);
@@ -172,7 +186,12 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
     async sampleUntil(untilMs: number) {
       if (!host.stopped) {
         const lease = decodeLease(await kv.get(LEASE_KEY));
-        if (lease?.token && self != null && lease.holder === self) host.leaseToken = lease.token;
+        if (lease?.token && self != null && lease.holder === self) {
+          host.leaseToken = lease.token;
+          if (host.holderId == null) host.holderId = self;
+          if (host.leaseFromMs == null) host.leaseFromMs = lease.acquiredAtMs ?? host.clock();
+          host.leaseUntilMs = lease.untilMs;
+        }
       }
       host.runBaseFills = host.book.legs.length;
       host.runBaseDecisions = host.emitted.size;

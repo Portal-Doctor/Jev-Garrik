@@ -195,7 +195,10 @@ export function applyMemoryFlush(
   for (const key of body.drop ?? []) {
     if (key.startsWith("p6:seed:wm:")) rows.delete(key);
   }
-  for (const row of body.extra ?? []) rows.set(row.key, { value: row.value, expiresAt: null });
+  for (const row of body.extra ?? []) {
+    if (row.nx && rows.get(row.key)) continue;
+    rows.set(row.key, { value: row.value, expiresAt: row.px != null && row.px > 0 ? clock() + row.px : null });
+  }
   return 1;
 }
 
@@ -206,7 +209,7 @@ interface FlushBody {
   bars?: { key: string; value: string; id: string; field: string; max: number; px: number }[];
   marks?: { key: string; value: string }[];
   warm?: { key: string; value: string }[];
-  extra?: { key: string; value: string }[];
+  extra?: { key: string; value: string; px?: number; nx?: boolean }[];
   drop?: string[];
 }
 
@@ -229,6 +232,8 @@ export interface Lease {
   released?: boolean;
   /** Planned release, getDeadline() minus 60s. The watcher polls faster near this time. */
   releaseAtMs?: number;
+  /** Wall clock when this holder first took the lease. Renewals do not move it. */
+  acquiredAtMs?: number;
 }
 
 export function encodeLease(lease: Lease): string {
@@ -248,6 +253,7 @@ export function decodeLease(raw: string | null): Lease | null {
     ...(body.saveFailed ? { saveFailed: true } : {}),
     ...(body.released ? { released: true } : {}),
     ...(body.releaseAtMs != null ? { releaseAtMs: body.releaseAtMs } : {}),
+    ...(body.acquiredAtMs != null ? { acquiredAtMs: body.acquiredAtMs } : {}),
   };
 }
 
@@ -376,7 +382,8 @@ export async function tryAcquire(kv: Kv, self: string, untilMs: number, nowMs = 
   const same = current && current.holder === self && current.released !== true;
   const token = same && current!.token ? current!.token : `${self}:${nowMs}`;
   const savedAtMs = same && current!.savedAtMs != null ? current!.savedAtMs : nowMs;
-  const next = encodeLease({ holder: self, untilMs, release: "none", token, savedAtMs, releaseAtMs: untilMs - HANDOVER_MARGIN_MS });
+  const acquiredAtMs = same && current!.acquiredAtMs != null ? current!.acquiredAtMs : nowMs;
+  const next = encodeLease({ holder: self, untilMs, release: "none", token, savedAtMs, releaseAtMs: untilMs - HANDOVER_MARGIN_MS, acquiredAtMs });
   const won = await kv.cas(LEASE_KEY, raw, next, { px: ttl });
   if (!won) return false;
   await kv.set(LEASE_META_KEY, next);
@@ -900,7 +907,10 @@ const FLUSH_LUA = [
   "end",
   "if type(body['extra']) == 'table' then",
   "  for _, row in ipairs(body['extra']) do",
-  "    redis.call('SET', row['key'], row['value'])",
+  "    local px = tonumber(row['px']) or 0",
+  "    if row['nx'] and redis.call('EXISTS', row['key']) == 1 then",
+  "    elseif px > 0 then redis.call('SET', row['key'], row['value'], 'PX', px)",
+  "    else redis.call('SET', row['key'], row['value']) end",
   "  end",
   "end",
   "return 1",

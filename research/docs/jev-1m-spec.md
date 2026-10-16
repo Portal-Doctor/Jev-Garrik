@@ -1,8 +1,8 @@
 # Jev 1m shadow input
 
-schema-version: jev-1m-v2.1
+schema-version: jev-1m-v2.2
 
-v2 SHA-256 46bfb2c1d0caa710ac2e20299bbd5e8b1eacd16def4498316eee6c443790cf6b superseded by v2.1. Previous v2.1 SHA-256 4742fa43ed5ecc96d424595395095394080b59a606ea4cc4e8cab76523275544 superseded by this wording.
+v2 SHA-256 46bfb2c1d0caa710ac2e20299bbd5e8b1eacd16def4498316eee6c443790cf6b superseded by v2.1. Previous v2.1 SHA-256 4742fa43ed5ecc96d424595395095394080b59a606ea4cc4e8cab76523275544 superseded by v2.1 wording. v2.1 SHA-256 31691e038d0329da6bbe22df705fb4486ca84c146b862386ae098d0759a7dbee superseded by v2.2. The file on dev at adbc044 was that same v2.1 hash.
 
 Frozen for the live shadow caller. v2 wins wherever it conflicts with v1. `cb/` is not edited. The formulas below are copied verbatim from `cb/state.ts`, `cb/features.ts`, and `cb/feed.ts`. The caller builds `MarketState` with `buildState` and those functions. It does not re-derive them.
 
@@ -18,7 +18,7 @@ Sources locked into this file:
 - The window is `[barStartMs, barStartMs + 900000)`.
 - A packet is valid when at least 13 of the 15 slots are present and slot 14 is present.
 - The forming minute closes when `nowMs` reaches the next minute. The caller evaluates on the first scheduled pass at or after the 15m boundary.
-- A present minute is a closed live minute from this process. A restored row is an audit copy and is not present.
+- A present minute is a closed live minute from this process, or a handover-imported minute that meets every condition below. Provenance for that import is `src:'handover'`. Any other restored row is an audit copy and is not present. Import only after the lease is held. All of these are required: same schema version; same product; T minute-aligned; sealed at or after T+60000 and at or before that holder's release time; the old holder held the lease for all of [T, T+60000). If both holders have a row for the same T, the row from the holder who held the lease during that minute wins, and each minute counts once. Gap minutes stay absent. Backfilled minutes are never imported as present. The 13 of 15 rule and slot 14 are unchanged.
 
 ## Minute
 
@@ -61,7 +61,9 @@ The stored packet is a `MarketState` from the verbatim `buildState` below, plus 
 
 ## Call
 
-Drain in `driveHost` after `sendDueEntries`, only when this process holds the lease (`applyBars` and a lease token, or no kv). One call per tick. Timeout is `min(8000, untilMs - nowMs - 60000)` milliseconds. A non-positive budget does not start a call. Those packets are `timeout` and are not retried.
+Drain in `driveHost` after `sendDueEntries`, only when this process holds the lease (`applyBars` and a lease token, or no kv). One call per tick. Timeout is `min(8000, untilMs - nowMs - 60000)` milliseconds. A packet is terminal only after a call outcome or after expiry. A holder with no usable time budget does not start a call and does NOT drop the packet; it stays queued, persisted under (pair, barStartSec), for the next lease holder. Uncalled at expiry becomes terminal timeout (counted, never dropped).
+
+Expiry is `barStartSec + 900 + 600` seconds. A call that cannot finish before `untilMs` is never started. The queue is removed only after the call settles. The successor dedupes on `jevDone` and `p6:jev:ans`. Every completed bar for an open position, plus `BTC-USD`, is scheduled even when late. A bar already past expiry is a terminal timeout with no call. Each terminal answer records `answeredAtMs` and latency from the bar close. Shadow scoring uses the mid at `answeredAtMs`, not the bar-close mid. An answer for a trade already closed by `answeredAtMs` is logged and counts in `skipShare` and latency, and is excluded from guard-effect scoring. Latency buckets are `<=60s`, `<=300s`, and `<=600s`.
 
 `noteJevSpend` is applied to a copy with a `1e-9` USD probe before the call. If that throws, the packet is `not_called` and nothing is fetched. After a priced answer, `noteJevSpend` commits the real cost. If the real cost would pass the cap, the meter is left unchanged, the outcome is `call_error`, and the key is still stored.
 
@@ -75,7 +77,7 @@ The engine function memory is 1024 MB, set in `web/vercel.json` at `functions["s
 
 ## Persist
 
-The flush stores minute summaries only (at most 15 minutes for at most 16 products), the done keys, the answers, the meter, and the skip counts. It does not store raw level2 or raw trades. Restored minutes stay `live: false`.
+The flush stores minute summaries only (products with open positions, plus BTC), the done keys, the slim answers, the meter, and the skip counts. It does not store raw level2 or raw trades. A handover-imported minute that meets the conditions above is present (`src:'handover'`). Any other restored row stays `live: false`. The full packet, minute rows, and answer are one key per `(pair, barStartSec)`, written once at the terminal outcome inside the same flush, with a 14-day TTL. Hot answers keep the pair, bar, reason, four labels, tokens, cost, `answeredAtMs`, latency, and a packet hash. On a hot payload over 256 KB, Jev answers, then minutes, then done keys are shed, and the book and positions are still written. An incident is recorded at 75% of that cap.
 
 ## Verbatim formulas
 
