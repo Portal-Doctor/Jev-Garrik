@@ -211,8 +211,10 @@ export interface PaperHost {
   jevSkip: JevSkipLedger;
   /** One summary per contiguous catch-up run. Not one key per bar. */
   jevCatchUps: JevCatchUpRun[];
-  /** First-processed time for on-time bars. A later holder does not reclassify these. */
+  /** First-seen stamps above the watermark and inside expiry plus three bars. */
   jevFirst: JevFirstBar[];
+  /** Per pair. Only moves forward. Never shed. */
+  jevThrough: Record<string, number>;
   jevPrev?: { bar: number; holder: string; leaseFromMs: number };
   jevCatchUpOpen?: boolean;
   /** Full packets waiting for the next leased flush. Written once. */
@@ -607,6 +609,7 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     jevSkip: freshJevSkip(),
     jevCatchUps: [],
     jevFirst: [],
+    jevThrough: {},
     jevPacketWrites: [],
     jevPacketSent: new Set(),
     holderId: null,
@@ -1644,6 +1647,7 @@ export interface PaperStateBody {
   jevSkip?: JevSkipLedger;
   jevCatchUps?: JevCatchUpRun[];
   jevFirst?: JevFirstBar[];
+  jevThrough?: Record<string, number>;
   jevPrev?: { bar: number; holder: string; leaseFromMs: number };
   jevBarSec?: number;
   jevQueue?: JevQueued[];
@@ -1781,6 +1785,7 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     jevSkip: host.jevSkip,
     jevCatchUps: host.jevCatchUps,
     jevFirst: host.jevFirst,
+    jevThrough: { ...host.jevThrough },
     ...(host.jevPrev ? { jevPrev: host.jevPrev } : {}),
     jevBarSec: host.book.jevBarSec,
     jevQueue: queuedForHandover(host.jevQueue, host.jevDone),
@@ -1861,7 +1866,8 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   if (jevReadable && body.jevAnswers) host.jevAnswers = body.jevAnswers;
   if (body.jevSkip) host.jevSkip = normalizeJevSkip(body.jevSkip);
   if (body.jevCatchUps) host.jevCatchUps = body.jevCatchUps.map((run) => ({ ...run }));
-  if (body.jevFirst) host.jevFirst = body.jevFirst.map((row) => ({ ...row }));
+  if (body.jevFirst) host.jevFirst = body.jevFirst.map((row) => ({ ...row, pairs: [...(row.pairs ?? [])] }));
+  if (body.jevThrough) host.jevThrough = { ...body.jevThrough };
   if (body.jevPrev) host.jevPrev = { ...body.jevPrev };
   host.jevSkip.handoverMinutes = host.jevTape.handoverMinutes;
   host.jevSkip.holder = host.holderId ?? host.jevSkip.holder;

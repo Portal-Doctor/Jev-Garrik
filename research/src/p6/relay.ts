@@ -662,6 +662,8 @@ export function dashboard(opts: {
   jevPackets: number;
   dIndeterminate: number;
   dSubmitted: number;
+  catchUpDays?: Parameters<typeof gapWeekReport>[0]["catchUpDays"];
+  nowMs?: number;
 }): Dashboard {
   const gaps = gapWeekReport(opts);
   return {

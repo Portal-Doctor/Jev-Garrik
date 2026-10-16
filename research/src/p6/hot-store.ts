@@ -158,6 +158,7 @@ interface HotBody {
   jevSkip?: PaperStateBody["jevSkip"];
   jevCatchUps?: PaperStateBody["jevCatchUps"];
   jevFirst?: PaperStateBody["jevFirst"];
+  jevThrough?: PaperStateBody["jevThrough"];
   jevPrev?: PaperStateBody["jevPrev"];
   jevBarSec?: PaperStateBody["jevBarSec"];
   jevQueue?: PaperStateBody["jevQueue"];
@@ -224,6 +225,7 @@ export function captureHot(host: PaperHost): HotBody {
     jevSkip: host.jevSkip,
     jevCatchUps: host.jevCatchUps,
     jevFirst: host.jevFirst,
+    jevThrough: { ...host.jevThrough },
     ...(host.jevPrev ? { jevPrev: host.jevPrev } : {}),
     ...(host.book.jevBarSec != null ? { jevBarSec: host.book.jevBarSec } : {}),
     jevQueue: queuedForHandover(host.jevQueue, host.jevDone),
@@ -252,23 +254,25 @@ function compactJevMinutes(host: PaperHost): JevMinuteTuple[] {
     .map(packMinute);
 }
 
-function jevShed(host: PaperHost, shed: { answers: boolean; minutes: boolean; done: boolean }): HotBody {
+function jevShed(host: PaperHost, shed: { answers: boolean; minutes: boolean; done: boolean; first: boolean }): HotBody {
   const body = captureHot(host);
   if (shed.answers) body.jevAnswers = [];
   if (shed.minutes) body.jevMinutes = [];
   if (shed.done) body.jevDone = [];
+  if (shed.first) body.jevFirst = [];
   if (!host.leaseToken) {
     body.jevQueue = [];
     body.jevAnswers = [];
     body.jevDone = [];
     body.jevMinutes = [];
+    body.jevFirst = [];
   }
   return body;
 }
 
 /** Shed Jev fields in order when hot is over the cap, and always return a snapshot. */
 export function hotSnapshot(host: PaperHost): string {
-  const shed = { answers: false, minutes: false, done: false };
+  const shed = { answers: false, minutes: false, done: false, first: false };
   let json = JSON.stringify(jevShed(host, shed));
   let bytes = Buffer.byteLength(json);
   if (bytes >= HOT_WARN_BYTES && !host.book.incidents.some((row) => row.includes("75% of 256 KB"))) {
@@ -288,6 +292,11 @@ export function hotSnapshot(host: PaperHost): string {
   }
   if (bytes > HOT_MAX_BYTES) {
     shed.done = true;
+    json = JSON.stringify(jevShed(host, shed));
+    bytes = Buffer.byteLength(json);
+  }
+  if (bytes > HOT_MAX_BYTES) {
+    shed.first = true;
     json = JSON.stringify(jevShed(host, shed));
     bytes = Buffer.byteLength(json);
   }
@@ -649,7 +658,7 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
     const mark = storedMarks.find(([productId]) => productId === id)?.[1];
     return !mark || mark.status === "short";
   }).length;
-  const jevReport = skipShareReport(host.jevSkip);
+  const jevReport = skipShareReport(host.jevSkip, host.clock());
   const finished = host.runOutcome !== "" && host.runOutcome !== "running";
   const completed = finished
     ? { end: host.clock(), cmds: host.saveCommands + 1, outcome: host.runOutcome }

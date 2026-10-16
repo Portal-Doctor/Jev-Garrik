@@ -259,9 +259,9 @@ export default async function P6DashboardPage({
         <Stat label="latency <=300s" value={String(jev?.latency?.le300 ?? 0)} />
         <Stat label="latency <=600s" value={String(jev?.latency?.le600 ?? 0)} />
         <Stat label="latency late" value={String(jev?.latency?.late ?? 0)} />
-        <Stat label="catch-up" value={String(jev?.catchUp ?? 0)} />
-        <Stat label="catch-up share" value={(jev?.catchUpShare ?? 0).toFixed(3)} />
-        <Stat label="catch-up flag" value={jev?.catchUpFlag ? "yes" : "no"} />
+        <Stat label="catch-up 7d" value={String(jev?.catchUp ?? 0)} />
+        <Stat label="catch-up 7d share" value={(jev?.catchUpShare ?? 0).toFixed(3)} />
+        <Stat label="catch-up 7d flag" value={jev?.catchUpFlag ? "yes" : "no"} />
       </section>
 
       <section style={{ padding: "12px 24px" }}>

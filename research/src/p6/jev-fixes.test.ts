@@ -283,7 +283,7 @@ test("guard scoring uses the arrival mid and skips a trade already closed", () =
   });
   host.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: 0.01, tokens: 4 });
   const bar = Math.floor(NOW / 1000) - 901;
-  host.jevQueue.push({ pair: "NEAR-USD", barStartSec: bar, state: state(100), minutes: [] });
+  host.jevQueue.push({ pair: "NEAR-USD", barStartSec: bar, state: state(100), minutes: [], tradeId: "c1" });
   host.jevTape.onBook("NEAR-USD", NOW, { bids: new Map([["109", 1]]), asks: new Map([["111", 1]]) });
   return drainJevShadow(host, NOW, NOW + 120_000).then(() => {
     const answer = host.jevAnswers[0];

@@ -40,6 +40,8 @@ export interface JevQueued {
   barStartSec: number;
   state: MarketState;
   minutes: JevMinuteSummary[];
+  /** Open trade this packet is about. Scoring matches this id, never the pair. */
+  tradeId?: string;
   /** In-process only. A crash leaves the row queued for the next holder. */
   inflight?: boolean;
 }
@@ -66,7 +68,7 @@ export interface JevLatencyBuckets {
   le60: number;
   le300: number;
   le600: number;
-  /** Answers slower than 600s. The four buckets partition every answer. */
+  /** Answered rows slower than 600s after bar close. Unanswered rows are not counted. */
   late: number;
 }
 
@@ -86,6 +88,15 @@ export interface JevFirstBar {
   atMs: number;
   holder: string;
   leaseFromMs: number;
+  /** Pairs classified with this bar. The watermark advances per pair. */
+  pairs: string[];
+}
+
+/** One UTC day of bar counts. The trailing-7 flag reads these, not the run list. */
+export interface JevDayCount {
+  dayMs: number;
+  onTime: number;
+  catchUp: number;
 }
 
 export interface JevSkipLedger {
@@ -95,10 +106,12 @@ export interface JevSkipLedger {
   latency: JevLatencyBuckets;
   handoverMinutes: number;
   holder: string;
-  /** UTC week bucket, `Math.floor(nowMs / 7d) * 7d`. */
+  /** Display only. Epoch week, `Math.floor(nowMs / 7d) * 7d`. The flag does not read these. */
   weekStartMs: number;
   weekOnTime: number;
   weekCatchUp: number;
+  /** Per UTC day. Kept for 14 days including today. */
+  jevDays: JevDayCount[];
 }
 
 export interface JevSkipReport {
@@ -110,10 +123,13 @@ export interface JevSkipReport {
   holder: string;
   onTime: number;
   catchUp: number;
-  /** catchUp / (onTime + catchUp) for the current week. */
+  /** Trailing 7 UTC days, including today. */
   catchUpShare: number;
-  /** True when the weekly catch-up share is above 2%. */
+  /** True when that share is strictly above 2%. */
   catchUpFlag: boolean;
+  /** UTC-week bucket. Display only. */
+  displayOnTime: number;
+  displayCatchUp: number;
 }
 
 export function freshJevSkip(): JevSkipLedger {
@@ -127,6 +143,7 @@ export function freshJevSkip(): JevSkipLedger {
     weekStartMs: 0,
     weekOnTime: 0,
     weekCatchUp: 0,
+    jevDays: [],
   };
 }
 
@@ -143,10 +160,11 @@ export function normalizeJevSkip(ledger: Partial<JevSkipLedger> | undefined): Je
     weekStartMs: ledger.weekStartMs ?? 0,
     weekOnTime: ledger.weekOnTime ?? 0,
     weekCatchUp: ledger.weekCatchUp ?? 0,
+    jevDays: (ledger.jevDays ?? []).map((day) => ({ ...day })),
   };
 }
 
-export function skipShareReport(ledger: JevSkipLedger): JevSkipReport {
+export function skipShareReport(ledger: JevSkipLedger, nowMs = 0): JevSkipReport {
   const row = normalizeJevSkip(ledger);
   const packets = Object.values(row.byTier).reduce((sum, item) => sum + item.packets, 0);
   const byReason = {} as Record<JevReason, number>;
@@ -157,10 +175,8 @@ export function skipShareReport(ledger: JevSkipLedger): JevSkipReport {
     no_trades_feed: packets > 0 ? row.bySub.no_trades_feed / packets : 0,
     no_book_feed: packets > 0 ? row.bySub.no_book_feed / packets : 0,
   };
-  const onTime = row.weekOnTime;
-  const catchUp = row.weekCatchUp;
-  const denom = onTime + catchUp;
-  const catchUpShare = denom > 0 ? catchUp / denom : 0;
+  const asOf = nowMs > 0 ? nowMs : row.jevDays.reduce((max, day) => Math.max(max, day.dayMs), 0);
+  const trail = trailingCatchUpShare(row.jevDays, asOf);
   return {
     byReason,
     byTier,
@@ -168,11 +184,52 @@ export function skipShareReport(ledger: JevSkipLedger): JevSkipReport {
     latency: { ...row.latency, late: row.latency.late ?? 0 },
     handoverMinutes: row.handoverMinutes,
     holder: row.holder,
-    onTime,
-    catchUp,
-    catchUpShare,
-    catchUpFlag: catchUpShare > 0.02,
+    onTime: trail.onTime,
+    catchUp: trail.catchUp,
+    catchUpShare: trail.share,
+    catchUpFlag: trail.flag,
+    displayOnTime: row.weekOnTime,
+    displayCatchUp: row.weekCatchUp,
   };
+}
+
+const JEV_DAY_MS = 86_400_000;
+
+/**
+ * Trailing 7 UTC days, including today. Share is catchUp / (onTime + catchUp).
+ * Exactly 2% does not flag. An empty window is share 0.
+ */
+export function trailingCatchUpShare(
+  days: readonly JevDayCount[],
+  nowMs: number,
+): { onTime: number; catchUp: number; share: number; flag: boolean } {
+  const today = Math.floor(nowMs / JEV_DAY_MS) * JEV_DAY_MS;
+  const from = today - 6 * JEV_DAY_MS;
+  let onTime = 0;
+  let catchUp = 0;
+  for (const day of days) {
+    if (day.dayMs < from || day.dayMs > today) continue;
+    onTime += day.onTime;
+    catchUp += day.catchUp;
+  }
+  const denom = onTime + catchUp;
+  const share = denom > 0 ? catchUp / denom : 0;
+  return { onTime, catchUp, share, flag: share > 0.02 };
+}
+
+/** Count one bar on its UTC day. Keep 14 UTC days including the newest. */
+export function noteJevDay(ledger: JevSkipLedger, nowMs: number, kind: "onTime" | "catchUp"): void {
+  const dayMs = Math.floor(nowMs / JEV_DAY_MS) * JEV_DAY_MS;
+  let day = ledger.jevDays.find((row) => row.dayMs === dayMs);
+  if (!day) {
+    day = { dayMs, onTime: 0, catchUp: 0 };
+    ledger.jevDays.push(day);
+  }
+  if (kind === "onTime") day.onTime += 1;
+  else day.catchUp += 1;
+  const newest = ledger.jevDays.reduce((max, row) => Math.max(max, row.dayMs), dayMs);
+  const keepFrom = newest - 13 * JEV_DAY_MS;
+  ledger.jevDays = ledger.jevDays.filter((row) => row.dayMs >= keepFrom);
 }
 
 const JEV_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -316,6 +373,8 @@ export interface JevDrainHost {
   leaseFromMs?: number | null;
   jevCatchUps?: JevCatchUpRun[];
   jevFirst?: JevFirstBar[];
+  /** Per pair. Only moves forward. A bar at or below it is not classified again. */
+  jevThrough?: Record<string, number>;
   jevPrev?: { bar: number; holder: string; leaseFromMs: number };
   /** True while the current pass is still appending one catch-up run. */
   jevCatchUpOpen?: boolean;
@@ -325,8 +384,8 @@ export interface JevDrainHost {
     jevSkipped: number;
     incidents: string[];
     packets: ShadowPacket[];
-    positions: { productId: string }[];
-    closed?: { productId: string; exitTs: number }[];
+    positions: { productId: string; id?: string }[];
+    closed?: { productId: string; exitTs: number; id?: string }[];
   };
 }
 
@@ -392,7 +451,13 @@ export function queuedForHandover(rows: readonly JevQueued[], done: ReadonlySet<
     const key = jevKey(row.pair, row.barStartSec);
     if (done.has(key) || seen.has(key)) continue;
     seen.add(key);
-    out.push({ pair: row.pair, barStartSec: row.barStartSec, state: row.state, minutes: Array.isArray(row.minutes) ? row.minutes : [] });
+    out.push({
+      pair: row.pair,
+      barStartSec: row.barStartSec,
+      state: row.state,
+      minutes: Array.isArray(row.minutes) ? row.minutes : [],
+      ...(row.tradeId ? { tradeId: row.tradeId } : {}),
+    });
   }
   return out;
 }
@@ -401,13 +466,54 @@ function firstOf(host: JevDrainHost, barStartSec: number): JevFirstBar | undefin
   return (host.jevFirst ?? []).find((row) => row.bar === barStartSec);
 }
 
-function rememberFirst(host: JevDrainHost, barStartSec: number, nowMs: number): void {
-  const list = host.jevFirst ?? (host.jevFirst = []);
-  if (list.some((row) => row.bar === barStartSec)) return;
-  list.push({ bar: barStartSec, atMs: nowMs, holder: host.holderId ?? "", leaseFromMs: host.leaseFromMs ?? 0 });
-  const keepAfter = nowMs - 8 * 24 * 60 * 60 * 1000;
+/** Stamps live through expiry plus three bars. Older bars become the watermark. */
+function stampWindowSec(): number {
+  return JEV_EXPIRY_SEC + 3 * FIFTEEN_SEC;
+}
+
+function advanceThrough(host: JevDrainHost, pair: string, bar: number): void {
+  const through = host.jevThrough ?? (host.jevThrough = {});
+  const current = through[pair] ?? -1;
+  if (bar > current) through[pair] = bar;
+}
+
+/** Drop stamps that have aged out or sit at or below the watermark, and move the watermark forward. */
+function settleStamps(host: JevDrainHost, nowMs: number): void {
   const nowSec = Math.floor(nowMs / 1000);
-  host.jevFirst = list.filter((row) => row.bar === barStartSec || row.atMs >= keepAfter || nowSec < row.bar + JEV_EXPIRY_SEC);
+  const window = stampWindowSec();
+  const kept: JevFirstBar[] = [];
+  for (const row of host.jevFirst ?? []) {
+    const covered = row.pairs.length > 0 && row.pairs.every((pair) => row.bar <= (host.jevThrough?.[pair] ?? -1));
+    if (nowSec >= row.bar + window || covered) {
+      for (const pair of row.pairs) advanceThrough(host, pair, row.bar);
+      continue;
+    }
+    kept.push(row);
+  }
+  host.jevFirst = kept;
+}
+
+function noteStamp(host: JevDrainHost, bar: number, pairs: readonly string[], nowMs: number): void {
+  const nowSec = Math.floor(nowMs / 1000);
+  if (nowSec >= bar + stampWindowSec()) {
+    for (const pair of pairs) advanceThrough(host, pair, bar);
+    return;
+  }
+  const list = host.jevFirst ?? (host.jevFirst = []);
+  if (list.some((row) => row.bar === bar)) return;
+  list.push({ bar, atMs: nowMs, holder: host.holderId ?? "", leaseFromMs: host.leaseFromMs ?? 0, pairs: [...pairs] });
+}
+
+/** True when every pair that already has a watermark has moved through this bar. */
+function barAtOrBelowWatermark(host: JevDrainHost, bar: number, pairs: readonly string[]): boolean {
+  const through = host.jevThrough ?? {};
+  const known = pairs.filter((pair) => Object.prototype.hasOwnProperty.call(through, pair));
+  if (known.length === 0) return false;
+  return known.every((pair) => bar <= through[pair]!);
+}
+
+function tradeIdFor(host: JevDrainHost, pair: string): string | undefined {
+  return host.book.positions.find((position) => position.productId === pair)?.id;
 }
 
 /** A contiguous run covers this bar. A hole inside a short count does not. */
@@ -455,29 +561,35 @@ function noteCatchUp(host: JevDrainHost, barStartSec: number, nowMs: number): vo
   host.jevCatchUpOpen = true;
   rollWeek(host.jevSkip, nowMs);
   host.jevSkip.weekCatchUp += 1;
+  noteJevDay(host.jevSkip, nowMs, "catchUp");
   touchPrev(host, barStartSec);
 }
 
 export function scheduleLiveJev(host: JevDrainHost, barStartSec: number): void {
   if (host.book.jevBarSec === barStartSec) return;
-  if (firstOf(host, barStartSec) || catchUpCovers(host.jevCatchUps ?? [], barStartSec)) return;
   const nowMs = host.clock();
+  const pairs = scheduledPairs(host.book.positions.map((position) => position.productId));
+  settleStamps(host, nowMs);
+  if (barAtOrBelowWatermark(host, barStartSec, pairs)) return;
+  if (firstOf(host, barStartSec) || catchUpCovers(host.jevCatchUps ?? [], barStartSec)) return;
   if (packetExpired(barStartSec, nowMs)) {
     noteCatchUp(host, barStartSec, nowMs);
+    noteStamp(host, barStartSec, pairs, nowMs);
     host.book.jevBarSec = barStartSec;
     return;
   }
-  rememberFirst(host, barStartSec, nowMs);
+  noteStamp(host, barStartSec, pairs, nowMs);
   host.book.jevBarSec = barStartSec;
   host.jevCatchUpOpen = false;
   rollWeek(host.jevSkip, nowMs);
   host.jevSkip.weekOnTime += 1;
+  noteJevDay(host.jevSkip, nowMs, "onTime");
   touchPrev(host, barStartSec);
-  const pairs = scheduledPairs(host.book.positions.map((position) => position.productId));
   host.book.jevPackets += pairs.length;
   for (const pair of pairs) {
     const tier = liquidityTier(pair);
     const key = jevKey(pair, barStartSec);
+    const tradeId = tradeIdFor(host, pair);
     if (host.jevDone.has(key) || host.jevQueue.some((row) => jevKey(row.pair, row.barStartSec) === key)) continue;
     noteScheduled(host.jevSkip, tier);
     host.jevTape.closeThrough(pair, nowMs);
@@ -488,7 +600,7 @@ export function scheduleLiveJev(host: JevDrainHost, barStartSec: number): void {
       host.jevDone.add(key);
       host.book.incidents.push(`jev no_1m_input ${pair} ${barStartSec}${window.sub ? ` ${window.sub}` : ""}`);
       const state = host.jevTape.marketState(pair, nowMs) ?? ({ pair } as MarketState);
-      remember(host, { pair, barStartSec, state, minutes: window.minutes }, "no_1m_input", null, 0, null);
+      remember(host, { pair, barStartSec, state, minutes: window.minutes, ...(tradeId ? { tradeId } : {}) }, "no_1m_input", null, 0, null);
       continue;
     }
     const state = host.jevTape.marketState(pair, nowMs);
@@ -497,10 +609,10 @@ export function scheduleLiveJev(host: JevDrainHost, barStartSec: number): void {
       host.book.jevSkipped += 1;
       host.jevDone.add(key);
       host.book.incidents.push(`jev no_1m_input ${pair} ${barStartSec}`);
-      remember(host, { pair, barStartSec, state: { pair } as MarketState, minutes: window.minutes }, "no_1m_input", null, 0, null);
+      remember(host, { pair, barStartSec, state: { pair } as MarketState, minutes: window.minutes, ...(tradeId ? { tradeId } : {}) }, "no_1m_input", null, 0, null);
       continue;
     }
-    host.jevQueue.push({ pair, barStartSec, state, minutes: window.minutes });
+    host.jevQueue.push({ pair, barStartSec, state, minutes: window.minutes, ...(tradeId ? { tradeId } : {}) });
     host.book.packets.push({ pair, position: 0, barStartSec, label: "read", called: false });
   }
 }
@@ -509,12 +621,15 @@ export function scheduleLiveJev(host: JevDrainHost, barStartSec: number): void {
  * Exit of the trade this answer is about, or null when that trade is still open
  * or no such trade exists. A close before the bar close is a different trade.
  */
-function closedAtMs(host: JevDrainHost, pair: string, barStartSec: number, answeredAtMs: number): number | null {
-  if (host.book.positions.some((position) => position.productId === pair)) return null;
+function closedAtMs(host: JevDrainHost, tradeId: string | undefined, barStartSec: number, answeredAtMs: number): number | null {
+  if (!tradeId) return null;
+  if (host.book.positions.some((position) => position.id === tradeId)) return null;
   const aboutFrom = (barStartSec + FIFTEEN_SEC) * 1000;
   let last: number | null = null;
   for (const trade of host.book.closed ?? []) {
-    if (trade.productId !== pair || !(trade.exitTs <= answeredAtMs) || trade.exitTs < aboutFrom) continue;
+    if (trade.id !== tradeId) continue;
+    if (!(trade.exitTs <= answeredAtMs)) continue;
+    if (trade.exitTs < aboutFrom) continue;
     if (last == null || trade.exitTs > last) last = trade.exitTs;
   }
   return last;
@@ -536,9 +651,9 @@ function remember(
     answeredAtMs,
     arrivalMid,
     barCloseMid,
-    tradeClosedAtMs: closedAtMs(host, row.pair, row.barStartSec, answeredAtMs),
+    tradeClosedAtMs: closedAtMs(host, row.tradeId, row.barStartSec, answeredAtMs),
   });
-  noteLatency(host.jevSkip, latencyMs);
+  if (reason === "ok") noteLatency(host.jevSkip, latencyMs);
   host.jevSkip.holder = host.holderId ?? host.jevSkip.holder;
   host.jevSkip.handoverMinutes = host.jevTape.handoverMinutes;
   const stored: JevStored = {

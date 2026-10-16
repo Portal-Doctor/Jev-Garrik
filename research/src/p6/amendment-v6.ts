@@ -6,6 +6,7 @@
 
 import { AMENDMENT1_SHA256, AMENDMENT2_SHA256, REGISTRATION_SHA256 } from "./amendment2a";
 import { AMENDMENT_2A_SHA256 } from "./amendment2b";
+import { trailingCatchUpShare, type JevDayCount } from "./jev-call";
 import { missingMidShare } from "./mid-feed";
 
 export const AMENDMENT_2B_SHA256 = "6bfa199e5d70660e887f73e006a548a4b4f803e8f9a7922dc755ff0966154f34";
@@ -159,6 +160,10 @@ export function gapWeekReport(opts: {
   jevPackets: number;
   dIndeterminate: number;
   dSubmitted: number;
+  /** Daily catch-up counters. The trailing-7 flag reads these. */
+  catchUpDays?: readonly JevDayCount[];
+  /** Clock for the trailing window. Today is included. */
+  nowMs?: number;
 }): {
   gappedMs: number;
   gappedShare: number;
@@ -166,6 +171,8 @@ export function gapWeekReport(opts: {
   volRate: number;
   overallRate: number;
   jevSkipShare: number;
+  /** Trailing 7 UTC days including today. Zero when the window is empty. */
+  jevCatchUpShare: number;
   dIndeterminateShare: number | null;
   noGo: boolean;
   flagWeek: boolean;
@@ -214,8 +221,10 @@ export function gapWeekReport(opts: {
   if (longestMs > GAP_MAX_MS) flags.push("gap-length");
   if (overallRate > 0 && volRate > VOL_HOUR_RATE_MULT * overallRate) flags.push("vol-hours");
   if (jev.flagWeek) flags.push("jev-skip");
+  const trail = trailingCatchUpShare(opts.catchUpDays ?? [], opts.nowMs ?? 0);
+  if (trail.flag) flags.push("jev-catchup");
   const noGo = flags.includes("gap-share") || flags.includes("gap-length") || flags.includes("vol-hours");
-  const flagWeek = noGo || flags.includes("jev-skip");
+  const flagWeek = noGo || flags.includes("jev-skip") || flags.includes("jev-catchup");
   return {
     gappedMs,
     gappedShare,
@@ -223,6 +232,7 @@ export function gapWeekReport(opts: {
     volRate,
     overallRate,
     jevSkipShare: jev.share,
+    jevCatchUpShare: trail.share,
     dIndeterminateShare,
     noGo,
     flagWeek,

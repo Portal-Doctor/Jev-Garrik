@@ -6,13 +6,16 @@ import {
   catchUpCovers,
   drainJevShadow,
   freshJevSkip,
+  noteJevDay,
   noteLatency,
   packetExpired,
   refuseLateCall,
   scheduleLiveJev,
   skipShareReport,
+  trailingCatchUpShare,
   type JevCatchUpRun,
 } from "./jev-call";
+import { gapWeekReport } from "./amendment-v6";
 import { HOT_MAX_BYTES, hotSnapshot, persistSplit } from "./hot-store";
 import { handoverMinuteOk, JEV_MINUTE_MS, JEV_SCHEMA, type StoredJevMinute } from "./jev-minute";
 import { installPaperState, startPaperHost, type PaperHost } from "./paper-host";
@@ -46,8 +49,8 @@ function state(pair = "BTC-USD", mid = 100): MarketState {
   } as unknown as MarketState;
 }
 
-function closed(productId: string, exitTs: number): PaperHost["book"]["closed"][number] {
-  return { productId, exitTs } as PaperHost["book"]["closed"][number];
+function closed(id: string, productId: string, exitTs: number): PaperHost["book"]["closed"][number] {
+  return { id, productId, exitTs } as PaperHost["book"]["closed"][number];
 }
 
 test("an empty drain does not read the lease", async () => {
@@ -76,20 +79,20 @@ test("an empty drain does not read the lease", async () => {
 
 test("a historical flat close stays in the score and a close before the answer does not", async () => {
   const bar = Math.floor(NOW / 1000) - 901;
-  const cases: { name: string; pair: string; closedAt: number | null; open: boolean; included: boolean }[] = [
-    { name: "BTC never traded", pair: "BTC-USD", closedAt: null, open: false, included: true },
-    { name: "BTC closed 3 days ago", pair: "BTC-USD", closedAt: NOW - 3 * DAY, open: false, included: true },
-    { name: "ETH closed before the answer", pair: "ETH-USD", closedAt: NOW - 1, open: false, included: false },
-    { name: "ETH still open", pair: "ETH-USD", closedAt: NOW - 3 * DAY, open: true, included: true },
+  const cases: { name: string; pair: string; tradeId?: string; closedId?: string; closedAt: number | null; openId?: string; included: boolean }[] = [
+    { name: "BTC never traded", pair: "BTC-USD", closedAt: null, included: true },
+    { name: "BTC closed 3 days ago", pair: "BTC-USD", tradeId: "btc-old", closedId: "btc-old", closedAt: NOW - 3 * DAY, included: true },
+    { name: "ETH closed before the answer", pair: "ETH-USD", tradeId: "eth-1", closedId: "eth-1", closedAt: NOW - 1, included: false },
+    { name: "ETH still open", pair: "ETH-USD", tradeId: "eth-open", closedId: "eth-old", closedAt: NOW - 1, openId: "eth-open", included: true },
   ];
   for (const item of cases) {
     const host = startPaperHost([item.pair], {});
     host.clock = () => NOW;
     host.leaseToken = "held";
-    if (item.open) host.book.positions = [{ productId: item.pair } as PaperHost["book"]["positions"][number]];
-    if (item.closedAt != null) host.book.closed.push(closed(item.pair, item.closedAt));
+    if (item.openId) host.book.positions = [{ id: item.openId, productId: item.pair } as PaperHost["book"]["positions"][number]];
+    if (item.closedAt != null && item.closedId) host.book.closed.push(closed(item.closedId, item.pair, item.closedAt));
     host.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: 0.01, tokens: 4 });
-    host.jevQueue.push({ pair: item.pair, barStartSec: bar, state: state(item.pair, 100), minutes: [] });
+    host.jevQueue.push({ pair: item.pair, barStartSec: bar, state: state(item.pair, 100), minutes: [], ...(item.tradeId ? { tradeId: item.tradeId } : {}) });
     host.jevTape.onBook(item.pair, NOW, { bids: new Map([["109", 1]]), asks: new Map([["111", 1]]) });
     await drainJevShadow(host, NOW, NOW + 120_000);
     const answer = host.jevAnswers[0];
@@ -145,7 +148,12 @@ test("a bar first seen on time is not reclassed after expiry, and a queued expir
   expect(host.book.jevPackets).toBe(packets);
   expect(host.jevSkip.weekCatchUp).toBe(0);
 
-  const saved = { jevFirst: host.jevFirst.map((row) => ({ ...row })), jevCatchUps: [] as JevCatchUpRun[] };
+  expect(host.jevThrough["BTC-USD"]).toBeGreaterThanOrEqual(bar);
+  const saved = {
+    jevFirst: host.jevFirst.map((row) => ({ ...row, pairs: [...row.pairs] })),
+    jevThrough: { ...host.jevThrough },
+    jevCatchUps: [] as JevCatchUpRun[],
+  };
   const next = startPaperHost(["BTC-USD"], {});
   next.clock = () => now;
   next.holderId = "holder-b";
@@ -153,6 +161,7 @@ test("a bar first seen on time is not reclassed after expiry, and a queued expir
   installPaperState(next, saved);
   scheduleLiveJev(next, bar);
   expect(next.jevCatchUps).toHaveLength(0);
+  expect(next.jevThrough["BTC-USD"]).toBeGreaterThanOrEqual(bar);
 
   const queued = startPaperHost(["BTC-USD"], {});
   queued.clock = () => now;
@@ -194,19 +203,35 @@ test("catch-up cause is takeover only when the holder and the lease epoch both c
   expect(host.jevCatchUps[1]?.cause).toBe("takeover");
 });
 
-test("weekly catch-up share flags above 2 percent", () => {
-  const quiet = freshJevSkip();
-  quiet.weekOnTime = 100;
-  quiet.weekCatchUp = 2;
-  const low = skipShareReport(quiet);
-  expect(low.catchUpShare).toBeCloseTo(2 / 102);
+test("trailing catch-up share flags only strictly above 2 percent", () => {
+  const today = Date.parse("2026-10-16T00:00:00.000Z");
+  const exactDays = [{ dayMs: today, onTime: 98, catchUp: 2 }];
+  const exact = trailingCatchUpShare(exactDays, today + 1_000);
+  expect(exact.share).toBeCloseTo(0.02);
+  expect(exact.flag).toBe(false);
+  const above = trailingCatchUpShare([{ dayMs: today, onTime: 97, catchUp: 2 }], today + 1_000);
+  expect(above.share).toBeGreaterThan(0.02);
+  expect(above.flag).toBe(true);
+  const empty = trailingCatchUpShare([], today);
+  expect(empty.share).toBe(0);
+  expect(empty.flag).toBe(false);
+  const low = skipShareReport({ ...freshJevSkip(), jevDays: exactDays }, today + 1_000);
   expect(low.catchUpFlag).toBe(false);
-  quiet.weekCatchUp = 3;
-  quiet.weekOnTime = 97;
-  const high = skipShareReport(quiet);
-  expect(high.catchUpShare).toBeCloseTo(0.03);
-  expect(high.catchUpFlag).toBe(true);
-  expect(high.catchUp + high.onTime).toBe(100);
+  expect(low.catchUpShare).toBeCloseTo(0.02);
+  const gaps = { weekMs: WEEK, gaps: [], hours: [], jevSkipped: 0, jevPackets: 1, dIndeterminate: 0, dSubmitted: 0 };
+  const quiet = gapWeekReport({ ...gaps, catchUpDays: exactDays, nowMs: today + 1_000 });
+  expect(quiet.flags).not.toContain("jev-catchup");
+  expect(quiet.flagWeek).toBe(false);
+  expect(quiet.noGo).toBe(false);
+  expect(quiet.jevCatchUpShare).toBeCloseTo(0.02);
+  const flagged = gapWeekReport({ ...gaps, catchUpDays: [{ dayMs: today, onTime: 97, catchUp: 2 }], nowMs: today + 1_000 });
+  expect(flagged.flags).toContain("jev-catchup");
+  expect(flagged.flags).not.toContain("jev-skip");
+  expect(flagged.flagWeek).toBe(true);
+  expect(flagged.noGo).toBe(false);
+  const zero = gapWeekReport({ ...gaps, catchUpDays: [], nowMs: today });
+  expect(zero.jevCatchUpShare).toBe(0);
+  expect(zero.flags).not.toContain("jev-catchup");
 });
 
 test("latency buckets sum to the answer count", () => {
@@ -311,4 +336,239 @@ test("an empty holder and a lease that ends before T+60s stay absent", () => {
   expect(src).toContain('if (typeof row.holder !== "string" || row.holder === "") return false;');
   expect(catchUpCovers([{ count: 2, firstBar: 900, lastBar: 1_800, cause: "engine_gap", atMs: 0, holder: "a" }], 900)).toBe(true);
   expect(catchUpCovers([{ count: 1, firstBar: 900, lastBar: 1_800, cause: "engine_gap", atMs: 0, holder: "a" }], 1_800)).toBe(false);
+});
+
+function scoredHost(pair: string): PaperHost {
+  const host = startPaperHost([pair], {});
+  host.clock = () => NOW;
+  host.leaseToken = "held";
+  host.holderId = "holder-a";
+  host.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: 0.01, tokens: 4 });
+  host.jevTape.onBook(pair, NOW, { bids: new Map([["109", 1]]), asks: new Map([["111", 1]]) });
+  return host;
+}
+
+test("guard scoring follows the trade id across two trades on one pair", async () => {
+  const bar = Math.floor(NOW / 1000) - 901;
+  const host = scoredHost("ETH-USD");
+  host.book.positions = [{ id: "t2", productId: "ETH-USD" } as PaperHost["book"]["positions"][number]];
+  host.book.closed.push(closed("t1", "ETH-USD", NOW - 1));
+  host.jevQueue.push({ pair: "ETH-USD", barStartSec: bar, state: state("ETH-USD", 100), minutes: [], tradeId: "t1" });
+  await drainJevShadow(host, NOW, NOW + 120_000);
+  expect(host.jevAnswers[0]?.guardIncluded).toBe(false);
+  expect(host.jevAnswers[0]?.scoreMid).toBeNull();
+
+  const reopen = scoredHost("ETH-USD");
+  reopen.book.positions = [{ id: "t2", productId: "ETH-USD" } as PaperHost["book"]["positions"][number]];
+  reopen.book.closed.push(closed("t1", "ETH-USD", NOW - 1));
+  reopen.jevQueue.push({ pair: "ETH-USD", barStartSec: bar, state: state("ETH-USD", 100), minutes: [], tradeId: "t2" });
+  await drainJevShadow(reopen, NOW, NOW + 120_000);
+  expect(reopen.jevAnswers[0]?.guardIncluded).toBe(true);
+  expect(reopen.jevAnswers[0]?.scoreMid).toBe(110);
+
+  const bothClosed = scoredHost("ETH-USD");
+  bothClosed.book.closed.push(closed("t1", "ETH-USD", NOW - 1));
+  bothClosed.book.closed.push(closed("t2", "ETH-USD", NOW + 5_000));
+  bothClosed.jevQueue.push({ pair: "ETH-USD", barStartSec: bar, state: state("ETH-USD", 100), minutes: [], tradeId: "t1" });
+  await drainJevShadow(bothClosed, NOW, NOW + 120_000);
+  expect(bothClosed.jevAnswers[0]?.guardIncluded).toBe(false);
+  expect(bothClosed.jevAnswers[0]?.scoreMid).toBeNull();
+});
+
+test("closed-trade bounds are the bar close and answeredAtMs", async () => {
+  const bar = Math.floor(NOW / 1000) - 901;
+  const barClose = (bar + 900) * 1000;
+  const cases: { exitTs: number; included: boolean }[] = [
+    { exitTs: NOW, included: false },
+    { exitTs: barClose, included: false },
+    { exitTs: barClose + 1, included: false },
+    { exitTs: barClose - 1, included: true },
+    { exitTs: NOW + 1, included: true },
+  ];
+  for (const item of cases) {
+    const host = scoredHost("ETH-USD");
+    host.book.closed.push(closed("t1", "ETH-USD", item.exitTs));
+    host.jevQueue.push({ pair: "ETH-USD", barStartSec: bar, state: state("ETH-USD", 100), minutes: [], tradeId: "t1" });
+    await drainJevShadow(host, NOW, NOW + 120_000);
+    expect(host.jevAnswers[0]?.guardIncluded).toBe(item.included);
+  }
+});
+
+test("a bar at close plus 599s is called and at plus 600s is catch-up", () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  host.holderId = "holder-a";
+  host.leaseFromMs = 100;
+  const bar = Math.floor(NOW / 1000) - 1_800;
+  const close = (bar + 900) * 1000;
+  host.clock = () => close + 599_000;
+  scheduleLiveJev(host, bar);
+  expect(host.jevCatchUps).toHaveLength(0);
+  expect(host.book.jevPackets).toBeGreaterThan(0);
+  const packets = host.book.jevPackets;
+  const earlier = bar - 900;
+  host.book.jevBarSec = undefined;
+  host.clock = () => (earlier + 900) * 1000 + 600_000;
+  scheduleLiveJev(host, earlier);
+  expect(host.book.jevPackets).toBe(packets);
+  expect(host.jevCatchUps).toHaveLength(1);
+  expect(host.jevCatchUps[0]?.firstBar).toBe(earlier);
+});
+
+test("latency buckets count answered rows only", async () => {
+  const host = scoredHost("BTC-USD");
+  const bar = Math.floor(NOW / 1000) - 901;
+  host.jevQueue.push({ pair: "BTC-USD", barStartSec: bar, state: state(), minutes: [] });
+  await drainJevShadow(host, NOW, NOW + 120_000);
+  expect(host.jevAnswers[0]?.reason).toBe("ok");
+  const expired = Math.floor(NOW / 1000) - 1_500;
+  host.clock = () => NOW;
+  host.jevCaller = async () => {
+    throw new Error("expired queue must not call");
+  };
+  host.jevQueue.push({ pair: "BTC-USD", barStartSec: expired, state: state(), minutes: [] });
+  await drainJevShadow(host, NOW, NOW + 120_000);
+  host.book.jevBarSec = undefined;
+  host.holderId = "holder-a";
+  host.leaseFromMs = 100;
+  const live = Math.floor(NOW / 1000) - 1_000;
+  scheduleLiveJev(host, live);
+  expect(host.jevSkip.byReason.timeout).toBe(1);
+  expect(host.jevSkip.byReason.no_1m_input).toBeGreaterThan(0);
+  const row = host.jevSkip.latency;
+  const answered = host.jevAnswers.filter((item) => item.reason === "ok").length;
+  expect(row.le60 + row.le300 + row.le600 + row.late).toBe(answered);
+  expect(row).toEqual({ le60: 1, le300: 0, le600: 0, late: 0 });
+});
+
+test("evicting a catch-up summary does not change the trailing share", () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  host.clock = () => NOW;
+  host.holderId = "holder-a";
+  host.leaseFromMs = 100;
+  for (let i = 0; i < 10; i += 1) noteJevDay(host.jevSkip, NOW, "onTime");
+  const newest = Math.floor(NOW / 1000) - 5_000;
+  const oldest = newest - 39 * 1_800;
+  for (let i = 0; i < 40; i += 1) {
+    host.book.jevBarSec = undefined;
+    scheduleLiveJev(host, oldest + i * 1_800);
+  }
+  expect(host.jevCatchUps).toHaveLength(32);
+  const report = skipShareReport(host.jevSkip, NOW);
+  expect(report.catchUp).toBe(40);
+  expect(report.onTime).toBe(10);
+  expect(report.catchUpShare).toBeCloseTo(40 / 50);
+  host.jevCatchUps.splice(0, 8);
+  const after = skipShareReport(host.jevSkip, NOW);
+  expect(after.catchUpShare).toBe(report.catchUpShare);
+  expect(after.catchUp).toBe(40);
+});
+
+test("daily counters keep 14 UTC days", () => {
+  const ledger = freshJevSkip();
+  const today = Date.parse("2026-10-16T00:00:00.000Z");
+  for (let i = 19; i >= 0; i -= 1) noteJevDay(ledger, today - i * DAY, i % 2 === 0 ? "catchUp" : "onTime");
+  expect(ledger.jevDays).toHaveLength(14);
+  expect(Math.min(...ledger.jevDays.map((day) => day.dayMs))).toBe(today - 13 * DAY);
+});
+
+test("the watermark only moves forward and a bar at or below it is not catch-up", () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  host.holderId = "holder-a";
+  host.leaseFromMs = 100;
+  host.jevThrough = { "BTC-USD": 5_000_000 };
+  host.jevFirst = [{ bar: 900, atMs: 1, holder: "holder-a", leaseFromMs: 100, pairs: ["BTC-USD"] }];
+  const fresh = 5_000_900;
+  host.clock = () => (fresh + 910) * 1000;
+  scheduleLiveJev(host, fresh);
+  expect(host.jevThrough["BTC-USD"]).toBeGreaterThanOrEqual(5_000_000);
+  expect(host.jevFirst.some((row) => row.bar === 900)).toBe(false);
+  const before = host.jevSkip.jevDays.reduce((sum, day) => sum + day.catchUp, 0);
+  host.book.jevBarSec = undefined;
+  scheduleLiveJev(host, 5_000_000);
+  scheduleLiveJev(host, 5_000_000 - 900);
+  expect(host.jevSkip.jevDays.reduce((sum, day) => sum + day.catchUp, 0)).toBe(before);
+  expect(host.jevThrough["BTC-USD"]).toBeGreaterThanOrEqual(5_000_000);
+});
+
+test("first-seen stamps stay bounded across many days and the watermark is not shed", () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  host.holderId = "holder-a";
+  host.leaseFromMs = 100;
+  const start = Math.floor(Date.parse("2026-10-01T00:00:00.000Z") / 1000);
+  const end = start + 8 * 96 * 900;
+  for (let bar = start; bar <= end; bar += 900) {
+    host.book.jevBarSec = undefined;
+    host.clock = () => (bar + 900) * 1000 + 10_000;
+    scheduleLiveJev(host, bar);
+  }
+  expect(host.jevFirst.length).toBeLessThanOrEqual(8);
+  expect(host.jevFirst.length).toBeGreaterThan(0);
+  expect(Buffer.byteLength(JSON.stringify(host.jevFirst))).toBeLessThan(4_096);
+  const mark = host.jevThrough["BTC-USD"] ?? -1;
+  expect(mark).toBeGreaterThan(start);
+  expect(mark).toBeLessThan(end);
+  const catchUp = host.jevSkip.jevDays.reduce((sum, day) => sum + day.catchUp, 0);
+  host.book.jevBarSec = undefined;
+  host.clock = () => (end + 900) * 1000 + 10_000;
+  scheduleLiveJev(host, start);
+  expect(host.jevSkip.jevDays.reduce((sum, day) => sum + day.catchUp, 0)).toBe(catchUp);
+  expect(host.jevThrough["BTC-USD"]).toBeGreaterThanOrEqual(mark);
+
+  host.leaseToken = "held";
+  host.jevFirst = Array.from({ length: 20 }, (_, i) => ({
+    bar: i + 1,
+    atMs: 1,
+    holder: "h".repeat(20_000),
+    leaseFromMs: 100,
+    pairs: ["BTC-USD"],
+  }));
+  const body = JSON.parse(hotSnapshot(host)) as { jevFirst: unknown[]; jevThrough: Record<string, number> };
+  expect(body.jevFirst).toEqual([]);
+  expect(body.jevThrough["BTC-USD"]).toBe(host.jevThrough["BTC-USD"]);
+});
+
+test("one difference in holder or lease epoch is an engine gap", () => {
+  const end = Math.floor(NOW / 1000) - 5_000;
+  const holderOnly = startPaperHost(["BTC-USD"], {});
+  holderOnly.clock = () => NOW;
+  holderOnly.holderId = "holder-a";
+  holderOnly.leaseFromMs = 100;
+  scheduleLiveJev(holderOnly, end);
+  holderOnly.book.jevBarSec = undefined;
+  holderOnly.holderId = "holder-b";
+  scheduleLiveJev(holderOnly, end + 1_800);
+  expect(holderOnly.jevCatchUps[1]?.cause).toBe("engine_gap");
+
+  const leaseOnly = startPaperHost(["BTC-USD"], {});
+  leaseOnly.clock = () => NOW;
+  leaseOnly.holderId = "holder-a";
+  leaseOnly.leaseFromMs = 100;
+  scheduleLiveJev(leaseOnly, end);
+  leaseOnly.book.jevBarSec = undefined;
+  leaseOnly.leaseFromMs = 200;
+  scheduleLiveJev(leaseOnly, end + 1_800);
+  expect(leaseOnly.jevCatchUps[1]?.cause).toBe("engine_gap");
+});
+
+test("a display-week roll keeps the previous days in the trailing flag", () => {
+  const boundary = Date.parse("2026-10-15T00:00:00.000Z");
+  const host = startPaperHost(["BTC-USD"], {});
+  host.holderId = "holder-a";
+  host.leaseFromMs = 100;
+  const before = boundary - 3_600_000;
+  host.clock = () => before;
+  const oldBar = Math.floor(before / 1000) - 5_000;
+  scheduleLiveJev(host, oldBar);
+  expect(host.jevSkip.weekCatchUp).toBe(1);
+  host.book.jevBarSec = undefined;
+  const after = boundary + 3_600_000;
+  host.clock = () => after;
+  const live = Math.floor(after / 1000) - 1_000;
+  scheduleLiveJev(host, live);
+  const report = skipShareReport(host.jevSkip, after);
+  expect(report.displayCatchUp).toBe(0);
+  expect(report.displayOnTime).toBe(1);
+  expect(report.catchUp).toBe(1);
+  expect(report.onTime).toBe(1);
+  expect(report.catchUpFlag).toBe(true);
 });

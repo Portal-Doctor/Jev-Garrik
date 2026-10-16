@@ -277,12 +277,14 @@ export async function loadDashboard(kv: Kv): Promise<Dashboard> {
         volHours?: { rv: number; gappedMs: number; hourMs: number }[];
         dIndeterminate?: number;
         dSubmitted?: number;
+        jevSkip?: { jevDays?: { dayMs: number; onTime: number; catchUp: number }[] };
       })
     : null;
+  const nowMs = Date.now();
   return dashboard({
     positions: body?.positions ?? [],
     gates: body?.killSwitch ? ["kill-switch"] : [],
-    leaseHolder: lease && lease.untilMs > Date.now() ? lease.holder : null,
+    leaseHolder: lease && lease.untilMs > nowMs ? lease.holder : null,
     incidents: body?.incidents ?? [],
     weekMs: 7 * 24 * 60 * 60 * 1000,
     gaps: body?.gaps ?? [],
@@ -291,6 +293,8 @@ export async function loadDashboard(kv: Kv): Promise<Dashboard> {
     jevPackets: body?.jevPackets ?? 0,
     dIndeterminate: body?.dIndeterminate ?? 0,
     dSubmitted: body?.dSubmitted ?? 0,
+    catchUpDays: body?.jevSkip?.jevDays ?? [],
+    nowMs,
   });
 }
 
