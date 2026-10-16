@@ -24,7 +24,7 @@ import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
 import { completedDays, deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
 import { freshJevMeter, type JevMeter } from "./jev-shadow";
-import { drainJevShadow, freshJevSkip, normalizeJevSkip, queuedForHandover, scheduleClosedJevBar, scheduleLiveJev, type JevCaller, type JevCatchUpRun, type JevFirstBar, type JevQueued, type JevSkipLedger, type JevStored } from "./jev-call";
+import { archiveJevLegacy, drainJevShadow, freshJevSkip, normalizeJevSkip, queuedForHandover, scheduleClosedJevBar, scheduleLiveJev, type JevCaller, type JevCatchUpRun, type JevFirstBar, type JevLegacyTotals, type JevQueued, type JevSkipLedger, type JevStored } from "./jev-call";
 import { JevTape, type JevMinuteTuple, type StoredJevMinute } from "./jev-minute";
 import { renewLease, type Kv } from "./relay";
 import { kickDurable } from "./hot-store";
@@ -213,8 +213,10 @@ export interface PaperHost {
   jevCatchUps: JevCatchUpRun[];
   /** First-seen stamps above the watermark and inside expiry plus three bars. */
   jevFirst: JevFirstBar[];
-  /** Per pair. Only moves forward. Never shed. */
+  /** Per pair. Only moves forward. Never shed. Install max-merges it. */
   jevThrough: Record<string, number>;
+  /** First-seen lifetime packet counters. Excluded from the V6 skip gate. */
+  jevLegacy?: JevLegacyTotals;
   jevPrev?: { bar: number; holder: string; leaseFromMs: number };
   jevCatchUpOpen?: boolean;
   /** Full packets waiting for the next leased flush. Written once. */
@@ -1648,6 +1650,7 @@ export interface PaperStateBody {
   jevCatchUps?: JevCatchUpRun[];
   jevFirst?: JevFirstBar[];
   jevThrough?: Record<string, number>;
+  jevLegacy?: JevLegacyTotals;
   jevPrev?: { bar: number; holder: string; leaseFromMs: number };
   jevBarSec?: number;
   jevQueue?: JevQueued[];
@@ -1786,6 +1789,7 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     jevCatchUps: host.jevCatchUps,
     jevFirst: host.jevFirst,
     jevThrough: { ...host.jevThrough },
+    ...(host.jevLegacy ? { jevLegacy: { ...host.jevLegacy } } : {}),
     ...(host.jevPrev ? { jevPrev: host.jevPrev } : {}),
     jevBarSec: host.book.jevBarSec,
     jevQueue: queuedForHandover(host.jevQueue, host.jevDone),
@@ -1836,6 +1840,8 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   if (body.closed) host.ledgerStored = body.closed.length;
   if (body.jevPackets != null) host.book.jevPackets = body.jevPackets;
   if (body.jevSkipped != null) host.book.jevSkipped = body.jevSkipped;
+  const legacy = archiveJevLegacy(host.jevLegacy ?? body.jevLegacy, host.book.jevSkipped, host.book.jevPackets);
+  if (legacy) host.jevLegacy = legacy;
   if (body.gapFills != null) host.book.gapFills = body.gapFills;
   if (body.memberCloses) {
     host.book.config.memberCloses = body.memberCloses.map((row) => ({ ...row, days: [...row.days] }));
@@ -1867,7 +1873,13 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   if (body.jevSkip) host.jevSkip = normalizeJevSkip(body.jevSkip);
   if (body.jevCatchUps) host.jevCatchUps = body.jevCatchUps.map((run) => ({ ...run }));
   if (body.jevFirst) host.jevFirst = body.jevFirst.map((row) => ({ ...row, pairs: [...(row.pairs ?? [])] }));
-  if (body.jevThrough) host.jevThrough = { ...body.jevThrough };
+  if (body.jevThrough) {
+    for (const [pair, bar] of Object.entries(body.jevThrough)) {
+      if (typeof bar !== "number" || !Number.isFinite(bar)) continue;
+      const current = host.jevThrough[pair];
+      if (current == null || bar > current) host.jevThrough[pair] = bar;
+    }
+  }
   if (body.jevPrev) host.jevPrev = { ...body.jevPrev };
   host.jevSkip.handoverMinutes = host.jevTape.handoverMinutes;
   host.jevSkip.holder = host.holderId ?? host.jevSkip.holder;

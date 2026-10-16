@@ -6,7 +6,7 @@
 
 import { AMENDMENT1_SHA256, AMENDMENT2_SHA256, REGISTRATION_SHA256 } from "./amendment2a";
 import { AMENDMENT_2A_SHA256 } from "./amendment2b";
-import { trailingCatchUpShare, type JevDayCount } from "./jev-call";
+import { trailingCatchUpShare, trailingSkipGate, type JevDayCount, type JevSkipStatus } from "./jev-call";
 import { missingMidShare } from "./mid-feed";
 
 export const AMENDMENT_2B_SHA256 = "6bfa199e5d70660e887f73e006a548a4b4f803e8f9a7922dc755ff0966154f34";
@@ -170,7 +170,13 @@ export function gapWeekReport(opts: {
   longestMs: number;
   volRate: number;
   overallRate: number;
+  /** Trailing 7 UTC days of on-time packets. Not the lifetime book counters. */
   jevSkipShare: number;
+  jevSkipStatus: JevSkipStatus;
+  jevSkipDays: number;
+  jevSkipScheduled: number;
+  jevSkipWilson: number;
+  jevSkipLabel: string;
   /** Trailing 7 UTC days including today. Zero when the window is empty. */
   jevCatchUpShare: number;
   dIndeterminateShare: number | null;
@@ -214,13 +220,16 @@ export function gapWeekReport(opts: {
   const topMs = top.reduce((sum, hour) => sum + Math.max(0, hour.hourMs), 0);
   const topGap = top.reduce((sum, hour) => sum + Math.max(0, hour.gappedMs), 0);
   const volRate = topMs > 0 ? topGap / topMs : 0;
-  const jev = jevSkipShare(opts.jevSkipped, opts.jevPackets);
+  // Lifetime jevSkipped / jevPackets stay on the book for the archive. They do not feed this gate.
+  void opts.jevSkipped;
+  void opts.jevPackets;
+  const gate = trailingSkipGate(opts.catchUpDays ?? [], opts.nowMs ?? 0);
   const dIndeterminateShare = opts.dSubmitted > 0 ? opts.dIndeterminate / opts.dSubmitted : null;
   const flags: string[] = [];
   if (gappedShare > GAP_WEEK_CAP) flags.push("gap-share");
   if (longestMs > GAP_MAX_MS) flags.push("gap-length");
   if (overallRate > 0 && volRate > VOL_HOUR_RATE_MULT * overallRate) flags.push("vol-hours");
-  if (jev.flagWeek) flags.push("jev-skip");
+  if (gate.flag) flags.push("jev-skip");
   const trail = trailingCatchUpShare(opts.catchUpDays ?? [], opts.nowMs ?? 0);
   if (trail.flag) flags.push("jev-catchup");
   const noGo = flags.includes("gap-share") || flags.includes("gap-length") || flags.includes("vol-hours");
@@ -231,7 +240,12 @@ export function gapWeekReport(opts: {
     longestMs,
     volRate,
     overallRate,
-    jevSkipShare: jev.share,
+    jevSkipShare: gate.share,
+    jevSkipStatus: gate.status,
+    jevSkipDays: gate.days,
+    jevSkipScheduled: gate.scheduled,
+    jevSkipWilson: gate.wilsonLower,
+    jevSkipLabel: gate.label,
     jevCatchUpShare: trail.share,
     dIndeterminateShare,
     noGo,

@@ -338,7 +338,10 @@ test("V6 is live: gap windows, REST books, skipped Jev, gap fills, and the caps"
   });
   expect(report.flags).toContain("gap-share");
   expect(report.flags).toContain("gap-length");
-  expect(report.flags).toContain("jev-skip");
+  expect(report.flags).not.toContain("jev-skip");
+  expect(report.jevSkipStatus).toBe("INSUFFICIENT_DATA");
+  expect(report.jevSkipShare).toBe(0);
+  expect(report.noGo).toBe(true);
   expect(report.flagWeek).toBe(true);
   expect(report.dIndeterminateShare).toBe(0.25);
   const view = dashboard({

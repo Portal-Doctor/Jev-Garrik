@@ -159,6 +159,7 @@ interface HotBody {
   jevCatchUps?: PaperStateBody["jevCatchUps"];
   jevFirst?: PaperStateBody["jevFirst"];
   jevThrough?: PaperStateBody["jevThrough"];
+  jevLegacy?: PaperStateBody["jevLegacy"];
   jevPrev?: PaperStateBody["jevPrev"];
   jevBarSec?: PaperStateBody["jevBarSec"];
   jevQueue?: PaperStateBody["jevQueue"];
@@ -226,6 +227,7 @@ export function captureHot(host: PaperHost): HotBody {
     jevCatchUps: host.jevCatchUps,
     jevFirst: host.jevFirst,
     jevThrough: { ...host.jevThrough },
+    ...(host.jevLegacy ? { jevLegacy: { ...host.jevLegacy } } : {}),
     ...(host.jevPrev ? { jevPrev: host.jevPrev } : {}),
     ...(host.book.jevBarSec != null ? { jevBarSec: host.book.jevBarSec } : {}),
     jevQueue: queuedForHandover(host.jevQueue, host.jevDone),
@@ -693,6 +695,16 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
       onTime: jevReport.onTime,
       catchUpShare: jevReport.catchUpShare,
       catchUpFlag: jevReport.catchUpFlag,
+      skipShare: jevReport.skipShare,
+      skipStatus: jevReport.skipStatus,
+      skipDays: jevReport.skipDays,
+      skipScheduled: jevReport.skipScheduled,
+      skipSkipped: jevReport.skipSkipped,
+      skipAnswered: jevReport.skipAnswered,
+      skipWilson: jevReport.skipWilson,
+      skipLabel: jevReport.skipLabel,
+      legacySkipped: host.jevLegacy?.jevSkipped ?? 0,
+      legacyPackets: host.jevLegacy?.jevPackets ?? 0,
     },
   };
   let encoded = JSON.stringify(last);
