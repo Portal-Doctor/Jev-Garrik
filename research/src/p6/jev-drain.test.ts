@@ -8,6 +8,8 @@ import { HOT_KEY, memoryKv } from "./relay";
 import { freshJevMeter, JEV_CALL_RESERVE_USD, noteJevSpend, type JevMeter } from "./jev-shadow";
 
 const NOW = Date.parse("2026-10-14T18:00:00.000Z");
+/** Recent enough that barStartSec + 1500 is still ahead of NOW. */
+const BAR = Math.floor(NOW / 1000) - 1400;
 
 function state(): MarketState {
   return {
@@ -74,7 +76,7 @@ test("the drain is shadow only, idempotent, and priced before the call", async (
     row.calls += 1;
     return { ok: true, answer: ANSWER, costUsd: 0.01 };
   };
-  row.jevQueue.push({ pair: "ETH-USD", barStartSec: 900, state: state(), minutes: [] });
+  row.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 900, state: state(), minutes: [] });
   await drainJevShadow(row, NOW, NOW + 120_000);
   expect(row.calls).toBe(1);
   expect(row.jevMeter.cumulativeUsd).toBeCloseTo(0.01, 8);
@@ -82,7 +84,7 @@ test("the drain is shadow only, idempotent, and priced before the call", async (
   expect(row.jevMeter.todayUsd).toBeCloseTo(0.01, 8);
   expect(row.jevAnswers[0]?.reason).toBe("ok");
   expect(row.jevAnswers[0]?.answer?.liquidity_stress).toBe("normal");
-  row.jevQueue.push({ pair: "ETH-USD", barStartSec: 900, state: state(), minutes: [] });
+  row.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 900, state: state(), minutes: [] });
   await drainJevShadow(row, NOW, NOW + 120_000);
   expect(row.calls).toBe(1);
   const watcher = host();
@@ -90,7 +92,7 @@ test("the drain is shadow only, idempotent, and priced before the call", async (
   watcher.jevCaller = async () => {
     throw new Error("watcher must not call");
   };
-  watcher.jevQueue.push({ pair: "ETH-USD", barStartSec: 900, state: state(), minutes: [] });
+  watcher.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 900, state: state(), minutes: [] });
   await drainJevShadow(watcher, NOW, NOW + 120_000);
   expect(watcher.jevAnswers).toHaveLength(0);
 });
@@ -103,11 +105,12 @@ test("timeout, not_called, call_error, and invalid_response are separate shares"
     called = true;
     return { ok: false, reason: "not_called" };
   };
-  late.jevQueue.push({ pair: "ETH-USD", barStartSec: 1, state: state(), minutes: [] });
+  late.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 1, state: state(), minutes: [] });
   await drainJevShadow(late, NOW, NOW + 60_000);
   expect(called).toBe(false);
-  expect(late.book.jevSkipped).toBe(1);
-  expect(late.jevAnswers[0]?.reason).toBe("timeout");
+  expect(late.book.jevSkipped).toBe(0);
+  expect(late.jevAnswers).toHaveLength(0);
+  expect(late.jevQueue).toHaveLength(1);
   expect(late.jevMeter.cumulativeUsd).toBe(0);
 
   const capped = host();
@@ -115,7 +118,7 @@ test("timeout, not_called, call_error, and invalid_response are separate shares"
   capped.jevCaller = async () => {
     throw new Error("cap must stop the call");
   };
-  capped.jevQueue.push({ pair: "ETH-USD", barStartSec: 2, state: state(), minutes: [] });
+  capped.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 2, state: state(), minutes: [] });
   await drainJevShadow(capped, NOW, NOW + 120_000);
   expect(capped.jevAnswers[0]?.reason).toBe("not_called");
 
@@ -123,7 +126,7 @@ test("timeout, not_called, call_error, and invalid_response are separate shares"
   bad.jevCaller = async () => {
     throw new Error("socket reset");
   };
-  bad.jevQueue.push({ pair: "ETH-USD", barStartSec: 3, state: state(), minutes: [] });
+  bad.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 3, state: state(), minutes: [] });
   await drainJevShadow(bad, NOW, NOW + 120_000);
   expect(bad.jevAnswers[0]?.reason).toBe("call_error");
   expect(bad.jevAnswers[0]?.costUsd).toBe(0);
@@ -133,7 +136,7 @@ test("timeout, not_called, call_error, and invalid_response are separate shares"
 
   const invalid = host();
   invalid.jevCaller = async () => ({ ok: false, reason: "invalid_response" });
-  invalid.jevQueue.push({ pair: "ETH-USD", barStartSec: 4, state: state(), minutes: [] });
+  invalid.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 4, state: state(), minutes: [] });
   await drainJevShadow(invalid, NOW, NOW + 120_000);
   expect(invalid.jevMeter.cumulativeUsd).toBeCloseTo(JEV_CALL_RESERVE_USD, 8);
   expect(invalid.jevMeter.calls).toBe(0);
@@ -143,7 +146,7 @@ test("timeout, not_called, call_error, and invalid_response are separate shares"
   expect(readJevAnswer({ market_regime: { choice: "trend" }, direction_bias: { choice: "flat" }, toxic_flow_risk: { choice: "low" }, liquidity_stress: { choice: "calm" } })).toBeNull();
   const unwired = host();
   unwired.jevCaller = undefined;
-  unwired.jevQueue.push({ pair: "ETH-USD", barStartSec: 5, state: state(), minutes: [] });
+  unwired.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 5, state: state(), minutes: [] });
   await drainJevShadow(unwired, NOW, NOW + 120_000);
   expect(unwired.jevAnswers[0]?.reason).toBe("not_called");
   expect(unwired.jevMeter.calls).toBe(0);
@@ -159,7 +162,7 @@ test("a not_called caller refunds the hold and leaves the cap intact", async () 
       throw new Error("the key must stay unset");
     };
     for (let i = 0; i < 120; i += 1) {
-      row.jevQueue.push({ pair: "ETH-USD", barStartSec: 100 + i, state: state(), minutes: [] });
+      row.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 100 + i, state: state(), minutes: [] });
     }
     for (let i = 0; i < 120; i += 1) await drainJevShadow(row, NOW, NOW + 120_000);
     expect(row.jevSkip.byReason.not_called).toBe(120);
@@ -168,7 +171,7 @@ test("a not_called caller refunds the hold and leaves the cap intact", async () 
     expect(row.jevMeter.cumulativeUsd).toBe(0);
     expect(row.jevMeter.calls).toBe(0);
     row.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: 0.01 });
-    row.jevQueue.push({ pair: "ETH-USD", barStartSec: 300, state: state(), minutes: [] });
+    row.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 300, state: state(), minutes: [] });
     await drainJevShadow(row, NOW, NOW + 120_000);
     expect(row.jevAnswers[row.jevAnswers.length - 1]?.reason).toBe("ok");
     expect(row.jevMeter.calls).toBe(1);
@@ -205,7 +208,7 @@ test("scheduling counts BTC even when the open pair is the only name with minute
 test("a priced failure settles to its cost and an unpriced timeout keeps the hold", async () => {
   const priced = host();
   priced.jevCaller = async () => ({ ok: false, reason: "invalid_response", costUsd: 0.02 });
-  priced.jevQueue.push({ pair: "ETH-USD", barStartSec: 6, state: state(), minutes: [] });
+  priced.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 6, state: state(), minutes: [] });
   await drainJevShadow(priced, NOW, NOW + 120_000);
   expect(priced.jevMeter.cumulativeUsd).toBeCloseTo(0.02, 8);
   expect(priced.jevMeter.calls).toBe(0);
@@ -213,7 +216,7 @@ test("a priced failure settles to its cost and an unpriced timeout keeps the hol
 
   const hung = host();
   hung.jevCaller = () => new Promise<JevCallOutcome>(() => {});
-  hung.jevQueue.push({ pair: "ETH-USD", barStartSec: 7, state: state(), minutes: [] });
+  hung.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 7, state: state(), minutes: [] });
   await drainJevShadow(hung, NOW, NOW + 60_000 + 30);
   expect(hung.jevAnswers[0]?.reason).toBe("timeout");
   expect(hung.jevMeter.cumulativeUsd).toBeCloseTo(JEV_CALL_RESERVE_USD, 8);
@@ -231,8 +234,8 @@ test("two drains cannot both pass the cap, and a kept hold blocks the next call"
       release = resolve;
     });
   };
-  tight.jevQueue.push({ pair: "ETH-USD", barStartSec: 8, state: state(), minutes: [] });
-  tight.jevQueue.push({ pair: "ETH-USD", barStartSec: 9, state: state(), minutes: [] });
+  tight.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 8, state: state(), minutes: [] });
+  tight.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 9, state: state(), minutes: [] });
   const first = drainJevShadow(tight, NOW, NOW + 120_000);
   const second = drainJevShadow(tight, NOW, NOW + 120_000);
   await Promise.resolve();
@@ -247,8 +250,8 @@ test("two drains cannot both pass the cap, and a kept hold blocks the next call"
   const over = host();
   over.jevMeter = roomForOneReserve();
   over.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: JEV_CALL_RESERVE_USD + 1 });
-  over.jevQueue.push({ pair: "ETH-USD", barStartSec: 10, state: state(), minutes: [] });
-  over.jevQueue.push({ pair: "ETH-USD", barStartSec: 11, state: state(), minutes: [] });
+  over.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 10, state: state(), minutes: [] });
+  over.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 11, state: state(), minutes: [] });
   await drainJevShadow(over, NOW, NOW + 120_000);
   expect(over.jevAnswers[0]?.reason).toBe("call_error");
   expect(over.jevMeter.calls).toBe(0);
@@ -262,8 +265,8 @@ test("overlapping calls each settle to the real cost", async () => {
   const row = host();
   const waiting: Array<(value: JevCallOutcome) => void> = [];
   row.jevCaller = () => new Promise((resolve) => waiting.push(resolve));
-  row.jevQueue.push({ pair: "ETH-USD", barStartSec: 12, state: state(), minutes: [] });
-  row.jevQueue.push({ pair: "ETH-USD", barStartSec: 13, state: state(), minutes: [] });
+  row.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 12, state: state(), minutes: [] });
+  row.jevQueue.push({ pair: "ETH-USD", barStartSec: BAR + 13, state: state(), minutes: [] });
   const first = drainJevShadow(row, NOW, NOW + 120_000);
   const second = drainJevShadow(row, NOW, NOW + 120_000);
   await Promise.resolve();
@@ -281,15 +284,16 @@ test("a queued packet survives handover and a late bar is only the latest comple
   const bar = 1_700_000_100;
   const late = (bar + 900 + 500) * 1000;
   expect(scheduleClosedJevBar(bar, late)).toBe(true);
-  expect(scheduleClosedJevBar(bar - 900, late)).toBe(false);
+  expect(scheduleClosedJevBar(bar - 900, late)).toBe(true);
   expect(scheduleClosedJevBar(bar, bar * 1000)).toBe(false);
 
   const host = startPaperHost(["ETH-USD"], {});
   host.clock = () => NOW;
   host.kv = memoryKv();
   host.leaseToken = "held";
+  await host.kv.set("p6:lease", JSON.stringify({ holder: "cron", untilMs: NOW + 120_000, token: "held", release: "none" }));
   host.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: 0.01 });
-  for (const barStartSec of [21, 22, 23]) {
+  for (const barStartSec of [BAR + 21, BAR + 22, BAR + 23]) {
     host.jevQueue.push({ pair: "ETH-USD", barStartSec, state: state(), minutes: [] });
   }
   await drainJevShadow(host, NOW, NOW + 120_000);
@@ -302,8 +306,8 @@ test("a queued packet survives handover and a late bar is only the latest comple
   next.leaseToken = "held";
   next.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: 0.01 });
   installPaperState(next, capturePaperState(host));
-  expect(next.jevQueue.map((row) => row.barStartSec)).toEqual([22, 23]);
-  expect(next.jevDone.has("ETH-USD:21")).toBe(true);
+  expect(next.jevQueue.map((row) => row.barStartSec)).toEqual([BAR + 22, BAR + 23]);
+  expect(next.jevDone.has(`ETH-USD:${BAR + 21}`)).toBe(true);
   expect(next.jevTape.assess("ETH-USD", NOW).ok).toBe(false);
 
   const kv = memoryKv();
@@ -312,13 +316,14 @@ test("a queued packet survives handover and a late bar is only the latest comple
   again.clock = () => NOW;
   const loaded = await loadSplit(kv, again);
   installPaperState(again, loaded!);
-  expect(again.jevQueue.map((row) => row.barStartSec)).toEqual([22, 23]);
+  expect(again.jevQueue.map((row) => row.barStartSec)).toEqual([BAR + 22, BAR + 23]);
   again.kv = memoryKv();
   again.leaseToken = "held";
+  await again.kv.set("p6:lease", JSON.stringify({ holder: "cron", untilMs: NOW + 120_000, token: "held", release: "none" }));
   again.jevCaller = async () => ({ ok: true, answer: ANSWER, costUsd: 0.01 });
   await drainJevShadow(again, NOW, NOW + 120_000);
   await drainJevShadow(again, NOW, NOW + 120_000);
   expect(again.jevQueue).toHaveLength(0);
-  expect(again.jevAnswers.map((row) => row.barStartSec).sort((a, b) => a - b)).toEqual([21, 22, 23]);
+  expect(again.jevAnswers.map((row) => row.barStartSec).sort((a, b) => a - b)).toEqual([BAR + 21, BAR + 22, BAR + 23]);
   expect(again.jevAnswers.every((row) => row.reason === "ok")).toBe(true);
 });

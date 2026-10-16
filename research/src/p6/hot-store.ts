@@ -5,7 +5,8 @@
 
 import type { BarOHLC } from "../p3/signals";
 import { paperPnl } from "./engine";
-import { queuedForHandover, skipShareReport } from "./jev-call";
+import { boundJevDone, JEV_PACKET_TTL_MS, queuedForHandover, skipShareReport } from "./jev-call";
+import { packMinute, type JevMinuteTuple } from "./jev-minute";
 import {
   FOUR_KEEP,
   fourSeriesReady,
@@ -24,8 +25,10 @@ import { barMarker, HOT_KEY, LEASE_KEY, VALUE_MAX_BYTES, type Kv } from "./relay
 /** One record per flush. The dashboard reads this and does not recompute P/L. */
 export const LAST_RUN_KEY = "p6:lastRun";
 
-/** Heartbeat payload cap. A larger write is an incident and is not sent. */
+/** Heartbeat payload cap. Over this, Jev fields are shed and the book is still written. */
 export const HOT_MAX_BYTES = 256 * 1024;
+/** Incident when the hot snapshot reaches 75% of the cap. */
+export const HOT_WARN_BYTES = 192 * 1024;
 export const BAR15_TTL_MS = 9 * 24 * 60 * 60 * 1000;
 export const RING_TTL_MS = 2 * 60 * 60 * 1000;
 export const TAPE_TTL_MS = 2 * 60 * 60 * 1000;
@@ -149,10 +152,14 @@ interface HotBody {
   dIndeterminate: number;
   feedCursor: PaperStateBody["feedCursor"];
   jevMeter: PaperStateBody["jevMeter"];
-  jevMinutes?: PaperStateBody["jevMinutes"];
+  jevMinutes?: JevMinuteTuple[];
   jevDone?: PaperStateBody["jevDone"];
   jevAnswers?: PaperStateBody["jevAnswers"];
   jevSkip?: PaperStateBody["jevSkip"];
+  jevCatchUps?: PaperStateBody["jevCatchUps"];
+  jevFirst?: PaperStateBody["jevFirst"];
+  jevThrough?: PaperStateBody["jevThrough"];
+  jevPrev?: PaperStateBody["jevPrev"];
   jevBarSec?: PaperStateBody["jevBarSec"];
   jevQueue?: PaperStateBody["jevQueue"];
   emitted: string[];
@@ -198,10 +205,28 @@ export function captureHot(host: PaperHost): HotBody {
     dIndeterminate: book.indeterminateByClass.D,
     feedCursor: { ...host.feedCursor },
     jevMeter: { ...host.jevMeter },
-    jevMinutes: host.jevTape.exportMinutes(),
-    jevDone: [...host.jevDone],
-    jevAnswers: host.jevAnswers.slice(-20),
+    jevMinutes: compactJevMinutes(host),
+    jevDone: boundJevDone([...host.jevDone], Math.floor(host.clock() / 1000)),
+    jevAnswers: host.jevAnswers.slice(-20).map((row) => ({
+      pair: row.pair,
+      barStartSec: row.barStartSec,
+      reason: row.reason,
+      answer: row.answer,
+      tokens: row.tokens ?? null,
+      costUsd: row.costUsd,
+      answeredAtMs: row.answeredAtMs,
+      latencyMs: row.latencyMs,
+      packetHash: row.packetHash,
+      ...(row.holder ? { holder: row.holder } : {}),
+      ...(row.handoverMinutes != null ? { handoverMinutes: row.handoverMinutes } : {}),
+      ...(row.guardIncluded != null ? { guardIncluded: row.guardIncluded } : {}),
+      ...(row.scoreMid !== undefined ? { scoreMid: row.scoreMid } : {}),
+    })),
     jevSkip: host.jevSkip,
+    jevCatchUps: host.jevCatchUps,
+    jevFirst: host.jevFirst,
+    jevThrough: { ...host.jevThrough },
+    ...(host.jevPrev ? { jevPrev: host.jevPrev } : {}),
     ...(host.book.jevBarSec != null ? { jevBarSec: host.book.jevBarSec } : {}),
     jevQueue: queuedForHandover(host.jevQueue, host.jevDone),
     emitted: [...host.emitted].slice(-80),
@@ -218,6 +243,68 @@ export function captureHot(host: PaperHost): HotBody {
 
 export function hotBytes(host: PaperHost): number {
   return Buffer.byteLength(JSON.stringify(captureHot(host)));
+}
+
+function compactJevMinutes(host: PaperHost): JevMinuteTuple[] {
+  const open = new Set(host.book.positions.map((position) => position.productId));
+  open.add("BTC-USD");
+  return host.jevTape
+    .exportMinutes({ holder: host.holderId, leaseFromMs: host.leaseFromMs, leaseUntilMs: host.leaseUntilMs })
+    .filter((row) => open.has(row.productId))
+    .map(packMinute);
+}
+
+function jevShed(host: PaperHost, shed: { answers: boolean; minutes: boolean; done: boolean; first: boolean }): HotBody {
+  const body = captureHot(host);
+  if (shed.answers) body.jevAnswers = [];
+  if (shed.minutes) body.jevMinutes = [];
+  if (shed.done) body.jevDone = [];
+  if (shed.first) body.jevFirst = [];
+  if (!host.leaseToken) {
+    body.jevQueue = [];
+    body.jevAnswers = [];
+    body.jevDone = [];
+    body.jevMinutes = [];
+    body.jevFirst = [];
+  }
+  return body;
+}
+
+/** Shed Jev fields in order when hot is over the cap, and always return a snapshot. */
+export function hotSnapshot(host: PaperHost): string {
+  const shed = { answers: false, minutes: false, done: false, first: false };
+  let json = JSON.stringify(jevShed(host, shed));
+  let bytes = Buffer.byteLength(json);
+  if (bytes >= HOT_WARN_BYTES && !host.book.incidents.some((row) => row.includes("75% of 256 KB"))) {
+    host.book.incidents.push(`hot ${bytes} bytes at 75% of 256 KB`);
+    json = JSON.stringify(jevShed(host, shed));
+    bytes = Buffer.byteLength(json);
+  }
+  if (bytes > HOT_MAX_BYTES) {
+    shed.answers = true;
+    json = JSON.stringify(jevShed(host, shed));
+    bytes = Buffer.byteLength(json);
+  }
+  if (bytes > HOT_MAX_BYTES) {
+    shed.minutes = true;
+    json = JSON.stringify(jevShed(host, shed));
+    bytes = Buffer.byteLength(json);
+  }
+  if (bytes > HOT_MAX_BYTES) {
+    shed.done = true;
+    json = JSON.stringify(jevShed(host, shed));
+    bytes = Buffer.byteLength(json);
+  }
+  if (bytes > HOT_MAX_BYTES) {
+    shed.first = true;
+    json = JSON.stringify(jevShed(host, shed));
+    bytes = Buffer.byteLength(json);
+  }
+  if (bytes > HOT_MAX_BYTES && !host.book.incidents.some((row) => row.includes("exceeds 256 KB"))) {
+    host.book.incidents.push(`heartbeat write ${bytes} exceeds 256 KB`);
+    json = JSON.stringify(jevShed(host, shed));
+  }
+  return json;
 }
 
 async function writeOwned(kv: Kv, host: PaperHost, key: string, value: string, px?: number): Promise<void> {
@@ -480,11 +567,7 @@ function buildFlush(host: PaperHost): FlushPlan {
     if (rows.length === 0) continue;
     tapes.push({ key: tapeKey(at), value: tapeBlock(rows), px: TAPE_TTL_MS });
   }
-  const hotJson = JSON.stringify(captureHot(host));
-  const hotBytes = Buffer.byteLength(hotJson);
-  let hot: string | undefined;
-  if (hotBytes > HOT_MAX_BYTES) host.book.incidents.push(`heartbeat write ${hotBytes} exceeds 256 KB`);
-  else hot = hotJson;
+  const hot = hotSnapshot(host);
   const seenMark = new Set<string>();
   const marksOut: { key: string; value: string }[] = [];
   for (const bar of [...host.closingMarks, ...host.fifteen]) {
@@ -575,6 +658,7 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
     const mark = storedMarks.find(([productId]) => productId === id)?.[1];
     return !mark || mark.status === "short";
   }).length;
+  const jevReport = skipShareReport(host.jevSkip, host.clock());
   const finished = host.runOutcome !== "" && host.runOutcome !== "running";
   const completed = finished
     ? { end: host.clock(), cmds: host.saveCommands + 1, outcome: host.runOutcome }
@@ -595,13 +679,20 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
     seedIdx: host.seedCursor.idx,
     completed,
     pnl: paperPnl(host.book),
-    jev: {
+      jev: {
       totalUsd: host.jevMeter.cumulativeUsd,
       todayUsd: host.jevMeter.today === new Date(host.clock()).toISOString().slice(0, 10) ? host.jevMeter.todayUsd : 0,
       calls: host.jevMeter.calls ?? 0,
       capUsd: host.jevMeter.capUsd,
       byReason: { ...host.jevSkip.byReason },
-      skips: skipShareReport(host.jevSkip),
+      skips: jevReport,
+      latency: { ...jevReport.latency },
+      handoverMinutes: host.jevTape.handoverMinutes,
+      holder: host.holderId ?? "",
+      catchUp: jevReport.catchUp,
+      onTime: jevReport.onTime,
+      catchUpShare: jevReport.catchUpShare,
+      catchUpFlag: jevReport.catchUpFlag,
     },
   };
   let encoded = JSON.stringify(last);
@@ -611,11 +702,14 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
     last.redis.maxValueBytes = lastBytes;
     encoded = JSON.stringify(last);
   }
-  const extra = [
+  const extra: { key: string; value: string; px?: number; nx?: boolean }[] = [
     { key: SEED_CURSOR_KEY, value: JSON.stringify(host.seedCursor) },
     ...storedMarks.map(([id, mark]) => ({ key: seedMarkKey(id), value: JSON.stringify(mark) })),
     { key: LAST_RUN_KEY, value: encoded },
   ];
+  if (host.leaseToken) {
+    for (const row of host.jevPacketWrites ?? []) extra.push({ key: row.key, value: row.value, px: JEV_PACKET_TTL_MS, nx: true });
+  }
   return extra;
 }
 
@@ -669,7 +763,7 @@ async function applyUnowned(kv: Kv, host: PaperHost, plan: FlushPlan): Promise<v
     bars?: { key: string; value: string; id: string; field: string; max: number; px: number }[];
     marks?: { key: string; value: string }[];
     warm?: { key: string; value: string }[];
-    extra?: { key: string; value: string }[];
+    extra?: { key: string; value: string; px?: number; nx?: boolean }[];
   };
   if (body.hot) {
     const wrote = await kv.set(HOT_KEY, body.hot);
@@ -696,7 +790,8 @@ async function applyUnowned(kv: Kv, host: PaperHost, plan: FlushPlan): Promise<v
     await kv.set(mark.key, mark.value);
   }
   for (const row of body.extra ?? []) {
-    const wrote = await kv.set(row.key, row.value);
+    if (row.nx && (await kv.get(row.key))) continue;
+    const wrote = await kv.set(row.key, row.value, row.px != null && row.px > 0 ? { px: row.px } : undefined);
     if (!wrote) throw new Error(`kv set ${row.key} failed`);
   }
 }
@@ -773,6 +868,9 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
         return;
       }
       host.seedDropKeys = [];
+      host.jevPacketSent = host.jevPacketSent ?? new Set();
+      for (const row of host.jevPacketWrites ?? []) host.jevPacketSent.add(row.key);
+      host.jevPacketWrites = [];
       const body = JSON.parse(plan.payload) as { warm?: unknown[] };
       if ((body.warm ?? []).length > 0) host.warmupStored = true;
     }

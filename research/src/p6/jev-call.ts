@@ -3,6 +3,7 @@
  * A call never places an order and never reads an order endpoint.
  */
 
+import { createHash } from "node:crypto";
 import type { MarketState } from "../../../cb/state";
 import { JEV_TIMEOUT_MS } from "../../vendor/87b35d0/config.ts";
 import { adjustJevReserve, JEV_CALL_RESERVE_USD, reserveJevCall, type JevMeter, type ShadowPacket } from "./jev-shadow";
@@ -12,6 +13,11 @@ export const JEV_CALL_CAP_MS = JEV_TIMEOUT_MS;
 /** Matches relay HANDOVER_MARGIN_MS. A call is not started inside this margin. */
 export const JEV_CALL_MARGIN_MS = 60_000;
 export const JEV_ANSWER_KEEP = 20;
+/** Bar length plus 600s. An uncalled packet is a counted timeout at this age. */
+export const JEV_EXPIRY_SEC = 900 + 600;
+export const JEV_PACKET_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+export const JEV_DONE_BARS = 8;
+const LEASE_KEY = "p6:lease";
 
 export const JEV_REASONS = ["no_1m_input", "not_called", "timeout", "call_error", "invalid_response"] as const;
 export type JevReason = (typeof JEV_REASONS)[number];
@@ -24,8 +30,8 @@ export interface JevAnswer {
 }
 
 export type JevCallOutcome =
-  | { ok: true; answer: JevAnswer; costUsd: number }
-  | { ok: false; reason: Exclude<JevReason, "no_1m_input">; costUsd?: number };
+  | { ok: true; answer: JevAnswer; costUsd: number; tokens?: number }
+  | { ok: false; reason: Exclude<JevReason, "no_1m_input">; costUsd?: number; tokens?: number };
 
 export type JevCaller = (state: MarketState, timeoutMs: number) => Promise<JevCallOutcome>;
 
@@ -34,28 +40,96 @@ export interface JevQueued {
   barStartSec: number;
   state: MarketState;
   minutes: JevMinuteSummary[];
+  /** Open trade this packet is about. Scoring matches this id, never the pair. */
+  tradeId?: string;
+  /** In-process only. A crash leaves the row queued for the next holder. */
+  inflight?: boolean;
 }
 
 export interface JevStored {
   pair: string;
   barStartSec: number;
-  packet: MarketState;
-  minutes: JevMinuteSummary[];
   answer: JevAnswer | null;
   reason: JevReason | "ok";
   costUsd: number;
+  tokens: number | null;
+  answeredAtMs: number;
+  latencyMs: number;
+  packetHash: string;
+  holder?: string;
+  handoverMinutes?: number;
+  /** True when the answer is included in guard-effect scoring. */
+  guardIncluded?: boolean;
+  /** Mid used for scoring. The arrival mid at answeredAtMs, never the bar-close mid. */
+  scoreMid?: number | null;
+}
+
+export interface JevLatencyBuckets {
+  le60: number;
+  le300: number;
+  le600: number;
+  /** Answered rows slower than 600s after bar close. Unanswered rows are not counted. */
+  late: number;
+}
+
+/** One compact record for a contiguous catch-up run. Not one key per bar. */
+export interface JevCatchUpRun {
+  count: number;
+  firstBar: number;
+  lastBar: number;
+  cause: "engine_gap" | "takeover";
+  atMs: number;
+  holder: string;
+}
+
+/** First time a bar was seen. Classification uses this time and is not recomputed. */
+export interface JevFirstBar {
+  bar: number;
+  atMs: number;
+  holder: string;
+  leaseFromMs: number;
+  /** Pairs classified with this bar. The watermark advances per pair. */
+  pairs: string[];
+}
+
+/** One UTC day of bar counts. The trailing-7 flag reads these, not the run list. */
+export interface JevDayCount {
+  dayMs: number;
+  onTime: number;
+  catchUp: number;
 }
 
 export interface JevSkipLedger {
   byReason: Record<JevReason, number>;
   bySub: { no_trades_feed: number; no_book_feed: number };
   byTier: Record<string, { packets: number; skipped: number }>;
+  latency: JevLatencyBuckets;
+  handoverMinutes: number;
+  holder: string;
+  /** Display only. Epoch week, `Math.floor(nowMs / 7d) * 7d`. The flag does not read these. */
+  weekStartMs: number;
+  weekOnTime: number;
+  weekCatchUp: number;
+  /** Per UTC day. Kept for 14 days including today. */
+  jevDays: JevDayCount[];
 }
 
 export interface JevSkipReport {
   byReason: Record<JevReason, number>;
   byTier: Record<string, number>;
   bySub: { no_trades_feed: number; no_book_feed: number };
+  latency: JevLatencyBuckets;
+  handoverMinutes: number;
+  holder: string;
+  onTime: number;
+  catchUp: number;
+  /** Trailing 7 UTC days, including today. */
+  catchUpShare: number;
+  /** True when that share is strictly above 2%. */
+  catchUpFlag: boolean;
+  /** UTC-week bucket. Display only. */
+  displayOnTime: number;
+  displayCatchUp: number;
 }
 
 export function freshJevSkip(): JevSkipLedger {
@@ -63,20 +137,119 @@ export function freshJevSkip(): JevSkipLedger {
     byReason: { no_1m_input: 0, not_called: 0, timeout: 0, call_error: 0, invalid_response: 0 },
     bySub: { no_trades_feed: 0, no_book_feed: 0 },
     byTier: {},
+    latency: { le60: 0, le300: 0, le600: 0, late: 0 },
+    handoverMinutes: 0,
+    holder: "",
+    weekStartMs: 0,
+    weekOnTime: 0,
+    weekCatchUp: 0,
+    jevDays: [],
   };
 }
 
-export function skipShareReport(ledger: JevSkipLedger): JevSkipReport {
-  const packets = Object.values(ledger.byTier).reduce((sum, row) => sum + row.packets, 0);
-  const byReason = {} as Record<JevReason, number>;
-  for (const reason of JEV_REASONS) byReason[reason] = packets > 0 ? ledger.byReason[reason] / packets : 0;
-  const byTier: Record<string, number> = {};
-  for (const [tier, row] of Object.entries(ledger.byTier)) byTier[tier] = row.packets > 0 ? row.skipped / row.packets : 0;
-  const bySub = {
-    no_trades_feed: packets > 0 ? ledger.bySub.no_trades_feed / packets : 0,
-    no_book_feed: packets > 0 ? ledger.bySub.no_book_feed / packets : 0,
+export function normalizeJevSkip(ledger: Partial<JevSkipLedger> | undefined): JevSkipLedger {
+  const fresh = freshJevSkip();
+  if (!ledger) return fresh;
+  return {
+    byReason: { ...fresh.byReason, ...ledger.byReason },
+    bySub: { ...fresh.bySub, ...ledger.bySub },
+    byTier: ledger.byTier ?? {},
+    latency: { ...fresh.latency, ...ledger.latency },
+    handoverMinutes: ledger.handoverMinutes ?? 0,
+    holder: ledger.holder ?? "",
+    weekStartMs: ledger.weekStartMs ?? 0,
+    weekOnTime: ledger.weekOnTime ?? 0,
+    weekCatchUp: ledger.weekCatchUp ?? 0,
+    jevDays: (ledger.jevDays ?? []).map((day) => ({ ...day })),
   };
-  return { byReason, byTier, bySub };
+}
+
+export function skipShareReport(ledger: JevSkipLedger, nowMs = 0): JevSkipReport {
+  const row = normalizeJevSkip(ledger);
+  const packets = Object.values(row.byTier).reduce((sum, item) => sum + item.packets, 0);
+  const byReason = {} as Record<JevReason, number>;
+  for (const reason of JEV_REASONS) byReason[reason] = packets > 0 ? row.byReason[reason] / packets : 0;
+  const byTier: Record<string, number> = {};
+  for (const [tier, item] of Object.entries(row.byTier)) byTier[tier] = item.packets > 0 ? item.skipped / item.packets : 0;
+  const bySub = {
+    no_trades_feed: packets > 0 ? row.bySub.no_trades_feed / packets : 0,
+    no_book_feed: packets > 0 ? row.bySub.no_book_feed / packets : 0,
+  };
+  const asOf = nowMs > 0 ? nowMs : row.jevDays.reduce((max, day) => Math.max(max, day.dayMs), 0);
+  const trail = trailingCatchUpShare(row.jevDays, asOf);
+  return {
+    byReason,
+    byTier,
+    bySub,
+    latency: { ...row.latency, late: row.latency.late ?? 0 },
+    handoverMinutes: row.handoverMinutes,
+    holder: row.holder,
+    onTime: trail.onTime,
+    catchUp: trail.catchUp,
+    catchUpShare: trail.share,
+    catchUpFlag: trail.flag,
+    displayOnTime: row.weekOnTime,
+    displayCatchUp: row.weekCatchUp,
+  };
+}
+
+const JEV_DAY_MS = 86_400_000;
+
+/**
+ * Trailing 7 UTC days, including today. Share is catchUp / (onTime + catchUp).
+ * Exactly 2% does not flag. An empty window is share 0.
+ */
+export function trailingCatchUpShare(
+  days: readonly JevDayCount[],
+  nowMs: number,
+): { onTime: number; catchUp: number; share: number; flag: boolean } {
+  const today = Math.floor(nowMs / JEV_DAY_MS) * JEV_DAY_MS;
+  const from = today - 6 * JEV_DAY_MS;
+  let onTime = 0;
+  let catchUp = 0;
+  for (const day of days) {
+    if (day.dayMs < from || day.dayMs > today) continue;
+    onTime += day.onTime;
+    catchUp += day.catchUp;
+  }
+  const denom = onTime + catchUp;
+  const share = denom > 0 ? catchUp / denom : 0;
+  return { onTime, catchUp, share, flag: share > 0.02 };
+}
+
+/** Count one bar on its UTC day. Keep 14 UTC days including the newest. */
+export function noteJevDay(ledger: JevSkipLedger, nowMs: number, kind: "onTime" | "catchUp"): void {
+  const dayMs = Math.floor(nowMs / JEV_DAY_MS) * JEV_DAY_MS;
+  let day = ledger.jevDays.find((row) => row.dayMs === dayMs);
+  if (!day) {
+    day = { dayMs, onTime: 0, catchUp: 0 };
+    ledger.jevDays.push(day);
+  }
+  if (kind === "onTime") day.onTime += 1;
+  else day.catchUp += 1;
+  const newest = ledger.jevDays.reduce((max, row) => Math.max(max, row.dayMs), dayMs);
+  const keepFrom = newest - 13 * JEV_DAY_MS;
+  ledger.jevDays = ledger.jevDays.filter((row) => row.dayMs >= keepFrom);
+}
+
+const JEV_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function rollWeek(ledger: JevSkipLedger, nowMs: number): void {
+  const start = Math.floor(nowMs / JEV_WEEK_MS) * JEV_WEEK_MS;
+  if (ledger.weekStartMs === start) return;
+  ledger.weekStartMs = start;
+  ledger.weekOnTime = 0;
+  ledger.weekCatchUp = 0;
+}
+
+/** Exclusive buckets. 60s is le60, 300s is le300, 600s is le600, and anything slower is late. */
+export function noteLatency(ledger: JevSkipLedger, latencyMs: number): void {
+  const row = ledger.latency ?? (ledger.latency = { le60: 0, le300: 0, le600: 0, late: 0 });
+  if (row.late == null) row.late = 0;
+  if (latencyMs <= 60_000) row.le60 += 1;
+  else if (latencyMs <= 300_000) row.le300 += 1;
+  else if (latencyMs <= 600_000) row.le600 += 1;
+  else row.late += 1;
 }
 
 function noteScheduled(ledger: JevSkipLedger, tier: string): void {
@@ -95,6 +268,11 @@ function noteSkip(ledger: JevSkipLedger, reason: JevReason, tier: string, sub?: 
 
 export function callBudgetMs(nowMs: number, untilMs: number): number {
   return Math.min(JEV_CALL_CAP_MS, untilMs - nowMs - JEV_CALL_MARGIN_MS);
+}
+
+/** True when the call must not start. A budget that would end after untilMs does not start. */
+export function refuseLateCall(nowMs: number, untilMs: number, budget: number): boolean {
+  return !(budget > 0) || nowMs + budget > untilMs;
 }
 
 export function jevKey(pair: string, barStartSec: number): string {
@@ -180,6 +358,8 @@ export interface JevDrainHost {
   clock: () => number;
   kv?: unknown;
   leaseToken: string | null;
+  stopped?: boolean;
+  holderId?: string | null;
   jevMeter: JevMeter;
   jevTape: JevTape;
   jevQueue: JevQueued[];
@@ -187,13 +367,25 @@ export interface JevDrainHost {
   jevAnswers: JevStored[];
   jevSkip: JevSkipLedger;
   jevCaller?: JevCaller;
+  jevPacketWrites?: { key: string; value: string }[];
+  jevPacketSent?: Set<string>;
+  /** Lease epoch. A renew does not move it. Takeover compares it with the previous bar. */
+  leaseFromMs?: number | null;
+  jevCatchUps?: JevCatchUpRun[];
+  jevFirst?: JevFirstBar[];
+  /** Per pair. Only moves forward. A bar at or below it is not classified again. */
+  jevThrough?: Record<string, number>;
+  jevPrev?: { bar: number; holder: string; leaseFromMs: number };
+  /** True while the current pass is still appending one catch-up run. */
+  jevCatchUpOpen?: boolean;
   book: {
     jevBarSec?: number;
     jevPackets: number;
     jevSkipped: number;
     incidents: string[];
     packets: ShadowPacket[];
-    positions: { productId: string }[];
+    positions: { productId: string; id?: string }[];
+    closed?: { productId: string; exitTs: number; id?: string }[];
   };
 }
 
@@ -205,13 +397,49 @@ export function latestCompletedBarStartSec(nowMs: number): number {
   return Math.floor(nowSec / FIFTEEN_SEC) * FIFTEEN_SEC - FIFTEEN_SEC;
 }
 
-/**
- * True only for the latest completed 15m bar, however late it arrives.
- * A bar still forming is false. An older catch-up bar is false so history is not sent to Jev.
- */
+/** True once the 15m bar has closed, however late. A bar still forming is false. */
 export function scheduleClosedJevBar(barStartSec: number, nowMs: number): boolean {
-  if (nowMs < (barStartSec + FIFTEEN_SEC) * 1000) return false;
-  return barStartSec === latestCompletedBarStartSec(nowMs);
+  return nowMs >= (barStartSec + FIFTEEN_SEC) * 1000;
+}
+
+export function packetExpired(barStartSec: number, nowMs: number): boolean {
+  return Math.floor(nowMs / 1000) >= barStartSec + JEV_EXPIRY_SEC;
+}
+
+export function jevAnswerKey(pair: string, barStartSec: number): string {
+  return `p6:jev:ans:${pair}:${barStartSec}`;
+}
+
+/** Last 8 bar starts, plus any key whose packet has not expired. */
+export function boundJevDone(keys: readonly string[], nowSec: number): string[] {
+  const parsed = keys
+    .map((key) => {
+      const cut = key.lastIndexOf(":");
+      return { key, bar: Number(key.slice(cut + 1)) };
+    })
+    .filter((row) => Number.isFinite(row.bar));
+  const bars = [...new Set(parsed.map((row) => row.bar))].sort((a, b) => b - a);
+  const keep = new Set(bars.slice(0, JEV_DONE_BARS));
+  return parsed.filter((row) => keep.has(row.bar) || nowSec < row.bar + JEV_EXPIRY_SEC).map((row) => row.key);
+}
+
+export function packetHash(state: MarketState, minutes: readonly JevMinuteSummary[]): string {
+  return createHash("sha256").update(JSON.stringify({ state, minutes })).digest("hex");
+}
+
+/**
+ * Guard-effect scoring uses the mid at answeredAtMs. A trade already closed
+ * by then is excluded. The bar-close mid is never the score.
+ */
+export function guardEffectScore(opts: {
+  answeredAtMs: number;
+  arrivalMid: number | null;
+  barCloseMid: number | null;
+  tradeClosedAtMs: number | null;
+}): { included: boolean; mid: number | null } {
+  void opts.barCloseMid;
+  if (opts.tradeClosedAtMs != null && opts.tradeClosedAtMs <= opts.answeredAtMs) return { included: false, mid: null };
+  return { included: true, mid: opts.arrivalMid };
 }
 
 /** Drop done keys and rows that cannot be drained. The handover stores this list. */
@@ -223,22 +451,147 @@ export function queuedForHandover(rows: readonly JevQueued[], done: ReadonlySet<
     const key = jevKey(row.pair, row.barStartSec);
     if (done.has(key) || seen.has(key)) continue;
     seen.add(key);
-    out.push({ pair: row.pair, barStartSec: row.barStartSec, state: row.state, minutes: Array.isArray(row.minutes) ? row.minutes : [] });
+    out.push({
+      pair: row.pair,
+      barStartSec: row.barStartSec,
+      state: row.state,
+      minutes: Array.isArray(row.minutes) ? row.minutes : [],
+      ...(row.tradeId ? { tradeId: row.tradeId } : {}),
+    });
   }
   return out;
 }
 
+function firstOf(host: JevDrainHost, barStartSec: number): JevFirstBar | undefined {
+  return (host.jevFirst ?? []).find((row) => row.bar === barStartSec);
+}
+
+/** Stamps live through expiry plus three bars. Older bars become the watermark. */
+function stampWindowSec(): number {
+  return JEV_EXPIRY_SEC + 3 * FIFTEEN_SEC;
+}
+
+function advanceThrough(host: JevDrainHost, pair: string, bar: number): void {
+  const through = host.jevThrough ?? (host.jevThrough = {});
+  const current = through[pair] ?? -1;
+  if (bar > current) through[pair] = bar;
+}
+
+/** Drop stamps that have aged out or sit at or below the watermark, and move the watermark forward. */
+function settleStamps(host: JevDrainHost, nowMs: number): void {
+  const nowSec = Math.floor(nowMs / 1000);
+  const window = stampWindowSec();
+  const kept: JevFirstBar[] = [];
+  for (const row of host.jevFirst ?? []) {
+    const covered = row.pairs.length > 0 && row.pairs.every((pair) => row.bar <= (host.jevThrough?.[pair] ?? -1));
+    if (nowSec >= row.bar + window || covered) {
+      for (const pair of row.pairs) advanceThrough(host, pair, row.bar);
+      continue;
+    }
+    kept.push(row);
+  }
+  host.jevFirst = kept;
+}
+
+function noteStamp(host: JevDrainHost, bar: number, pairs: readonly string[], nowMs: number): void {
+  const nowSec = Math.floor(nowMs / 1000);
+  if (nowSec >= bar + stampWindowSec()) {
+    for (const pair of pairs) advanceThrough(host, pair, bar);
+    return;
+  }
+  const list = host.jevFirst ?? (host.jevFirst = []);
+  if (list.some((row) => row.bar === bar)) return;
+  list.push({ bar, atMs: nowMs, holder: host.holderId ?? "", leaseFromMs: host.leaseFromMs ?? 0, pairs: [...pairs] });
+}
+
+/** True when every pair that already has a watermark has moved through this bar. */
+function barAtOrBelowWatermark(host: JevDrainHost, bar: number, pairs: readonly string[]): boolean {
+  const through = host.jevThrough ?? {};
+  const known = pairs.filter((pair) => Object.prototype.hasOwnProperty.call(through, pair));
+  if (known.length === 0) return false;
+  return known.every((pair) => bar <= through[pair]!);
+}
+
+function tradeIdFor(host: JevDrainHost, pair: string): string | undefined {
+  return host.book.positions.find((position) => position.productId === pair)?.id;
+}
+
+/** A contiguous run covers this bar. A hole inside a short count does not. */
+export function catchUpCovers(runs: readonly JevCatchUpRun[], barStartSec: number): boolean {
+  for (const run of runs) {
+    if (barStartSec < run.firstBar || barStartSec > run.lastBar) continue;
+    if ((barStartSec - run.firstBar) % FIFTEEN_SEC !== 0) continue;
+    const span = (run.lastBar - run.firstBar) / FIFTEEN_SEC + 1;
+    if (run.count === span) return true;
+  }
+  return false;
+}
+
+/**
+ * Takeover only when this holder differs from the previous bar's holder and the
+ * lease epoch differs too. Every other first sight is an engine gap.
+ */
+function catchUpCause(host: JevDrainHost): "engine_gap" | "takeover" {
+  const prev = host.jevPrev;
+  const holder = host.holderId ?? "";
+  const leaseFrom = host.leaseFromMs ?? 0;
+  if (!prev || holder === "" || prev.holder === "" || leaseFrom === 0 || prev.leaseFromMs === 0) return "engine_gap";
+  if (holder !== prev.holder && leaseFrom !== prev.leaseFromMs) return "takeover";
+  return "engine_gap";
+}
+
+function touchPrev(host: JevDrainHost, barStartSec: number): void {
+  host.jevPrev = { bar: barStartSec, holder: host.holderId ?? "", leaseFromMs: host.leaseFromMs ?? 0 };
+}
+
+function noteCatchUp(host: JevDrainHost, barStartSec: number, nowMs: number): void {
+  const holder = host.holderId ?? "";
+  const runs = host.jevCatchUps ?? (host.jevCatchUps = []);
+  const last = runs[runs.length - 1];
+  const adjacent = last != null && (barStartSec === last.lastBar + FIFTEEN_SEC || barStartSec === last.firstBar - FIFTEEN_SEC);
+  const cause = host.jevCatchUpOpen && last && last.holder === holder && adjacent ? last.cause : catchUpCause(host);
+  if (host.jevCatchUpOpen && last && last.cause === cause && last.holder === holder && adjacent) {
+    last.count += 1;
+    if (barStartSec < last.firstBar) last.firstBar = barStartSec;
+    if (barStartSec > last.lastBar) last.lastBar = barStartSec;
+  } else {
+    runs.push({ count: 1, firstBar: barStartSec, lastBar: barStartSec, cause, atMs: nowMs, holder });
+    if (runs.length > 32) runs.splice(0, runs.length - 32);
+  }
+  host.jevCatchUpOpen = true;
+  rollWeek(host.jevSkip, nowMs);
+  host.jevSkip.weekCatchUp += 1;
+  noteJevDay(host.jevSkip, nowMs, "catchUp");
+  touchPrev(host, barStartSec);
+}
+
 export function scheduleLiveJev(host: JevDrainHost, barStartSec: number): void {
   if (host.book.jevBarSec === barStartSec) return;
-  host.book.jevBarSec = barStartSec;
   const nowMs = host.clock();
   const pairs = scheduledPairs(host.book.positions.map((position) => position.productId));
+  settleStamps(host, nowMs);
+  if (barAtOrBelowWatermark(host, barStartSec, pairs)) return;
+  if (firstOf(host, barStartSec) || catchUpCovers(host.jevCatchUps ?? [], barStartSec)) return;
+  if (packetExpired(barStartSec, nowMs)) {
+    noteCatchUp(host, barStartSec, nowMs);
+    noteStamp(host, barStartSec, pairs, nowMs);
+    host.book.jevBarSec = barStartSec;
+    return;
+  }
+  noteStamp(host, barStartSec, pairs, nowMs);
+  host.book.jevBarSec = barStartSec;
+  host.jevCatchUpOpen = false;
+  rollWeek(host.jevSkip, nowMs);
+  host.jevSkip.weekOnTime += 1;
+  noteJevDay(host.jevSkip, nowMs, "onTime");
+  touchPrev(host, barStartSec);
   host.book.jevPackets += pairs.length;
   for (const pair of pairs) {
     const tier = liquidityTier(pair);
-    noteScheduled(host.jevSkip, tier);
     const key = jevKey(pair, barStartSec);
-    if (host.jevDone.has(key)) continue;
+    const tradeId = tradeIdFor(host, pair);
+    if (host.jevDone.has(key) || host.jevQueue.some((row) => jevKey(row.pair, row.barStartSec) === key)) continue;
+    noteScheduled(host.jevSkip, tier);
     host.jevTape.closeThrough(pair, nowMs);
     const window = host.jevTape.assess(pair, barStartSec * 1000);
     if (!window.ok) {
@@ -246,6 +599,8 @@ export function scheduleLiveJev(host: JevDrainHost, barStartSec: number): void {
       host.book.jevSkipped += 1;
       host.jevDone.add(key);
       host.book.incidents.push(`jev no_1m_input ${pair} ${barStartSec}${window.sub ? ` ${window.sub}` : ""}`);
+      const state = host.jevTape.marketState(pair, nowMs) ?? ({ pair } as MarketState);
+      remember(host, { pair, barStartSec, state, minutes: window.minutes, ...(tradeId ? { tradeId } : {}) }, "no_1m_input", null, 0, null);
       continue;
     }
     const state = host.jevTape.marketState(pair, nowMs);
@@ -254,35 +609,128 @@ export function scheduleLiveJev(host: JevDrainHost, barStartSec: number): void {
       host.book.jevSkipped += 1;
       host.jevDone.add(key);
       host.book.incidents.push(`jev no_1m_input ${pair} ${barStartSec}`);
+      remember(host, { pair, barStartSec, state: { pair } as MarketState, minutes: window.minutes, ...(tradeId ? { tradeId } : {}) }, "no_1m_input", null, 0, null);
       continue;
     }
-    host.jevQueue.push({ pair, barStartSec, state, minutes: window.minutes });
+    host.jevQueue.push({ pair, barStartSec, state, minutes: window.minutes, ...(tradeId ? { tradeId } : {}) });
     host.book.packets.push({ pair, position: 0, barStartSec, label: "read", called: false });
   }
 }
 
-function remember(host: JevDrainHost, row: JevQueued, reason: JevReason | "ok", answer: JevAnswer | null, costUsd: number): void {
+/**
+ * Exit of the trade this answer is about, or null when that trade is still open
+ * or no such trade exists. A close before the bar close is a different trade.
+ */
+function closedAtMs(host: JevDrainHost, tradeId: string | undefined, barStartSec: number, answeredAtMs: number): number | null {
+  if (!tradeId) return null;
+  if (host.book.positions.some((position) => position.id === tradeId)) return null;
+  const aboutFrom = (barStartSec + FIFTEEN_SEC) * 1000;
+  let last: number | null = null;
+  for (const trade of host.book.closed ?? []) {
+    if (trade.id !== tradeId) continue;
+    if (!(trade.exitTs <= answeredAtMs)) continue;
+    if (trade.exitTs < aboutFrom) continue;
+    if (last == null || trade.exitTs > last) last = trade.exitTs;
+  }
+  return last;
+}
+
+function remember(
+  host: JevDrainHost,
+  row: JevQueued,
+  reason: JevReason | "ok",
+  answer: JevAnswer | null,
+  costUsd: number,
+  tokens: number | null,
+): void {
+  const answeredAtMs = host.clock();
+  const latencyMs = Math.max(0, answeredAtMs - (row.barStartSec + FIFTEEN_SEC) * 1000);
+  const arrivalMid = host.jevTape.midAtTime(row.pair, answeredAtMs);
+  const barCloseMid = typeof row.state.mid === "number" ? row.state.mid : null;
+  const score = guardEffectScore({
+    answeredAtMs,
+    arrivalMid,
+    barCloseMid,
+    tradeClosedAtMs: closedAtMs(host, row.tradeId, row.barStartSec, answeredAtMs),
+  });
+  if (reason === "ok") noteLatency(host.jevSkip, latencyMs);
+  host.jevSkip.holder = host.holderId ?? host.jevSkip.holder;
+  host.jevSkip.handoverMinutes = host.jevTape.handoverMinutes;
+  const stored: JevStored = {
+    pair: row.pair,
+    barStartSec: row.barStartSec,
+    answer,
+    reason,
+    costUsd,
+    tokens,
+    answeredAtMs,
+    latencyMs,
+    packetHash: packetHash(row.state, row.minutes),
+    ...(host.holderId ? { holder: host.holderId } : {}),
+    handoverMinutes: host.jevTape.handoverMinutes,
+    guardIncluded: score.included,
+    scoreMid: score.mid,
+  };
   host.jevDone.add(jevKey(row.pair, row.barStartSec));
-  host.jevAnswers.push({ pair: row.pair, barStartSec: row.barStartSec, packet: row.state, minutes: row.minutes, answer, reason, costUsd });
+  host.jevAnswers.push(stored);
   if (host.jevAnswers.length > JEV_ANSWER_KEEP) host.jevAnswers.splice(0, host.jevAnswers.length - JEV_ANSWER_KEEP);
+  const key = jevAnswerKey(row.pair, row.barStartSec);
+  const sent = host.jevPacketSent ?? (host.jevPacketSent = new Set());
+  if (sent.has(key)) return;
+  const writes = host.jevPacketWrites ?? (host.jevPacketWrites = []);
+  if (writes.some((item) => item.key === key)) return;
+  writes.push({
+    key,
+    value: JSON.stringify({
+      ...stored,
+      packet: row.state,
+      minutes: row.minutes,
+    }),
+  });
 }
 
 function dropQueued(host: JevDrainHost, reason: Exclude<JevReason, "no_1m_input">): void {
-  const pending = host.jevQueue.filter((row) => !host.jevDone.has(jevKey(row.pair, row.barStartSec)));
-  host.jevQueue = [];
+  const pending = host.jevQueue.filter((row) => !row.inflight && !host.jevDone.has(jevKey(row.pair, row.barStartSec)));
+  host.jevQueue = host.jevQueue.filter((row) => row.inflight);
   for (const row of pending) {
     noteSkip(host.jevSkip, reason, liquidityTier(row.pair));
     host.book.jevSkipped += 1;
     host.book.incidents.push(`jev ${reason} ${row.pair} ${row.barStartSec}`);
-    remember(host, row, reason, null, 0);
+    remember(host, row, reason, null, 0, null);
   }
 }
 
-function skipOne(host: JevDrainHost, row: JevQueued, reason: JevReason, costUsd: number, answer: JevAnswer | null = null): void {
+function skipOne(
+  host: JevDrainHost,
+  row: JevQueued,
+  reason: JevReason,
+  costUsd: number,
+  answer: JevAnswer | null = null,
+  tokens: number | null = null,
+): void {
   noteSkip(host.jevSkip, reason, liquidityTier(row.pair));
   host.book.jevSkipped += 1;
   host.book.incidents.push(`jev ${reason} ${row.pair} ${row.barStartSec}`);
-  remember(host, row, reason, answer, costUsd);
+  remember(host, row, reason, answer, costUsd, tokens);
+}
+
+function removeQueued(host: JevDrainHost, row: JevQueued): void {
+  host.jevQueue = host.jevQueue.filter((item) => item !== row && jevKey(item.pair, item.barStartSec) !== jevKey(row.pair, row.barStartSec));
+}
+
+function kvGet(kv: unknown): ((key: string) => Promise<string | null>) | null {
+  if (!kv || typeof kv !== "object" || !("get" in kv) || typeof (kv as { get?: unknown }).get !== "function") return null;
+  return (key) => (kv as { get(key: string): Promise<string | null> }).get(key);
+}
+
+function leaseHeld(raw: string | null, token: string): boolean {
+  if (!raw) return false;
+  try {
+    const body = JSON.parse(raw) as { token?: string; release?: string };
+    return body.token === token && body.release === "none";
+  } catch {
+    return false;
+  }
 }
 
 /** A failed call that named its price settles to that price. An unpriced failure keeps the hold. */
@@ -296,22 +744,39 @@ function chargeFailure(host: JevDrainHost, reservedUsd: number, costUsd: number 
   }
 }
 
-/** One shadow call, or none. Does not throw. Does not touch orders. */
+/** One shadow call, or none. Does not throw. Does not touch orders. A non-positive budget leaves the queue. */
 export async function drainJevShadow(host: JevDrainHost, nowMs: number, untilMs: number): Promise<void> {
-  if (host.kv && host.leaseToken == null) return;
-  host.jevQueue = host.jevQueue.filter((row) => !host.jevDone.has(jevKey(row.pair, row.barStartSec)));
+  if (host.stopped) return;
   if (host.jevQueue.length === 0) return;
-  const budget = callBudgetMs(nowMs, untilMs);
-  if (!(budget > 0)) {
-    dropQueued(host, "timeout");
+  const read = kvGet(host.kv);
+  if (read) {
+    if (host.leaseToken == null) return;
+    const raw = await read(LEASE_KEY);
+    if (!leaseHeld(raw, host.leaseToken)) return;
+  } else if (host.kv && host.leaseToken == null) return;
+  host.jevDone = new Set(boundJevDone([...host.jevDone], Math.floor(nowMs / 1000)));
+  host.jevQueue = host.jevQueue.filter((row) => !host.jevDone.has(jevKey(row.pair, row.barStartSec)));
+  const next = host.jevQueue.find((row) => !row.inflight);
+  if (!next) return;
+  if (read && host.leaseToken) {
+    const stored = await read(jevAnswerKey(next.pair, next.barStartSec));
+    if (stored) {
+      host.jevDone.add(jevKey(next.pair, next.barStartSec));
+      removeQueued(host, next);
+      return;
+    }
+  }
+  if (packetExpired(next.barStartSec, nowMs)) {
+    skipOne(host, next, "timeout", 0);
+    removeQueued(host, next);
     return;
   }
-  const next = host.jevQueue[0];
-  if (!next) return;
-  host.jevQueue = host.jevQueue.slice(1);
+  const budget = callBudgetMs(nowMs, untilMs);
+  if (refuseLateCall(nowMs, untilMs, budget)) return;
   const caller = host.jevCaller;
   if (!caller) {
     skipOne(host, next, "not_called", 0);
+    removeQueued(host, next);
     dropQueued(host, "not_called");
     return;
   }
@@ -319,9 +784,11 @@ export async function drainJevShadow(host: JevDrainHost, nowMs: number, untilMs:
     host.jevMeter = reserveJevCall(host.jevMeter, nowMs);
   } catch {
     skipOne(host, next, "not_called", 0);
+    removeQueued(host, next);
     dropQueued(host, "not_called");
     return;
   }
+  next.inflight = true;
   const reserved = JEV_CALL_RESERVE_USD;
   let outcome: JevCallOutcome;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -338,23 +805,24 @@ export async function drainJevShadow(host: JevDrainHost, nowMs: number, untilMs:
     outcome = { ok: false, reason: "call_error" };
   } finally {
     if (timer) clearTimeout(timer);
+    removeQueued(host, next);
   }
   if (!outcome.ok) {
     if (outcome.reason === "not_called" || !reachedNetwork) {
       host.jevMeter = adjustJevReserve(host.jevMeter, reserved, 0);
-      skipOne(host, next, outcome.reason, 0);
+      skipOne(host, next, outcome.reason, 0, null, outcome.tokens ?? null);
       return;
     }
     const billed = chargeFailure(host, reserved, outcome.costUsd);
-    skipOne(host, next, outcome.reason, billed);
+    skipOne(host, next, outcome.reason, billed, null, outcome.tokens ?? null);
     return;
   }
   try {
     host.jevMeter = adjustJevReserve(host.jevMeter, reserved, outcome.costUsd);
     host.jevMeter = { ...host.jevMeter, calls: (host.jevMeter.calls ?? 0) + 1 };
   } catch {
-    skipOne(host, next, "call_error", reserved, outcome.answer);
+    skipOne(host, next, "call_error", reserved, outcome.answer, outcome.tokens ?? null);
     return;
   }
-  remember(host, next, "ok", outcome.answer, outcome.costUsd);
+  remember(host, next, "ok", outcome.answer, outcome.costUsd, outcome.tokens ?? null);
 }

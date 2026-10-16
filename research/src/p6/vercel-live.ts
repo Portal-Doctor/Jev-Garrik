@@ -76,6 +76,15 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
     },
     async reload() {
       host.seedChecked = false;
+      if (!host.stopped && self) {
+        const lease = decodeLease(await kv.get(LEASE_KEY));
+        if (lease?.token && lease.holder === self && lease.release === "none" && lease.untilMs > host.clock()) {
+          host.leaseToken = lease.token;
+          if (host.holderId == null) host.holderId = self;
+          if (host.leaseFromMs == null) host.leaseFromMs = lease.acquiredAtMs ?? host.clock();
+          host.leaseUntilMs = lease.untilMs;
+        }
+      }
       const saved = await loadSplit(kv, host);
       if (!saved) return;
       installPaperState(host, saved);
@@ -162,7 +171,12 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       // A failed renew sets stopped. Never take the token that replaced us.
       if (!host.stopped) {
         const lease = decodeLease(await kv.get(LEASE_KEY));
-        if (lease?.token && self != null && lease.holder === self) host.leaseToken = lease.token;
+        if (lease?.token && self != null && lease.holder === self) {
+          host.leaseToken = lease.token;
+          if (host.holderId == null) host.holderId = self;
+          if (host.leaseFromMs == null) host.leaseFromMs = lease.acquiredAtMs ?? host.clock();
+          host.leaseUntilMs = lease.untilMs;
+        }
       }
       if (host.stopped || !host.leaseToken) return false;
       const ok = replayHandover(host);
@@ -172,7 +186,12 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
     async sampleUntil(untilMs: number) {
       if (!host.stopped) {
         const lease = decodeLease(await kv.get(LEASE_KEY));
-        if (lease?.token && self != null && lease.holder === self) host.leaseToken = lease.token;
+        if (lease?.token && self != null && lease.holder === self) {
+          host.leaseToken = lease.token;
+          if (host.holderId == null) host.holderId = self;
+          if (host.leaseFromMs == null) host.leaseFromMs = lease.acquiredAtMs ?? host.clock();
+          host.leaseUntilMs = lease.untilMs;
+        }
       }
       host.runBaseFills = host.book.legs.length;
       host.runBaseDecisions = host.emitted.size;
@@ -258,12 +277,14 @@ export async function loadDashboard(kv: Kv): Promise<Dashboard> {
         volHours?: { rv: number; gappedMs: number; hourMs: number }[];
         dIndeterminate?: number;
         dSubmitted?: number;
+        jevSkip?: { jevDays?: { dayMs: number; onTime: number; catchUp: number }[] };
       })
     : null;
+  const nowMs = Date.now();
   return dashboard({
     positions: body?.positions ?? [],
     gates: body?.killSwitch ? ["kill-switch"] : [],
-    leaseHolder: lease && lease.untilMs > Date.now() ? lease.holder : null,
+    leaseHolder: lease && lease.untilMs > nowMs ? lease.holder : null,
     incidents: body?.incidents ?? [],
     weekMs: 7 * 24 * 60 * 60 * 1000,
     gaps: body?.gaps ?? [],
@@ -272,6 +293,8 @@ export async function loadDashboard(kv: Kv): Promise<Dashboard> {
     jevPackets: body?.jevPackets ?? 0,
     dIndeterminate: body?.dIndeterminate ?? 0,
     dSubmitted: body?.dSubmitted ?? 0,
+    catchUpDays: body?.jevSkip?.jevDays ?? [],
+    nowMs,
   });
 }
 

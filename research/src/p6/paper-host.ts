@@ -24,8 +24,8 @@ import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
 import { completedDays, deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
 import { freshJevMeter, type JevMeter } from "./jev-shadow";
-import { drainJevShadow, freshJevSkip, queuedForHandover, scheduleClosedJevBar, scheduleLiveJev, type JevCaller, type JevQueued, type JevSkipLedger, type JevStored } from "./jev-call";
-import { JevTape, type StoredJevMinute } from "./jev-minute";
+import { drainJevShadow, freshJevSkip, normalizeJevSkip, queuedForHandover, scheduleClosedJevBar, scheduleLiveJev, type JevCaller, type JevCatchUpRun, type JevFirstBar, type JevQueued, type JevSkipLedger, type JevStored } from "./jev-call";
+import { JevTape, type JevMinuteTuple, type StoredJevMinute } from "./jev-minute";
 import { renewLease, type Kv } from "./relay";
 import { kickDurable } from "./hot-store";
 import { foldedCovers, foldHours } from "../data/derive";
@@ -209,6 +209,21 @@ export interface PaperHost {
   jevDone: Set<string>;
   jevAnswers: JevStored[];
   jevSkip: JevSkipLedger;
+  /** One summary per contiguous catch-up run. Not one key per bar. */
+  jevCatchUps: JevCatchUpRun[];
+  /** First-seen stamps above the watermark and inside expiry plus three bars. */
+  jevFirst: JevFirstBar[];
+  /** Per pair. Only moves forward. Never shed. */
+  jevThrough: Record<string, number>;
+  jevPrev?: { bar: number; holder: string; leaseFromMs: number };
+  jevCatchUpOpen?: boolean;
+  /** Full packets waiting for the next leased flush. Written once. */
+  jevPacketWrites: { key: string; value: string }[];
+  jevPacketSent: Set<string>;
+  /** Holder id while this process holds the lease. */
+  holderId: string | null;
+  leaseFromMs: number | null;
+  leaseUntilMs: number | null;
   /** Test hook. Unset uses the live caller, which does not connect without a key. */
   jevCaller?: JevCaller;
   /** Lease token this process acquired. A save without it does not claim the lease. */
@@ -592,6 +607,14 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     jevDone: new Set(),
     jevAnswers: [],
     jevSkip: freshJevSkip(),
+    jevCatchUps: [],
+    jevFirst: [],
+    jevThrough: {},
+    jevPacketWrites: [],
+    jevPacketSent: new Set(),
+    holderId: null,
+    leaseFromMs: null,
+    leaseUntilMs: null,
     leaseToken: null,
     restTimedOut: new Set(),
     leaseRenewedMs: 0,
@@ -1618,10 +1641,14 @@ export interface PaperStateBody {
   fourBars?: [string, BarOHLC[]][];
   feedCursor?: FeedCursor;
   jevMeter?: JevMeter;
-  jevMinutes?: StoredJevMinute[];
+  jevMinutes?: (StoredJevMinute | JevMinuteTuple)[];
   jevDone?: string[];
   jevAnswers?: JevStored[];
   jevSkip?: JevSkipLedger;
+  jevCatchUps?: JevCatchUpRun[];
+  jevFirst?: JevFirstBar[];
+  jevThrough?: Record<string, number>;
+  jevPrev?: { bar: number; holder: string; leaseFromMs: number };
   jevBarSec?: number;
   jevQueue?: JevQueued[];
   feedCut?: FeedCut | null;
@@ -1752,10 +1779,14 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     fourBars: [...host.fourBars.entries()],
     feedCursor: { ...host.feedCursor },
     jevMeter: { ...host.jevMeter },
-    jevMinutes: host.jevTape.exportMinutes(),
+    jevMinutes: host.jevTape.exportMinutes({ holder: host.holderId, leaseFromMs: host.leaseFromMs, leaseUntilMs: host.leaseUntilMs }),
     jevDone: [...host.jevDone],
     jevAnswers: host.jevAnswers.slice(-20),
     jevSkip: host.jevSkip,
+    jevCatchUps: host.jevCatchUps,
+    jevFirst: host.jevFirst,
+    jevThrough: { ...host.jevThrough },
+    ...(host.jevPrev ? { jevPrev: host.jevPrev } : {}),
     jevBarSec: host.book.jevBarSec,
     jevQueue: queuedForHandover(host.jevQueue, host.jevDone),
     feedCut: host.feedCut ? { ...host.feedCut, trade: host.feedCut.trade ? { ...host.feedCut.trade } : null } : null,
@@ -1829,12 +1860,19 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
       monthCapUsd: 100,
     };
   }
-  if (body.jevMinutes) host.jevTape.importMinutes(body.jevMinutes);
-  if (body.jevDone) host.jevDone = new Set(body.jevDone);
-  if (body.jevAnswers) host.jevAnswers = body.jevAnswers;
-  if (body.jevSkip) host.jevSkip = body.jevSkip;
+  const jevReadable = !host.stopped && (!host.kv || host.leaseToken != null);
+  if (jevReadable && body.jevMinutes) host.jevTape.importMinutes(body.jevMinutes);
+  if (jevReadable && body.jevDone) host.jevDone = new Set(body.jevDone);
+  if (jevReadable && body.jevAnswers) host.jevAnswers = body.jevAnswers;
+  if (body.jevSkip) host.jevSkip = normalizeJevSkip(body.jevSkip);
+  if (body.jevCatchUps) host.jevCatchUps = body.jevCatchUps.map((run) => ({ ...run }));
+  if (body.jevFirst) host.jevFirst = body.jevFirst.map((row) => ({ ...row, pairs: [...(row.pairs ?? [])] }));
+  if (body.jevThrough) host.jevThrough = { ...body.jevThrough };
+  if (body.jevPrev) host.jevPrev = { ...body.jevPrev };
+  host.jevSkip.handoverMinutes = host.jevTape.handoverMinutes;
+  host.jevSkip.holder = host.holderId ?? host.jevSkip.holder;
   if (body.jevBarSec != null) host.book.jevBarSec = body.jevBarSec;
-  if (body.jevQueue) host.jevQueue = queuedForHandover(body.jevQueue, host.jevDone);
+  if (jevReadable && body.jevQueue) host.jevQueue = queuedForHandover(body.jevQueue, host.jevDone);
   if (body.gaps) host.gaps = body.gaps.map((gap) => ({ ...gap }));
   if (body.dSubmitted != null) host.book.submittedByClass.D = body.dSubmitted;
   if (body.dIndeterminate != null) host.book.indeterminateByClass.D = body.dIndeterminate;

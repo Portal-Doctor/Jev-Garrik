@@ -254,7 +254,7 @@ test("a missing hour still folds one 4h bar, matching the offline aggregate", ()
   expect(folded[0]!.volume).toBe(Number(derived[0]!.volume));
 });
 
-test("history bars do not increment the Jev skip count", () => {
+test("a completed bar past expiry is catch-up and is not a skip", () => {
   const start = Math.floor(Date.parse("2026-10-01T00:00:00.000Z") / 1000);
   const host = startPaperHost(["ETH-USD"], {});
   host.clock = () => Date.parse("2026-10-12T00:00:00.000Z");
@@ -262,8 +262,14 @@ test("history bars do not increment the Jev skip count", () => {
   acceptRestBar(host, { productId: "ETH-USD", startSec: start, open: 1, high: 1, low: 1, close: 1, volume: 1 });
   expect(host.book.jevSkipped).toBe(0);
   expect(host.book.jevPackets).toBe(0);
+  expect(host.jevAnswers.some((row) => row.reason === "timeout")).toBe(false);
+  expect(host.jevPacketWrites).toHaveLength(0);
+  expect(host.jevCatchUps).toHaveLength(1);
+  expect(host.jevCatchUps[0]?.count).toBe(1);
+  expect(host.jevCatchUps[0]?.cause).toBe("engine_gap");
   const liveStart = Math.floor(host.clock() / 1000) - 900;
   acceptRestBar(host, { productId: "ETH-USD", startSec: liveStart, open: 1, high: 1, low: 1, close: 1, volume: 1 });
+  expect(host.book.jevPackets).toBeGreaterThan(0);
   expect(host.book.jevSkipped).toBeGreaterThan(0);
 });
 
@@ -328,7 +334,7 @@ test("a duplicate append is a no-op", async () => {
   expect(stored[0]?.startSec).toBe(start);
 });
 
-test("a heartbeat write over 256 KB is an incident and is not stored", async () => {
+test("a heartbeat write over 256 KB is an incident and the book is still stored", async () => {
   const kv = memoryKv();
   const host = startPaperHost(["ETH-USD"], {});
   const start = Math.floor(Date.now() / 1000) - 900;
@@ -337,7 +343,8 @@ test("a heartbeat write over 256 KB is an incident and is not stored", async () 
   host.book.incidents.push("x".repeat(HOT_MAX_BYTES));
   await persistRun(kv, host);
   expect(host.book.incidents.some((row) => row.includes("exceeds 256 KB"))).toBe(true);
-  expect(await kv.get(HOT_KEY)).toBeNull();
+  const storedHot = JSON.parse((await kv.get(HOT_KEY)) ?? "null") as { positions?: unknown } | null;
+  expect(storedHot?.positions).toEqual([]);
   const stored = JSON.parse((await kv.get(bar15Key("ETH-USD", new Date(start * 1000).toISOString().slice(0, 10)))) ?? "[]") as { startSec: number }[];
   expect(stored.some((bar) => bar.startSec === start)).toBe(true);
 });

@@ -33,8 +33,8 @@ export async function liveJevCaller(state: MarketState, timeoutMs: number, env: 
     const outputTokens = result.usage.outputTokens ?? null;
     const total = result.usage.totalTokens ?? (inputTokens != null && outputTokens != null ? inputTokens + outputTokens : null);
     const costUsd = total != null && total > 0 ? costUsdFromTokens(total) : 0;
-    if (!answer || !(costUsd > 0)) return { ok: false, reason: "invalid_response", ...(costUsd > 0 ? { costUsd } : {}) };
-    return { ok: true, answer, costUsd };
+    if (!answer || !(costUsd > 0)) return { ok: false, reason: "invalid_response", ...(costUsd > 0 ? { costUsd } : {}), ...(total != null ? { tokens: total } : {}) };
+    return { ok: true, answer, costUsd, ...(total != null ? { tokens: total } : {}) };
   } catch (error) {
     if (isAbort(error)) return { ok: false, reason: "timeout" };
     return { ok: false, reason: "call_error" };

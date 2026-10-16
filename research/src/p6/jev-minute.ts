@@ -7,7 +7,7 @@
 import { FeatureAccumulator, topImbalance, type BookView } from "../../../cb/features";
 import { buildState, type MarketState } from "../../../cb/state";
 
-export const JEV_SCHEMA = "jev-1m-v2.1";
+export const JEV_SCHEMA = "jev-1m-v2.2";
 export const JEV_MINUTE_MS = 60_000;
 export const JEV_WINDOW_MS = 15 * JEV_MINUTE_MS;
 export const JEV_MIN_PRESENT = 13;
@@ -33,9 +33,45 @@ export interface JevMinuteSummary {
 
 export interface StoredJevMinute extends JevMinuteSummary {
   productId: string;
-  /** False on rows restored from a flush. Only a live row can make a packet valid. */
+  /**
+   * True for a minute sealed live, or imported present from the holder who
+   * covered that minute. Any other restored row stays false.
+   */
   live: boolean;
+  schema?: string;
+  /** live while sealing, handover after a qualified import, backfill never present. */
+  src?: "live" | "handover" | "backfill" | "gap";
+  holder?: string;
+  /** Clock when the minute was sealed. Must be >= T+60000 and <= the holder's release. */
+  sealedAtMs?: number;
+  /** Lease window of the holder who sealed the minute. */
+  leaseFromMs?: number;
+  leaseUntilMs?: number;
+  backfilled?: boolean;
 }
+
+/** Compact hot tuple. Order is fixed. A 0 lease bound means unset. */
+export type JevMinuteTuple = [
+  string,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  0 | 1,
+  string,
+  string,
+  string,
+  number,
+  number,
+  number,
+  0 | 1,
+];
 
 export type JevFeedGap = "no_book_feed" | "no_trades_feed" | "carry_limit";
 
@@ -175,6 +211,74 @@ function downDuring(downMs: number | null, minuteTs: number): boolean {
   return downMs != null && downMs >= minuteTs && downMs < minuteTs + JEV_MINUTE_MS;
 }
 
+export function packMinute(row: StoredJevMinute): JevMinuteTuple {
+  return [
+    row.productId,
+    row.ts,
+    row.takerBuyUsd,
+    row.takerSellUsd,
+    row.trades,
+    row.midClose,
+    row.midHigh,
+    row.midLow,
+    row.spreadBps,
+    row.imbalance5,
+    row.imbalance20,
+    row.carried ? 1 : 0,
+    row.schema ?? "",
+    row.src ?? "",
+    row.holder ?? "",
+    row.sealedAtMs ?? 0,
+    row.leaseFromMs ?? 0,
+    row.leaseUntilMs ?? 0,
+    row.backfilled ? 1 : 0,
+  ];
+}
+
+export function unpackMinute(value: StoredJevMinute | JevMinuteTuple): StoredJevMinute {
+  if (!Array.isArray(value)) return value;
+  const [productId, ts, takerBuyUsd, takerSellUsd, trades, midClose, midHigh, midLow, spreadBps, imbalance5, imbalance20, carried, schema, src, holder, sealedAtMs, leaseFromMs, leaseUntilMs, backfilled] = value;
+  const source = src === "live" || src === "handover" || src === "backfill" || src === "gap" ? src : undefined;
+  return {
+    productId,
+    ts,
+    takerBuyUsd,
+    takerSellUsd,
+    trades,
+    midClose,
+    midHigh,
+    midLow,
+    spreadBps,
+    imbalance5,
+    imbalance20,
+    carried: carried === 1,
+    live: false,
+    ...(schema ? { schema } : {}),
+    ...(source ? { src: source } : {}),
+    ...(holder ? { holder } : {}),
+    ...(sealedAtMs > 0 ? { sealedAtMs } : {}),
+    ...(leaseFromMs > 0 ? { leaseFromMs } : {}),
+    ...(leaseUntilMs > 0 ? { leaseUntilMs } : {}),
+    ...(backfilled === 1 ? { backfilled: true } : {}),
+  };
+}
+
+/** True only when every handover condition holds. A miss stays absent. */
+export function handoverMinuteOk(row: StoredJevMinute, productId?: string): boolean {
+  if (!row || row.backfilled === true || row.src === "backfill" || row.src === "gap") return false;
+  if (row.schema !== JEV_SCHEMA) return false;
+  if (typeof row.productId !== "string" || row.productId === "") return false;
+  if (productId != null && row.productId !== productId) return false;
+  if (row.ts % JEV_MINUTE_MS !== 0) return false;
+  if (typeof row.holder !== "string" || row.holder === "") return false;
+  if (typeof row.sealedAtMs !== "number" || typeof row.leaseFromMs !== "number" || typeof row.leaseUntilMs !== "number") return false;
+  if (row.sealedAtMs < row.ts + JEV_MINUTE_MS) return false;
+  if (row.sealedAtMs > row.leaseUntilMs) return false;
+  if (row.leaseFromMs > row.ts) return false;
+  if (row.leaseUntilMs < row.ts + JEV_MINUTE_MS) return false;
+  return true;
+}
+
 /** no_book_feed if any missing slot was book-down or never seen, otherwise no_trades_feed. */
 function missingSlotSub(bookDownOrUnseen: boolean, tradesDown: boolean): "no_book_feed" | "no_trades_feed" | undefined {
   if (bookDownOrUnseen) return "no_book_feed";
@@ -209,7 +313,15 @@ function freshProduct(): ProductTape {
 }
 
 export class JevTape {
+  /** Minutes accepted as present from a previous holder. */
+  handoverMinutes = 0;
   private readonly products = new Map<string, ProductTape>();
+
+  midAtTime(productId: string, targetTs: number): number | null {
+    const row = this.products.get(productId);
+    if (!row) return null;
+    return midAt(row.ring, targetTs);
+  }
 
   private row(productId: string): ProductTape {
     let row = this.products.get(productId);
@@ -349,11 +461,19 @@ export class JevTape {
     );
   }
 
-  /** Audit rows. Restored rows stay non-live so they cannot authorize a call. */
-  exportMinutes(): StoredJevMinute[] {
+  /** Audit rows. A live row is stamped with the holder's lease when that context is passed. */
+  exportMinutes(ctx?: { holder?: string | null; leaseFromMs?: number | null; leaseUntilMs?: number | null }): StoredJevMinute[] {
     const byProduct = new Map<string, StoredJevMinute[]>();
     for (const [productId, row] of this.products) {
       if (row.minutes.length === 0) continue;
+      for (const bar of row.minutes) {
+        if (bar.src === "handover" || bar.src === "backfill" || bar.src === "gap") continue;
+        if (!bar.schema) bar.schema = JEV_SCHEMA;
+        if (!bar.src) bar.src = "live";
+        if (!bar.holder && ctx?.holder) bar.holder = ctx.holder;
+        if (bar.leaseFromMs == null && ctx?.leaseFromMs != null) bar.leaseFromMs = ctx.leaseFromMs;
+        if (bar.leaseUntilMs == null && ctx?.leaseUntilMs != null) bar.leaseUntilMs = ctx.leaseUntilMs;
+      }
       byProduct.set(productId, row.minutes.slice(-JEV_PERSIST_MINUTES));
     }
     const ids = [...byProduct.keys()].sort((a, b) => {
@@ -367,14 +487,39 @@ export class JevTape {
     return out;
   }
 
-  importMinutes(rows: readonly StoredJevMinute[]): void {
-    for (const row of rows) {
+  /**
+   * Import only after the lease is held. A row is present only when every
+   * handover condition holds. Anything else is stored as an audit copy.
+   * Returns how many minutes were newly counted present.
+   */
+  importMinutes(rows: readonly (StoredJevMinute | JevMinuteTuple)[], opts?: { productId?: string }): number {
+    let imported = 0;
+    for (const raw of rows) {
+      const row = unpackMinute(raw);
       if (!row || typeof row.productId !== "string" || !(row.ts > 0)) continue;
       const tape = this.row(row.productId);
-      if (tape.minutes.some((bar) => bar.ts === row.ts)) continue;
-      tape.minutes.push({ ...row, live: false });
+      const incomingOk = handoverMinuteOk(row, opts?.productId);
+      const existing = tape.minutes.find((bar) => bar.ts === row.ts);
+      if (existing) {
+        const existingOk = existing.live === true && (existing.src === "handover" || existing.src === "live") && handoverMinuteOk(existing);
+        if (incomingOk && !existingOk) {
+          const index = tape.minutes.indexOf(existing);
+          tape.minutes[index] = { ...row, live: true, src: "handover" };
+          imported += 1;
+          this.handoverMinutes += 1;
+        }
+        continue;
+      }
+      if (!incomingOk) {
+        tape.minutes.push({ ...row, live: false });
+        continue;
+      }
+      tape.minutes.push({ ...row, live: true, src: "handover" });
+      imported += 1;
+      this.handoverMinutes += 1;
     }
     for (const tape of this.products.values()) tape.minutes.sort((a, b) => a.ts - b.ts);
+    return imported;
   }
 
   private openForming(row: ProductTape, minute: number, mid: number, spread: number, imb5: number, imb20: number): void {
@@ -467,6 +612,9 @@ export class JevTape {
         imbalance20: forming.imb20,
         carried: false,
         live: true,
+        schema: JEV_SCHEMA,
+        src: "live",
+        sealedAtMs: nowMs,
       });
       row.carryStreak = 0;
       return;
@@ -497,6 +645,9 @@ export class JevTape {
         imbalance20: row.lastImb20,
         carried: true,
         live: true,
+        schema: JEV_SCHEMA,
+        src: "live",
+        sealedAtMs: nowMs,
       });
       row.carryStreak += 1;
       return;
