@@ -105,7 +105,7 @@ function PnlStrip({ block }: { block: PnlBlock }) {
                     {closedNote(tile.closedN) ? ` · ${closedNote(tile.closedN)}` : ""}
                   </span>
                 )}
-                <span className={styles.sub}>hourly drawdown {tile.drawdownUsd == null ? "-" : drawdownText(tile.drawdownUsd)}</span>
+                <span className={styles.sub}>hourly (may understate the intrahour low) {tile.drawdownUsd == null ? "-" : drawdownText(tile.drawdownUsd)}</span>
                 <span className={styles.sub}>{tile.tradesUnknown ? "trades unknown" : concentrationText(tile.concentrationPct)}</span>
                 {tile.since ? <span className={styles.sub}>{tile.since}</span> : null}
                 {tile.anchorLabel ? <span className={styles.sub}>{tile.anchorLabel}</span> : null}

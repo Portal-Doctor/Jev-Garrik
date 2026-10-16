@@ -214,6 +214,7 @@ test("the page does not import the cron secret, auth, or a Redis write", () => {
   expect(page.includes("muted")).toBe(true);
   expect(page.includes("closedNote(tile.closedN)")).toBe(true);
   expect(page.includes("drawdownText(")).toBe(true);
+  expect(page.includes("hourly (may understate the intrahour low)")).toBe(true);
   expect(page.includes("trades unknown")).toBe(true);
   expect(page.includes("partial")).toBe(false);
   expect(page.includes("anchorLabel")).toBe(true);
