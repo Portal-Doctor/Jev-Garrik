@@ -2,7 +2,9 @@
 
 schema-version: jev-1m-v2.2
 
-v2 SHA-256 46bfb2c1d0caa710ac2e20299bbd5e8b1eacd16def4498316eee6c443790cf6b superseded by v2.1. Previous v2.1 SHA-256 4742fa43ed5ecc96d424595395095394080b59a606ea4cc4e8cab76523275544 superseded by v2.1 wording. v2.1 SHA-256 31691e038d0329da6bbe22df705fb4486ca84c146b862386ae098d0759a7dbee superseded by v2.2. The file on dev at adbc044 was that same v2.1 hash.
+v2.2 rev 2. The schema label stays `jev-1m-v2.2`.
+
+v2 SHA-256 46bfb2c1d0caa710ac2e20299bbd5e8b1eacd16def4498316eee6c443790cf6b superseded by v2.1. Previous v2.1 SHA-256 4742fa43ed5ecc96d424595395095394080b59a606ea4cc4e8cab76523275544 superseded by v2.1 wording. v2.1 SHA-256 31691e038d0329da6bbe22df705fb4486ca84c146b862386ae098d0759a7dbee superseded by v2.2. v2.2 SHA-256 61e8b52268b2571abb7f39616030550b633327bf252e3ffce68c74521c50a198 at head 2712ee9 superseded by v2.2 rev 2. The file on dev at adbc044 was that same v2.1 hash.
 
 Frozen for the live shadow caller. v2 wins wherever it conflicts with v1. `cb/` is not edited. The formulas below are copied verbatim from `cb/state.ts`, `cb/features.ts`, and `cb/feed.ts`. The caller builds `MarketState` with `buildState` and those functions. It does not re-derive them.
 
@@ -63,7 +65,13 @@ The stored packet is a `MarketState` from the verbatim `buildState` below, plus 
 
 Drain in `driveHost` after `sendDueEntries`, only when this process holds the lease (`applyBars` and a lease token, or no kv). One call per tick. Timeout is `min(8000, untilMs - nowMs - 60000)` milliseconds. A packet is terminal only after a call outcome or after expiry. A holder with no usable time budget does not start a call and does NOT drop the packet; it stays queued, persisted under (pair, barStartSec), for the next lease holder. Uncalled at expiry becomes terminal timeout (counted, never dropped).
 
-Expiry is `barStartSec + 900 + 600` seconds. A call that cannot finish before `untilMs` is never started. The queue is removed only after the call settles. The successor dedupes on `jevDone` and `p6:jev:ans`. Every completed bar for an open position, plus `BTC-USD`, is scheduled even when late. A bar already past expiry is a terminal timeout with no call. Each terminal answer records `answeredAtMs` and latency from the bar close. Shadow scoring uses the mid at `answeredAtMs`, not the bar-close mid. An answer for a trade already closed by `answeredAtMs` is logged and counts in `skipShare` and latency, and is excluded from guard-effect scoring. Latency buckets are `<=60s`, `<=300s`, and `<=600s`.
+Expiry is `barStartSec + 900 + 600` seconds. A call that cannot finish before `untilMs` is never started. The queue is removed only after the call settles. The successor dedupes on `jevDone` and `p6:jev:ans`. A bar first processed inside expiry is scheduled, including one called late by a successor. A queued bar that then expires uncalled is a counted terminal timeout.
+
+A bar already past expiry (barStartSec + 900 + 600) when first processed is a CATCH-UP bar. It is not scheduled for a call and is excluded from skipShare, both numerator and denominator. It is recorded as one summary per catch-up run: count, first and last barStartSec, and cause (engine gap or takeover), with NO per-bar p6:jev:ans or packet writes. Bars first processed on time, including those called late by a successor within expiry, count normally.
+
+Catch-up share is `catchUp / (onTime + catchUp)` for the current week, reported next to `skipShare`, and flagged above 2%. Catch-up bars are not Jev calls and get no shadow credit, so they do not feed 3a or 3b, and the 30-trigger and 60-day clocks count only on-time bars. Classification uses the first-processed time recorded when the bar is first seen. That time is persisted and is not re-classed by a later holder or a restart. Skips on on-time bars count in full. Cause is takeover when this run's holder differs from the previous bar's holder and the lease epoch (`acquiredAtMs`) also differs; otherwise the cause is engine gap.
+
+Each terminal answer records `answeredAtMs` and latency from the bar close. Shadow scoring uses the mid at `answeredAtMs`, not the bar-close mid. An answer is excluded from guard-effect scoring only when the trade that answer is about is already closed at `answeredAtMs`: that trade's exit is at or after the bar close and at or before `answeredAtMs`. A historical close of a flat pair, including BTC with no open position, stays in the score. An excluded answer is logged and counts in `skipShare` and latency. Latency buckets partition every answer: `<=60s`, `<=300s`, `<=600s`, and `late` (`>600s`).
 
 `noteJevSpend` is applied to a copy with a `1e-9` USD probe before the call. If that throws, the packet is `not_called` and nothing is fetched. After a priced answer, `noteJevSpend` commits the real cost. If the real cost would pass the cap, the meter is left unchanged, the outcome is `call_error`, and the key is still stored.
 
@@ -77,7 +85,7 @@ The engine function memory is 1024 MB, set in `web/vercel.json` at `functions["s
 
 ## Persist
 
-The flush stores minute summaries only (products with open positions, plus BTC), the done keys, the slim answers, the meter, and the skip counts. It does not store raw level2 or raw trades. A handover-imported minute that meets the conditions above is present (`src:'handover'`). Any other restored row stays `live: false`. The full packet, minute rows, and answer are one key per `(pair, barStartSec)`, written once at the terminal outcome inside the same flush, with a 14-day TTL. Hot answers keep the pair, bar, reason, four labels, tokens, cost, `answeredAtMs`, latency, and a packet hash. On a hot payload over 256 KB, Jev answers, then minutes, then done keys are shed, and the book and positions are still written. An incident is recorded at 75% of that cap.
+The flush stores minute summaries only (products with open positions, plus BTC), the done keys, the slim answers, the meter, and the skip counts. It does not store raw level2 or raw trades. A handover-imported minute that meets the conditions above is present (`src:'handover'`). Any other restored row stays `live: false`. The full packet, minute rows, and answer are one key per `(pair, barStartSec)`, written once at the terminal outcome inside the same flush, with a 14-day TTL. Hot answers keep the pair, bar, reason, four labels, tokens, cost, `answeredAtMs`, latency, and a packet hash. A catch-up run is one compact hot record (count, first bar, last bar, cause), not a per-bar key. On a hot payload over 256 KB, Jev answers, then minutes, then done keys are shed, and the book and positions are still written. An incident is recorded at 75% of that cap.
 
 ## Verbatim formulas
 

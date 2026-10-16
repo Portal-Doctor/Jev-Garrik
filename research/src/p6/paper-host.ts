@@ -24,7 +24,7 @@ import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
 import { completedDays, deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
 import { freshJevMeter, type JevMeter } from "./jev-shadow";
-import { drainJevShadow, freshJevSkip, normalizeJevSkip, queuedForHandover, scheduleClosedJevBar, scheduleLiveJev, type JevCaller, type JevQueued, type JevSkipLedger, type JevStored } from "./jev-call";
+import { drainJevShadow, freshJevSkip, normalizeJevSkip, queuedForHandover, scheduleClosedJevBar, scheduleLiveJev, type JevCaller, type JevCatchUpRun, type JevFirstBar, type JevQueued, type JevSkipLedger, type JevStored } from "./jev-call";
 import { JevTape, type JevMinuteTuple, type StoredJevMinute } from "./jev-minute";
 import { renewLease, type Kv } from "./relay";
 import { kickDurable } from "./hot-store";
@@ -209,6 +209,12 @@ export interface PaperHost {
   jevDone: Set<string>;
   jevAnswers: JevStored[];
   jevSkip: JevSkipLedger;
+  /** One summary per contiguous catch-up run. Not one key per bar. */
+  jevCatchUps: JevCatchUpRun[];
+  /** First-processed time for on-time bars. A later holder does not reclassify these. */
+  jevFirst: JevFirstBar[];
+  jevPrev?: { bar: number; holder: string; leaseFromMs: number };
+  jevCatchUpOpen?: boolean;
   /** Full packets waiting for the next leased flush. Written once. */
   jevPacketWrites: { key: string; value: string }[];
   jevPacketSent: Set<string>;
@@ -599,6 +605,8 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     jevDone: new Set(),
     jevAnswers: [],
     jevSkip: freshJevSkip(),
+    jevCatchUps: [],
+    jevFirst: [],
     jevPacketWrites: [],
     jevPacketSent: new Set(),
     holderId: null,
@@ -1634,6 +1642,9 @@ export interface PaperStateBody {
   jevDone?: string[];
   jevAnswers?: JevStored[];
   jevSkip?: JevSkipLedger;
+  jevCatchUps?: JevCatchUpRun[];
+  jevFirst?: JevFirstBar[];
+  jevPrev?: { bar: number; holder: string; leaseFromMs: number };
   jevBarSec?: number;
   jevQueue?: JevQueued[];
   feedCut?: FeedCut | null;
@@ -1768,6 +1779,9 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     jevDone: [...host.jevDone],
     jevAnswers: host.jevAnswers.slice(-20),
     jevSkip: host.jevSkip,
+    jevCatchUps: host.jevCatchUps,
+    jevFirst: host.jevFirst,
+    ...(host.jevPrev ? { jevPrev: host.jevPrev } : {}),
     jevBarSec: host.book.jevBarSec,
     jevQueue: queuedForHandover(host.jevQueue, host.jevDone),
     feedCut: host.feedCut ? { ...host.feedCut, trade: host.feedCut.trade ? { ...host.feedCut.trade } : null } : null,
@@ -1846,6 +1860,9 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   if (jevReadable && body.jevDone) host.jevDone = new Set(body.jevDone);
   if (jevReadable && body.jevAnswers) host.jevAnswers = body.jevAnswers;
   if (body.jevSkip) host.jevSkip = normalizeJevSkip(body.jevSkip);
+  if (body.jevCatchUps) host.jevCatchUps = body.jevCatchUps.map((run) => ({ ...run }));
+  if (body.jevFirst) host.jevFirst = body.jevFirst.map((row) => ({ ...row }));
+  if (body.jevPrev) host.jevPrev = { ...body.jevPrev };
   host.jevSkip.handoverMinutes = host.jevTape.handoverMinutes;
   host.jevSkip.holder = host.holderId ?? host.jevSkip.holder;
   if (body.jevBarSec != null) host.book.jevBarSec = body.jevBarSec;

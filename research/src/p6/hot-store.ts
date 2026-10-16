@@ -156,6 +156,9 @@ interface HotBody {
   jevDone?: PaperStateBody["jevDone"];
   jevAnswers?: PaperStateBody["jevAnswers"];
   jevSkip?: PaperStateBody["jevSkip"];
+  jevCatchUps?: PaperStateBody["jevCatchUps"];
+  jevFirst?: PaperStateBody["jevFirst"];
+  jevPrev?: PaperStateBody["jevPrev"];
   jevBarSec?: PaperStateBody["jevBarSec"];
   jevQueue?: PaperStateBody["jevQueue"];
   emitted: string[];
@@ -219,6 +222,9 @@ export function captureHot(host: PaperHost): HotBody {
       ...(row.scoreMid !== undefined ? { scoreMid: row.scoreMid } : {}),
     })),
     jevSkip: host.jevSkip,
+    jevCatchUps: host.jevCatchUps,
+    jevFirst: host.jevFirst,
+    ...(host.jevPrev ? { jevPrev: host.jevPrev } : {}),
     ...(host.book.jevBarSec != null ? { jevBarSec: host.book.jevBarSec } : {}),
     jevQueue: queuedForHandover(host.jevQueue, host.jevDone),
     emitted: [...host.emitted].slice(-80),
@@ -643,6 +649,7 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
     const mark = storedMarks.find(([productId]) => productId === id)?.[1];
     return !mark || mark.status === "short";
   }).length;
+  const jevReport = skipShareReport(host.jevSkip);
   const finished = host.runOutcome !== "" && host.runOutcome !== "running";
   const completed = finished
     ? { end: host.clock(), cmds: host.saveCommands + 1, outcome: host.runOutcome }
@@ -669,10 +676,14 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
       calls: host.jevMeter.calls ?? 0,
       capUsd: host.jevMeter.capUsd,
       byReason: { ...host.jevSkip.byReason },
-      skips: skipShareReport(host.jevSkip),
-      latency: { ...(host.jevSkip.latency ?? { le60: 0, le300: 0, le600: 0 }) },
+      skips: jevReport,
+      latency: { ...jevReport.latency },
       handoverMinutes: host.jevTape.handoverMinutes,
       holder: host.holderId ?? "",
+      catchUp: jevReport.catchUp,
+      onTime: jevReport.onTime,
+      catchUpShare: jevReport.catchUpShare,
+      catchUpFlag: jevReport.catchUpFlag,
     },
   };
   let encoded = JSON.stringify(last);

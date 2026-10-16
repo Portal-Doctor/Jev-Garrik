@@ -254,17 +254,22 @@ test("a missing hour still folds one 4h bar, matching the offline aggregate", ()
   expect(folded[0]!.volume).toBe(Number(derived[0]!.volume));
 });
 
-test("a completed bar past expiry is a counted timeout", () => {
+test("a completed bar past expiry is catch-up and is not a skip", () => {
   const start = Math.floor(Date.parse("2026-10-01T00:00:00.000Z") / 1000);
   const host = startPaperHost(["ETH-USD"], {});
   host.clock = () => Date.parse("2026-10-12T00:00:00.000Z");
   host.hourWarm.set("ETH-USD", []);
   acceptRestBar(host, { productId: "ETH-USD", startSec: start, open: 1, high: 1, low: 1, close: 1, volume: 1 });
-  expect(host.book.jevSkipped).toBeGreaterThan(0);
-  expect(host.book.jevPackets).toBeGreaterThan(0);
-  expect(host.jevAnswers.some((row) => row.reason === "timeout")).toBe(true);
+  expect(host.book.jevSkipped).toBe(0);
+  expect(host.book.jevPackets).toBe(0);
+  expect(host.jevAnswers.some((row) => row.reason === "timeout")).toBe(false);
+  expect(host.jevPacketWrites).toHaveLength(0);
+  expect(host.jevCatchUps).toHaveLength(1);
+  expect(host.jevCatchUps[0]?.count).toBe(1);
+  expect(host.jevCatchUps[0]?.cause).toBe("engine_gap");
   const liveStart = Math.floor(host.clock() / 1000) - 900;
   acceptRestBar(host, { productId: "ETH-USD", startSec: liveStart, open: 1, high: 1, low: 1, close: 1, volume: 1 });
+  expect(host.book.jevPackets).toBeGreaterThan(0);
   expect(host.book.jevSkipped).toBeGreaterThan(0);
 });
 

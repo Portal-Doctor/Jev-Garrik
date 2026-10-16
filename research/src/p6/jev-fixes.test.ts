@@ -102,6 +102,7 @@ test("an imported minute stays absent when any one condition fails", () => {
     { sealedAtMs: T + JEV_MINUTE_MS - 1 },
     { sealedAtMs: T + JEV_MINUTE_MS + 5_000, leaseUntilMs: T + JEV_MINUTE_MS + 1 },
     { leaseFromMs: T + 1 },
+    { holder: "" },
     { backfilled: true },
     { src: "backfill" },
     { src: "gap" },
@@ -304,8 +305,10 @@ test("latency buckets are exclusive at 60s, 300s, and 600s", () => {
   noteLatency(ledger, 300_000);
   noteLatency(ledger, 600_000);
   noteLatency(ledger, 600_001);
-  expect(ledger.latency).toEqual({ le60: 1, le300: 1, le600: 1 });
-  expect(skipShareReport(ledger).latency).toEqual({ le60: 1, le300: 1, le600: 1 });
+  expect(ledger.latency).toEqual({ le60: 1, le300: 1, le600: 1, late: 1 });
+  expect(skipShareReport(ledger).latency).toEqual({ le60: 1, le300: 1, le600: 1, late: 1 });
+  const sum = ledger.latency.le60 + ledger.latency.le300 + ledger.latency.le600 + ledger.latency.late;
+  expect(sum).toBe(4);
 });
 
 test("oversize sheds Jev first, writes the book, and stores the packet once", async () => {
