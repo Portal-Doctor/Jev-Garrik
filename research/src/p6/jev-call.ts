@@ -92,11 +92,22 @@ export interface JevFirstBar {
   pairs: string[];
 }
 
-/** One UTC day of bar counts. The trailing-7 flag reads these, not the run list. */
+/** One UTC day. Catch-up counts and on-time packet counts share the row. */
 export interface JevDayCount {
   dayMs: number;
   onTime: number;
   catchUp: number;
+  /** On-time packets scheduled this day. Catch-up bars are not included. */
+  scheduled?: number;
+  skipped?: number;
+  answered?: number;
+  byReason?: Partial<Record<JevReason, number>>;
+}
+
+/** Lifetime book counters archived once. The V6 gate does not read them. */
+export interface JevLegacyTotals {
+  jevSkipped: number;
+  jevPackets: number;
 }
 
 export interface JevSkipLedger {
@@ -130,7 +141,18 @@ export interface JevSkipReport {
   /** UTC-week bucket. Display only. */
   displayOnTime: number;
   displayCatchUp: number;
+  /** Trailing 7 UTC days of on-time packets. Lifetime counters are not used. */
+  skipScheduled: number;
+  skipSkipped: number;
+  skipAnswered: number;
+  skipDays: number;
+  skipShare: number;
+  skipWilson: number;
+  skipStatus: JevSkipStatus;
+  skipLabel: string;
 }
+
+export type JevSkipStatus = "INSUFFICIENT_DATA" | "PASS" | "FLAG";
 
 export function freshJevSkip(): JevSkipLedger {
   return {
@@ -160,7 +182,15 @@ export function normalizeJevSkip(ledger: Partial<JevSkipLedger> | undefined): Je
     weekStartMs: ledger.weekStartMs ?? 0,
     weekOnTime: ledger.weekOnTime ?? 0,
     weekCatchUp: ledger.weekCatchUp ?? 0,
-    jevDays: (ledger.jevDays ?? []).map((day) => ({ ...day })),
+    jevDays: (ledger.jevDays ?? []).map((day) => ({
+      dayMs: day.dayMs,
+      onTime: day.onTime ?? 0,
+      catchUp: day.catchUp ?? 0,
+      scheduled: day.scheduled ?? 0,
+      skipped: day.skipped ?? 0,
+      answered: day.answered ?? 0,
+      byReason: { ...emptyReasons(), ...day.byReason },
+    })),
   };
 }
 
@@ -177,6 +207,7 @@ export function skipShareReport(ledger: JevSkipLedger, nowMs = 0): JevSkipReport
   };
   const asOf = nowMs > 0 ? nowMs : row.jevDays.reduce((max, day) => Math.max(max, day.dayMs), 0);
   const trail = trailingCatchUpShare(row.jevDays, asOf);
+  const gate = trailingSkipGate(row.jevDays, asOf);
   return {
     byReason,
     byTier,
@@ -190,10 +221,108 @@ export function skipShareReport(ledger: JevSkipLedger, nowMs = 0): JevSkipReport
     catchUpFlag: trail.flag,
     displayOnTime: row.weekOnTime,
     displayCatchUp: row.weekCatchUp,
+    skipScheduled: gate.scheduled,
+    skipSkipped: gate.skipped,
+    skipAnswered: gate.answered,
+    skipDays: gate.days,
+    skipShare: gate.share,
+    skipWilson: gate.wilsonLower,
+    skipStatus: gate.status,
+    skipLabel: gate.label,
   };
 }
 
 const JEV_DAY_MS = 86_400_000;
+/** One-sided 95% normal quantile. The early skip flag uses this z. */
+const WILSON_Z = 1.6449;
+
+function emptyReasons(): Record<JevReason, number> {
+  return { no_1m_input: 0, not_called: 0, timeout: 0, call_error: 0, invalid_response: 0 };
+}
+
+/** One-sided 95% Wilson lower bound of skipped/scheduled. Zero when nothing was scheduled. */
+export function wilsonLower(skipped: number, scheduled: number): number {
+  if (!(scheduled > 0)) return 0;
+  const n = scheduled;
+  const p = skipped / n;
+  const z2 = WILSON_Z * WILSON_Z;
+  const denom = 1 + z2 / n;
+  const center = p + z2 / (2 * n);
+  const margin = WILSON_Z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n));
+  return (center - margin) / denom;
+}
+
+export interface TrailingSkipGate {
+  scheduled: number;
+  skipped: number;
+  answered: number;
+  /** Days in the window with scheduled > 0. A zero-packet day does not count. */
+  days: number;
+  share: number;
+  wilsonLower: number;
+  status: JevSkipStatus;
+  flag: boolean;
+  label: string;
+}
+
+/**
+ * V6 skip gate. Trailing 7 UTC days including today. Catch-up bars are not in these counters.
+ * Lifetime book counters are not an input.
+ */
+export function trailingSkipGate(days: readonly JevDayCount[], nowMs: number): TrailingSkipGate {
+  const today = Math.floor(nowMs / JEV_DAY_MS) * JEV_DAY_MS;
+  const from = today - 6 * JEV_DAY_MS;
+  let scheduled = 0;
+  let skipped = 0;
+  let answered = 0;
+  let active = 0;
+  for (const day of days) {
+    if (day.dayMs < from || day.dayMs > today) continue;
+    const n = day.scheduled ?? 0;
+    scheduled += n;
+    skipped += day.skipped ?? 0;
+    answered += day.answered ?? 0;
+    if (n > 0) active += 1;
+  }
+  const share = scheduled > 0 ? skipped / scheduled : 0;
+  const lower = wilsonLower(skipped, scheduled);
+  let status: JevSkipStatus;
+  if (active >= 2 && scheduled >= 100 && lower > 0.05) status = "FLAG";
+  else if (active < 7 || scheduled < 300) status = "INSUFFICIENT_DATA";
+  else if (share <= 0.05) status = "PASS";
+  else status = "FLAG";
+  const label = status === "INSUFFICIENT_DATA" ? `insufficient data (days ${active}/7, scheduled ${scheduled})` : status;
+  return { scheduled, skipped, answered, days: active, share, wilsonLower: lower, status, flag: status === "FLAG", label };
+}
+
+/**
+ * Keep the first archive. A later load with new lifetime totals does not replace it.
+ * A book that has never counted a packet does not create an archive.
+ */
+export function archiveJevLegacy(existing: JevLegacyTotals | undefined, jevSkipped: number, jevPackets: number): JevLegacyTotals | undefined {
+  if (existing && Number.isFinite(existing.jevSkipped) && Number.isFinite(existing.jevPackets)) {
+    return { jevSkipped: existing.jevSkipped, jevPackets: existing.jevPackets };
+  }
+  if (!(jevSkipped > 0) && !(jevPackets > 0)) return undefined;
+  return { jevSkipped, jevPackets };
+}
+
+function touchDay(ledger: JevSkipLedger, nowMs: number): JevDayCount {
+  const dayMs = Math.floor(nowMs / JEV_DAY_MS) * JEV_DAY_MS;
+  let day = ledger.jevDays.find((row) => row.dayMs === dayMs);
+  if (!day) {
+    day = { dayMs, onTime: 0, catchUp: 0, scheduled: 0, skipped: 0, answered: 0, byReason: emptyReasons() };
+    ledger.jevDays.push(day);
+  }
+  day.scheduled = day.scheduled ?? 0;
+  day.skipped = day.skipped ?? 0;
+  day.answered = day.answered ?? 0;
+  day.byReason = { ...emptyReasons(), ...day.byReason };
+  const newest = ledger.jevDays.reduce((max, row) => Math.max(max, row.dayMs), dayMs);
+  const keepFrom = newest - 13 * JEV_DAY_MS;
+  ledger.jevDays = ledger.jevDays.filter((row) => row.dayMs >= keepFrom);
+  return ledger.jevDays.find((row) => row.dayMs === dayMs) ?? day;
+}
 
 /**
  * Trailing 7 UTC days, including today. Share is catchUp / (onTime + catchUp).
@@ -219,17 +348,22 @@ export function trailingCatchUpShare(
 
 /** Count one bar on its UTC day. Keep 14 UTC days including the newest. */
 export function noteJevDay(ledger: JevSkipLedger, nowMs: number, kind: "onTime" | "catchUp"): void {
-  const dayMs = Math.floor(nowMs / JEV_DAY_MS) * JEV_DAY_MS;
-  let day = ledger.jevDays.find((row) => row.dayMs === dayMs);
-  if (!day) {
-    day = { dayMs, onTime: 0, catchUp: 0 };
-    ledger.jevDays.push(day);
-  }
+  const day = touchDay(ledger, nowMs);
   if (kind === "onTime") day.onTime += 1;
   else day.catchUp += 1;
-  const newest = ledger.jevDays.reduce((max, row) => Math.max(max, row.dayMs), dayMs);
-  const keepFrom = newest - 13 * JEV_DAY_MS;
-  ledger.jevDays = ledger.jevDays.filter((row) => row.dayMs >= keepFrom);
+}
+
+/** On-time packet only. Catch-up bars do not call this. */
+export function noteOnTimePacket(ledger: JevSkipLedger, nowMs: number, kind: "scheduled" | "answered" | JevReason): void {
+  const day = touchDay(ledger, nowMs);
+  if (kind === "scheduled") day.scheduled = (day.scheduled ?? 0) + 1;
+  else if (kind === "answered") day.answered = (day.answered ?? 0) + 1;
+  else {
+    day.skipped = (day.skipped ?? 0) + 1;
+    const reasons = day.byReason ?? emptyReasons();
+    reasons[kind] = (reasons[kind] ?? 0) + 1;
+    day.byReason = reasons;
+  }
 }
 
 const JEV_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -258,12 +392,13 @@ function noteScheduled(ledger: JevSkipLedger, tier: string): void {
   ledger.byTier[tier] = row;
 }
 
-function noteSkip(ledger: JevSkipLedger, reason: JevReason, tier: string, sub?: "no_trades_feed" | "no_book_feed"): void {
+function noteSkip(ledger: JevSkipLedger, reason: JevReason, tier: string, nowMs: number, sub?: "no_trades_feed" | "no_book_feed"): void {
   ledger.byReason[reason] += 1;
   if (sub) ledger.bySub[sub] += 1;
   const row = ledger.byTier[tier] ?? { packets: 0, skipped: 0 };
   row.skipped += 1;
   ledger.byTier[tier] = row;
+  noteOnTimePacket(ledger, nowMs, reason);
 }
 
 export function callBudgetMs(nowMs: number, untilMs: number): number {
@@ -592,10 +727,11 @@ export function scheduleLiveJev(host: JevDrainHost, barStartSec: number): void {
     const tradeId = tradeIdFor(host, pair);
     if (host.jevDone.has(key) || host.jevQueue.some((row) => jevKey(row.pair, row.barStartSec) === key)) continue;
     noteScheduled(host.jevSkip, tier);
+    noteOnTimePacket(host.jevSkip, nowMs, "scheduled");
     host.jevTape.closeThrough(pair, nowMs);
     const window = host.jevTape.assess(pair, barStartSec * 1000);
     if (!window.ok) {
-      noteSkip(host.jevSkip, "no_1m_input", tier, window.sub);
+      noteSkip(host.jevSkip, "no_1m_input", tier, nowMs, window.sub);
       host.book.jevSkipped += 1;
       host.jevDone.add(key);
       host.book.incidents.push(`jev no_1m_input ${pair} ${barStartSec}${window.sub ? ` ${window.sub}` : ""}`);
@@ -605,7 +741,7 @@ export function scheduleLiveJev(host: JevDrainHost, barStartSec: number): void {
     }
     const state = host.jevTape.marketState(pair, nowMs);
     if (!state) {
-      noteSkip(host.jevSkip, "no_1m_input", tier);
+      noteSkip(host.jevSkip, "no_1m_input", tier, nowMs);
       host.book.jevSkipped += 1;
       host.jevDone.add(key);
       host.book.incidents.push(`jev no_1m_input ${pair} ${barStartSec}`);
@@ -653,7 +789,10 @@ function remember(
     barCloseMid,
     tradeClosedAtMs: closedAtMs(host, row.tradeId, row.barStartSec, answeredAtMs),
   });
-  if (reason === "ok") noteLatency(host.jevSkip, latencyMs);
+  if (reason === "ok") {
+    noteLatency(host.jevSkip, latencyMs);
+    noteOnTimePacket(host.jevSkip, answeredAtMs, "answered");
+  }
   host.jevSkip.holder = host.holderId ?? host.jevSkip.holder;
   host.jevSkip.handoverMinutes = host.jevTape.handoverMinutes;
   const stored: JevStored = {
@@ -693,7 +832,7 @@ function dropQueued(host: JevDrainHost, reason: Exclude<JevReason, "no_1m_input"
   const pending = host.jevQueue.filter((row) => !row.inflight && !host.jevDone.has(jevKey(row.pair, row.barStartSec)));
   host.jevQueue = host.jevQueue.filter((row) => row.inflight);
   for (const row of pending) {
-    noteSkip(host.jevSkip, reason, liquidityTier(row.pair));
+    noteSkip(host.jevSkip, reason, liquidityTier(row.pair), host.clock());
     host.book.jevSkipped += 1;
     host.book.incidents.push(`jev ${reason} ${row.pair} ${row.barStartSec}`);
     remember(host, row, reason, null, 0, null);
@@ -708,7 +847,7 @@ function skipOne(
   answer: JevAnswer | null = null,
   tokens: number | null = null,
 ): void {
-  noteSkip(host.jevSkip, reason, liquidityTier(row.pair));
+  noteSkip(host.jevSkip, reason, liquidityTier(row.pair), host.clock());
   host.book.jevSkipped += 1;
   host.book.incidents.push(`jev ${reason} ${row.pair} ${row.barStartSec}`);
   remember(host, row, reason, answer, costUsd, tokens);

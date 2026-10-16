@@ -129,6 +129,13 @@ export default async function P6DashboardPage({
     catchUp?: number;
     catchUpShare?: number;
     catchUpFlag?: boolean;
+    skipShare?: number;
+    skipStatus?: string;
+    skipDays?: number;
+    skipScheduled?: number;
+    skipLabel?: string;
+    legacySkipped?: number;
+    legacyPackets?: number;
   } | null;
   const redis = (last?.redis ?? {}) as { cmds?: number; bytes?: number; maxValueBytes?: number };
   const cold = Array.isArray(last?.cold) ? (last.cold as { id?: string; reason?: string }[]) : [];
@@ -262,6 +269,15 @@ export default async function P6DashboardPage({
         <Stat label="catch-up 7d" value={String(jev?.catchUp ?? 0)} />
         <Stat label="catch-up 7d share" value={(jev?.catchUpShare ?? 0).toFixed(3)} />
         <Stat label="catch-up 7d flag" value={jev?.catchUpFlag ? "yes" : "no"} />
+        <Stat
+          label="skip gate"
+          value={jev?.skipLabel ?? "insufficient data (days 0/7, scheduled 0)"}
+          tone={jev?.skipStatus === "FLAG" ? -1 : jev?.skipStatus === "PASS" ? 1 : 0}
+        />
+        <Stat label="skip share 7d" value={(jev?.skipShare ?? 0).toFixed(3)} />
+        <Stat label="skip days" value={`${jev?.skipDays ?? 0}/7`} />
+        <Stat label="skip scheduled" value={String(jev?.skipScheduled ?? 0)} />
+        <Stat label="legacy, excluded" value={`${jev?.legacySkipped ?? 0} skipped / ${jev?.legacyPackets ?? 0} packets`} />
       </section>
 
       <section style={{ padding: "12px 24px" }}>
