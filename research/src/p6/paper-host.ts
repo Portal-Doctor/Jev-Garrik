@@ -23,7 +23,9 @@ import { applyForward, freshBook, forwardBookPanel, noteMemberDay, type Book } f
 import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
 import { completedDays, deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
-import { buildJevPackets, freshJevMeter, type JevMeter } from "./jev-shadow";
+import { freshJevMeter, type JevMeter } from "./jev-shadow";
+import { drainJevShadow, freshJevSkip, queuedForHandover, scheduleClosedJevBar, scheduleLiveJev, type JevCaller, type JevQueued, type JevSkipLedger, type JevStored } from "./jev-call";
+import { JevTape, type StoredJevMinute } from "./jev-minute";
 import { renewLease, type Kv } from "./relay";
 import { kickDurable } from "./hot-store";
 import { foldedCovers, foldHours } from "../data/derive";
@@ -199,8 +201,16 @@ export interface PaperHost {
   feedBufferCapped: boolean;
   /** While true, socket messages are buffered instead of applied. */
   bufferFeeds: boolean;
-  /** Cumulative and monthly Jev spend. Live calls are not made. */
+  /** Cumulative and monthly Jev spend. Shadow calls do not place orders. */
   jevMeter: JevMeter;
+  /** Live minute summaries. Restored rows are not live. */
+  jevTape: JevTape;
+  jevQueue: JevQueued[];
+  jevDone: Set<string>;
+  jevAnswers: JevStored[];
+  jevSkip: JevSkipLedger;
+  /** Test hook. Unset uses the live caller, which does not connect without a key. */
+  jevCaller?: JevCaller;
   /** Lease token this process acquired. A save without it does not claim the lease. */
   leaseToken: string | null;
   /** Products that timed out this run. Later REST for them is not sent. */
@@ -532,6 +542,11 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     feedBufferCapped: false,
     bufferFeeds: false,
     jevMeter: loadJevMeter(),
+    jevTape: new JevTape(),
+    jevQueue: [],
+    jevDone: new Set(),
+    jevAnswers: [],
+    jevSkip: freshJevSkip(),
     leaseToken: null,
     restTimedOut: new Set(),
     leaseRenewedMs: 0,
@@ -681,6 +696,7 @@ function emitGaps(host: PaperHost, shard: readonly string[], cause: string): voi
   host.reconnects += 1;
   host.status = "reconnecting";
   host.book.incidents.push(`socket reconnect ${host.reconnects} ${cause}: ${shard.join(",")}`);
+  host.jevTape.feedDown(host.clock(), shard);
   for (const productId of shard) {
     host.gapEvents += 1;
     applyForward(host.book, { kind: "gap", productId });
@@ -721,6 +737,7 @@ export function onSocketClosed(host: PaperHost, shardIndex: number): void {
   }
   host.gapOpen[shardIndex] = false;
   host.needsReconnect[shardIndex] = true;
+  host.jevTape.feedDown(host.clock(), host.shards[shardIndex] ?? []);
   host.book.incidents.push(`socket ${shardIndex} closed`);
 }
 
@@ -759,6 +776,7 @@ export function observeHeartbeat(host: PaperHost, shardIndex: number, nowMs: num
   const reconnect = last != null && heartbeatMustReconnect(last, nowMs) && !host.gapOpen[shardIndex];
   if (reconnect) emitGaps(host, host.shards[shardIndex] ?? [], "late-heartbeat");
   applyForward(host.book, { kind: "heartbeat", tsMs: nowMs });
+  host.jevTape.heartbeat(nowMs, host.shards[shardIndex] ?? []);
   host.lastHeartbeatMs[shardIndex] = nowMs;
   host.gapOpen[shardIndex] = false;
   host.status = "live";
@@ -844,6 +862,9 @@ export function applyPublic(host: PaperHost, shardIndex: number, events: readonl
           },
         };
       }
+      if (event.side === "BUY" || event.side === "SELL") {
+        host.jevTape.onTrade(event.productId, tsMs, event.price, event.size, event.side);
+      }
       if (event.side === "BUY" || event.side === "SELL" || opts?.handoverMicro) {
         applyForward(host.book, {
           kind: "trade",
@@ -881,8 +902,9 @@ export function applyPublic(host: PaperHost, shardIndex: number, events: readonl
   for (const productId of dirty) {
     const book = host.books.get(productId);
     const top = book ? touch(book) : null;
-    if (top) {
+    if (top && book) {
       host.book.quotes[productId] = { bid: top.bid, ask: top.ask, tsMs: nowMs, quoteSrc: "l2" };
+      host.jevTape.onBook(productId, nowMs, book);
       applyForward(host.book, { kind: "mid", tsMs: nowMs, productId, bid: top.bid, ask: top.ask });
     }
   }
@@ -1326,8 +1348,7 @@ function pushBar(host: PaperHost, bar: OhlcvBar): void {
       host.dailyCloses.set(bar.productId, series);
       noteMemberDay(host.book, bar.productId, closeSource({ date, close: bar.close }));
     }
-    const jev = buildJevPackets({ members: host.products, barStartSec: bar.startSec, nowSec, mids: host.book.mids.completed });
-    missing1m = liveBar && jev.missing;
+    if (scheduleClosedJevBar(bar.startSec, host.clock())) scheduleLiveJev(host, bar.startSec);
     rollSettled(host, bar.productId, nowSec);
     if ((live || dailyClose) && host.generatedSec !== nowSec) {
       host.generated = universeEntries(host, nowSec);
@@ -1362,7 +1383,7 @@ function pushBar(host: PaperHost, bar: OhlcvBar): void {
     ...(bScores ? { bScores } : {}),
     dailyClose,
     missing1m,
-    countJev: liveBar,
+    countJev: false,
   };
   applyForward(host.book, { ...fields, phase: "gap" });
   applyForward(host.book, { ...fields, phase: "rest" });
@@ -1551,6 +1572,12 @@ export interface PaperStateBody {
   fourBars?: [string, BarOHLC[]][];
   feedCursor?: FeedCursor;
   jevMeter?: JevMeter;
+  jevMinutes?: StoredJevMinute[];
+  jevDone?: string[];
+  jevAnswers?: JevStored[];
+  jevSkip?: JevSkipLedger;
+  jevBarSec?: number;
+  jevQueue?: JevQueued[];
   feedCut?: FeedCut | null;
   overflowByDay?: [string, number][];
   fourSeedSrc?: [string, "research" | "rest_1h"][];
@@ -1679,6 +1706,12 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     fourBars: [...host.fourBars.entries()],
     feedCursor: { ...host.feedCursor },
     jevMeter: { ...host.jevMeter },
+    jevMinutes: host.jevTape.exportMinutes(),
+    jevDone: [...host.jevDone],
+    jevAnswers: host.jevAnswers.slice(-20),
+    jevSkip: host.jevSkip,
+    jevBarSec: host.book.jevBarSec,
+    jevQueue: queuedForHandover(host.jevQueue, host.jevDone),
     feedCut: host.feedCut ? { ...host.feedCut, trade: host.feedCut.trade ? { ...host.feedCut.trade } : null } : null,
     overflowByDay: [...host.overflowByDay.entries()],
     fourSeedSrc: [...host.fourSeedSrc.entries()],
@@ -1739,7 +1772,23 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   if (body.dailyBars) host.dailyBars = new Map(body.dailyBars.map(([id, rows]) => [id, rows.map((row) => ({ ...row }))]));
   if (body.fourBars) host.fourBars = new Map(body.fourBars.map(([id, rows]) => [id, rows.map((row) => ({ ...row }))]));
   if (body.feedCursor) host.feedCursor = { l2: body.feedCursor.l2 ?? null, tradeId: body.feedCursor.tradeId ?? null };
-  if (body.jevMeter) host.jevMeter = { ...body.jevMeter };
+  if (body.jevMeter) {
+    const saved = body.jevMeter;
+    host.jevMeter = {
+      ...saved,
+      calls: saved.calls ?? 0,
+      todayUsd: saved.todayUsd ?? 0,
+      today: saved.today ?? "",
+      capUsd: 5,
+      monthCapUsd: 100,
+    };
+  }
+  if (body.jevMinutes) host.jevTape.importMinutes(body.jevMinutes);
+  if (body.jevDone) host.jevDone = new Set(body.jevDone);
+  if (body.jevAnswers) host.jevAnswers = body.jevAnswers;
+  if (body.jevSkip) host.jevSkip = body.jevSkip;
+  if (body.jevBarSec != null) host.book.jevBarSec = body.jevBarSec;
+  if (body.jevQueue) host.jevQueue = queuedForHandover(body.jevQueue, host.jevDone);
   if (body.gaps) host.gaps = body.gaps.map((gap) => ({ ...gap }));
   if (body.dSubmitted != null) host.book.submittedByClass.D = body.dSubmitted;
   if (body.dIndeterminate != null) host.book.indeterminateByClass.D = body.dIndeterminate;
@@ -2161,7 +2210,9 @@ export async function driveHost(host: PaperHost, untilMs: number, hooks: DriveHo
             return;
           }
           const held = !host.kv || host.leaseToken != null;
+          host.jevTape.sealDue(now);
           if (apply && held) await sendDueEntries(host, now);
+          if (apply && held) await drainJevShadow(host, now, untilMs);
           host.shards.forEach((_, index) => {
             if (!considerHeartbeatGap(host, index, now)) return;
             replaceShard(host, sockets, index, PUBLIC_WS_URL);

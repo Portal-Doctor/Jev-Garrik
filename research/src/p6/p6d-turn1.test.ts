@@ -180,7 +180,7 @@ test("Jev packets come from the 1m bars and the spend meter stops at $5", () => 
   host.book.mids.completed = mids.map((row) => ({ ...row, open: row.close, high: row.close, low: row.close, volumeBase: 0 }));
   acceptRestBar(host, { productId: "ETH-USD", startSec: start, open: 10, high: 11, low: 9, close: 10, volume: 1 });
   expect(host.book.jevSkipped).toBeGreaterThan(0);
-  expect(host.book.incidents.some((row) => row.includes("jev skip"))).toBe(true);
+  expect(host.book.incidents.some((row) => row.includes("jev no_1m_input"))).toBe(true);
   expect(host.jevMeter.capUsd).toBe(5);
   expect(host.jevMeter.monthCapUsd).toBe(100);
   expect(host.jevMeter.cumulativeUsd).toBeLessThanOrEqual(5);

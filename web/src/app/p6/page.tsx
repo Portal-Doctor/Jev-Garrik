@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { dashboardAuthorized, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Dashboard } from "../../../../research/src/p6/dashboard-read";
+import { dashboardAccess, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Dashboard } from "../../../../research/src/p6/dashboard-read";
 import { RunClock } from "./countdown";
 import styles from "../paper/paper.module.css";
 
@@ -10,6 +10,12 @@ function usd(value: unknown): string {
   if (!Number.isFinite(n)) return "-";
   const sign = n > 0 ? "+" : "";
   return `${sign}${n.toFixed(2)}`;
+}
+
+function jevUsd(value: unknown): string {
+  const n = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(n)) return "-";
+  return `$${n.toFixed(4)}`;
 }
 
 function toneOf(value: unknown): number | undefined {
@@ -55,10 +61,29 @@ function classTone(id: string, drawdownR: number): "green" | "yellow" | "red" {
   return drawdownR < 5 ? "green" : "red";
 }
 
-/** Read-only. The view token is not the cron secret. Nothing on this page writes Redis. */
-export default async function P6DashboardPage() {
+/** Read-only. The view token is not the cron secret. Nothing on this page writes Redis. Open with GET /p6; see dashboardAccess. */
+export default async function P6DashboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const headerList = await headers();
-  if (!dashboardAuthorized(headerList.get("authorization"), process.env.DASHBOARD_TOKEN)) {
+  const query = searchParams ? await searchParams : {};
+  const rawToken = query.token;
+  const tokenParam = rawToken == null ? null : Array.isArray(rawToken) ? (rawToken[0] ?? "") : rawToken;
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (typeof value === "string") params.append(key, value);
+    else if (Array.isArray(value)) for (const item of value) params.append(key, item);
+  }
+  const access = dashboardAccess({
+    authorization: headerList.get("authorization"),
+    cookieHeader: headerList.get("cookie"),
+    tokenParam,
+    searchParams: params,
+    dashboardToken: process.env.DASHBOARD_TOKEN,
+  });
+  if (access.action !== "allow") {
     return (
       <main className={styles.top}>
         <h1>P6 paper</h1>
@@ -94,6 +119,13 @@ export default async function P6DashboardPage() {
     pairBackstopUsd?: number;
   } | null;
   const rest = (last?.rest ?? {}) as { n?: number; r429?: number; waitedMs?: number };
+  const jev = (last?.jev ?? null) as {
+    totalUsd?: number;
+    todayUsd?: number;
+    calls?: number;
+    capUsd?: number;
+    byReason?: { no_1m_input?: number; not_called?: number; timeout?: number; call_error?: number; invalid_response?: number };
+  } | null;
   const redis = (last?.redis ?? {}) as { cmds?: number; bytes?: number; maxValueBytes?: number };
   const cold = Array.isArray(last?.cold) ? (last.cold as { id?: string; reason?: string }[]) : [];
   const warm = typeof last?.warm === "number" ? last.warm : 0;
@@ -207,6 +239,18 @@ export default async function P6DashboardPage() {
         <Stat label="Redis cmds" value={String(redis.cmds ?? 0)} />
         <Stat label="Month" value={`${(month / 1_000_000).toFixed(2)}M / ${(budget / 1_000_000).toFixed(0)}M`} tone={proj === "red" ? -1 : proj === "amber" ? 0 : 1} />
         <Stat label="Max value" value={String(redis.maxValueBytes ?? 0)} />
+      </section>
+
+      <section className={styles.equityStrip}>
+        <Stat label="Jev spend" value={jevUsd(jev?.totalUsd)} />
+        <Stat label="Jev today" value={jevUsd(jev?.todayUsd)} />
+        <Stat label="Jev calls" value={String(jev?.calls ?? 0)} />
+        <Stat label="Jev cap" value={jevUsd(jev?.capUsd)} />
+        <Stat label="no_1m_input" value={String(jev?.byReason?.no_1m_input ?? 0)} />
+        <Stat label="not_called" value={String(jev?.byReason?.not_called ?? 0)} />
+        <Stat label="timeout" value={String(jev?.byReason?.timeout ?? 0)} />
+        <Stat label="call_error" value={String(jev?.byReason?.call_error ?? 0)} />
+        <Stat label="invalid_response" value={String(jev?.byReason?.invalid_response ?? 0)} />
       </section>
 
       <section style={{ padding: "12px 24px" }}>

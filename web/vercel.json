@@ -4,5 +4,11 @@
       "path": "/api/engine",
       "schedule": "1,16,31,46 * * * *"
     }
-  ]
+  ],
+  "functions": {
+    "src/app/api/engine/route.ts": {
+      "memory": 1024,
+      "maxDuration": 1800
+    }
+  }
 }

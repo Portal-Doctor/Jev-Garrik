@@ -5,6 +5,7 @@
 
 import type { BarOHLC } from "../p3/signals";
 import { paperPnl } from "./engine";
+import { queuedForHandover, skipShareReport } from "./jev-call";
 import {
   FOUR_KEEP,
   fourSeriesReady,
@@ -148,6 +149,12 @@ interface HotBody {
   dIndeterminate: number;
   feedCursor: PaperStateBody["feedCursor"];
   jevMeter: PaperStateBody["jevMeter"];
+  jevMinutes?: PaperStateBody["jevMinutes"];
+  jevDone?: PaperStateBody["jevDone"];
+  jevAnswers?: PaperStateBody["jevAnswers"];
+  jevSkip?: PaperStateBody["jevSkip"];
+  jevBarSec?: PaperStateBody["jevBarSec"];
+  jevQueue?: PaperStateBody["jevQueue"];
   emitted: string[];
   weeks: PaperStateBody["weeks"];
   feedCut: PaperStateBody["feedCut"];
@@ -191,6 +198,12 @@ export function captureHot(host: PaperHost): HotBody {
     dIndeterminate: book.indeterminateByClass.D,
     feedCursor: { ...host.feedCursor },
     jevMeter: { ...host.jevMeter },
+    jevMinutes: host.jevTape.exportMinutes(),
+    jevDone: [...host.jevDone],
+    jevAnswers: host.jevAnswers.slice(-20),
+    jevSkip: host.jevSkip,
+    ...(host.book.jevBarSec != null ? { jevBarSec: host.book.jevBarSec } : {}),
+    jevQueue: queuedForHandover(host.jevQueue, host.jevDone),
     emitted: [...host.emitted].slice(-80),
     weeks: [...host.weeks.entries()],
     feedCut: host.feedCut,
@@ -579,6 +592,14 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
     seedIdx: host.seedCursor.idx,
     completed,
     pnl: paperPnl(host.book),
+    jev: {
+      totalUsd: host.jevMeter.cumulativeUsd,
+      todayUsd: host.jevMeter.today === new Date(host.clock()).toISOString().slice(0, 10) ? host.jevMeter.todayUsd : 0,
+      calls: host.jevMeter.calls ?? 0,
+      capUsd: host.jevMeter.capUsd,
+      byReason: { ...host.jevSkip.byReason },
+      skips: skipShareReport(host.jevSkip),
+    },
   };
   let encoded = JSON.stringify(last);
   const lastBytes = Buffer.byteLength(encoded);
