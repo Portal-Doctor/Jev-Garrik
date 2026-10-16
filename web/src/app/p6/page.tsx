@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { dashboardAccess, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Page } from "../../../../research/src/p6/dashboard-read";
-import { concentrationText, formatCt, N_NOTE, PNL_START_USD, signedPct, signedUsd, wlText, type PnlBlock } from "../../../../research/src/p6/pnl-block";
+import { closedNote, concentrationText, drawdownText, formatCt, PNL_START_USD, signedPct, signedUsd, wlText, type PnlBlock } from "../../../../research/src/p6/pnl-block";
 import { RunClock } from "./countdown";
 import styles from "../paper/paper.module.css";
 
@@ -76,7 +76,7 @@ function PnlStrip({ block }: { block: PnlBlock }) {
       </div>
       <div className={styles.pnlGrid}>
         {block.tiles.map((tile) => (
-          <div key={tile.id} className={styles.pnlTile}>
+          <div key={tile.id} className={`${styles.pnlTile} ${tile.anchorLabel ? styles.pnlTileGrey : ""}`}>
             <span className={styles.pnlWindow}>{tile.id}</span>
             {tile.status === "no-data" ? (
               <span className={styles.sub}>no data yet</span>
@@ -97,14 +97,18 @@ function PnlStrip({ block }: { block: PnlBlock }) {
                 <span className={styles.sub}>
                   fees paid {tile.feesUsd == null ? "-" : signedUsd(tile.feesUsd)} · spread+slippage paid {tile.spreadSlipUsd == null ? "-" : signedUsd(tile.spreadSlipUsd)} · included above
                 </span>
-                <span>
-                  {wlText(tile.wins, tile.losses)}
-                  {tile.closedN < 30 ? ` · ${N_NOTE}` : ""}
-                </span>
-                <span className={styles.sub}>hourly drawdown {tile.drawdownUsd == null ? "-" : signedUsd(tile.drawdownUsd)}</span>
-                <span className={styles.sub}>{concentrationText(tile.concentrationPct)}</span>
+                {tile.tradesUnknown ? (
+                  <span>trades unknown</span>
+                ) : (
+                  <span>
+                    {wlText(tile.wins, tile.losses)}
+                    {closedNote(tile.closedN) ? ` · ${closedNote(tile.closedN)}` : ""}
+                  </span>
+                )}
+                <span className={styles.sub}>hourly drawdown {tile.drawdownUsd == null ? "-" : drawdownText(tile.drawdownUsd)}</span>
+                <span className={styles.sub}>{tile.tradesUnknown ? "trades unknown" : concentrationText(tile.concentrationPct)}</span>
                 {tile.since ? <span className={styles.sub}>{tile.since}</span> : null}
-                {tile.partial ? <span className={styles.sub}>partial</span> : null}
+                {tile.anchorLabel ? <span className={styles.sub}>{tile.anchorLabel}</span> : null}
               </>
             )}
           </div>

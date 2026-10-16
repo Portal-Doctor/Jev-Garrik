@@ -202,27 +202,113 @@ function jevSkipUnused(ledger: JevSkipLedger): boolean {
   return true;
 }
 
+function reasonMax(
+  a: Partial<Record<JevReason, number>> | undefined,
+  b: Partial<Record<JevReason, number>> | undefined,
+): Record<JevReason, number> {
+  const out = emptyReasons();
+  for (const reason of JEV_REASONS) out[reason] = Math.max(a?.[reason] ?? 0, b?.[reason] ?? 0);
+  return out;
+}
+
 /**
- * Per UTC day, the row with the larger scheduled count wins, whole row.
- * A tie keeps the installed row. The result is trimmed to 14 UTC days including the newest.
- * A fresh ledger takes the snapshot's other fields. A ledger that already has days keeps its other fields,
- * so a stale snapshot cannot replace them.
+ * skipped is at least the larger stored skipped count and at least the sum of the merged reasons.
+ * A remainder (skipped above that sum) is added to the largest reason. A tie takes the earliest JEV_REASONS entry.
+ * If every reason is 0, the remainder goes to not_called. The per-reason sum then equals skipped.
+ * This never shrinks a skip count, so a stale row cannot turn FLAG into PASS.
+ */
+function reconcileSkipped(skipped: number, byReason: Record<JevReason, number>): { skipped: number; byReason: Record<JevReason, number> } {
+  const sum = JEV_REASONS.reduce((total, reason) => total + byReason[reason], 0);
+  const next = Math.max(skipped, sum);
+  if (next > sum) {
+    let target: JevReason = "not_called";
+    let best = 0;
+    for (const reason of JEV_REASONS) {
+      if (byReason[reason] > best) {
+        best = byReason[reason];
+        target = reason;
+      }
+    }
+    byReason[target] += next - sum;
+  }
+  return { skipped: next, byReason };
+}
+
+function mergeDayCounts(a: JevDayCount, b: JevDayCount): JevDayCount {
+  const reasons = reasonMax(a.byReason, b.byReason);
+  const reconciled = reconcileSkipped(Math.max(a.skipped ?? 0, b.skipped ?? 0), reasons);
+  return {
+    dayMs: a.dayMs,
+    onTime: Math.max(a.onTime ?? 0, b.onTime ?? 0),
+    catchUp: Math.max(a.catchUp ?? 0, b.catchUp ?? 0),
+    scheduled: Math.max(a.scheduled ?? 0, b.scheduled ?? 0),
+    skipped: reconciled.skipped,
+    answered: Math.max(a.answered ?? 0, b.answered ?? 0),
+    byReason: reconciled.byReason,
+  };
+}
+
+/**
+ * Per field, not per row. scheduled, skipped, answered, onTime, and catchUp are max.
+ * Day byReason is per-key max, then skipped is raised to the reason sum (see reconcileSkipped).
+ * Ledger byReason, bySub, latency buckets, and byTier packets/skipped are per-key max.
+ * A byTier skipped count may exceed that tier's packets; neither number is shrunk.
+ * holder, handoverMinutes, and weekStartMs stay on the installed ledger once it is in use.
+ * A fresh ledger (no days, no week counts, no reasons, no latency) takes the snapshot's identity fields.
+ * weekOnTime and weekCatchUp are maxed only when weekStartMs matches. Different weeks keep the installed counts.
+ * The result is trimmed to 14 UTC days including the newest.
  */
 export function mergeJevSkip(current: JevSkipLedger, incoming: Partial<JevSkipLedger> | undefined): JevSkipLedger {
   const base = normalizeJevSkip(current);
   const next = normalizeJevSkip(incoming);
-  const kept = jevSkipUnused(base) ? next : base;
+  const unused = jevSkipUnused(base);
+  const byReason = reasonMax(base.byReason, next.byReason);
+  const bySub = {
+    no_trades_feed: Math.max(base.bySub.no_trades_feed, next.bySub.no_trades_feed),
+    no_book_feed: Math.max(base.bySub.no_book_feed, next.bySub.no_book_feed),
+  };
+  const byTier: Record<string, { packets: number; skipped: number }> = {};
+  for (const tier of new Set([...Object.keys(base.byTier), ...Object.keys(next.byTier)])) {
+    const left = base.byTier[tier];
+    const right = next.byTier[tier];
+    byTier[tier] = {
+      packets: Math.max(left?.packets ?? 0, right?.packets ?? 0),
+      skipped: Math.max(left?.skipped ?? 0, right?.skipped ?? 0),
+    };
+  }
+  const latency = {
+    le60: Math.max(base.latency.le60, next.latency.le60),
+    le300: Math.max(base.latency.le300, next.latency.le300),
+    le600: Math.max(base.latency.le600, next.latency.le600),
+    late: Math.max(base.latency.late, next.latency.late),
+  };
+  const identity = unused ? next : base;
+  const sameWeek = base.weekStartMs === next.weekStartMs;
+  const weekOnTime = unused || !sameWeek ? identity.weekOnTime : Math.max(base.weekOnTime, next.weekOnTime);
+  const weekCatchUp = unused || !sameWeek ? identity.weekCatchUp : Math.max(base.weekCatchUp, next.weekCatchUp);
   const byDay = new Map<number, JevDayCount>();
   for (const day of base.jevDays) byDay.set(day.dayMs, day);
   for (const day of next.jevDays) {
     const have = byDay.get(day.dayMs);
-    if (!have || (day.scheduled ?? 0) > (have.scheduled ?? 0)) byDay.set(day.dayMs, day);
+    byDay.set(day.dayMs, have ? mergeDayCounts(have, day) : day);
   }
-  const days = [...byDay.values()].sort((a, b) => a.dayMs - b.dayMs);
-  const newest = days.reduce((max, day) => Math.max(max, day.dayMs), 0);
+  const blank = { onTime: 0, catchUp: 0, scheduled: 0, skipped: 0, answered: 0, byReason: emptyReasons() };
+  const mergedDays = [...byDay.values()].map((day) => mergeDayCounts(day, { dayMs: day.dayMs, ...blank }));
+  const newest = mergedDays.reduce((max, day) => Math.max(max, day.dayMs), 0);
   const keepFrom = newest - 13 * JEV_DAY_MS;
-  const jevDays = newest === 0 ? [] : days.filter((day) => day.dayMs >= keepFrom);
-  return { ...kept, jevDays };
+  const jevDays = newest === 0 ? [] : mergedDays.filter((day) => day.dayMs >= keepFrom).sort((a, b) => a.dayMs - b.dayMs);
+  return {
+    byReason,
+    bySub,
+    byTier,
+    latency,
+    handoverMinutes: identity.handoverMinutes,
+    holder: identity.holder,
+    weekStartMs: identity.weekStartMs,
+    weekOnTime,
+    weekCatchUp,
+    jevDays,
+  };
 }
 
 export function skipShareReport(ledger: JevSkipLedger, nowMs = 0): JevSkipReport {

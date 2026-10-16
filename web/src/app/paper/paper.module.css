@@ -223,6 +223,11 @@
   font-size: 13px;
 }
 
+.pnlTileGrey {
+  background: #4b5563;
+  color: #e5e7eb;
+}
+
 .pnlWindow {
   font-size: 12px;
   letter-spacing: 0.06em;

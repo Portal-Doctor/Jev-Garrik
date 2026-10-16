@@ -11,11 +11,11 @@ import { commandBudget, healthStale, monthCommands, nextCronMs, projectionTone }
 import {
   buildPnlBlock,
   EQ_FIRST_KEY,
-  parseHourTrades,
+  parseHourAgg,
   parsePoint,
   pnlMgetKeys,
   type EqPoint,
-  type EqTrade,
+  type HourAgg,
   type PnlBlock,
 } from "./pnl-block";
 
@@ -354,18 +354,18 @@ function numField(row: Record<string, unknown>, key: string): number | null {
 }
 
 /**
- * Second read of a page load. One MGET of the hourly equity keys, the per-hour trade lists, and p6:eq:first.
+ * Second read of a page load. One MGET of the hourly equity keys, the per-hour aggregates, and p6:eq:first.
  * Does not read p6:fills or p6:ledger. A book reset must delete p6:eq:* (deferred; not built).
  */
 export async function readPnlWindows(kv: Pick<Kv, "mget">, nowMs: number): Promise<{
   first: EqPoint | null;
   points: EqPoint[];
-  trades: Map<number, EqTrade[] | null>;
+  trades: Map<number, HourAgg | null>;
 }> {
   const keys = pnlMgetKeys(nowMs);
   const values = await kv.mget(keys);
   const points: EqPoint[] = [];
-  const trades = new Map<number, EqTrade[] | null>();
+  const trades = new Map<number, HourAgg | null>();
   let first: EqPoint | null = null;
   keys.forEach((key, index) => {
     const raw = values[index] ?? null;
@@ -376,7 +376,7 @@ export async function readPnlWindows(kv: Pick<Kv, "mget">, nowMs: number): Promi
     }
     if (key.startsWith("p6:eq:tr:")) {
       const hour = Number(key.slice("p6:eq:tr:".length));
-      trades.set(hour, parseHourTrades(raw));
+      trades.set(hour, parseHourAgg(raw));
       return;
     }
     if (key.startsWith("p6:eq:")) {
