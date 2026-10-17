@@ -79,7 +79,11 @@ test("the summary uses one card, one fold, and only bar-width inline styles", ()
   expect(styles.length).toBe(3);
   for (const block of styles) expect(block.includes("width:") && block.includes("%")).toBe(true);
   expect(nav.includes('href="/p6"')).toBe(true);
-  expect(nav.includes("P6 paper")).toBe(true);
+  expect(nav.includes('label="Paper (P6)"')).toBe(true);
+  expect(nav.includes("P6 paper")).toBe(false);
+  const p6Group = nav.slice(nav.indexOf('id="p6"'), nav.indexOf('id="coinbase"'));
+  expect(p6Group.includes("Summary")).toBe(true);
+  expect(p6Group.includes("Overview")).toBe(false);
   expect(nav.includes("Coinbase engine")).toBe(true);
   expect(nav.includes('href="/paper/backtest"')).toBe(true);
   expect(nav.includes("Backtest")).toBe(true);

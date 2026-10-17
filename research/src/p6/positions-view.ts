@@ -25,12 +25,71 @@ export const BOOK_DRAWDOWN_AMBER_USD = BOOK_DRAWDOWN_HALT_USD * 0.5;
 /** Open-risk Near limit. Drawdown does not use this fraction. */
 export const OPEN_RISK_NEAR_FRACTION = 0.8;
 
-/** OK below nearAt, Near limit until the limit, Over at the limit. */
+/**
+ * Class R meters and the class dollar backstop.
+ * OK below nearAt, Near limit until the limit, Over at the limit.
+ * Open risk and book drawdown do not use this. They use riskTone.
+ */
 export function limitWord(used: number, limit: number, nearAt: number): "OK" | "Near limit" | "Over" {
   if (!(limit > 0) || !Number.isFinite(used)) return "OK";
   if (used >= limit) return "Over";
   if (used >= nearAt) return "Near limit";
   return "OK";
+}
+
+const SUMMARY_CLASS_IDS = ["A", "B", "C", "D", "E"] as const;
+
+/** Open risk is Over only above the cap. Book drawdown is Halted at the halt. Thresholds are the design-rule constants. */
+export function riskTone(openRiskUsd: number, drawdownUsd: number): {
+  openRisk: "OK" | "Near limit" | "Over";
+  drawdown: "OK" | "Near limit" | "Halted";
+} {
+  const cap = OPEN_RISK_CAP_USD;
+  const nearRisk = cap * OPEN_RISK_NEAR_FRACTION;
+  const halt = BOOK_DRAWDOWN_HALT_USD;
+  const nearDrawdown = BOOK_DRAWDOWN_AMBER_USD;
+  return {
+    openRisk: openRiskState(openRiskUsd, cap, nearRisk),
+    drawdown: drawdownState(drawdownUsd, halt, nearDrawdown),
+  };
+}
+
+function openRiskState(used: number, cap: number, nearAt: number): "OK" | "Near limit" | "Over" {
+  if (!(cap > 0) || !Number.isFinite(used)) return "OK";
+  if (used > cap) return "Over";
+  if (used >= nearAt) return "Near limit";
+  return "OK";
+}
+
+function drawdownState(used: number, halt: number, nearAt: number): "OK" | "Near limit" | "Halted" {
+  if (!(halt > 0) || !Number.isFinite(used)) return "OK";
+  if (used >= halt) return "Halted";
+  if (used >= nearAt) return "Near limit";
+  return "OK";
+}
+
+/** Missing cap is not OK. A known cap still uses the class-meter word. */
+export function classDollarWord(drawdownUsd: number, capUsd: number | null): "OK" | "Near limit" | "Over" | "n/a" {
+  if (capUsd == null) return "n/a";
+  if (!(capUsd > 0)) return "OK";
+  return limitWord(drawdownUsd, capUsd, capUsd * 0.7);
+}
+
+/** Red banner lines. Book halt is the drawdown argument, at or above the halt constant. */
+export function gateBannerLines(input: {
+  killSwitch: boolean;
+  classes?: Record<string, { paused?: boolean; killed?: boolean }> | null;
+  drawdownUsd: number;
+}): string[] {
+  const lines: string[] = [];
+  if (input.killSwitch) lines.push("Kill switch on. New entries are blocked.");
+  for (const id of SUMMARY_CLASS_IDS) {
+    const row = input.classes?.[id];
+    if (row?.killed) lines.push(`Class ${id} killed. New entries in class ${id} are blocked.`);
+    else if (row?.paused) lines.push(`Class ${id} paused. New entries in class ${id} are blocked until it resumes.`);
+  }
+  if (input.drawdownUsd >= BOOK_DRAWDOWN_HALT_USD) lines.push("Book halt reached. New entries are blocked until the book recovers.");
+  return lines;
 }
 
 export const POSITIONS_IDENTITY =
