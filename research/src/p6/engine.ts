@@ -412,18 +412,30 @@ function utcDay(tsMs: number): string {
   return new Date(tsMs).toISOString().slice(0, 10);
 }
 
-function exitCostUsd(position: Position, mark: number): number {
-  return (mark * position.units * (TAKER_FEE_BPS + position.sLiveBps)) / 10_000;
+function parityRoundTripUsd(position: Position, mark: number, sBtBps: number): number {
+  const exitFill = x1FillPrice(mark, "sell", sBtBps);
+  const net = netBps(position.fillPrice, exitFill, TAKER_FEE_BPS, TAKER_FEE_BPS);
+  return (net / 10_000) * position.units * position.fillPrice;
 }
 
-function markedPnl(book: Book, position: Position, mark: number): number {
-  if (book.config.parity) {
-    const exitFill = x1FillPrice(mark, "sell", book.config.parity.sBtBps);
-    const net = netBps(position.fillPrice, exitFill, TAKER_FEE_BPS, TAKER_FEE_BPS);
-    return (net / 10_000) * position.units * position.fillPrice;
-  }
+/**
+ * The exit-cost term inside markedPnl. One definition.
+ * A live book uses notional × (taker bps + the position's live slippage) / 10_000.
+ * A parity book has no separate slippage term: this returns the residual
+ * notional − cost basis − round-trip mark, so markedPnl stays the round-trip net.
+ */
+export function openExitCostUsd(book: Book, position: Position, mark: number): number {
+  const notional = mark * position.units;
+  const costBasis = position.units * position.fillPrice + position.entryFeeUsd;
+  if (book.config.parity) return notional - costBasis - parityRoundTripUsd(position, mark, book.config.parity.sBtBps);
+  return (notional * (TAKER_FEE_BPS + position.sLiveBps)) / 10_000;
+}
+
+export function markedPnl(book: Book, position: Position, mark: number): number {
+  const notional = mark * position.units;
+  const costBasis = position.units * position.fillPrice + position.entryFeeUsd;
   // The close already subtracts entryFeeUsd once. Charging it here keeps equity continuous. Parity already charges the round trip.
-  return (mark - position.fillPrice) * position.units - exitCostUsd(position, mark) - position.entryFeeUsd;
+  return notional - openExitCostUsd(book, position, mark) - costBasis;
 }
 
 function openMtm(book: Book): number {

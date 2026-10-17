@@ -1,6 +1,17 @@
 import { headers } from "next/headers";
 import { dashboardAccess, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Page } from "../../../../research/src/p6/dashboard-read";
-import { closedNote, concentrationText, drawdownText, formatCt, PNL_START_USD, signedPct, signedUsd, wlText, type PnlBlock } from "../../../../research/src/p6/pnl-block";
+import { closedNote, concentrationText, drawdownText, formatCt, PNL_START_USD, signedPct, signedUsd, tileMarkedGrey, wlText, type PnlBlock } from "../../../../research/src/p6/pnl-block";
+import {
+  ageText,
+  CASH_LABEL,
+  ENTRY_FEE_NOTE,
+  formatUsd,
+  MARK_FALLBACK,
+  positionsFooter,
+  positionsSectionCopy,
+  STABLECOIN_NOTE,
+  type PositionSnap,
+} from "../../../../research/src/p6/positions-view";
 import { RunClock } from "./countdown";
 import styles from "../paper/paper.module.css";
 
@@ -76,7 +87,7 @@ function PnlStrip({ block }: { block: PnlBlock }) {
       </div>
       <div className={styles.pnlGrid}>
         {block.tiles.map((tile) => (
-          <div key={tile.id} className={`${styles.pnlTile} ${tile.anchorLabel ? styles.pnlTileGrey : ""}`}>
+          <div key={tile.id} className={`${styles.pnlTile} ${tileMarkedGrey(tile) ? styles.pnlTileGrey : ""}`}>
             <span className={styles.pnlWindow}>{tile.id}</span>
             {tile.status === "no-data" ? (
               <span className={styles.sub}>no data yet</span>
@@ -103,6 +114,7 @@ function PnlStrip({ block }: { block: PnlBlock }) {
                   <span>
                     {wlText(tile.wins, tile.losses)}
                     {closedNote(tile.closedN) ? ` · ${closedNote(tile.closedN)}` : ""}
+                    {tile.hourNote ? ` · ${tile.hourNote}` : ""}
                   </span>
                 )}
                 <span className={styles.sub}>hourly (may understate the intrahour low) {tile.drawdownUsd == null ? "-" : drawdownText(tile.drawdownUsd)}</span>
@@ -121,6 +133,110 @@ function PnlStrip({ block }: { block: PnlBlock }) {
 function toneClass(value: number | null): string {
   if (value == null || value === 0) return "";
   return value > 0 ? styles.pos : styles.neg;
+}
+
+export function PositionsSection({
+  last,
+  nowMs,
+  openUnrealized,
+}: {
+  last: Record<string, unknown> | null;
+  nowMs: number;
+  openUnrealized: number | null;
+}) {
+  const pnl = last && typeof last.pnl === "object" && last.pnl != null ? (last.pnl as { equityUsd?: number; realizedUsd?: number; startingUsd?: number }) : null;
+  const reported = Array.isArray(last?.positions);
+  const snaps = reported ? (last?.positions as PositionSnap[]) : null;
+  const equityUsd = typeof pnl?.equityUsd === "number" ? pnl.equityUsd : 0;
+  const realizedUsd = typeof pnl?.realizedUsd === "number" ? pnl.realizedUsd : 0;
+  const startingUsd = typeof pnl?.startingUsd === "number" ? pnl.startingUsd : PNL_START_USD;
+  const markTs = last && typeof last.end === "number" ? last.end : null;
+  const omitted = typeof last?.positionsOmitted === "number" ? last.positionsOmitted : 0;
+  const skipped = typeof last?.positionsSkipped === "number" ? last.positionsSkipped : 0;
+  const view = positionsFooter({
+    snaps,
+    nowMs,
+    markTs,
+    equityUsd,
+    realizedUsd,
+    unrealizedUsd: openUnrealized ?? 0,
+    startingUsd,
+    omitted,
+    skipped,
+  });
+  const copy = positionsSectionCopy(view);
+  const bad = view.reported && (!view.reconciled || !view.unrealizedMatch || view.problems.length > 0);
+  const grey = copy.grey;
+  return (
+    <section className={`${styles.pnlBlock} ${grey ? styles.pnlStale : ""}`}>
+      <div className={styles.pnlHead}>
+        <span className={styles.pnlTitle}>POSITIONS</span>
+        <span className={styles.sub}>
+          as of last run {view.markTs == null ? "—" : formatCt(view.markTs, false)}
+          {view.stale ? " · stale" : ""}
+        </span>
+        <span className={styles.sub}>{ENTRY_FEE_NOTE}</span>
+      </div>
+      <table className={styles.posTable}>
+        <thead>
+          <tr>
+            {["Pair", "Class", "Qty", "Entry", "Age", "Mark", "Notional", "Unrealized", "Unrealized %", "Initial risk", "Net R", "Stop", "Distance %", "Target"].map((label) => (
+              <th key={label} className={styles.posHead}>
+                {label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {copy.body ? (
+            <tr>
+              <td colSpan={14} className={styles.posCell}>
+                {copy.body}
+              </td>
+            </tr>
+          ) : (
+            view.rows.map((row) => (
+              <tr key={row.id}>
+                <td className={styles.posCell}>{row.product}</td>
+                <td className={styles.posCell}>{row.classId}</td>
+                <td className={styles.posCell}>{row.units}</td>
+                <td className={styles.posCell}>{row.fill}</td>
+                <td className={styles.posCell}>{ageText(row.ageMs)}</td>
+                <td className={styles.posCell}>
+                  {row.mark} {row.markSrc === "entry" ? MARK_FALLBACK : view.markTs == null ? "" : formatCt(view.markTs, false)}
+                </td>
+                <td className={styles.posCell}>{formatUsd(row.notional)}</td>
+                <td className={styles.posCell}>{signedUsd(row.unrealized)}</td>
+                <td className={styles.posCell}>{row.unrealizedPct == null ? "-" : signedPct(row.unrealizedPct)}</td>
+                <td className={styles.posCell}>{formatUsd(row.risk)}</td>
+                <td className={styles.posCell}>{row.netR == null ? "-" : row.netR.toFixed(2)}</td>
+                <td className={styles.posCell}>{row.stop}</td>
+                <td className={styles.posCell}>{row.stopDistancePct == null ? "-" : `${row.stopDistancePct.toFixed(2)}%`}</td>
+                <td className={styles.posCell}>{row.target ?? "—"}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+      {copy.omittedNote ? <p className={styles.sub}>{copy.omittedNote}</p> : null}
+      <p className={styles.sub}>
+        total active investment {copy.active} · at cost {copy.atCost}
+      </p>
+      <p className={styles.sub}>est. exit costs {copy.exit} · already deducted in unrealized</p>
+      <p className={styles.sub}>
+        cash balance {CASH_LABEL} {copy.cash}
+      </p>
+      <p className={styles.sub}>= equity {copy.equity}</p>
+      <p className={bad ? styles.neg : styles.sub}>{copy.check}</p>
+      <p className={styles.sub}>{view.riskText}</p>
+      {view.clusters.map((cluster) => (
+        <p key={cluster.id} className={styles.sub}>
+          {cluster.text}
+        </p>
+      ))}
+      <p className={styles.sub}>{STABLECOIN_NOTE}</p>
+    </section>
+  );
 }
 
 /** Read-only. The view token is not the cron secret. Nothing on this page writes Redis. Open with GET /p6; see dashboardAccess. */
@@ -216,6 +332,7 @@ export default async function P6DashboardPage({
   return (
     <main>
       <PnlStrip block={block} />
+      <PositionsSection last={last} nowMs={Date.now()} openUnrealized={block.openUnrealized} />
       <header className={styles.top}>
         <div className={styles.title}>
           <h1>

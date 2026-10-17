@@ -226,6 +226,8 @@ export interface PnlTile {
   drawdownUsd: number | null;
   /** Null when trades are unknown, realized <= 0, n < 3, or the largest net is not positive. */
   concentrationPct: number | null;
+  /** Set when the window does not start and end on an hour. W-L then uses complete hours only. */
+  hourNote: string | null;
 }
 
 export interface PnlBlock {
@@ -297,15 +299,25 @@ export function endIsStale(nowMs: number, lastEndMs: number | null | undefined):
   return nowMs - lastEndMs > STALE_MS;
 }
 
+/** Time-only CT clock. hourCycle h23, so a midnight hour is 00 and not 24, and not hour12. */
+export const CT_CLOCK: Intl.DateTimeFormatOptions = {
+  timeZone: "America/Chicago",
+  hourCycle: "h23",
+  hour: "2-digit",
+  minute: "2-digit",
+};
+
+/** Shown when a window edge is not on an hour. Those hours are left out of W-L. */
+export const HOUR_EDGE_NOTE = "counts complete hours only";
+
+export function tileMarkedGrey(tile: { since: string | null; anchorLabel: string | null }): boolean {
+  return tile.since != null || tile.anchorLabel != null;
+}
+
 export function formatCt(ms: number, withDate: boolean): string {
   const date = new Date(ms);
   if (!withDate) {
-    const time = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Chicago",
-      hourCycle: "h23",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
+    const time = new Intl.DateTimeFormat("en-US", CT_CLOCK).format(date);
     return `${time} CT`;
   }
   const day = new Intl.DateTimeFormat("en-US", {
@@ -359,7 +371,16 @@ function emptyTile(id: PnlWindowId, span: string, start: number, end: number, si
     closedN: 0,
     drawdownUsd: null,
     concentrationPct: null,
+    hourNote: null,
   };
+}
+
+/** Complete clock hours inside [startMs, endMs]. An hour that hangs over either edge is omitted. */
+export function completeHourSpan(startMs: number, endMs: number): { fromSec: number; toSec: number } | null {
+  const first = Math.ceil(startMs / EQ_HOUR_MS) * EQ_HOUR_MS;
+  const last = Math.floor((endMs - EQ_HOUR_MS) / EQ_HOUR_MS) * EQ_HOUR_MS;
+  if (!(last >= first)) return null;
+  return { fromSec: first / 1000, toSec: last / 1000 };
 }
 
 export function buildPnlBlock(input: {
@@ -403,26 +424,31 @@ export function buildPnlBlock(input: {
     const since = short ? sinceText(end - origin.ts, window.span) : null;
     if (!anchor) return emptyTile(window.id, window.span, start, end, since ?? "no data yet");
     const anchorLabel = found != null && start - found.ts > ANCHOR_GREY_MS ? anchorAgeLabel(start - found.ts) : null;
-    const fromHour = Math.max(hourStartSec(start), origin.hourStartSec);
-    const toHour = hourStartSec(end);
+    const span = completeHourSpan(start, end);
+    const hourNote = start % EQ_HOUR_MS !== 0 || end % EQ_HOUR_MS !== 0 ? HOUR_EDGE_NOTE : null;
     let tradesUnknown = false;
     let wins = 0;
     let losses = 0;
     let closedN = 0;
     let largest = 0;
     let seen = false;
-    for (let hour = fromHour; hour <= toHour; hour += 3600) {
-      const agg = input.trades.get(hour);
-      if (agg == null) {
-        tradesUnknown = true;
-        continue;
-      }
-      closedN += agg.n;
-      wins += agg.wins;
-      losses += agg.losses;
-      if (agg.n > 0 && (!seen || agg.largestNet > largest)) {
-        largest = agg.largestNet;
-        seen = true;
+    // Hours before the paper-start hour are outside the series. The since-start label covers them.
+    // A missing hour after that start, inside the complete-hour span, is unknown.
+    const fromSec = span ? Math.max(span.fromSec, origin.hourStartSec) : null;
+    if (span && fromSec != null && fromSec <= span.toSec) {
+      for (let hour = fromSec; hour <= span.toSec; hour += 3600) {
+        const agg = input.trades.get(hour);
+        if (agg == null) {
+          tradesUnknown = true;
+          continue;
+        }
+        closedN += agg.n;
+        wins += agg.wins;
+        losses += agg.losses;
+        if (agg.n > 0 && (!seen || agg.largestNet > largest)) {
+          largest = agg.largestNet;
+          seen = true;
+        }
       }
     }
     if (tradesUnknown) {
@@ -435,8 +461,10 @@ export function buildPnlBlock(input: {
     const realized = input.realizedNow! - anchor.realized;
     const unrealizedDelta = input.unrealizedNow! - anchor.unrealized;
     const path = input.points.filter((point) => point.ts >= anchor.ts && point.ts <= end);
+    // A partial edge (hourNote) mixes complete-hour winners with whole-window realized.
+    // Withhold the ratio. An aligned window has no partial hour, so the window realized is that same span.
     const concentration =
-      !tradesUnknown && realized > 0 && closedN >= 3 && seen && largest > 0 ? (largest / realized) * 100 : null;
+      hourNote == null && !tradesUnknown && realized > 0 && closedN >= 3 && seen && largest > 0 ? (largest / realized) * 100 : null;
     return {
       id: window.id,
       span: window.span,
@@ -459,6 +487,7 @@ export function buildPnlBlock(input: {
       closedN,
       drawdownUsd: hourlyDrawdown(path),
       concentrationPct: concentration,
+      hourNote,
     };
   });
   return {

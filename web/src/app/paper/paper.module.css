@@ -234,6 +234,22 @@
   color: var(--muted);
 }
 
+.posTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.posCell {
+  padding: 6px 8px;
+}
+
+.posHead {
+  text-align: left;
+  padding: 6px 8px;
+  color: var(--muted);
+}
+
 /* ---- equity strip ---- */
 .equityStrip {
   display: flex;
