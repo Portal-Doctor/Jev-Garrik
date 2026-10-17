@@ -258,7 +258,7 @@ test("paper P/L separates equity, fees, spread, drawdown, and the backstops", ()
   const position = marked.positions[0]!;
   const mark = 98;
   const exitCost = (mark * position.units * (90 + position.sLiveBps)) / 10_000;
-  const unrealized = (mark - position.fillPrice) * position.units - exitCost;
+  const unrealized = (mark - position.fillPrice) * position.units - exitCost - position.entryFeeUsd;
   const pnl = paperPnl(marked);
   expect(pnl.startingUsd).toBe(8000);
   expect(pnl.realizedUsd).toBeCloseTo(80, 6);

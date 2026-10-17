@@ -26,6 +26,53 @@ import { barMarker, HOT_KEY, LEASE_KEY, VALUE_MAX_BYTES, type Kv } from "./relay
 /** One record per flush. The dashboard reads this and does not recompute P/L. */
 export const LAST_RUN_KEY = "p6:lastRun";
 
+/** Account revision. Not part of p6:hot. NX so a successor cannot move fromDay. */
+export const ACCT_KEY = "p6:acct";
+
+/**
+ * First full UTC day strictly after the write's UTC day.
+ * A write at 23:59:59.999Z yields the next calendar day.
+ * A write at 00:00:00.000Z yields the day after that, so the write day itself never counts.
+ */
+export function acctFromDay(nowMs: number): string {
+  const dayStart = Math.floor(nowMs / 86_400_000) * 86_400_000;
+  return new Date(dayStart + 86_400_000).toISOString().slice(0, 10);
+}
+
+/** Inclusive floor. A stored day before the project start is not a marker. */
+const ACCT_FLOOR_DAY = "2026-01-01";
+
+/**
+ * rev must be 2. The day must round-trip through UTC midnight and sit in
+ * [2026-01-01, acctFromDay(nowMs)]. The cap is the next full UTC day, which is
+ * the latest day this writer stamps, at most one day past today.
+ * A non-object body, invalid JSON, an impossible day, or a day outside that
+ * range is no marker. This does not throw.
+ */
+export function parseAcctMarker(raw: string | null, nowMs = Date.now()): { rev: 2; fromDay: string } | null {
+  if (!raw) return null;
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (body == null || typeof body !== "object" || Array.isArray(body)) return null;
+  const rev = (body as { rev?: unknown }).rev;
+  const fromDay = (body as { fromDay?: unknown }).fromDay;
+  if (rev !== 2 || typeof fromDay !== "string" || !acctDayOk(fromDay, nowMs)) return null;
+  return { rev: 2, fromDay };
+}
+
+function acctDayOk(day: string, nowMs: number): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  const parsed = new Date(`${day}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return false;
+  if (parsed.toISOString().slice(0, 10) !== day) return false;
+  if (day < ACCT_FLOOR_DAY || day > acctFromDay(nowMs)) return false;
+  return true;
+}
+
 /** Heartbeat payload cap. Over this, Jev fields are shed and the book is still written. */
 export const HOT_MAX_BYTES = 256 * 1024;
 /** Incident when the hot snapshot reaches 75% of the cap. */
@@ -730,6 +777,9 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
       closed: host.book.closed,
     }),
   );
+  const fromDay = host.book.acctFromDay ?? acctFromDay(host.clock());
+  // NX keeps a valid marker put. An invalid body this process loaded may be replaced; the next flush is NX again.
+  extra.push({ key: ACCT_KEY, value: JSON.stringify({ rev: 2, fromDay }), nx: !host.acctRepair });
   if (host.leaseToken) {
     for (const row of host.jevPacketWrites ?? []) extra.push({ key: row.key, value: row.value, px: JEV_PACKET_TTL_MS, nx: true });
   }
@@ -908,6 +958,8 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
     host.saveCommands += 1;
     host.saveBytes += plan.bytes;
     host.eqHourDone = host.eqPlanHour;
+    if (host.book.acctFromDay == null) host.book.acctFromDay = acctFromDay(host.clock());
+    host.acctRepair = false;
   } catch (error) {
     releaseMarks(host, plan.marks);
     if (leaseLost(error) || transportError(error)) throw error;
@@ -940,7 +992,7 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
   const products = [...new Set(host.products)];
   const tapeMinutes: number[] = [];
   for (let i = 0; i < TAPE_LOOKBACK_MIN; i += 1) tapeMinutes.push(minute - i * 60);
-  const keys: string[] = [HOT_KEY, FILLS_KEY, LEDGER_KEY, SEED_CURSOR_KEY, LAST_RUN_KEY];
+  const keys: string[] = [HOT_KEY, FILLS_KEY, LEDGER_KEY, SEED_CURSOR_KEY, LAST_RUN_KEY, ACCT_KEY];
   for (const at of tapeMinutes) keys.push(tapeKey(at));
   for (const productId of products) {
     for (const day of days) keys.push(bar15Key(productId, day));
@@ -1047,6 +1099,10 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
     }
     host.seedChecked = true;
   }
+  const rawAcct = byKey.get(ACCT_KEY) ?? null;
+  const acct = parseAcctMarker(rawAcct, host.clock());
+  host.acctRepair = rawAcct != null && acct == null;
+  if (acct) host.book.acctFromDay = acct.fromDay;
   return {
     ...hot,
     ...(ledger.length > 0 ? { closed: ledger } : {}),
