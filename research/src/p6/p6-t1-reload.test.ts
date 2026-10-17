@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "bun:test";
 import { HANDOVER_MICRO_MS } from "./amendment-v6";
 import type { Position } from "./engine";
-import { bar15Key, bar4hKey, loadSplit, persistSplit } from "./hot-store";
-import { attachMemberCloses, installPaperState, startPaperHost, type PaperHost } from "./paper-host";
+import { bar15Key, bar4hKey, HOT_MAX_BYTES, loadSplit, persistSplit } from "./hot-store";
+import { attachMemberCloses, FOUR_KEEP, HOUR_KEEP, installPaperState, startPaperHost, type PaperHost } from "./paper-host";
 import {
   decodeLease,
   LEASE_KEY,
@@ -176,9 +178,19 @@ test("a snapshot with no sequence reloads every bar key", async () => {
     seen.push(...keys);
     return base(keys);
   };
-  await holder.reload();
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  try {
+    await holder.reload();
+  } finally {
+    console.log = log;
+  }
   kv.mget = base;
   for (const productId of PRODUCTS) expect(seen).toContain(bar4hKey(productId));
+  expect(lines).toContain("redis keySeq missing");
 });
 
 test("after takeover the book matches the old double-load path", async () => {
@@ -307,6 +319,187 @@ test("a sequence change between the token and the data reloads instead of mixing
   expect(host.fourBars.get("BTC-USD")?.some((bar) => bar.ts === added)).toBe(true);
   expect(snap(host)).toEqual(snap(twin));
 });
+
+test("takeover reload drops the cached raw strings", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const host = startPaperHost(PRODUCTS, {});
+  host.clock = clock;
+  const holder = hostHolder(host, kv, [], "standby");
+  await holder.warm();
+  expect(host.redisRaw).not.toBeNull();
+  expect(host.redisRings).not.toBeNull();
+  const seq = host.redisSeq;
+  await holder.reload();
+  expect(host.redisRaw).toBeNull();
+  expect(host.redisRings).toBeNull();
+  expect(host.redisSeq).toBe(seq);
+  const twin = startPaperHost(PRODUCTS, {});
+  twin.clock = clock;
+  await oldReload(twin, kv, "standby");
+  expect(snap(host)).toEqual(snap(twin));
+});
+
+test("a restarted sequence does not reuse bars warmed at seq N", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const n = 4;
+  const warmed = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; keySeq?: Record<string, number> };
+  warmed.seq = n;
+  for (const key of Object.keys(warmed.keySeq ?? {})) warmed.keySeq![key] = n;
+  await kv.set(HOT_KEY, JSON.stringify(warmed));
+  const host = startPaperHost(PRODUCTS, {});
+  host.clock = clock;
+  const holder = hostHolder(host, kv, [], "standby");
+  await holder.warm();
+  expect(host.redisSeq).toBe(n);
+  const stripped = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; keySeq?: unknown };
+  delete stripped.seq;
+  delete stripped.keySeq;
+  await kv.set(HOT_KEY, JSON.stringify(stripped));
+  const fresh = startPaperHost(PRODUCTS, {});
+  fresh.clock = clock;
+  fresh.warmupStored = true;
+  const loaded = await loadSplit(kv, fresh);
+  if (!loaded) throw new Error("fresh load");
+  installPaperState(fresh, loaded);
+  expect(fresh.redisSeq).toBeNull();
+  const added: number[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const ts = TODAY - (500 + i) * 14_400;
+    added.push(ts);
+    const rows = fresh.fourBars.get("BTC-USD") ?? [];
+    rows.push(ohlc(ts));
+    fresh.fourBars.set("BTC-USD", rows);
+    fresh.book.realizedUsd = 100 + i;
+    await persistSplit(kv, fresh);
+  }
+  const published = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; keySeq?: Record<string, number> };
+  await holder.reload();
+  const twin = startPaperHost(PRODUCTS, {});
+  twin.clock = clock;
+  await oldReload(twin, kv, "standby");
+  expect(snap(host)).toEqual(snap(twin));
+  for (const ts of added) expect(host.fourBars.get("BTC-USD")?.some((bar) => bar.ts === ts)).toBe(true);
+  expect(published.seq).toBeGreaterThan(n);
+  expect(published.keySeq?.[bar4hKey("BTC-USD")]).toBe(published.seq);
+});
+
+test("prod-sized hot with keySeq stays under 256 KB and a steady flush is not grouped", async () => {
+  const path = fileURLToPath(new URL("../../data/reports/universe-membership.json", import.meta.url));
+  const membership = JSON.parse(readFileSync(path, "utf8")) as { members: { date: string; names: string[] }[] };
+  const latest = membership.members[membership.members.length - 1];
+  const names = latest?.names ?? [];
+  expect(names.length).toBeGreaterThan(20);
+  const kv = memoryKv(clock);
+  expect(await tryAcquire(kv, "holder", NOW + 60 * 60_000, NOW)).toBe(true);
+  const lease = decodeLease(await kv.get(LEASE_KEY));
+  if (!lease?.token) throw new Error("lease");
+  const host = startPaperHost(names, {});
+  host.clock = clock;
+  host.warmupStored = true;
+  host.leaseToken = lease.token;
+  host.holderId = "holder";
+  const day0 = Math.floor(Date.parse("2025-11-10T00:00:00Z") / 1000);
+  const dailyCount = Math.floor((TODAY - day0) / 86_400);
+  expect(dailyCount).toBeGreaterThan(300);
+  for (const productId of names) {
+    for (let day = 0; day < 8; day += 1) {
+      for (let slot = 0; slot < 96; slot += 1) host.fifteen.push(fifteen(productId, TODAY - day * 86_400 + slot * 900));
+    }
+    host.fourBars.set(
+      productId,
+      Array.from({ length: FOUR_KEEP }, (_, index) => ohlc(TODAY - (index + 1) * 14_400)),
+    );
+    host.hourWarm.set(
+      productId,
+      Array.from({ length: HOUR_KEEP }, (_, index) => ohlc(TODAY - (index + 1) * 3_600)),
+    );
+    host.dailyBars.set(
+      productId,
+      Array.from({ length: dailyCount }, (_, index) => ohlc(day0 + index * 86_400)),
+    );
+  }
+  let barSets = 0;
+  let stripSets = 0;
+  let stripBytes = 0;
+  const ownedSet = kv.ownedSet.bind(kv);
+  kv.ownedSet = async (leaseKey, token, key, value, opts) => {
+    if (key.startsWith("p6:bar")) barSets += 1;
+    if (key === HOT_KEY) {
+      const body = JSON.parse(value) as { seq?: unknown; keySeq?: unknown };
+      if (body.seq == null && body.keySeq == null) {
+        stripSets += 1;
+        stripBytes += Buffer.byteLength(value);
+      }
+    }
+    return ownedSet(leaseKey, token, key, value, opts);
+  };
+  const payloads: number[] = [];
+  const ownedFlush = kv.ownedFlush.bind(kv);
+  kv.ownedFlush = async (leaseKey, token, nowMs, payload) => {
+    payloads.push(Buffer.byteLength(payload));
+    return ownedFlush(leaseKey, token, nowMs, payload);
+  };
+  await persistSplit(kv, host);
+  const firstBarSets = barSets;
+  const firstPayload = payloads[payloads.length - 1] ?? 0;
+  const stored = await kv.get(HOT_KEY);
+  if (!stored) throw new Error("hot");
+  const parsed = JSON.parse(stored) as { seq?: number; keySeq?: Record<string, number> };
+  const keySeq = parsed.keySeq ?? {};
+  const rest = { ...parsed } as { seq?: number; keySeq?: unknown };
+  delete rest.seq;
+  delete rest.keySeq;
+  const hotBefore = Buffer.byteLength(JSON.stringify(rest));
+  const hotAfter = Buffer.byteLength(stored);
+  expect(hotAfter).toBeLessThan(HOT_MAX_BYTES);
+  expect(Object.keys(keySeq).length).toBeGreaterThan(names.length);
+  barSets = 0;
+  const steady: number[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    host.book.realizedUsd = i + 1;
+    const before = payloads.length;
+    await persistSplit(kv, host);
+    steady.push(payloads[before] ?? 0);
+  }
+  host.fifteen.push(fifteen(names[0]!, TODAY + 96 * 900));
+  const beforeBar = payloads.length;
+  await persistSplit(kv, host);
+  const barPayload = payloads[beforeBar] ?? 0;
+  const steadyGrouped = barSets;
+  const steadyStrip = stripSets;
+  let hotGets = 0;
+  let hotGetBytes = 0;
+  let countGets = false;
+  const get = kv.get.bind(kv);
+  kv.get = async (key) => {
+    const value = await get(key);
+    if (countGets && key === HOT_KEY) {
+      hotGets += 1;
+      if (value) hotGetBytes += Buffer.byteLength(value);
+    }
+    return value;
+  };
+  host.persistedBars.clear();
+  const stripBefore = stripSets;
+  const stripBytesBefore = stripBytes;
+  const barsBefore = barSets;
+  countGets = true;
+  await persistSplit(kv, host);
+  countGets = false;
+  console.log(
+    `t1 prod asOf=${latest?.date} products=${names.length} hotBefore=${hotBefore} hotAfter=${hotAfter} keySeqKeys=${Object.keys(keySeq).length} firstBarSets=${firstBarSets} firstPayload=${firstPayload} steadyStripSets=${steadyStrip} steadyPayloads=${steady.join(",")} barPayload=${barPayload} steadyBarSets=${steadyGrouped} againBarSets=${barSets - barsBefore} againStripSets=${stripSets - stripBefore} againStripBytes=${stripBytes - stripBytesBefore} againHotGets=${hotGets} againHotGetBytes=${hotGetBytes}`,
+  );
+  expect(hotAfter).toBeLessThan(HOT_MAX_BYTES);
+  expect(firstBarSets).toBeGreaterThan(0);
+  expect(firstPayload).toBeLessThan(1_048_576);
+  expect(steadyGrouped).toBe(0);
+  expect(steadyStrip).toBe(0);
+  for (const bytes of steady) expect(bytes).toBeLessThan(1_048_576);
+  expect(barPayload).toBeLessThan(1_048_576);
+  expect(stripSets - stripBefore).toBe(1);
+}, 30_000);
 
 test("takeover switch time stays under a second and is no worse than a full reload", async () => {
   const neu = await takeover("new");

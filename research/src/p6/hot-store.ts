@@ -933,6 +933,11 @@ export function noteReadBytes(host: PaperHost, raw: string | null | undefined): 
   if (raw) host.readBytes += Buffer.byteLength(raw);
 }
 
+/** Partial reload saves nothing while p6:hot has no keySeq. No payload in the line. */
+export function noteKeySeqMissing(): void {
+  console.log("redis keySeq missing");
+}
+
 function trackedSeqKey(key: string): boolean {
   if (key === SEED_CURSOR_KEY || key === LAST_RUN_KEY || key === ACCT_KEY) return true;
   return (
@@ -975,11 +980,21 @@ function touchedSeqKeys(body: FlushPayload): string[] {
  * They share the EVAL with the bars. A map that would push hot over 256 KB,
  * or the payload over 1 MB, is left off. The sequence number is left off too
  * if it alone does not fit, and the original payload is written.
+ *
+ * `seq` is max(loaded + 1, clock seconds). A process that loads a hot with no
+ * sequence must not start again at 1: a standby warmed at seq N would then
+ * reuse a key rewritten by the Nth later flush. A restore (T5/T11) must not
+ * write a p6:hot whose `seq`, or any `keySeq` value, is lower than a sequence
+ * already published. Clock seconds are the floor for that restore too.
  */
 function stampFlush(host: PaperHost, payload: string): HotStamp {
   const body = JSON.parse(payload) as FlushPayload;
   if (!body.hot) return { payload, seq: null, keySeq: null };
-  const next = (host.redisSeq ?? 0) + 1;
+  const clockSec = Math.floor(host.clock() / 1000);
+  const next = Math.max((host.redisSeq ?? 0) + 1, clockSec);
+  if (!Number.isSafeInteger(next) || next < clockSec || next <= (host.redisSeq ?? 0)) {
+    throw new Error("flush sequence went backwards");
+  }
   const hot = JSON.parse(body.hot) as HotBody;
   hot.seq = next;
   const keySeq = host.redisKeySeq ? new Map(host.redisKeySeq) : new Map<string, number>();
@@ -988,6 +1003,12 @@ function stampFlush(host: PaperHost, payload: string): HotStamp {
   }
   for (const key of host.redisRewrite) keySeq.set(key, next);
   for (const key of touchedSeqKeys(body)) keySeq.set(key, next);
+  if (host.redisKeySeq) {
+    for (const [key, prev] of host.redisKeySeq) {
+      const value = keySeq.get(key);
+      if (value != null && value < prev) throw new Error("flush sequence went backwards");
+    }
+  }
   if (keySeq.size > 0) {
     const sorted: Record<string, number> = {};
     for (const key of [...keySeq.keys()].sort()) sorted[key] = keySeq.get(key)!;
@@ -1103,6 +1124,7 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
       // The hot we stored has no key map. A later flush must not republish a map that missed this write.
       host.redisKeySeq = null;
       if (stamped.seq != null) host.redisSeq = stamped.seq;
+      noteKeySeqMissing();
     }
   } catch (error) {
     releaseMarks(host, plan.marks);
@@ -1193,6 +1215,7 @@ function rememberSplit(host: PaperHost, byKey: Map<string, string | null>, rings
   host.redisRaw = byKey;
   host.redisRings = rings;
   const parsed = parseHotSeq(hotRaw);
+  if (hotRaw && !parsed) noteKeySeqMissing();
   host.redisSeq = parsed?.seq ?? null;
   host.redisKeySeq = parsed?.keySeq ?? null;
 }

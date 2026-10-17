@@ -280,7 +280,7 @@ export interface PaperHost {
   redisSeq: number | null;
   /** Per-key sequence from that same snapshot. Null when the map was absent. */
   redisKeySeq: Map<string, number> | null;
-  /** Raw values from the last split read. A reload reuses one only when its sequence matches. */
+  /** Raw values from the last split read. A reload reuses one only when its sequence matches. Cleared after that reload. */
   redisRaw: Map<string, string | null> | null;
   /** Ring lists from that same read, oldest first. */
   redisRings: Map<string, string[]> | null;

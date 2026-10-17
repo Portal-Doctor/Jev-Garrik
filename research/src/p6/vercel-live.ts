@@ -85,11 +85,17 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
           host.leaseUntilMs = lease.untilMs;
         }
       }
-      const saved = await reloadSplit(kv, host);
-      if (!saved) return;
-      installPaperState(host, saved);
-      rememberPersistedBars(host);
-      attachMemberCloses(host);
+      try {
+        const saved = await reloadSplit(kv, host);
+        if (!saved) return;
+        installPaperState(host, saved);
+        rememberPersistedBars(host);
+        attachMemberCloses(host);
+      } finally {
+        // One reload after the lease. The raw strings exist so that reload can reuse unchanged keys.
+        host.redisRaw = null;
+        host.redisRings = null;
+      }
     },
     async resetCold() {
       if (!coldResetEnabled(process.env) || host.stopped) return;
