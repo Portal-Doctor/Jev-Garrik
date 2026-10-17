@@ -423,9 +423,204 @@ test("the entry-fee amendment cites the V6.2 file and waits for Brian", () => {
   expect(body.rule).toBe(AMENDMENT_V63_RULE);
   expect(body.rule).toBe("open marks also charge the entry fee; thresholds unchanged; promotion day count restarts at fromDay");
   expect(body.awaiting).toBe("AWAITING Brian's approval stamp");
-  expect(body.live).toBe(false);
-  expect(body.featureFlag).toBe(false);
+  expect(body.mergedCode).toBe("live once merged, with no feature flag");
+  expect("live" in body).toBe(false);
+  expect("featureFlag" in body).toBe(false);
   expect("approvedAt" in body).toBe(false);
   expect("approvedBy" in body).toBe(false);
-  expect(createHash("sha256").update(JSON.stringify(body)).digest("hex")).toBe("f9f0ba7440865eaad60a8a6756442c8028bbae50a268888a8f1bc6c192505a70");
+  expect(createHash("sha256").update(JSON.stringify(body)).digest("hex")).toBe("480408d77e0c9f2de606c7000def95edc535a894567690cc7bd8398fa632fc6d");
+});
+
+test("partial D adds accumulate the entry fee and open equity charges the sum", () => {
+  const placed = SAT;
+  const book = replayInjected([
+    { kind: "clock", tsMs: placed - 60_000 },
+    {
+      kind: "d-order",
+      id: "d-partial",
+      productId: "ETH-USD",
+      limit: 100,
+      units: 1,
+      placedTs: placed,
+      stop: 90,
+      bid: 100,
+      ask: 100,
+      bookTsMs: placed,
+      sendTsMs: placed + 5,
+      decisionMid: 100,
+      tick: 0.01,
+    },
+    { kind: "trade", productId: "ETH-USD", price: 99.98, size: 0.2, makerSide: "sell", tsMs: placed + 1_000 },
+    { kind: "trade", productId: "ETH-USD", price: 99.98, size: 0.6, makerSide: "sell", tsMs: placed + 2_000 },
+  ]);
+  expect(book.positions).toHaveLength(1);
+  const position = book.positions[0]!;
+  expect(position.fillPrice).toBe(100);
+  expect(position.units).toBeCloseTo(0.4, 8);
+  const fee = (units: number) => (units * position.fillPrice * MAKER_FEE_BPS) / 10_000;
+  expect(position.entryFeeUsd).toBeCloseTo(fee(0.1) + fee(0.3), 8);
+  expect(Math.abs(position.entryFeeUsd - fee(0.1))).toBeGreaterThan(1e-6);
+  expect(Math.abs(position.entryFeeUsd - fee(0.3))).toBeGreaterThan(1e-6);
+  const marked = applyForward(book, { kind: "mark", productId: "ETH-USD", price: position.fillPrice });
+  const pnl = paperPnl(marked);
+  const exit = exitCostUsd(position, position.fillPrice);
+  expect(pnl.unrealizedUsd).toBeCloseTo(-(fee(0.1) + fee(0.3) + exit), 8);
+  expect(pnl.equityUsd).toBeCloseTo(DEPLOYABLE_USD - (fee(0.1) + fee(0.3)) - exit, 8);
+  expect(Math.abs(pnl.unrealizedUsd - (-(fee(0.1) + exit)))).toBeCloseTo(fee(0.3), 8);
+  expect(Math.abs(pnl.equityUsd - (DEPLOYABLE_USD - fee(0.1) - exit))).toBeCloseTo(fee(0.3), 8);
+});
+
+test("p6:acct rejects a non-object or impossible day, and a bad body is repaired", async () => {
+  const now = Date.UTC(2026, 9, 16, 15, 0, 0);
+  const bad = [
+    "null",
+    "[]",
+    "123",
+    '"x"',
+    "true",
+    "not-json",
+    '{"rev":2,"fromDay":"2026-02-30"}',
+    '{"rev":2,"fromDay":"9999-12-31"}',
+    '{"rev":2,"fromDay":"not-a-date"}',
+    '{"rev":2,"fromDay":"2026-13-01"}',
+    '{"rev":1,"fromDay":"2026-10-17"}',
+    '{"rev":"2","fromDay":"2026-10-17"}',
+    '{"rev":2,"fromDay":"2025-12-31"}',
+    '{"rev":2,"fromDay":"2026-10-18"}',
+  ];
+  for (const raw of bad) expect(parseAcctMarker(raw, now)).toBeNull();
+  expect(parseAcctMarker('{"rev":2,"fromDay":"2026-01-01"}', now)).toEqual({ rev: 2, fromDay: "2026-01-01" });
+  expect(parseAcctMarker('{"rev":2,"fromDay":"2026-10-17"}', now)).toEqual({ rev: 2, fromDay: "2026-10-17" });
+  const mondayMidnight = Date.parse("2026-10-19T00:00:00.000Z");
+  expect(acctFromDay(mondayMidnight)).toBe("2026-10-20");
+  expect(parseAcctMarker('{"rev":2,"fromDay":"2026-10-20"}', mondayMidnight)).toEqual({ rev: 2, fromDay: "2026-10-20" });
+  expect(parseAcctMarker('{"rev":2,"fromDay":"2026-10-21"}', mondayMidnight)).toBeNull();
+
+  const kv = memoryKv(() => now);
+  const writer = startPaperHost(["BTC-USD"], {});
+  writer.clock = () => now;
+  await persistSplit(kv, writer);
+  expect(writer.book.acctFromDay).toBe("2026-10-17");
+  expect(writer.acctRepair).toBe(false);
+
+  for (const raw of bad) {
+    await kv.set(ACCT_KEY, raw);
+    const loaded = startPaperHost(["BTC-USD"], {});
+    loaded.clock = () => now;
+    const body = await loadSplit(kv, loaded);
+    expect(body).not.toBeNull();
+    installPaperState(loaded, body!);
+    expect(loaded.book.acctFromDay).toBeNull();
+    expect(loaded.acctRepair).toBe(true);
+  }
+
+  const repair = startPaperHost(["BTC-USD"], {});
+  repair.clock = () => now;
+  expect(await tryAcquire(kv, "K", now + 86_400_000, now)).toBe(true);
+  repair.leaseToken = decodeLease(await kv.get(LEASE_KEY))?.token ?? null;
+  const payloads: string[] = [];
+  const owned = kv.ownedFlush.bind(kv);
+  kv.ownedFlush = async (leaseKey, token, nowMs, payload) => {
+    payloads.push(payload);
+    return owned(leaseKey, token, nowMs, payload);
+  };
+  const before = await loadSplit(kv, repair);
+  installPaperState(repair, before!);
+  expect(repair.acctRepair).toBe(true);
+  expect(repair.book.acctFromDay).toBeNull();
+  await persistSplit(kv, repair);
+  const extra = (JSON.parse(payloads[0]!) as { extra: { key: string; value: string; nx?: boolean }[] }).extra.filter((row) => row.key === ACCT_KEY);
+  const repaired = JSON.stringify({ rev: 2, fromDay: "2026-10-17" });
+  expect(extra).toEqual([{ key: ACCT_KEY, nx: false, value: repaired }]);
+  expect(await kv.get(ACCT_KEY)).toBe(repaired);
+  expect(repair.book.acctFromDay).toBe("2026-10-17");
+  expect(repair.acctRepair).toBe(false);
+  await persistSplit(kv, repair);
+  expect(await kv.get(ACCT_KEY)).toBe(repaired);
+  const second = (JSON.parse(payloads[1]!) as { extra: { key: string; nx?: boolean }[] }).extra.find((row) => row.key === ACCT_KEY);
+  expect(second?.nx).toBe(true);
+
+  const kept = startPaperHost(["BTC-USD"], {});
+  kept.clock = () => Date.UTC(2026, 9, 17, 15, 0, 0);
+  const keptBody = await loadSplit(kv, kept);
+  installPaperState(kept, keptBody!);
+  expect(kept.book.acctFromDay).toBe("2026-10-17");
+  expect(kept.acctRepair).toBe(false);
+  expect(await tryAcquire(kv, "K2", kept.clock() + 86_400_000, kept.clock())).toBe(true);
+  kept.leaseToken = decodeLease(await kv.get(LEASE_KEY))?.token ?? null;
+  await persistSplit(kv, kept);
+  expect(await kv.get(ACCT_KEY)).toBe(repaired);
+});
+
+test("a first Monday before p6:acct exists does not promote on earlier days", () => {
+  const points = Array.from({ length: 30 }, (_, index) => ({ netR: index % 2 === 0 ? 0.8 : 1.2, entryDate: "2025-12-02" }));
+  const trades = points.map((point, index) => ({
+    kind: "realize" as const,
+    id: `m${index}`,
+    classId: "A" as const,
+    productId: "ETH-USD",
+    netR: point.netR,
+    netUsd: point.netR * 20,
+    riskUsd: 20,
+    entryDate: point.entryDate,
+    exitTs: MONDAY - 1,
+  }));
+  const open = replayInjected([...trades, { kind: "clock", tsMs: MONDAY }]);
+  expect(open.acctFromDay).toBeNull();
+  expect(open.kelly.A?.promoted).toBe(false);
+  expect(open.kelly.A?.riskUsd).toBe(20);
+
+  const stamped = replayInjected(trades);
+  stamped.acctFromDay = "2025-12-02";
+  const reviewed = applyForward(stamped, { kind: "clock", tsMs: MONDAY });
+  expect(reviewed.kelly.A?.promoted).toBe(true);
+  expect(reviewed.kelly.A?.riskUsd).toBeCloseTo(60, 6);
+});
+
+test("forwardDays floors a partial day", () => {
+  const first = Date.parse("2025-12-02T00:00:00.000Z");
+  const points = [{ netR: 1, entryDate: "2025-12-02" }];
+  expect(forwardDays(points, first + Math.floor(1.9 * 86_400_000))).toBe(1);
+  expect(forwardDays(points, first + 2 * 86_400_000 - 1)).toBe(1);
+  expect(forwardDays(points, first + 2 * 86_400_000)).toBe(2);
+  expect(forwardDays(points, first + 90 * 86_400_000 - 1)).toBe(89);
+  expect(forwardDays(points, first + 90 * 86_400_000)).toBe(90);
+});
+
+test("a fromDay one day off the first trade does not loosen the count", () => {
+  const points = Array.from({ length: 30 }, (_, index) => ({ netR: index % 2 === 0 ? 0.8 : 1.2, entryDate: "2025-12-02" }));
+  expect(forwardDays(points, MONDAY)).toBe(90);
+  expect(forwardDays(points, MONDAY, "2025-12-01")).toBe(90);
+  expect(forwardDays(points, MONDAY, "2025-12-02")).toBe(90);
+  expect(forwardDays(points, MONDAY, "2025-12-03")).toBe(89);
+});
+
+test("promotion requires 90 forward days and 89 does not promote", () => {
+  const points = Array.from({ length: 30 }, (_, index) => ({ netR: index % 2 === 0 ? 0.8 : 1.2, entryDate: "2025-12-02" }));
+  const streams = ["A", "B", "C", "D", "E"].map((id) => ({ id, netR: id === "A" ? points.map((point) => point.netR) : [] }));
+  const first = Date.parse("2025-12-02T00:00:00.000Z");
+  const at89 = forwardClassRisk({
+    classId: "A",
+    forward: points,
+    streams,
+    nowMs: first + 89 * 86_400_000,
+    held: null,
+    bootstrapSeed: 422_918_504,
+    reps: 50,
+  });
+  expect(at89.forwardDays).toBe(89);
+  expect(at89.promoted).toBe(false);
+  expect(at89.riskUsd).toBe(20);
+  const at90 = forwardClassRisk({
+    classId: "A",
+    forward: points,
+    streams,
+    nowMs: first + 90 * 86_400_000,
+    held: null,
+    bootstrapSeed: 422_918_504,
+    reps: 50,
+  });
+  expect(at90.forwardDays).toBe(90);
+  expect(at90.promoted).toBe(true);
+  expect(at90.riskUsd).toBeCloseTo(60, 6);
 });
