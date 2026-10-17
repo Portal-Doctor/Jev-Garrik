@@ -24,6 +24,7 @@ import {
   ageText,
   formatUsd,
   limitWord,
+  riskTone,
   positionSnapBuild,
   positionsSectionCopy,
   positionSnaps,
@@ -439,16 +440,23 @@ test("the page renders the positions footer and does not write", () => {
   expect(BOOK_DRAWDOWN_AMBER_USD).toBe(800);
   expect(OPEN_RISK_CAP_USD).toBe(480);
   expect(OPEN_RISK_NEAR_FRACTION).toBe(0.8);
-  expect(limitWord(799, BOOK_DRAWDOWN_HALT_USD, BOOK_DRAWDOWN_AMBER_USD)).toBe("OK");
-  expect(limitWord(800, BOOK_DRAWDOWN_HALT_USD, BOOK_DRAWDOWN_AMBER_USD)).toBe("Near limit");
-  expect(limitWord(1600, BOOK_DRAWDOWN_HALT_USD, BOOK_DRAWDOWN_AMBER_USD)).toBe("Over");
-  expect(limitWord(383.99, OPEN_RISK_CAP_USD, OPEN_RISK_CAP_USD * OPEN_RISK_NEAR_FRACTION)).toBe("OK");
-  expect(limitWord(384, OPEN_RISK_CAP_USD, OPEN_RISK_CAP_USD * OPEN_RISK_NEAR_FRACTION)).toBe("Near limit");
-  expect(limitWord(480, OPEN_RISK_CAP_USD, OPEN_RISK_CAP_USD * OPEN_RISK_NEAR_FRACTION)).toBe("Over");
+  expect(riskTone(0, 799.99).drawdown).toBe("OK");
+  expect(riskTone(0, 800).drawdown).toBe("Near limit");
+  expect(riskTone(0, 1599.99).drawdown).toBe("Near limit");
+  expect(riskTone(0, 1600).drawdown).toBe("Halted");
+  expect(riskTone(383.97, 0).openRisk).toBe("OK");
+  expect(riskTone(384, 0).openRisk).toBe("Near limit");
+  expect(riskTone(480, 0).openRisk).toBe("Near limit");
+  expect(riskTone(480.03, 0).openRisk).toBe("Over");
+  expect(limitWord(10, 10, 7)).toBe("Over");
+  expect(limitWord(20, 20, 10)).toBe("Over");
+  expect(page.includes("riskTone(positionView.riskUsd, bookDd)")).toBe(true);
   expect(page.includes("limitWord(dd, 10, 7)")).toBe(true);
   expect(page.includes("dd < 5 ? \"OK\" : \"Over\"")).toBe(true);
   expect(page.includes("limitWord(dd, 20, 10)")).toBe(true);
-  expect(page.includes("cap * 0.7")).toBe(true);
+  expect(page.includes("classDollarWord(")).toBe(true);
+  expect(page.includes("cap * 0.7")).toBe(false);
+  expect(viewSrc.includes("capUsd * 0.7")).toBe(true);
 });
 
 test("a one-cent gap reconciles and 1.1 cents does not, on both checks", () => {

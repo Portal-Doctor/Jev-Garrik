@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { dashboardAccess, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Page } from "../../../../research/src/p6/dashboard-read";
+import { dashboardAccess, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Page, summaryFreshness } from "../../../../research/src/p6/dashboard-read";
 import {
   closedNote,
   concentrationText,
@@ -13,16 +13,17 @@ import {
 } from "../../../../research/src/p6/pnl-block";
 import {
   ageText,
-  BOOK_DRAWDOWN_AMBER_USD,
   BOOK_DRAWDOWN_HALT_USD,
   CASH_LABEL,
+  classDollarWord,
   ENTRY_FEE_NOTE,
   formatUsd,
+  gateBannerLines,
   limitWord,
   MARK_FALLBACK,
   OPEN_RISK_CAP_USD,
-  OPEN_RISK_NEAR_FRACTION,
   POSITIONS_IDENTITY,
+  riskTone,
   positionsFooter,
   positionsSectionCopy,
   STABLECOIN_NOTE,
@@ -236,13 +237,13 @@ export default async function P6DashboardPage({
   const equityUsd = typeof pnl?.equityUsd === "number" ? pnl.equityUsd : 0;
   const realizedUsd = typeof pnl?.realizedUsd === "number" ? pnl.realizedUsd : 0;
   const startingUsd = typeof pnl?.startingUsd === "number" ? pnl.startingUsd : PNL_START_USD;
-  const markTs = last && typeof last.end === "number" ? last.end : null;
+  const flushMs = block.lastUpdatedMs;
   const omitted = typeof last?.positionsOmitted === "number" ? last.positionsOmitted : 0;
   const skipped = typeof last?.positionsSkipped === "number" ? last.positionsSkipped : 0;
   const positionView = positionsFooter({
     snaps,
     nowMs: now,
-    markTs,
+    markTs: flushMs,
     equityUsd,
     realizedUsd,
     unrealizedUsd: block.openUnrealized ?? 0,
@@ -287,21 +288,13 @@ export default async function P6DashboardPage({
   const deltaPct = delta == null ? null : (delta / PNL_START_USD) * 100;
   const deltaHero = hero(delta);
   const start = PNL_START_USD.toLocaleString("en-US");
-  const openRiskWord = positionView.reported
-    ? limitWord(positionView.riskUsd, OPEN_RISK_CAP_USD, OPEN_RISK_CAP_USD * OPEN_RISK_NEAR_FRACTION)
-    : "checks skipped";
-  const bookWord = limitWord(bookDd, BOOK_DRAWDOWN_HALT_USD, BOOK_DRAWDOWN_AMBER_USD);
-  const health = last == null ? "Error" : block.stale ? "Stale" : "Healthy";
+  const toneWords = riskTone(positionView.riskUsd, bookDd);
+  const openRiskWord = positionView.reported ? toneWords.openRisk : "checks skipped";
+  const bookWord = toneWords.drawdown;
+  const fresh = summaryFreshness({ hasLastRun: last != null, flushMs, nowMs: now });
+  const health = fresh.health;
   const dotClass = health === "Error" ? styles.dotErr : health === "Stale" ? styles.dotStale : styles.dot;
-  const gateLines: string[] = [];
-  if (view.killSwitch) gateLines.push("Kill switch on. New entries are blocked.");
-  for (const id of CLASS_IDS) {
-    const row = pnl?.classes?.[id];
-    if (row?.killed) gateLines.push(`Class ${id} killed. New entries in class ${id} are blocked.`);
-    else if (row?.paused) gateLines.push(`Class ${id} paused. New entries in class ${id} are blocked until it resumes.`);
-  }
-  if (bookDd >= BOOK_DRAWDOWN_HALT_USD) gateLines.push("Book halt reached. New entries are blocked until the book recovers.");
-  const ageMin = block.lastUpdatedMs == null ? null : Math.max(0, Math.floor((now - block.lastUpdatedMs) / 60000));
+  const gateLines = gateBannerLines({ killSwitch: view.killSwitch, classes: pnl?.classes, drawdownUsd: bookDd });
   const tile = block.tiles.find((row) => row.id === picked.id) ?? block.tiles[0];
   const paused = CLASS_IDS.filter((id) => pnl?.classes?.[id]?.paused || pnl?.classes?.[id]?.killed);
   const badge = reconBadge(positionView);
@@ -314,14 +307,10 @@ export default async function P6DashboardPage({
           <span>{gateLines.join(" ")}</span>
         </div>
       ) : null}
-      {block.stale ? (
-        <div className={`${styles.alert} ${block.lastUpdatedMs == null ? "" : styles.alertStale}`} role="status">
+      {fresh.banner ? (
+        <div className={`${styles.alert} ${fresh.banner.staleClass ? styles.alertStale : ""}`} role="status">
           <strong>Data is stale.</strong>
-          <span>
-            {block.lastUpdatedMs == null
-              ? "There is no last run time. Numbers below are stale after 20 min."
-              : `The last run finished at ${formatCt(block.lastUpdatedMs, false)}, ${ageMin} min ago. Numbers below are from that run (stale after 20 min).`}
-          </span>
+          <span>{fresh.banner.text}</span>
         </div>
       ) : null}
 
@@ -343,13 +332,13 @@ export default async function P6DashboardPage({
       <div className={`${styles.card} ${styles.strip}`} role="status">
         <span className={styles.chip}>PAPER - no capital at risk</span>
         <span>{block.paperStartMs == null ? "Paper start —" : `Paper start ${formatCt(block.paperStartMs, true)}`}</span>
-        <span>Last updated {block.lastUpdatedMs == null ? "—" : formatCt(block.lastUpdatedMs, false)}</span>
+        <span>Last updated {fresh.lastUpdatedText}</span>
         <span className={styles.right}>
           <span className={styles.health}>
             <span className={`${styles.dot} ${dotClass}`} aria-hidden="true" />
             {health}
           </span>
-          <RunClock overdue={block.stale} />
+          <RunClock overdue={fresh.stale} />
         </span>
       </div>
 
@@ -412,7 +401,7 @@ export default async function P6DashboardPage({
         <div className={styles.cardHead}>
           <h2 id="pos-h">{positionView.reported ? `Open positions (${positionView.rows.length})` : "Open positions"}</h2>
           <span className={styles.sub}>
-            as of last run {positionView.markTs == null ? "—" : formatCt(positionView.markTs, false)} · {ENTRY_FEE_NOTE}
+            as of last run {fresh.lastUpdatedText} · {ENTRY_FEE_NOTE}
           </span>
         </div>
         {!positionView.reported ? (
@@ -537,6 +526,7 @@ export default async function P6DashboardPage({
         }
         note={`Book drawdown ${formatUsd(bookDd)} of ${formatUsd(BOOK_DRAWDOWN_HALT_USD)} halt · ${paused.length === 0 ? "no class paused" : paused.map((id) => `Class ${id} ${pnl?.classes?.[id]?.killed ? "killed" : "paused"}`).join(", ")}`}
       >
+        <p>Daily and weekly halt status is not reported yet</p>
         <dl className={styles.kvs}>
           <Kv label="Kill switch">{view.killSwitch ? "on" : "off"}</Kv>
           <Kv label="Book halt">
@@ -574,11 +564,11 @@ export default async function P6DashboardPage({
           })}
           {(["A", "B"] as const).map((id) => {
             const usdDd = pnl?.classes?.[id]?.drawdownUsd ?? 0;
-            const cap = classCap ?? 0;
-            const word = cap > 0 ? limitWord(usdDd, cap, cap * 0.7) : "OK";
+            const cap = classCap;
+            const word = classDollarWord(usdDd, cap);
             return (
               <Kv key={`${id}-usd`} label={`${id} $ backstop`}>
-                {formatUsd(usdDd)} / {cap > 0 ? formatUsd(cap) : "—"} · {word}
+                {formatUsd(usdDd)} / {cap != null && cap > 0 ? formatUsd(cap) : "—"} · {word}
               </Kv>
             );
           })}

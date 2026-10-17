@@ -10,7 +10,9 @@ import type { Kv } from "./relay";
 import { commandBudget, healthStale, monthCommands, nextCronMs, projectionTone } from "./dashboard-format";
 import {
   buildPnlBlock,
+  endIsStale,
   EQ_FIRST_KEY,
+  formatCt,
   parseHourAgg,
   parsePoint,
   pnlMgetKeys,
@@ -102,6 +104,22 @@ export type DashboardAccess =
   | { action: "deny" }
   | { action: "redirect"; location: string; setCookie: string };
 
+/**
+ * `/p6` or a path under `/p6/`. Anything else is rejected: look-alikes (`/p6evil`),
+ * protocol-relative (`//evil.com`), backslash tricks, and dot-segment traversal.
+ * The returned path is the pathname only, with no query and no host.
+ */
+export function dashboardPathname(pathname: string): string | null {
+  if (typeof pathname !== "string" || pathname.length === 0) return null;
+  if (!pathname.startsWith("/") || pathname.startsWith("//")) return null;
+  if (pathname.includes("\\") || pathname.includes("//")) return null;
+  if (/[\u0000\r\n]/.test(pathname)) return null;
+  if (pathname.split("/").some((segment) => segment === "." || segment === "..")) return null;
+  if (/%2e|%2f|%5c/i.test(pathname)) return null;
+  if (pathname !== "/p6" && !pathname.startsWith("/p6/")) return null;
+  return pathname;
+}
+
 export function dashboardAccess(input: {
   authorization: string | null;
   cookieHeader: string | null;
@@ -109,15 +127,19 @@ export function dashboardAccess(input: {
   tokenParam: string | null;
   searchParams?: URLSearchParams;
   dashboardToken: string | undefined;
+  /** Request pathname. Omitted on the `/p6` page guard, which stays on `/p6`. */
+  pathname?: string;
 }): DashboardAccess {
   const token = input.dashboardToken;
   if (!token) return { action: "deny" };
   if (input.tokenParam !== null) {
     if (!sameSecret(input.tokenParam, token)) return { action: "deny" };
+    const path = dashboardPathname(input.pathname ?? "/p6");
+    if (!path) return { action: "deny" };
     const params = new URLSearchParams(input.searchParams ?? undefined);
     params.delete("token");
     const query = params.toString();
-    const location = query ? `/p6?${query}` : "/p6";
+    const location = query ? `${path}?${query}` : path;
     if (location.includes("\n") || location.includes("\r")) return { action: "deny" };
     return { action: "redirect", location, setCookie: dashboardSetCookie(token) };
   }
@@ -130,10 +152,13 @@ export function dashboardAccess(input: {
 
 /**
  * Next's middleware adapter parses Location with NextURL and throws on a relative URL.
- * The path stays /p6. The origin comes from the request, never from a query parameter.
+ * The path stays `/p6` or a path under `/p6/`. The origin comes from the request, never from the location string.
  */
 export function absoluteDashboardLocation(requestUrl: string, location: string): string | null {
-  if (!location.startsWith("/p6") || location.startsWith("//")) return null;
+  if (!location.startsWith("/") || location.startsWith("//")) return null;
+  if (location.includes("\\") || location.includes("\n") || location.includes("\r")) return null;
+  const rawPath = location.split("?")[0] ?? "";
+  if (dashboardPathname(rawPath) == null) return null;
   let request: URL;
   let absolute: URL;
   try {
@@ -142,13 +167,20 @@ export function absoluteDashboardLocation(requestUrl: string, location: string):
   } catch {
     return null;
   }
-  if (absolute.origin !== request.origin || absolute.pathname !== "/p6") return null;
+  if (absolute.origin !== request.origin || absolute.username !== "" || absolute.password !== "") return null;
+  if (dashboardPathname(absolute.pathname) == null || absolute.pathname !== rawPath) return null;
   return absolute.toString();
 }
 
 /** Proxy result for /p6. GET is enough. The status does not depend on POST. */
 export function applyDashboardProxy(request: Request, dashboardToken: string | undefined): { status: number; body: string | null; headers: Record<string, string> } {
   const url = new URL(request.url);
+  const headers: Record<string, string> = {
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+  };
+  const path = dashboardPathname(url.pathname);
+  if (!path) return { status: 401, body: "unauthorized", headers };
   const tokenParam = url.searchParams.has("token") ? (url.searchParams.get("token") ?? "") : null;
   const access = dashboardAccess({
     authorization: request.headers.get("authorization"),
@@ -156,11 +188,8 @@ export function applyDashboardProxy(request: Request, dashboardToken: string | u
     tokenParam,
     searchParams: url.searchParams,
     dashboardToken,
+    pathname: path,
   });
-  const headers: Record<string, string> = {
-    "Cache-Control": "no-store",
-    "Referrer-Policy": "no-referrer",
-  };
   if (access.action === "deny") return { status: 401, body: "unauthorized", headers };
   if (access.action === "redirect") {
     return { status: 302, body: null, headers: { ...headers, Location: access.location, "Set-Cookie": access.setCookie } };
@@ -388,6 +417,47 @@ export async function readPnlWindows(kv: Pick<Kv, "mget">, nowMs: number): Promi
   return { first, points, trades };
 }
 
+/**
+ * Clock of the last completed engine flush on p6:lastRun.
+ * `end` moves on every heartbeat while outcome is still "running", so it is not the completion.
+ * A running row with no finished `completed` stamp has no clock. Never substitute the render time.
+ */
+export function completedFlushMs(last: Record<string, unknown> | null | undefined): number | null {
+  if (last == null) return null;
+  const completedEnd = finishedCompletedEnd(last.completed);
+  const outcome = last.outcome;
+  if (outcome === "running" || outcome === "") return completedEnd;
+  if (completedEnd != null) return completedEnd;
+  return typeof last.end === "number" && Number.isFinite(last.end) ? last.end : null;
+}
+
+function finishedCompletedEnd(completed: unknown): number | null {
+  if (completed == null || typeof completed !== "object") return null;
+  const row = completed as { end?: unknown; outcome?: unknown };
+  if (row.outcome === "running" || row.outcome === "") return null;
+  return typeof row.end === "number" && Number.isFinite(row.end) ? row.end : null;
+}
+
+/** Header clock, health word, and stale banner. Age uses STALE_MS via endIsStale. Exactly that age is not stale. */
+export function summaryFreshness(input: { hasLastRun: boolean; flushMs: number | null; nowMs: number }): {
+  health: "Healthy" | "Stale" | "Error";
+  stale: boolean;
+  lastUpdatedText: string;
+  banner: { staleClass: boolean; text: string } | null;
+} {
+  const flushMs = typeof input.flushMs === "number" && Number.isFinite(input.flushMs) ? input.flushMs : null;
+  const stale = endIsStale(input.nowMs, flushMs);
+  const health = input.hasLastRun ? (stale ? "Stale" : "Healthy") : "Error";
+  const lastUpdatedText = flushMs == null ? "—" : formatCt(flushMs, false);
+  if (!stale) return { health, stale, lastUpdatedText, banner: null };
+  const ageMin = flushMs == null ? null : Math.max(0, Math.floor((input.nowMs - flushMs) / 60000));
+  const text =
+    flushMs == null
+      ? "There is no last run time. Numbers below are stale after 20 min."
+      : `The last run finished at ${formatCt(flushMs, false)}, ${ageMin} min ago. Numbers below are from that run (stale after 20 min).`;
+  return { health, stale, lastUpdatedText, banner: { staleClass: flushMs != null, text } };
+}
+
 /** Dashboard mget plus the equity mget. Both are reads. */
 export async function readP6Page(kv: Pick<Kv, "mget">, nowMs: number): Promise<{ view: DashboardView; block: PnlBlock }> {
   const [view, equity] = await Promise.all([readP6Dashboard(kv), readPnlWindows(kv, nowMs)]);
@@ -395,7 +465,7 @@ export async function readP6Page(kv: Pick<Kv, "mget">, nowMs: number): Promise<{
   const pnl = last && typeof last.pnl === "object" && last.pnl != null ? (last.pnl as Record<string, unknown>) : null;
   const block = buildPnlBlock({
     nowMs,
-    lastEndMs: last && typeof last.end === "number" ? last.end : null,
+    lastEndMs: completedFlushMs(last),
     equityNow: pnl ? numField(pnl, "equityUsd") : null,
     realizedNow: pnl ? numField(pnl, "realizedUsd") : null,
     unrealizedNow: pnl ? numField(pnl, "unrealizedUsd") : null,
