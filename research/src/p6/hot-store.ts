@@ -40,16 +40,38 @@ export function acctFromDay(nowMs: number): string {
   return new Date(dayStart + 86_400_000).toISOString().slice(0, 10);
 }
 
-export function parseAcctMarker(raw: string | null): { rev: 2; fromDay: string } | null {
+/** Inclusive floor. A stored day before the project start is not a marker. */
+const ACCT_FLOOR_DAY = "2026-01-01";
+
+/**
+ * rev must be 2. The day must round-trip through UTC midnight and sit in
+ * [2026-01-01, acctFromDay(nowMs)]. The cap is the next full UTC day, which is
+ * the latest day this writer stamps, at most one day past today.
+ * A non-object body, invalid JSON, an impossible day, or a day outside that
+ * range is no marker. This does not throw.
+ */
+export function parseAcctMarker(raw: string | null, nowMs = Date.now()): { rev: 2; fromDay: string } | null {
   if (!raw) return null;
-  let body: { rev?: unknown; fromDay?: unknown };
+  let body: unknown;
   try {
-    body = JSON.parse(raw) as { rev?: unknown; fromDay?: unknown };
+    body = JSON.parse(raw);
   } catch {
     return null;
   }
-  if (body.rev !== 2 || typeof body.fromDay !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.fromDay)) return null;
-  return { rev: 2, fromDay: body.fromDay };
+  if (body == null || typeof body !== "object" || Array.isArray(body)) return null;
+  const rev = (body as { rev?: unknown }).rev;
+  const fromDay = (body as { fromDay?: unknown }).fromDay;
+  if (rev !== 2 || typeof fromDay !== "string" || !acctDayOk(fromDay, nowMs)) return null;
+  return { rev: 2, fromDay };
+}
+
+function acctDayOk(day: string, nowMs: number): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  const parsed = new Date(`${day}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return false;
+  if (parsed.toISOString().slice(0, 10) !== day) return false;
+  if (day < ACCT_FLOOR_DAY || day > acctFromDay(nowMs)) return false;
+  return true;
 }
 
 /** Heartbeat payload cap. Over this, Jev fields are shed and the book is still written. */
@@ -761,7 +783,8 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
     }),
   );
   const fromDay = host.book.acctFromDay ?? acctFromDay(host.clock());
-  extra.push({ key: ACCT_KEY, value: JSON.stringify({ rev: 2, fromDay }), nx: true });
+  // NX keeps a valid marker put. An invalid body this process loaded may be replaced; the next flush is NX again.
+  extra.push({ key: ACCT_KEY, value: JSON.stringify({ rev: 2, fromDay }), nx: !host.acctRepair });
   if (host.leaseToken) {
     for (const row of host.jevPacketWrites ?? []) extra.push({ key: row.key, value: row.value, px: JEV_PACKET_TTL_MS, nx: true });
   }
@@ -941,6 +964,7 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
     host.saveBytes += plan.bytes;
     host.eqHourDone = host.eqPlanHour;
     if (host.book.acctFromDay == null) host.book.acctFromDay = acctFromDay(host.clock());
+    host.acctRepair = false;
   } catch (error) {
     releaseMarks(host, plan.marks);
     if (leaseLost(error) || transportError(error)) throw error;
@@ -1080,7 +1104,9 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
     }
     host.seedChecked = true;
   }
-  const acct = parseAcctMarker(byKey.get(ACCT_KEY) ?? null);
+  const rawAcct = byKey.get(ACCT_KEY) ?? null;
+  const acct = parseAcctMarker(rawAcct, host.clock());
+  host.acctRepair = rawAcct != null && acct == null;
   if (acct) host.book.acctFromDay = acct.fromDay;
   return {
     ...hot,

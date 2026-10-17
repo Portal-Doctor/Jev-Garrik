@@ -211,7 +211,10 @@ export interface Book {
   jevBarSec?: number;
   /**
    * UTC day the promotion clock may start. Null until p6:acct is loaded or written.
-   * Not part of p6:hot. A missing value leaves the day count unrestricted.
+   * Not part of p6:hot. A Monday review while this is null counts from the next
+   * full UTC day, the day a flush would stamp, so that review cannot use days
+   * the marker will exclude. forwardDays still counts from the first trade when
+   * its fromDay argument is omitted.
    */
   acctFromDay: string | null;
 }
@@ -688,6 +691,12 @@ function reviewDue(book: Book, tsMs: number): boolean {
   return CLASSES.some((id) => (book.kelly[id]?.reviewMonday ?? "") < monday);
 }
 
+/** Same day hot-store acctFromDay stamps. This file cannot import hot-store. */
+function nextAcctDay(nowMs: number): string {
+  const dayStart = Math.floor(nowMs / 86_400_000) * 86_400_000;
+  return new Date(dayStart + 86_400_000).toISOString().slice(0, 10);
+}
+
 function reviewKelly(book: Book, tsMs: number): void {
   if (!reviewDue(book, tsMs)) return;
   const streams = CLASSES.map((id) => ({ id, netR: book.closed.filter((trade) => trade.classId === id).map((trade) => trade.netR) }));
@@ -703,7 +712,7 @@ function reviewKelly(book: Book, tsMs: number): void {
       nowMs: tsMs,
       held: book.kelly[classId],
       bootstrapSeed: seed,
-      fromDay: book.acctFromDay,
+      fromDay: book.acctFromDay ?? nextAcctDay(tsMs),
     });
     book.kelly[classId] = { reviewMonday: size.reviewMonday, riskUsd: size.riskUsd, promoted: size.promoted };
   }

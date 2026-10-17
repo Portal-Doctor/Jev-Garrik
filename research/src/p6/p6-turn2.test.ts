@@ -290,7 +290,10 @@ test("the paper book trades at $20 until a Monday review, then holds Kelly, and 
     entryDate: "2025-12-02",
     exitTs: monday - 1,
   }));
-  const reviewed = replayInjected([...good, { kind: "clock", tsMs: monday }, x1]);
+  const primed = replayInjected(good);
+  primed.acctFromDay = "2025-12-02";
+  let reviewed = applyForward(primed, { kind: "clock", tsMs: monday });
+  reviewed = applyForward(reviewed, x1);
   expect(reviewed.kelly.A?.promoted).toBe(true);
   expect(reviewed.positions[0]?.riskUsd).toBeCloseTo(60, 6);
   const heldBook = applyForward(reviewed, { kind: "clock", tsMs: wednesday });

@@ -1,7 +1,8 @@
 /**
- * Open marks charge the entry fee. This record is not approved.
+ * Open marks charge the entry fee. Once merged, that rule is the live code
+ * and there is no feature flag. This record is still awaiting Brian's stamp.
  * The V6.2 files are not edited. Halt thresholds are unchanged.
- * There is no approval stamp and no feature flag. The rule is not live.
+ * There is no approval stamp.
  */
 
 export const AMENDMENT_V62_SHA256 = "2f734d18c82308d6e7a58e519cf502755dfc4101a8f6c1c47630e0453df7acb8";
@@ -18,8 +19,7 @@ export function amendmentV63Body(): {
   haltThresholdsUnchanged: true;
   rule: string;
   awaiting: "AWAITING Brian's approval stamp";
-  live: false;
-  featureFlag: false;
+  mergedCode: "live once merged, with no feature flag";
 } {
   return {
     amendmentV62Sha256: AMENDMENT_V62_SHA256,
@@ -30,7 +30,6 @@ export function amendmentV63Body(): {
     haltThresholdsUnchanged: true,
     rule: AMENDMENT_V63_RULE,
     awaiting: "AWAITING Brian's approval stamp",
-    live: false,
-    featureFlag: false,
+    mergedCode: "live once merged, with no feature flag",
   };
 }

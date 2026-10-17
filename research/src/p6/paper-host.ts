@@ -219,6 +219,11 @@ export interface PaperHost {
   eqHourDone: number;
   /** Hour the current flush plan was built for. Copied to eqHourDone only after that flush writes. */
   eqPlanHour: number;
+  /**
+   * p6:acct was present and was not a valid rev-2 day. The next flush may replace
+   * that body. A valid marker and a missing key stay NX. Not part of p6:hot.
+   */
+  acctRepair: boolean;
   /** First-seen lifetime packet counters. Excluded from the V6 skip gate. */
   jevLegacy?: JevLegacyTotals;
   jevPrev?: { bar: number; holder: string; leaseFromMs: number };
@@ -618,6 +623,7 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     jevThrough: {},
     eqHourDone: 0,
     eqPlanHour: 0,
+    acctRepair: false,
     jevPacketWrites: [],
     jevPacketSent: new Set(),
     holderId: null,
