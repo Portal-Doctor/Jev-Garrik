@@ -8,10 +8,14 @@ import { captureHot, persistSplit } from "./hot-store";
 import { startPaperHost } from "./paper-host";
 import {
   CASH_LABEL,
+  CHECKS_SKIPPED,
   EMPTY_POSITIONS,
   ENTRY_FEE_NOTE,
   MARK_FALLBACK,
+  POSITION_FIELD_CAP,
+  POSITION_ROW_CAP,
   POSITIONS_IDENTITY,
+  POSITIONS_UNREPORTED,
   STABLECOIN_NOTE,
   ageText,
   positionSnaps,
@@ -285,10 +289,47 @@ test("sixteen position rows stay under 3 KB and lastRun is the only new home", a
   expect(reads).toBe(2);
 });
 
+test("a missing positions array is not an empty book", () => {
+  const base = { nowMs: SAT, markTs: SAT, equityUsd: 8050, realizedUsd: 50, unrealizedUsd: 0, startingUsd: 8000 };
+  const missing = positionsFooter({ ...base, snaps: null });
+  expect(missing.reported).toBe(false);
+  expect(missing.empty).toBe(false);
+  expect(missing.checkText).toBe(CHECKS_SKIPPED);
+  expect(missing.checkText).not.toBe("reconciled");
+  expect(missing.unrealizedText).toBe(CHECKS_SKIPPED);
+  expect(POSITIONS_UNREPORTED).toBe("positions not yet reported");
+  const flat = positionsFooter({ ...base, snaps: [], equityUsd: 8050 });
+  expect(flat.reported).toBe(true);
+  expect(flat.empty).toBe(true);
+  expect(flat.checkText).toBe("reconciled");
+  expect(flat.cashUsd).toBe(8050);
+});
+
+test("position rows cap at 64 and product and class strings cap at 32", () => {
+  const book = openTakers(["ETH-USD"]);
+  const seed = book.positions[0]!;
+  book.positions = Array.from({ length: POSITION_ROW_CAP + 1 }, (_, index) => ({
+    ...seed,
+    id: `c${index}`,
+    productId: `${"PAIR".repeat(20)}-${index}`,
+    classId: "C".repeat(40) as Position["classId"],
+  }));
+  const snaps = positionSnaps(book);
+  expect(snaps).toHaveLength(POSITION_ROW_CAP);
+  expect(snaps[0]!.p).toHaveLength(POSITION_FIELD_CAP);
+  expect(snaps[0]!.c).toHaveLength(POSITION_FIELD_CAP);
+  expect(POSITION_ROW_CAP).toBe(64);
+  expect(POSITION_FIELD_CAP).toBe(32);
+});
+
 test("the page renders the positions footer and does not write", () => {
   const page = readFileSync(new URL("../../../web/src/app/p6/page.tsx", import.meta.url), "utf8");
   expect(page.includes("positionsFooter")).toBe(true);
   expect(page.includes("EMPTY_POSITIONS")).toBe(true);
+  expect(page.includes("POSITIONS_UNREPORTED")).toBe(true);
+  expect(page.includes("CHECKS_SKIPPED")).toBe(true);
+  expect(page.includes("as of last run")).toBe(true);
+  expect(page.includes("!view.reported")).toBe(true);
   expect(page.includes("CASH_LABEL")).toBe(true);
   expect(page.includes("STABLECOIN_NOTE")).toBe(true);
   expect(page.includes("ENTRY_FEE_NOTE")).toBe(true);

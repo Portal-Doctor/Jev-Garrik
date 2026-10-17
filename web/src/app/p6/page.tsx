@@ -4,9 +4,11 @@ import { closedNote, concentrationText, drawdownText, formatCt, PNL_START_USD, s
 import {
   ageText,
   CASH_LABEL,
+  CHECKS_SKIPPED,
   EMPTY_POSITIONS,
   ENTRY_FEE_NOTE,
   MARK_FALLBACK,
+  POSITIONS_UNREPORTED,
   positionsFooter,
   STABLECOIN_NOTE,
   type PositionSnap,
@@ -148,7 +150,8 @@ function PositionsSection({
   openUnrealized: number | null;
 }) {
   const pnl = last && typeof last.pnl === "object" && last.pnl != null ? (last.pnl as { equityUsd?: number; realizedUsd?: number; startingUsd?: number }) : null;
-  const snaps = Array.isArray(last?.positions) ? (last.positions as PositionSnap[]) : [];
+  const reported = Array.isArray(last?.positions);
+  const snaps = reported ? (last?.positions as PositionSnap[]) : null;
   const equityUsd = typeof pnl?.equityUsd === "number" ? pnl.equityUsd : 0;
   const realizedUsd = typeof pnl?.realizedUsd === "number" ? pnl.realizedUsd : 0;
   const startingUsd = typeof pnl?.startingUsd === "number" ? pnl.startingUsd : PNL_START_USD;
@@ -162,13 +165,14 @@ function PositionsSection({
     unrealizedUsd: openUnrealized ?? 0,
     startingUsd,
   });
-  const bad = !view.reconciled || !view.unrealizedMatch || view.problems.length > 0;
+  const bad = view.reported && (!view.reconciled || !view.unrealizedMatch || view.problems.length > 0);
+  const grey = view.stale || !view.reported;
   return (
-    <section className={`${styles.pnlBlock} ${view.stale ? styles.pnlStale : ""}`}>
+    <section className={`${styles.pnlBlock} ${grey ? styles.pnlStale : ""}`}>
       <div className={styles.pnlHead}>
         <span className={styles.pnlTitle}>POSITIONS</span>
         <span className={styles.sub}>
-          marks {view.markTs == null ? "—" : formatCt(view.markTs, false)}
+          as of last run {view.markTs == null ? "—" : formatCt(view.markTs, false)}
           {view.stale ? " · stale" : ""}
         </span>
         <span className={styles.sub}>{ENTRY_FEE_NOTE}</span>
@@ -184,7 +188,13 @@ function PositionsSection({
           </tr>
         </thead>
         <tbody>
-          {view.empty ? (
+          {!view.reported ? (
+            <tr>
+              <td colSpan={14} style={{ padding: "6px 8px" }}>
+                {POSITIONS_UNREPORTED}
+              </td>
+            </tr>
+          ) : view.empty ? (
             <tr>
               <td colSpan={14} style={{ padding: "6px 8px" }}>
                 {EMPTY_POSITIONS}
@@ -215,18 +225,17 @@ function PositionsSection({
         </tbody>
       </table>
       <p className={styles.sub}>
-        total active investment {plainUsd(view.activeUsd)} · at cost {plainUsd(view.atCostUsd)}
+        total active investment {view.reported ? plainUsd(view.activeUsd) : "—"} · at cost {view.reported ? plainUsd(view.atCostUsd) : "—"}
       </p>
-      <p className={styles.sub}>est. exit costs {signedUsd(-view.exitCostUsd)} · already deducted in unrealized</p>
+      <p className={styles.sub}>est. exit costs {view.reported ? signedUsd(-view.exitCostUsd) : "—"} · already deducted in unrealized</p>
       <p className={styles.sub}>
-        cash balance {CASH_LABEL} {plainUsd(view.cashUsd)}
+        cash balance {CASH_LABEL} {view.reported ? plainUsd(view.cashUsd) : "—"}
       </p>
-      <p className={styles.sub}>= equity {plainUsd(view.equityUsd)}</p>
+      <p className={styles.sub}>= equity {view.reported ? plainUsd(view.equityUsd) : "—"}</p>
       <p className={bad ? styles.neg : styles.sub}>
-        {view.checkText}
-        {view.problems.length > 0 ? ` · ${view.problems.join(" · ")}` : ""}
-        {" · "}
-        {view.unrealizedText}
+        {view.reported ? view.checkText : CHECKS_SKIPPED}
+        {view.reported && view.problems.length > 0 ? ` · ${view.problems.join(" · ")}` : ""}
+        {view.reported ? ` · ${view.unrealizedText}` : ""}
       </p>
       <p className={styles.sub}>{view.riskText}</p>
       {view.clusters.map((cluster) => (

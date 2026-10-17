@@ -24,6 +24,10 @@ export const STABLECOIN_NOTE = "book holds no stablecoins";
 export const ENTRY_FEE_NOTE = "unrealized includes the entry fee";
 export const MARK_FALLBACK = "entry (no mark)";
 export const EMPTY_POSITIONS = "No open positions";
+export const POSITIONS_UNREPORTED = "positions not yet reported";
+export const CHECKS_SKIPPED = "checks skipped";
+export const POSITION_ROW_CAP = 64;
+export const POSITION_FIELD_CAP = 32;
 
 /**
  * Slim lastRun row. One per open position.
@@ -97,10 +101,24 @@ export interface PositionsView {
   clusters: { id: string; n: number; text: string }[];
   problems: string[];
   empty: boolean;
+  /** False when lastRun has no positions array yet. Checks are skipped. */
+  reported: boolean;
 }
 
 function round8(value: number): number {
   return Math.round(value * 1e8) / 1e8;
+}
+
+function clipText(value: string): string {
+  return value.length > POSITION_FIELD_CAP ? value.slice(0, POSITION_FIELD_CAP) : value;
+}
+
+export function clipSnaps(snaps: readonly PositionSnap[]): { snaps: PositionSnap[]; capped: boolean } {
+  const capped = snaps.length > POSITION_ROW_CAP;
+  return {
+    capped,
+    snaps: snaps.slice(0, POSITION_ROW_CAP).map((snap) => ({ ...snap, p: clipText(snap.p), c: clipText(snap.c) })),
+  };
 }
 
 export function positionSnaps(book: Book): PositionSnap[] {
@@ -129,7 +147,7 @@ export function positionSnaps(book: Book): PositionSnap[] {
     if (!known) snap.src = "entry";
     if (position.target != null) snap.tg = round8(position.target);
     return snap;
-  });
+  }).slice(0, POSITION_ROW_CAP).map((snap) => ({ ...snap, p: clipText(snap.p), c: clipText(snap.c) }));
 }
 
 function moneyGap(value: number): string {
@@ -137,7 +155,8 @@ function moneyGap(value: number): string {
 }
 
 export function positionsFooter(input: {
-  snaps: readonly PositionSnap[];
+  /** Null means the positions array is absent. An empty array is a flat book. */
+  snaps: readonly PositionSnap[] | null;
   nowMs: number;
   markTs: number | null;
   equityUsd: number;
@@ -147,7 +166,34 @@ export function positionsFooter(input: {
   currency?: string;
 }): PositionsView {
   const starting = input.startingUsd ?? PNL_START_USD;
-  const rows: PositionLine[] = input.snaps.map((snap) => {
+  if (input.snaps == null) {
+    return {
+      rows: [],
+      activeUsd: 0,
+      atCostUsd: 0,
+      exitCostUsd: 0,
+      cashUsd: 0,
+      equityUsd: input.equityUsd,
+      tieUsd: 0,
+      gapUsd: 0,
+      reconciled: false,
+      checkText: CHECKS_SKIPPED,
+      rowUnrealizedUsd: 0,
+      openUnrealizedUsd: input.unrealizedUsd,
+      unrealizedMatch: false,
+      unrealizedText: CHECKS_SKIPPED,
+      stale: endIsStale(input.nowMs, input.markTs),
+      markTs: input.markTs,
+      riskUsd: 0,
+      riskText: `open risk $0.00 of $${OPEN_RISK_CAP_USD} cap`,
+      clusters: [],
+      problems: [],
+      empty: false,
+      reported: false,
+    };
+  }
+  const snaps = clipSnaps(input.snaps).snaps;
+  const rows: PositionLine[] = snaps.map((snap) => {
     const costBasisUsd = snap.u * snap.f + snap.e;
     const side = snap.side ?? "long";
     return {
@@ -214,6 +260,7 @@ export function positionsFooter(input: {
     clusters,
     problems,
     empty: rows.length === 0,
+    reported: true,
   };
 }
 

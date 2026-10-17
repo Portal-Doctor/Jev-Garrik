@@ -432,8 +432,11 @@ export function buildPnlBlock(input: {
     let closedN = 0;
     let largest = 0;
     let seen = false;
-    if (span) {
-      for (let hour = span.fromSec; hour <= span.toSec; hour += 3600) {
+    // Hours before the paper-start hour are outside the series. The since-start label covers them.
+    // A missing hour after that start, inside the complete-hour span, is unknown.
+    const fromSec = span ? Math.max(span.fromSec, origin.hourStartSec) : null;
+    if (span && fromSec != null && fromSec <= span.toSec) {
+      for (let hour = fromSec; hour <= span.toSec; hour += 3600) {
         const agg = input.trades.get(hour);
         if (agg == null) {
           tradesUnknown = true;
