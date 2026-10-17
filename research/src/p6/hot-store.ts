@@ -5,6 +5,7 @@
 
 import type { BarOHLC } from "../p3/signals";
 import { paperPnl } from "./engine";
+import { equityExtras, hourStartSec } from "./pnl-block";
 import { boundJevDone, JEV_PACKET_TTL_MS, queuedForHandover, skipShareReport } from "./jev-call";
 import { packMinute, type JevMinuteTuple } from "./jev-minute";
 import {
@@ -719,6 +720,16 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
     ...storedMarks.map(([id, mark]) => ({ key: seedMarkKey(id), value: JSON.stringify(mark) })),
     { key: LAST_RUN_KEY, value: encoded },
   ];
+  // Hourly equity points ride in this same EVAL. A book reset must delete p6:eq:* (deferred; not built).
+  host.eqPlanHour = hourStartSec(host.clock());
+  extra.push(
+    ...equityExtras({
+      nowMs: host.clock(),
+      eqHourDone: host.eqHourDone ?? 0,
+      pnl: last.pnl,
+      closed: host.book.closed,
+    }),
+  );
   if (host.leaseToken) {
     for (const row of host.jevPacketWrites ?? []) extra.push({ key: row.key, value: row.value, px: JEV_PACKET_TTL_MS, nx: true });
   }
@@ -896,6 +907,7 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
     host.closingMarks = host.closingMarks.filter((bar) => !host.persistedBars.has(`bar:${bar.productId}:${bar.startSec}`));
     host.saveCommands += 1;
     host.saveBytes += plan.bytes;
+    host.eqHourDone = host.eqPlanHour;
   } catch (error) {
     releaseMarks(host, plan.marks);
     if (leaseLost(error) || transportError(error)) throw error;

@@ -24,7 +24,7 @@ import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
 import { completedDays, deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
 import { freshJevMeter, type JevMeter } from "./jev-shadow";
-import { archiveJevLegacy, drainJevShadow, freshJevSkip, normalizeJevSkip, queuedForHandover, scheduleClosedJevBar, scheduleLiveJev, type JevCaller, type JevCatchUpRun, type JevFirstBar, type JevLegacyTotals, type JevQueued, type JevSkipLedger, type JevStored } from "./jev-call";
+import { archiveJevLegacy, drainJevShadow, freshJevSkip, mergeJevSkip, queuedForHandover, scheduleClosedJevBar, scheduleLiveJev, type JevCaller, type JevCatchUpRun, type JevFirstBar, type JevLegacyTotals, type JevQueued, type JevSkipLedger, type JevStored } from "./jev-call";
 import { JevTape, type JevMinuteTuple, type StoredJevMinute } from "./jev-minute";
 import { renewLease, type Kv } from "./relay";
 import { kickDurable } from "./hot-store";
@@ -215,6 +215,10 @@ export interface PaperHost {
   jevFirst: JevFirstBar[];
   /** Per pair. Only moves forward. Never shed. Install max-merges it. */
   jevThrough: Record<string, number>;
+  /** Hour start, seconds, of the equity snapshot this process already flushed. Memory only. Not in p6:hot. */
+  eqHourDone: number;
+  /** Hour the current flush plan was built for. Copied to eqHourDone only after that flush writes. */
+  eqPlanHour: number;
   /** First-seen lifetime packet counters. Excluded from the V6 skip gate. */
   jevLegacy?: JevLegacyTotals;
   jevPrev?: { bar: number; holder: string; leaseFromMs: number };
@@ -612,6 +616,8 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     jevCatchUps: [],
     jevFirst: [],
     jevThrough: {},
+    eqHourDone: 0,
+    eqPlanHour: 0,
     jevPacketWrites: [],
     jevPacketSent: new Set(),
     holderId: null,
@@ -1870,7 +1876,7 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   if (jevReadable && body.jevMinutes) host.jevTape.importMinutes(body.jevMinutes);
   if (jevReadable && body.jevDone) host.jevDone = new Set(body.jevDone);
   if (jevReadable && body.jevAnswers) host.jevAnswers = body.jevAnswers;
-  if (body.jevSkip) host.jevSkip = normalizeJevSkip(body.jevSkip);
+  if (body.jevSkip) host.jevSkip = mergeJevSkip(host.jevSkip, body.jevSkip);
   if (body.jevCatchUps) host.jevCatchUps = body.jevCatchUps.map((run) => ({ ...run }));
   if (body.jevFirst) host.jevFirst = body.jevFirst.map((row) => ({ ...row, pairs: [...(row.pairs ?? [])] }));
   if (body.jevThrough) {

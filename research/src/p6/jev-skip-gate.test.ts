@@ -5,6 +5,7 @@ import {
   archiveJevLegacy,
   drainJevShadow,
   freshJevSkip,
+  mergeJevSkip,
   noteOnTimePacket,
   scheduleLiveJev,
   trailingSkipGate,
@@ -12,7 +13,7 @@ import {
   type JevReason,
 } from "./jev-call";
 import { hotSnapshot } from "./hot-store";
-import { installPaperState, startPaperHost } from "./paper-host";
+import { capturePaperState, installPaperState, startPaperHost } from "./paper-host";
 
 const DAY = 86_400_000;
 const NOW = Date.parse("2026-10-16T18:00:00.000Z");
@@ -232,6 +233,126 @@ test("install max-merges the watermark per pair", () => {
   expect(host.jevThrough["BTC-USD"]).toBe(5_000);
   expect(host.jevThrough["ETH-USD"]).toBe(200);
   expect(host.jevThrough["SOL-USD"]).toBe(50);
+});
+
+test("scheduled survives capture then install", () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  noteOnTimePacket(host.jevSkip, TODAY, "scheduled");
+  noteOnTimePacket(host.jevSkip, TODAY, "scheduled");
+  const body = capturePaperState(host);
+  const next = startPaperHost(["BTC-USD"], {});
+  installPaperState(next, body);
+  expect(next.jevSkip.jevDays.find((row) => row.dayMs === TODAY)?.scheduled).toBe(2);
+});
+
+test("install merges jevSkip days and keeps the 14-day bound", () => {
+  const host = startPaperHost(["BTC-USD"], {});
+  installPaperState(host, {
+    jevSkip: { ...freshJevSkip(), jevDays: [day(0, 10, 4), day(-1, 8, 1), day(-10, 3, 1)] },
+  });
+  installPaperState(host, {
+    jevSkip: { ...freshJevSkip(), jevDays: [day(0, 10, 0), day(-3, 2, 0), day(-20, 99, 0)] },
+  });
+  const today = host.jevSkip.jevDays.find((row) => row.dayMs === TODAY);
+  expect(today?.scheduled).toBe(10);
+  expect(today?.skipped).toBe(4);
+  expect(host.jevSkip.jevDays.find((row) => row.dayMs === TODAY - DAY)?.scheduled).toBe(8);
+  expect(host.jevSkip.jevDays.find((row) => row.dayMs === TODAY - 3 * DAY)?.scheduled).toBe(2);
+  expect(host.jevSkip.jevDays.find((row) => row.dayMs === TODAY - 10 * DAY)?.scheduled).toBe(3);
+  expect(host.jevSkip.jevDays.find((row) => row.dayMs === TODAY - 20 * DAY)).toBeUndefined();
+
+  installPaperState(host, { jevSkip: { ...freshJevSkip(), jevDays: [day(0, 12, 1)] } });
+  expect(host.jevSkip.jevDays.find((row) => row.dayMs === TODAY)?.scheduled).toBe(12);
+  expect(host.jevSkip.jevDays.find((row) => row.dayMs === TODAY)?.skipped).toBe(4);
+
+  const wide = startPaperHost(["BTC-USD"], {});
+  installPaperState(wide, {
+    jevSkip: { ...freshJevSkip(), jevDays: Array.from({ length: 20 }, (_, index) => day(-index, 1, 0)) },
+  });
+  expect(wide.jevSkip.jevDays).toHaveLength(14);
+  expect(wide.jevSkip.jevDays.some((row) => row.dayMs === TODAY - 14 * DAY)).toBe(false);
+  expect(wide.jevSkip.jevDays.some((row) => row.dayMs === TODAY - 13 * DAY)).toBe(true);
+
+  const lower = mergeJevSkip(
+    { ...freshJevSkip(), jevDays: Array.from({ length: 7 }, (_, index) => day(-index, 50, 5)) },
+    { ...freshJevSkip(), jevDays: [day(0, 1, 0)] },
+  );
+  expect(lower.jevDays.find((row) => row.dayMs === TODAY)?.scheduled).toBe(50);
+  expect(lower.jevDays).toHaveLength(7);
+});
+
+test("per-field max cannot turn a FLAG day into PASS", () => {
+  const clean = [6, 5, 4, 3, 2, 1].map((offset) => day(-offset, 50, 0));
+  const newer = { ...freshJevSkip(), jevDays: [...clean, day(0, 100, 30, 70)] };
+  const stale = { ...freshJevSkip(), jevDays: [...clean, day(0, 101, 0, 101)] };
+  for (const [installed, incoming] of [
+    [newer, stale],
+    [stale, newer],
+  ] as const) {
+    const merged = mergeJevSkip(installed, incoming);
+    const today = merged.jevDays.find((row) => row.dayMs === TODAY)!;
+    expect(today.scheduled).toBe(101);
+    expect(today.skipped).toBe(30);
+    const reasons = Object.values(today.byReason ?? {}).reduce((sum, value) => sum + (value ?? 0), 0);
+    expect(reasons).toBe(30);
+    expect(trailingSkipGate(merged.jevDays, NOW).status).toBe("FLAG");
+  }
+
+  const mixed = mergeJevSkip(
+    { ...freshJevSkip(), jevDays: [...clean, day(0, 100, 0)] },
+    { ...freshJevSkip(), jevDays: [...clean, day(0, 99, 40)] },
+  );
+  expect(mixed.jevDays.find((row) => row.dayMs === TODAY)?.scheduled).toBe(100);
+  expect(mixed.jevDays.find((row) => row.dayMs === TODAY)?.skipped).toBe(40);
+  expect(trailingSkipGate(mixed.jevDays, NOW).status).toBe("FLAG");
+
+  const tie = mergeJevSkip(
+    { ...freshJevSkip(), jevDays: [day(0, 100, 0)] },
+    { ...freshJevSkip(), jevDays: [day(0, 100, 10)] },
+  );
+  expect(tie.jevDays.find((row) => row.dayMs === TODAY)?.skipped).toBe(10);
+
+  const once = mergeJevSkip(newer, newer);
+  let repeated = newer;
+  for (let i = 0; i < 20; i += 1) repeated = mergeJevSkip(repeated, newer);
+  expect(repeated.jevDays).toEqual(once.jevDays);
+  expect(mergeJevSkip(newer, undefined).jevDays.find((row) => row.dayMs === TODAY)?.skipped).toBe(30);
+  expect(mergeJevSkip(newer, { ...freshJevSkip(), jevDays: [] }).jevDays.find((row) => row.dayMs === TODAY)?.skipped).toBe(30);
+  const taken = mergeJevSkip(freshJevSkip(), stale);
+  expect(taken.jevDays.find((row) => row.dayMs === TODAY)?.scheduled).toBe(101);
+
+  const installed = freshJevSkip();
+  installed.holder = "installed-holder";
+  installed.handoverMinutes = 4;
+  installed.weekStartMs = 100;
+  installed.weekOnTime = 5;
+  installed.latency.late = 9;
+  installed.byReason.timeout = 7;
+  installed.bySub.no_book_feed = 3;
+  installed.jevDays = [day(0, 1, 0)];
+  const incoming = freshJevSkip();
+  incoming.holder = "incoming-holder";
+  incoming.handoverMinutes = 1;
+  incoming.weekStartMs = 200;
+  incoming.weekOnTime = 9;
+  incoming.latency.late = 4;
+  incoming.byReason.timeout = 2;
+  incoming.bySub.no_book_feed = 1;
+  incoming.jevDays = [day(0, 1, 0)];
+  const kept = mergeJevSkip(installed, incoming);
+  expect(kept.latency.late).toBe(9);
+  expect(kept.byReason.timeout).toBe(7);
+  expect(kept.bySub.no_book_feed).toBe(3);
+  expect(kept.holder).toBe("installed-holder");
+  expect(kept.handoverMinutes).toBe(4);
+  expect(kept.weekStartMs).toBe(100);
+  expect(kept.weekOnTime).toBe(5);
+  incoming.latency.late = 12;
+  incoming.weekStartMs = 100;
+  incoming.weekOnTime = 9;
+  const raised = mergeJevSkip(installed, incoming);
+  expect(raised.latency.late).toBe(12);
+  expect(raised.weekOnTime).toBe(9);
 });
 
 function state(): MarketState {

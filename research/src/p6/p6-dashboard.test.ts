@@ -200,7 +200,7 @@ test("the page does not import the cron secret, auth, or a Redis write", () => {
   expect(page.includes("dashboardAccess")).toBe(true);
   const proxy = readFileSync(join(root, "web/src/proxy.ts"), "utf8");
   expect(proxy.includes("applyDashboardProxy")).toBe(true);
-  expect(page.includes("readP6Dashboard")).toBe(true);
+  expect(page.includes("readP6Page")).toBe(true);
   expect(page.includes("last?.completed")).toBe(true);
   expect(page.includes("kill R")).toBe(true);
   expect(page.includes("Arrival delay bps")).toBe(true);
@@ -212,6 +212,12 @@ test("the page does not import the cron secret, auth, or a Redis write", () => {
   expect(page.includes("invalid_response")).toBe(true);
   expect(page.includes("last?.jev")).toBe(true);
   expect(page.includes("muted")).toBe(true);
+  expect(page.includes("closedNote(tile.closedN)")).toBe(true);
+  expect(page.includes("drawdownText(")).toBe(true);
+  expect(page.includes("hourly (may understate the intrahour low)")).toBe(true);
+  expect(page.includes("trades unknown")).toBe(true);
+  expect(page.includes("partial")).toBe(false);
+  expect(page.includes("anchorLabel")).toBe(true);
 });
 
 test("paper P/L separates equity, fees, spread, drawdown, and the backstops", () => {
