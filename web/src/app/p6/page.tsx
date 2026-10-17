@@ -188,13 +188,7 @@ export function PositionsSection({
           </tr>
         </thead>
         <tbody>
-          {!view.reported ? (
-            <tr>
-              <td colSpan={14} className={styles.posCell}>
-                {copy.body}
-              </td>
-            </tr>
-          ) : view.empty ? (
+          {copy.body ? (
             <tr>
               <td colSpan={14} className={styles.posCell}>
                 {copy.body}

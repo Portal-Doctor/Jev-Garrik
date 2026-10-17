@@ -379,7 +379,7 @@ test("the page renders the positions footer and does not write", () => {
   expect(page.includes("copy.grey")).toBe(true);
   expect(page.includes("copy.omittedNote")).toBe(true);
   expect(page.includes("as of last run")).toBe(true);
-  expect(page.includes("!view.reported")).toBe(true);
+  expect(page.includes("copy.body ?")).toBe(true);
   expect(page.includes("CASH_LABEL")).toBe(true);
   expect(page.includes("STABLECOIN_NOTE")).toBe(true);
   expect(page.includes("ENTRY_FEE_NOTE")).toBe(true);
