@@ -421,14 +421,14 @@ test("the entry-fee amendment cites the V6.2 file and waits for Brian", () => {
   expect(body.metricDefinitionsEdited).toBe(false);
   expect(body.haltThresholdsUnchanged).toBe(true);
   expect(body.rule).toBe(AMENDMENT_V63_RULE);
-  expect(body.rule).toBe("open marks also charge the entry fee; thresholds unchanged; promotion day count restarts at fromDay");
+  expect(body.rule).toBe("open marks also charge the entry fee; thresholds unchanged; promotion day count restarts at fromDay; an invalid or garbage marker is ignored and repaired by the next flush of the process that loaded it; a first Monday review with no marker counts from the next UTC day");
   expect(body.awaiting).toBe("AWAITING Brian's approval stamp");
   expect(body.mergedCode).toBe("live once merged, with no feature flag");
   expect("live" in body).toBe(false);
   expect("featureFlag" in body).toBe(false);
   expect("approvedAt" in body).toBe(false);
   expect("approvedBy" in body).toBe(false);
-  expect(createHash("sha256").update(JSON.stringify(body)).digest("hex")).toBe("480408d77e0c9f2de606c7000def95edc535a894567690cc7bd8398fa632fc6d");
+  expect(createHash("sha256").update(JSON.stringify(body)).digest("hex")).toBe("da93a6ad0ed82b4374a0a3d0ecaff736b6b72fe5f05d12bccfbf1382bd78e6db");
 });
 
 test("partial D adds accumulate the entry fee and open equity charges the sum", () => {
