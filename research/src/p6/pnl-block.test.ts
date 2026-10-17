@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "bun:test";
 import { readP6Page } from "./dashboard-read";
 import { captureHot, hotBytes, persistSplit } from "./hot-store";
@@ -15,6 +16,8 @@ import {
   closedNote,
   concentrationText,
   drawdownText,
+  completeHourSpan,
+  CT_CLOCK,
   encodeHourAgg,
   encodePoint,
   endIsStale,
@@ -23,13 +26,16 @@ import {
   equityExtras,
   equitySeriesValueBytes,
   formatCt,
+  HOUR_EDGE_NOTE,
   hourStartSec,
   lastCompletedCloseMs,
   parseHourAgg,
   pnlMgetKeys,
   pnlPageReplyBytes,
+  signedPct,
   signedUsd,
   sinceText,
+  tileMarkedGrey,
   wlText,
   type EqPoint,
   type HourAgg,
@@ -685,4 +691,103 @@ test("the flush command count stays one and a successor does not move the hour p
     closed: [],
   });
   expect(again.some((row) => row.nx)).toBe(false);
+});
+
+test("W-L counts complete hours only and says so when an edge is mid-hour", () => {
+  const origin = Date.UTC(2026, 9, 16, 8, 0, 0);
+  const now = origin + 8 * HOUR;
+  const points = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((step) => pointAt(origin + step * HOUR, 8000 + step, step, 0));
+  const startHour = hourStartSec(origin);
+  const listed = tradesCovering(origin, now, new Map([[startHour, aggOf([10])]]));
+  const aligned = blockAt({ nowMs: now, points, equityNow: 8008, realizedNow: 8, unrealizedNow: 0, trades: listed });
+  const eight = aligned.tiles.find((tile) => tile.id === "8h")!;
+  expect(completeHourSpan(eight.windowStartMs, eight.windowEndMs)?.fromSec).toBe(startHour);
+  expect(eight.wins).toBe(1);
+  expect(eight.hourNote).toBeNull();
+  const mid = blockAt({ nowMs: now + 15 * 60 * 1000, points, equityNow: 8008, realizedNow: 8, unrealizedNow: 0, trades: listed });
+  const slipped = mid.tiles.find((tile) => tile.id === "8h")!;
+  expect(slipped.hourNote).toBe(HOUR_EDGE_NOTE);
+  expect(slipped.wins).toBe(0);
+});
+
+test("a 30d window with an hour that was never written is trades unknown", () => {
+  const end = Date.UTC(2026, 9, 16, 18, 0, 0);
+  const origin = end - 10 * 24 * HOUR;
+  const points: EqPoint[] = [];
+  for (let ts = origin; ts <= end; ts += HOUR) points.push(pointAt(ts, 8000, 0, 0));
+  const trades = tradesCovering(origin, end);
+  const built = blockAt({ nowMs: end, points, first: points[0], equityNow: 8000, realizedNow: 0, unrealizedNow: 0, trades });
+  const month = built.tiles.find((tile) => tile.id === "30d")!;
+  const eight = built.tiles.find((tile) => tile.id === "8h")!;
+  expect(month.tradesUnknown).toBe(true);
+  expect(month.closedN).toBe(0);
+  expect(eight.tradesUnknown).toBe(false);
+  const edge = hourStartSec(end - 30 * 24 * HOUR);
+  const expired = tradesCovering(end - 31 * 24 * HOUR, end);
+  expired.set(edge, null);
+  const older = blockAt({
+    nowMs: end,
+    points,
+    first: pointAt(end - 31 * 24 * HOUR, 8000, 0, 0),
+    equityNow: 8000,
+    realizedNow: 0,
+    unrealizedNow: 0,
+    trades: expired,
+  });
+  expect(older.tiles.find((tile) => tile.id === "30d")!.tradesUnknown).toBe(true);
+  expect(older.tiles.find((tile) => tile.id === "8h")!.tradesUnknown).toBe(false);
+});
+
+test("a flat close is not a win or a loss, and a zero largest trade is not concentration", () => {
+  const hour = 1_760_000_000;
+  expect(parseHourAgg(encodeHourAgg([{ exitTs: hour * 1000 + 10, netUsd: 0 }], hour))).toEqual({
+    n: 1,
+    wins: 0,
+    losses: 0,
+    flat: 1,
+    largestNet: 0,
+    realizedSum: 0,
+  });
+  const origin = Date.UTC(2026, 9, 16, 8, 0, 0);
+  const now = origin + 8 * HOUR;
+  const points = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((step) => pointAt(origin + step * HOUR, 8000, 0, 0));
+  const trades = tradesCovering(origin, now, new Map([[hourStartSec(origin + HOUR), aggOf([0, 0, 0])]]));
+  const tile = blockAt({ nowMs: now, points, equityNow: 8010, realizedNow: 10, unrealizedNow: 0, trades }).tiles.find((row) => row.id === "8h")!;
+  expect(tile.closedN).toBe(3);
+  expect(tile.wins).toBe(0);
+  expect(tile.losses).toBe(0);
+  expect(tile.concentrationPct).toBeNull();
+});
+
+test("the trade aggregate keeps its TTL and signedPct zero has no plus", () => {
+  const row = equityExtras({
+    nowMs: Date.UTC(2026, 9, 16, 15, 7, 0),
+    eqHourDone: hourStartSec(Date.UTC(2026, 9, 16, 15, 0, 0)),
+    pnl: { equityUsd: 1, realizedUsd: 1, unrealizedUsd: 0, feesUsd: 0, spreadSlipUsd: 0 },
+    closed: [],
+  }).find((item) => item.key.startsWith("p6:eq:tr:"));
+  expect(row?.px).toBe(EQ_TTL_MS);
+  expect(signedPct(0)).toBe("0.00%");
+  expect(signedPct(0).startsWith("+")).toBe(false);
+  expect(signedPct(0.004)).toBe("0.00%");
+});
+
+test("the CT clock is hourCycle h23 and a short-history tile is grey", () => {
+  expect(new Intl.DateTimeFormat("en-US", CT_CLOCK).resolvedOptions().hourCycle).toBe("h23");
+  const source = readFileSync(new URL("./pnl-block.ts", import.meta.url), "utf8");
+  expect(source.includes('hourCycle: "h23"')).toBe(true);
+  expect(source.includes("hour12: false")).toBe(false);
+  const end = Date.UTC(2026, 9, 16, 18, 0, 0);
+  const first = pointAt(end - 8 * HOUR, 8000, 0, 0);
+  const second = pointAt(end, 8030, 12, 18);
+  const young = blockAt({ nowMs: end, points: [first, second], equityNow: 8030, realizedNow: 12, unrealizedNow: 18 });
+  const month = young.tiles.find((tile) => tile.id === "30d")!;
+  const eight = young.tiles.find((tile) => tile.id === "8h")!;
+  expect(month.since).toBe("since start: 0d 8h of 30d");
+  expect(tileMarkedGrey(month)).toBe(true);
+  expect(month.anchorLabel).toBeNull();
+  expect(eight.since).toBeNull();
+  expect(eight.anchorLabel).toBeNull();
+  expect(tileMarkedGrey(eight)).toBe(false);
+  expect(tileMarkedGrey({ since: null, anchorLabel: "anchor 2h 00m old" })).toBe(true);
 });

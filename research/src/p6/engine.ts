@@ -413,7 +413,7 @@ function exitCostUsd(position: Position, mark: number): number {
   return (mark * position.units * (TAKER_FEE_BPS + position.sLiveBps)) / 10_000;
 }
 
-function markedPnl(book: Book, position: Position, mark: number): number {
+export function markedPnl(book: Book, position: Position, mark: number): number {
   if (book.config.parity) {
     const exitFill = x1FillPrice(mark, "sell", book.config.parity.sBtBps);
     const net = netBps(position.fillPrice, exitFill, TAKER_FEE_BPS, TAKER_FEE_BPS);

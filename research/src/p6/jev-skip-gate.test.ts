@@ -355,6 +355,29 @@ test("per-field max cannot turn a FLAG day into PASS", () => {
   expect(raised.weekOnTime).toBe(9);
 });
 
+test("answered stays at the larger count, reasons stay at the larger count, and skipped is reconciled", () => {
+  const answered = mergeJevSkip(
+    { ...freshJevSkip(), jevDays: [{ ...day(0, 10, 0), answered: 8 }] },
+    { ...freshJevSkip(), jevDays: [{ ...day(0, 10, 0), answered: 2 }] },
+  );
+  expect(answered.jevDays.find((row) => row.dayMs === TODAY)?.answered).toBe(8);
+  const base = freshJevSkip();
+  base.byReason.timeout = 1;
+  const incoming = freshJevSkip();
+  incoming.byReason.timeout = 9;
+  expect(mergeJevSkip(base, incoming).byReason.timeout).toBe(9);
+  const open = mergeJevSkip(freshJevSkip(), {
+    ...freshJevSkip(),
+    jevDays: [{ dayMs: TODAY, onTime: 0, catchUp: 0, scheduled: 4, skipped: 4, answered: 0 }],
+  });
+  const row = open.jevDays.find((item) => item.dayMs === TODAY);
+  const reasons = row?.byReason ?? {};
+  const sum = Object.values(reasons).reduce((total, value) => total + (value ?? 0), 0);
+  expect(reasons.not_called).toBe(4);
+  expect(row?.skipped).toBe(4);
+  expect(sum).toBe(4);
+});
+
 function state(): MarketState {
   return {
     pair: "BTC-USD",
