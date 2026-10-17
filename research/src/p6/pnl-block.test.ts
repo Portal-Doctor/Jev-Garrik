@@ -746,7 +746,7 @@ test("hours before paper start are not unknown, and a gap after the start is", (
   expect(gapped.tiles.find((tile) => tile.id === "30d")!.tradesUnknown).toBe(true);
 });
 
-test("concentration uses the same complete hours as W-L", () => {
+test("concentration is withheld on a partial hour and uses the aligned window otherwise", () => {
   const origin = Date.UTC(2026, 9, 16, 8, 0, 0);
   const now = origin + 8 * HOUR + 15 * 60 * 1000;
   const points = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((step) => pointAt(origin + step * HOUR, 8000, 0, 0));
@@ -762,8 +762,24 @@ test("concentration uses the same complete hours as W-L", () => {
   expect(tile.hourNote).toBe(HOUR_EDGE_NOTE);
   expect(tile.wins).toBe(3);
   expect(tile.closedN).toBe(3);
-  expect(tile.concentrationPct).toBeCloseTo((3 / tile.realizedUsd!) * 100, 6);
-  expect(tile.concentrationPct).not.toBeCloseTo((100 / tile.realizedUsd!) * 100, 4);
+  expect(tile.realizedUsd).toBe(10);
+  expect(tile.concentrationPct).toBeNull();
+  const alignedNow = origin + 8 * HOUR;
+  const alignedPoints = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((step) => pointAt(origin + step * HOUR, 8000, 0, 0));
+  const hourRealized = aggOf([1, 2, 3]).realizedSum;
+  const alignedTrades = tradesCovering(origin, alignedNow, new Map([[hourStartSec(origin + HOUR), aggOf([1, 2, 3])]]));
+  const aligned = blockAt({
+    nowMs: alignedNow,
+    points: alignedPoints,
+    equityNow: 8000 + hourRealized,
+    realizedNow: hourRealized,
+    unrealizedNow: 0,
+    trades: alignedTrades,
+  }).tiles.find((row) => row.id === "8h")!;
+  expect(aligned.hourNote).toBeNull();
+  expect(aligned.closedN).toBe(3);
+  expect(aligned.concentrationPct).toBeCloseTo((3 / hourRealized) * 100, 6);
+  expect(aligned.concentrationPct).toBeCloseTo((3 / aligned.realizedUsd!) * 100, 6);
 });
 
 test("a flat close is not a win or a loss, and a zero largest trade is not concentration", () => {

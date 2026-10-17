@@ -461,8 +461,10 @@ export function buildPnlBlock(input: {
     const realized = input.realizedNow! - anchor.realized;
     const unrealizedDelta = input.unrealizedNow! - anchor.unrealized;
     const path = input.points.filter((point) => point.ts >= anchor.ts && point.ts <= end);
+    // A partial edge (hourNote) mixes complete-hour winners with whole-window realized.
+    // Withhold the ratio. An aligned window has no partial hour, so the window realized is that same span.
     const concentration =
-      !tradesUnknown && realized > 0 && closedN >= 3 && seen && largest > 0 ? (largest / realized) * 100 : null;
+      hourNote == null && !tradesUnknown && realized > 0 && closedN >= 3 && seen && largest > 0 ? (largest / realized) * 100 : null;
     return {
       id: window.id,
       span: window.span,

@@ -7,11 +7,13 @@ import {
   CHECKS_SKIPPED,
   EMPTY_POSITIONS,
   ENTRY_FEE_NOTE,
+  formatUsd,
   MARK_FALLBACK,
   POSITIONS_UNREPORTED,
   positionsFooter,
   STABLECOIN_NOTE,
   type PositionSnap,
+  type PositionsView,
 } from "../../../../research/src/p6/positions-view";
 import { RunClock } from "./countdown";
 import styles from "../paper/paper.module.css";
@@ -136,11 +138,14 @@ function toneClass(value: number | null): string {
   return value > 0 ? styles.pos : styles.neg;
 }
 
-function plainUsd(value: number): string {
-  return `$${value.toFixed(2)}`;
+function checkLine(view: PositionsView): string {
+  if (!view.reported) return CHECKS_SKIPPED;
+  const problems = view.problems.length > 0 ? ` · ${view.problems.join(" · ")}` : "";
+  const second = view.unrealizedText === view.checkText ? "" : ` · ${view.unrealizedText}`;
+  return `${view.checkText}${problems}${second}`;
 }
 
-function PositionsSection({
+export function PositionsSection({
   last,
   nowMs,
   openUnrealized,
@@ -156,6 +161,8 @@ function PositionsSection({
   const realizedUsd = typeof pnl?.realizedUsd === "number" ? pnl.realizedUsd : 0;
   const startingUsd = typeof pnl?.startingUsd === "number" ? pnl.startingUsd : PNL_START_USD;
   const markTs = last && typeof last.end === "number" ? last.end : null;
+  const omitted = typeof last?.positionsOmitted === "number" ? last.positionsOmitted : 0;
+  const skipped = typeof last?.positionsSkipped === "number" ? last.positionsSkipped : 0;
   const view = positionsFooter({
     snaps,
     nowMs,
@@ -164,6 +171,8 @@ function PositionsSection({
     realizedUsd,
     unrealizedUsd: openUnrealized ?? 0,
     startingUsd,
+    omitted,
+    skipped,
   });
   const bad = view.reported && (!view.reconciled || !view.unrealizedMatch || view.problems.length > 0);
   const grey = view.stale || !view.reported;
@@ -177,11 +186,11 @@ function PositionsSection({
         </span>
         <span className={styles.sub}>{ENTRY_FEE_NOTE}</span>
       </div>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <table className={styles.posTable}>
         <thead>
           <tr>
             {["Pair", "Class", "Qty", "Entry", "Age", "Mark", "Notional", "Unrealized", "Unrealized %", "Initial risk", "Net R", "Stop", "Distance %", "Target"].map((label) => (
-              <th key={label} style={{ textAlign: "left", padding: "6px 8px", color: "var(--muted)" }}>
+              <th key={label} className={styles.posHead}>
                 {label}
               </th>
             ))}
@@ -190,53 +199,50 @@ function PositionsSection({
         <tbody>
           {!view.reported ? (
             <tr>
-              <td colSpan={14} style={{ padding: "6px 8px" }}>
+              <td colSpan={14} className={styles.posCell}>
                 {POSITIONS_UNREPORTED}
               </td>
             </tr>
           ) : view.empty ? (
             <tr>
-              <td colSpan={14} style={{ padding: "6px 8px" }}>
+              <td colSpan={14} className={styles.posCell}>
                 {EMPTY_POSITIONS}
               </td>
             </tr>
           ) : (
             view.rows.map((row) => (
               <tr key={row.id}>
-                <td style={{ padding: "6px 8px" }}>{row.product}</td>
-                <td style={{ padding: "6px 8px" }}>{row.classId}</td>
-                <td style={{ padding: "6px 8px" }}>{row.units}</td>
-                <td style={{ padding: "6px 8px" }}>{row.fill}</td>
-                <td style={{ padding: "6px 8px" }}>{ageText(row.ageMs)}</td>
-                <td style={{ padding: "6px 8px" }}>
+                <td className={styles.posCell}>{row.product}</td>
+                <td className={styles.posCell}>{row.classId}</td>
+                <td className={styles.posCell}>{row.units}</td>
+                <td className={styles.posCell}>{row.fill}</td>
+                <td className={styles.posCell}>{ageText(row.ageMs)}</td>
+                <td className={styles.posCell}>
                   {row.mark} {row.markSrc === "entry" ? MARK_FALLBACK : view.markTs == null ? "" : formatCt(view.markTs, false)}
                 </td>
-                <td style={{ padding: "6px 8px" }}>{plainUsd(row.notional)}</td>
-                <td style={{ padding: "6px 8px" }}>{signedUsd(row.unrealized)}</td>
-                <td style={{ padding: "6px 8px" }}>{row.unrealizedPct == null ? "-" : signedPct(row.unrealizedPct)}</td>
-                <td style={{ padding: "6px 8px" }}>{plainUsd(row.risk)}</td>
-                <td style={{ padding: "6px 8px" }}>{row.netR == null ? "-" : row.netR.toFixed(2)}</td>
-                <td style={{ padding: "6px 8px" }}>{row.stop}</td>
-                <td style={{ padding: "6px 8px" }}>{row.stopDistancePct == null ? "-" : `${row.stopDistancePct.toFixed(2)}%`}</td>
-                <td style={{ padding: "6px 8px" }}>{row.target ?? "—"}</td>
+                <td className={styles.posCell}>{formatUsd(row.notional)}</td>
+                <td className={styles.posCell}>{signedUsd(row.unrealized)}</td>
+                <td className={styles.posCell}>{row.unrealizedPct == null ? "-" : signedPct(row.unrealizedPct)}</td>
+                <td className={styles.posCell}>{formatUsd(row.risk)}</td>
+                <td className={styles.posCell}>{row.netR == null ? "-" : row.netR.toFixed(2)}</td>
+                <td className={styles.posCell}>{row.stop}</td>
+                <td className={styles.posCell}>{row.stopDistancePct == null ? "-" : `${row.stopDistancePct.toFixed(2)}%`}</td>
+                <td className={styles.posCell}>{row.target ?? "—"}</td>
               </tr>
             ))
           )}
         </tbody>
       </table>
+      {view.omitted > 0 ? <p className={styles.sub}>{view.omitted} positions not shown</p> : null}
       <p className={styles.sub}>
-        total active investment {view.reported ? plainUsd(view.activeUsd) : "—"} · at cost {view.reported ? plainUsd(view.atCostUsd) : "—"}
+        total active investment {view.reported ? formatUsd(view.activeUsd) : "—"} · at cost {view.reported ? formatUsd(view.atCostUsd) : "—"}
       </p>
       <p className={styles.sub}>est. exit costs {view.reported ? signedUsd(-view.exitCostUsd) : "—"} · already deducted in unrealized</p>
       <p className={styles.sub}>
-        cash balance {CASH_LABEL} {view.reported ? plainUsd(view.cashUsd) : "—"}
+        cash balance {CASH_LABEL} {view.reported ? formatUsd(view.cashUsd) : "—"}
       </p>
-      <p className={styles.sub}>= equity {view.reported ? plainUsd(view.equityUsd) : "—"}</p>
-      <p className={bad ? styles.neg : styles.sub}>
-        {view.reported ? view.checkText : CHECKS_SKIPPED}
-        {view.reported && view.problems.length > 0 ? ` · ${view.problems.join(" · ")}` : ""}
-        {view.reported ? ` · ${view.unrealizedText}` : ""}
-      </p>
+      <p className={styles.sub}>= equity {view.reported ? formatUsd(view.equityUsd) : "—"}</p>
+      <p className={bad ? styles.neg : styles.sub}>{checkLine(view)}</p>
       <p className={styles.sub}>{view.riskText}</p>
       {view.clusters.map((cluster) => (
         <p key={cluster.id} className={styles.sub}>

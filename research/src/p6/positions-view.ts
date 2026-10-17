@@ -26,8 +26,11 @@ export const MARK_FALLBACK = "entry (no mark)";
 export const EMPTY_POSITIONS = "No open positions";
 export const POSITIONS_UNREPORTED = "positions not yet reported";
 export const CHECKS_SKIPPED = "checks skipped";
+export const CHECKS_INCOMPLETE = "checks incomplete";
 export const POSITION_ROW_CAP = 64;
 export const POSITION_FIELD_CAP = 32;
+/** A printed cent can land 2e-13 over 0.01. 1.1 cents stays outside. */
+const CENT_SLACK = 1e-9;
 
 /**
  * Slim lastRun row. One per open position.
@@ -50,7 +53,8 @@ export interface PositionSnap {
   x: number;
   e: number;
   r: number;
-  k: string;
+  /** Omitted when the cluster text is the same as the product. */
+  k?: string;
   tg?: number;
   side?: string;
 }
@@ -103,31 +107,84 @@ export interface PositionsView {
   empty: boolean;
   /** False when lastRun has no positions array yet. Checks are skipped. */
   reported: boolean;
+  /** Rows dropped because the book was longer than POSITION_ROW_CAP. */
+  omitted: number;
+  /** Rows dropped because product or class was missing. Checks stay incomplete. */
+  skipped: number;
 }
 
 function round8(value: number): number {
   return Math.round(value * 1e8) / 1e8;
 }
 
-function clipText(value: string): string {
-  return value.length > POSITION_FIELD_CAP ? value.slice(0, POSITION_FIELD_CAP) : value;
+function withinCent(gap: number): boolean {
+  return Math.abs(gap) <= 0.01 + CENT_SLACK;
 }
 
-export function clipSnaps(snaps: readonly PositionSnap[]): { snaps: PositionSnap[]; capped: boolean } {
-  const capped = snaps.length > POSITION_ROW_CAP;
+function clipText(value: unknown): string {
+  const text = typeof value === "string" ? value : "";
+  return text.length > POSITION_FIELD_CAP ? text.slice(0, POSITION_FIELD_CAP) : text;
+}
+
+function clipSnap(snap: PositionSnap): PositionSnap {
+  const id = clipText(snap.id);
+  const p = clipText(snap.p);
+  const c = clipText(snap.c);
+  const next: PositionSnap = { ...snap, id, p, c };
+  const k = clipText(typeof snap.k === "string" ? snap.k : p);
+  if (k !== p) next.k = k;
+  else delete next.k;
+  return next;
+}
+
+/** Signed dollars with a thousands separator. Negative cash is `-$2,121.60`, never `$-2121.60`. */
+export function formatUsd(value: number): string {
+  const abs = Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return value < 0 ? `-$${abs}` : `$${abs}`;
+}
+
+export function clipSnaps(snaps: readonly PositionSnap[]): { snaps: PositionSnap[]; capped: boolean; omitted: number } {
+  const omitted = Math.max(0, snaps.length - POSITION_ROW_CAP);
   return {
-    capped,
-    snaps: snaps.slice(0, POSITION_ROW_CAP).map((snap) => ({ ...snap, p: clipText(snap.p), c: clipText(snap.c) })),
+    capped: omitted > 0,
+    omitted,
+    snaps: snaps.slice(0, POSITION_ROW_CAP).map(clipSnap),
   };
 }
 
-export function positionSnaps(book: Book): PositionSnap[] {
-  return book.positions.map((position) => {
+function positionUsable(position: Book["positions"][number] | null | undefined): position is Book["positions"][number] {
+  if (position == null || typeof position !== "object") return false;
+  if (typeof position.id !== "string" || position.id.length === 0) return false;
+  if (typeof position.productId !== "string" || position.productId.length === 0) return false;
+  if (typeof position.classId !== "string" || position.classId.length === 0) return false;
+  if (typeof position.clusterId !== "string") return false;
+  const nums = [position.units, position.fillPrice, position.stop, position.entryFeeUsd, position.riskUsd, position.entryTs, position.sLiveBps];
+  return nums.every((value) => typeof value === "number" && Number.isFinite(value));
+}
+
+export function positionSnapBuild(book: Book): { snaps: PositionSnap[]; omitted: number; skipped: number } {
+  const built: PositionSnap[] = [];
+  let skipped = 0;
+  for (const position of book.positions) {
+    if (!positionUsable(position)) {
+      skipped += 1;
+      continue;
+    }
     const known = Object.prototype.hasOwnProperty.call(book.marks, position.productId) && Number.isFinite(book.marks[position.productId]);
     const mark = known ? book.marks[position.productId]! : position.fillPrice;
-    const notional = mark * position.units;
-    const unrealized = markedPnl(book, position, mark);
-    const exitCost = openExitCostUsd(book, position, mark);
+    let unrealized = Number.NaN;
+    let exitCost = Number.NaN;
+    try {
+      unrealized = markedPnl(book, position, mark);
+      exitCost = openExitCostUsd(book, position, mark);
+    } catch {
+      skipped += 1;
+      continue;
+    }
+    if (!Number.isFinite(unrealized) || !Number.isFinite(exitCost) || !Number.isFinite(mark)) {
+      skipped += 1;
+      continue;
+    }
     const snap: PositionSnap = {
       id: position.id,
       p: position.productId,
@@ -136,18 +193,24 @@ export function positionSnaps(book: Book): PositionSnap[] {
       u: round8(position.units),
       f: round8(position.fillPrice),
       m: round8(mark),
-      n: round8(notional),
+      n: round8(mark * position.units),
       s: round8(position.stop),
       ur: round8(unrealized),
-      x: exitCost,
+      x: round8(exitCost),
       e: round8(position.entryFeeUsd),
       r: round8(position.riskUsd),
-      k: position.clusterId,
     };
+    if (position.clusterId !== position.productId) snap.k = position.clusterId;
     if (!known) snap.src = "entry";
-    if (position.target != null) snap.tg = round8(position.target);
-    return snap;
-  }).slice(0, POSITION_ROW_CAP).map((snap) => ({ ...snap, p: clipText(snap.p), c: clipText(snap.c) }));
+    if (position.target != null && Number.isFinite(position.target)) snap.tg = round8(position.target);
+    built.push(snap);
+  }
+  const omitted = Math.max(0, built.length - POSITION_ROW_CAP);
+  return { snaps: built.slice(0, POSITION_ROW_CAP).map(clipSnap), omitted, skipped };
+}
+
+export function positionSnaps(book: Book): PositionSnap[] {
+  return positionSnapBuild(book).snaps;
 }
 
 function moneyGap(value: number): string {
@@ -164,6 +227,10 @@ export function positionsFooter(input: {
   unrealizedUsd: number;
   startingUsd?: number;
   currency?: string;
+  /** Rows already removed before this array was stored. */
+  omitted?: number;
+  /** Malformed rows dropped at flush. */
+  skipped?: number;
 }): PositionsView {
   const starting = input.startingUsd ?? PNL_START_USD;
   if (input.snaps == null) {
@@ -190,9 +257,15 @@ export function positionsFooter(input: {
       problems: [],
       empty: false,
       reported: false,
+      omitted: 0,
+      skipped: 0,
     };
   }
-  const snaps = clipSnaps(input.snaps).snaps;
+  const clipped = clipSnaps(input.snaps);
+  const snaps = clipped.snaps;
+  const omitted = Math.max(input.omitted ?? 0, clipped.omitted);
+  const skipped = input.skipped ?? 0;
+  const incomplete = omitted > 0 || skipped > 0;
   const rows: PositionLine[] = snaps.map((snap) => {
     const costBasisUsd = snap.u * snap.f + snap.e;
     const side = snap.side ?? "long";
@@ -210,7 +283,7 @@ export function positionsFooter(input: {
       exitCost: snap.x,
       entryFee: snap.e,
       risk: snap.r,
-      cluster: snap.k,
+      cluster: snap.k ?? snap.p,
       target: snap.tg ?? null,
       costBasisUsd,
       unrealizedPct: costBasisUsd !== 0 ? (snap.ur / costBasisUsd) * 100 : null,
@@ -226,9 +299,9 @@ export function positionsFooter(input: {
   const cashUsd = starting + input.realizedUsd - atCostUsd;
   const tieUsd = cashUsd + activeUsd - exitCostUsd;
   const gapUsd = tieUsd - input.equityUsd;
-  const reconciled = Math.abs(gapUsd) <= 0.01;
+  const reconciled = !incomplete && withinCent(gapUsd);
   const rowUnrealizedUsd = rows.reduce((sum, row) => sum + row.unrealized, 0);
-  const unrealizedMatch = Math.abs(rowUnrealizedUsd - input.unrealizedUsd) <= 0.01;
+  const unrealizedMatch = !incomplete && withinCent(rowUnrealizedUsd - input.unrealizedUsd);
   const problems: string[] = [];
   if ((input.currency ?? "USD") !== "USD" || rows.some((row) => row.side !== "long")) problems.push("unsupported balance/side");
   if (cashUsd < 0) problems.push("negative cash");
@@ -248,11 +321,11 @@ export function positionsFooter(input: {
     tieUsd,
     gapUsd,
     reconciled,
-    checkText: reconciled ? "reconciled" : `NOT RECONCILED by ${moneyGap(gapUsd)}`,
+    checkText: incomplete ? CHECKS_INCOMPLETE : reconciled ? "reconciled" : `NOT RECONCILED by ${moneyGap(gapUsd)}`,
     rowUnrealizedUsd,
     openUnrealizedUsd: input.unrealizedUsd,
     unrealizedMatch,
-    unrealizedText: unrealizedMatch ? "row unrealized matches open now" : "row unrealized does not match open now",
+    unrealizedText: incomplete ? CHECKS_INCOMPLETE : unrealizedMatch ? "row unrealized matches open now" : "row unrealized does not match open now",
     stale: endIsStale(input.nowMs, input.markTs),
     markTs: input.markTs,
     riskUsd,
@@ -261,6 +334,8 @@ export function positionsFooter(input: {
     problems,
     empty: rows.length === 0,
     reported: true,
+    omitted,
+    skipped,
   };
 }
 

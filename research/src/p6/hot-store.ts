@@ -6,7 +6,7 @@
 import type { BarOHLC } from "../p3/signals";
 import { paperPnl } from "./engine";
 import { equityExtras, hourStartSec } from "./pnl-block";
-import { positionSnaps } from "./positions-view";
+import { positionSnapBuild } from "./positions-view";
 import { boundJevDone, JEV_PACKET_TTL_MS, queuedForHandover, skipShareReport } from "./jev-call";
 import { packMinute, type JevMinuteTuple } from "./jev-minute";
 import {
@@ -692,6 +692,7 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
   const completed = finished
     ? { end: host.clock(), cmds: host.saveCommands + 1, outcome: host.runOutcome }
     : host.completedRun;
+  const positionReport = positionSnapBuild(host.book);
   const last = {
     start: host.runStartedMs,
     end: host.clock(),
@@ -708,7 +709,9 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
     seedIdx: host.seedCursor.idx,
     completed,
     pnl: paperPnl(host.book),
-    positions: positionSnaps(host.book),
+    positions: positionReport.snaps,
+    positionsOmitted: positionReport.omitted,
+    positionsSkipped: positionReport.skipped,
       jev: {
       totalUsd: host.jevMeter.cumulativeUsd,
       todayUsd: host.jevMeter.today === new Date(host.clock()).toISOString().slice(0, 10) ? host.jevMeter.todayUsd : 0,
