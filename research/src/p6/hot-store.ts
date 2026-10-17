@@ -221,6 +221,16 @@ interface HotBody {
   fourSeedThrough: [string, number][];
   overlapSeen: boolean;
   working?: PaperStateBody["working"];
+  /**
+   * Monotonic flush sequence. Written in the same atomic flush as hot and the
+   * bars. Absent on snapshots stored before this field existed.
+   */
+  seq?: number;
+  /**
+   * Redis key to the sequence of the flush that last wrote it. Same atomic
+   * snapshot as `seq`. A key that is missing changed outside this map.
+   */
+  keySeq?: Record<string, number>;
 }
 
 export function captureHot(host: PaperHost): HotBody {
@@ -896,6 +906,7 @@ async function writeGroupedBars(kv: Kv, host: PaperHost, plan: FlushPlan): Promi
       continue;
     }
     await writeOwned(kv, host, key, encoded, group.px > 0 ? group.px : undefined);
+    host.redisRewrite.add(key);
     host.saveCommands += 1;
     host.saveBytes += Buffer.byteLength(encoded);
     if (!key.startsWith("p6:bar4h:") || !fourSeriesReady(trimmed as { ts: number }[])) continue;
@@ -911,9 +922,123 @@ async function writeGroupedBars(kv: Kv, host: PaperHost, plan: FlushPlan): Promi
     // or an offline fold that still covers FOUR_KEEP, so the next process
     // does not re-fetch.
     await writeOwned(kv, host, seedMarkKey(productId), markJson);
+    host.redisRewrite.add(seedMarkKey(productId));
     host.saveCommands += 1;
     host.saveBytes += Buffer.byteLength(markJson);
   }
+}
+
+/** Payload bytes of one Redis string. A nil reply counts as zero. */
+export function noteReadBytes(host: PaperHost, raw: string | null | undefined): void {
+  if (raw) host.readBytes += Buffer.byteLength(raw);
+}
+
+function trackedSeqKey(key: string): boolean {
+  if (key === SEED_CURSOR_KEY || key === LAST_RUN_KEY || key === ACCT_KEY) return true;
+  return (
+    key.startsWith("p6:bar15:") ||
+    key.startsWith("p6:bar4h:") ||
+    key.startsWith("p6:bar1h:") ||
+    key.startsWith("p6:d1:") ||
+    key.startsWith("p6:ring1m:") ||
+    key.startsWith("p6:tape:") ||
+    key.startsWith("p6:seed:wm:")
+  );
+}
+
+interface FlushPayload {
+  hot?: string;
+  tapes?: { key: string }[];
+  rings?: { key: string }[];
+  bars?: { key: string }[];
+  extra?: { key: string }[];
+  drop?: string[];
+}
+
+interface HotStamp {
+  payload: string;
+  seq: number | null;
+  keySeq: Map<string, number> | null;
+}
+
+function touchedSeqKeys(body: FlushPayload): string[] {
+  const keys: string[] = [];
+  for (const row of body.bars ?? []) if (trackedSeqKey(row.key)) keys.push(row.key);
+  for (const row of body.rings ?? []) if (trackedSeqKey(row.key)) keys.push(row.key);
+  for (const row of body.tapes ?? []) if (trackedSeqKey(row.key)) keys.push(row.key);
+  for (const row of body.extra ?? []) if (trackedSeqKey(row.key)) keys.push(row.key);
+  return keys;
+}
+
+/**
+ * Put `seq` and `keySeq` inside p6:hot before the flush payload is written.
+ * They share the EVAL with the bars. A map that would push hot over 256 KB,
+ * or the payload over 1 MB, is left off. The sequence number is left off too
+ * if it alone does not fit, and the original payload is written.
+ */
+function stampFlush(host: PaperHost, payload: string): HotStamp {
+  const body = JSON.parse(payload) as FlushPayload;
+  if (!body.hot) return { payload, seq: null, keySeq: null };
+  const next = (host.redisSeq ?? 0) + 1;
+  const hot = JSON.parse(body.hot) as HotBody;
+  hot.seq = next;
+  const keySeq = host.redisKeySeq ? new Map(host.redisKeySeq) : new Map<string, number>();
+  for (const key of body.drop ?? []) {
+    if (key.startsWith("p6:seed:wm:")) keySeq.delete(key);
+  }
+  for (const key of host.redisRewrite) keySeq.set(key, next);
+  for (const key of touchedSeqKeys(body)) keySeq.set(key, next);
+  if (keySeq.size > 0) {
+    const sorted: Record<string, number> = {};
+    for (const key of [...keySeq.keys()].sort()) sorted[key] = keySeq.get(key)!;
+    hot.keySeq = sorted;
+  }
+  const pack = (withMap: boolean): string | null => {
+    if (!withMap) delete hot.keySeq;
+    body.hot = JSON.stringify(hot);
+    const nextPayload = JSON.stringify(body);
+    if (Buffer.byteLength(body.hot) > HOT_MAX_BYTES) return null;
+    if (Buffer.byteLength(nextPayload) > VALUE_MAX_BYTES) return null;
+    if (payloadTooBig({ payload: nextPayload, bytes: Buffer.byteLength(nextPayload), marks: [], minutes: [] })) return null;
+    return nextPayload;
+  };
+  let nextPayload = pack(keySeq.size > 0);
+  let published = keySeq.size > 0 ? keySeq : null;
+  if (!nextPayload && published) {
+    published = null;
+    nextPayload = pack(false);
+  }
+  if (!nextPayload) return { payload, seq: null, keySeq: null };
+  return { payload: nextPayload, seq: next, keySeq: published };
+}
+
+/**
+ * A flush that splits bars out of the EVAL writes those bars first. Clear the
+ * published sequence before that, so a crash cannot pair a new bar with an old
+ * map. The in-memory map stays; the finishing flush publishes it with the
+ * rewritten keys.
+ */
+async function publishUnsequencedHot(kv: Kv, host: PaperHost): Promise<void> {
+  const raw = await kv.get(HOT_KEY);
+  noteReadBytes(host, raw);
+  if (!raw) return;
+  let hot: HotBody;
+  try {
+    hot = JSON.parse(raw) as HotBody;
+  } catch {
+    return;
+  }
+  if (hot.seq == null && hot.keySeq == null) return;
+  delete hot.seq;
+  delete hot.keySeq;
+  const next = JSON.stringify(hot);
+  if (host.leaseToken) {
+    const ok = await kv.ownedSet(LEASE_KEY, host.leaseToken, HOT_KEY, next);
+    if (!ok) throw new Error("lease lost");
+    return;
+  }
+  const wrote = await kv.set(HOT_KEY, next);
+  if (!wrote) throw new Error("kv set p6:hot failed");
 }
 
 async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
@@ -922,6 +1047,9 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
   await writeWarmupOnce(kv, host);
   let plan = buildFlush(host);
   if (plan.bytes > VALUE_MAX_BYTES && !payloadTooBig(plan)) {
+    // Those bar writes are not in the same EVAL as hot. Drop the sequence map
+    // first so a crash in the middle cannot be read as a current partial snapshot.
+    await publishUnsequencedHot(kv, host);
     await writeGroupedBars(kv, host, plan);
     const rings = plan.marks.filter((mark) => mark.startsWith("m:"));
     releaseMarks(host, rings);
@@ -934,6 +1062,8 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
     host.book.incidents.push("kv value exceeds 1 MB");
     return;
   }
+  const stamped = stampFlush(host, plan.payload);
+  plan = { ...plan, payload: stamped.payload, bytes: Buffer.byteLength(stamped.payload) };
   try {
     if (!host.leaseToken) {
       await applyUnowned(kv, host, plan);
@@ -965,6 +1095,15 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
     host.eqHourDone = host.eqPlanHour;
     if (host.book.acctFromDay == null) host.book.acctFromDay = acctFromDay(host.clock());
     host.acctRepair = false;
+    if (stamped.keySeq && stamped.seq != null) {
+      host.redisSeq = stamped.seq;
+      host.redisKeySeq = stamped.keySeq;
+      host.redisRewrite = new Set();
+    } else {
+      // The hot we stored has no key map. A later flush must not republish a map that missed this write.
+      host.redisKeySeq = null;
+      if (stamped.seq != null) host.redisSeq = stamped.seq;
+    }
   } catch (error) {
     releaseMarks(host, plan.marks);
     if (leaseLost(error) || transportError(error)) throw error;
@@ -987,8 +1126,15 @@ function parseList<T>(raw: string | null): T[] {
   return Array.isArray(parsed) ? parsed : [];
 }
 
-/** Rebuild the host from one MGET of hot and the last 10 tape minutes, plus the bar strings in that same read. */
-export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody | null> {
+interface SplitPlan {
+  keys: string[];
+  ringKeys: string[];
+  days: string[];
+  tapeMinutes: number[];
+  products: string[];
+}
+
+function splitPlan(host: PaperHost): SplitPlan {
   const nowSec = Math.floor(host.clock() / 1000);
   const today = Math.floor(nowSec / 86400) * 86400;
   const days: string[] = [];
@@ -1003,11 +1149,61 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
     for (const day of days) keys.push(bar15Key(productId, day));
     keys.push(bar4hKey(productId), bar1hKey(productId), d1Key(productId), seedMarkKey(productId));
   }
-  const values = await kv.mget(keys);
-  const byKey = new Map(keys.map((key, index) => [key, values[index] ?? null]));
+  return { keys, ringKeys: products.map((productId) => ringKey(productId)), days, tapeMinutes, products };
+}
+
+function parseHotSeq(raw: string | null): { seq: number; keySeq: Map<string, number> } | null {
+  if (!raw) return null;
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (body == null || typeof body !== "object" || Array.isArray(body)) return null;
+  const seq = (body as { seq?: unknown }).seq;
+  const keySeq = (body as { keySeq?: unknown }).keySeq;
+  if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 1) return null;
+  if (keySeq == null || typeof keySeq !== "object" || Array.isArray(keySeq)) return null;
+  const map = new Map<string, number>();
+  for (const [key, value] of Object.entries(keySeq as Record<string, unknown>)) {
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 1) return null;
+    map.set(key, value);
+  }
+  if (map.size === 0) return null;
+  return { seq, keySeq: map };
+}
+
+/**
+ * True only when this key's sequence in the token is the one warm() loaded.
+ * Fills and the ledger are appended outside the flush, so they never match.
+ * Dropping this comparison reloads a stale bar after the holder has saved.
+ */
+function reuseSplitKey(host: PaperHost, token: { seq: number; keySeq: Map<string, number> }, key: string): boolean {
+  if (key === FILLS_KEY || key === LEDGER_KEY || key === HOT_KEY) return false;
+  if (host.redisSeq == null || host.redisKeySeq == null) return false;
+  const next = token.keySeq.get(key);
+  const prev = host.redisKeySeq.get(key);
+  if (next == null || prev == null || next !== prev) return false;
+  if (key.startsWith("p6:ring1m:")) return host.redisRings?.has(key) ?? false;
+  return host.redisRaw?.has(key) ?? false;
+}
+
+function rememberSplit(host: PaperHost, byKey: Map<string, string | null>, rings: Map<string, string[]>, hotRaw: string | null): void {
+  host.redisRaw = byKey;
+  host.redisRings = rings;
+  const parsed = parseHotSeq(hotRaw);
+  host.redisSeq = parsed?.seq ?? null;
+  host.redisKeySeq = parsed?.keySeq ?? null;
+}
+
+function assembleSplit(host: PaperHost, byKey: Map<string, string | null>, ringsByKey: Map<string, string[]>, plan: SplitPlan): PaperStateBody | null {
   const raw = byKey.get(HOT_KEY) ?? null;
   if (!raw) return null;
   const hot = JSON.parse(raw) as HotBody;
+  const { seq, keySeq, ...book } = hot;
+  void seq;
+  void keySeq;
   const fifteen: PaperStateBody["fifteen"] = [];
   const hourWarm: [string, BarOHLC[]][] = [];
   const fourBars: [string, BarOHLC[]][] = [];
@@ -1015,8 +1211,8 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
   const dailyCloses: [string, DailyClose[]][] = [];
   const rings: PaperStateBody["rings"] = [];
   const tape: PaperStateBody["tape"] = [];
-  for (const productId of products) {
-    const bars = days
+  for (const productId of plan.products) {
+    const bars = plan.days
       .flatMap((day) => parseList<PaperStateBody["fifteen"][number]>(byKey.get(bar15Key(productId, day)) ?? null))
       .sort((a, b) => a.startSec - b.startSec);
     fifteen.push(...bars);
@@ -1037,17 +1233,15 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
     for (const bar of fours) host.persistedBars.add(`4h:${productId}:${bar.ts}`);
     for (const bar of daily) host.persistedBars.add(`d1:${productId}:${bar.ts}`);
   }
-  const ringKeys = products.map((productId) => ringKey(productId));
-  const ringRows = await kv.readLists(ringKeys);
-  ringRows.forEach((rows, index) => {
-    const productId = products[index]!;
+  for (const productId of plan.products) {
+    const rows = ringsByKey.get(ringKey(productId)) ?? [];
     for (const rawRow of rows) {
       const bar = JSON.parse(rawRow) as PaperStateBody["rings"][number];
       rings.push(bar);
       host.persistedBars.add(`m:${productId}:${bar.ts}`);
     }
-  });
-  for (const at of [...tapeMinutes].sort((a, b) => a - b)) {
+  }
+  for (const at of [...plan.tapeMinutes].sort((a, b) => a - b)) {
     const rows = tradesFromBlock(byKey.get(tapeKey(at)) ?? null);
     if (rows.length > 0) host.tapeWritten.add(at);
     tape.push(...rows);
@@ -1070,11 +1264,11 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
         };
       }
     }
-    for (const productId of products) {
-      const raw = byKey.get(seedMarkKey(productId)) ?? null;
+    for (const productId of plan.products) {
+      const markRaw = byKey.get(seedMarkKey(productId)) ?? null;
       const bars = fourBars.find(([id]) => id === productId)?.[1] ?? [];
       const ready = fourSeriesReady(bars);
-      if (!raw) {
+      if (!markRaw) {
         if (!ready) continue;
         const newest = bars[bars.length - 1]!.ts;
         const oldest = bars[0]!.ts;
@@ -1082,7 +1276,7 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
         host.fourFlushed.add(productId);
         continue;
       }
-      const mark = JSON.parse(raw) as SeedMark;
+      const mark = JSON.parse(markRaw) as SeedMark;
       if (mark.status === "warm" && !ready) {
         host.seedMarks.set(productId, { ...mark, status: "short", reason: "short" });
         continue;
@@ -1109,7 +1303,7 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
   host.acctRepair = rawAcct != null && acct == null;
   if (acct) host.book.acctFromDay = acct.fromDay;
   return {
-    ...hot,
+    ...book,
     ...(ledger.length > 0 ? { closed: ledger } : {}),
     legs,
     fifteen,
@@ -1122,4 +1316,89 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
     applied: [],
     volHours: [],
   };
+}
+
+/** Rebuild the host from one MGET of hot and the last 10 tape minutes, plus the bar strings in that same read. */
+export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody | null> {
+  const plan = splitPlan(host);
+  const values = await kv.mget(plan.keys);
+  for (const value of values) noteReadBytes(host, value);
+  const byKey = new Map(plan.keys.map((key, index) => [key, values[index] ?? null]));
+  const ringRows = await kv.readLists(plan.ringKeys);
+  const rings = new Map<string, string[]>();
+  ringRows.forEach((rows, index) => {
+    for (const row of rows) noteReadBytes(host, row);
+    rings.set(plan.ringKeys[index]!, rows);
+  });
+  const body = assembleSplit(host, byKey, rings, plan);
+  if (!body) {
+    host.redisSeq = null;
+    host.redisKeySeq = null;
+    host.redisRaw = null;
+    host.redisRings = null;
+    return null;
+  }
+  rememberSplit(host, byKey, rings, byKey.get(HOT_KEY) ?? null);
+  return body;
+}
+
+/**
+ * Second load after warm(). Reads p6:hot, then only keys whose sequence moved,
+ * then p6:hot again. Fills and the ledger are always in that MGET: they are
+ * appended outside the flush. The second GET is the torn-read check. If the
+ * sequence is missing, goes backwards, or changes between the two reads, this
+ * falls back to loadSplit and does not install the partial values.
+ *
+ * Extra Redis commands versus the old second loadSplit, when p6:hot already
+ * has a sequence:
+ * - GET p6:hot for the token (hot used to be one field of the full MGET)
+ * - GET p6:hot again after the data read
+ * Rings are read only when their sequence moved. A snapshot with no sequence
+ * pays the token GET and then the full loadSplit.
+ */
+export async function reloadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody | null> {
+  if (host.redisSeq == null || host.redisKeySeq == null || host.redisRaw == null || host.redisRings == null) {
+    return loadSplit(kv, host);
+  }
+  const tokenRaw = await kv.get(HOT_KEY);
+  noteReadBytes(host, tokenRaw);
+  const token = parseHotSeq(tokenRaw);
+  if (!token || token.seq < host.redisSeq) return loadSplit(kv, host);
+  const plan = splitPlan(host);
+  const readKeys: string[] = [];
+  for (const key of plan.keys) {
+    if (key === HOT_KEY) continue;
+    if (reuseSplitKey(host, token, key)) continue;
+    readKeys.push(key);
+  }
+  const readRings: string[] = [];
+  for (const key of plan.ringKeys) {
+    if (reuseSplitKey(host, token, key)) continue;
+    readRings.push(key);
+  }
+  const merged = new Map(host.redisRaw);
+  merged.set(HOT_KEY, tokenRaw);
+  if (readKeys.length > 0) {
+    const values = await kv.mget(readKeys);
+    values.forEach((value, index) => {
+      noteReadBytes(host, value);
+      merged.set(readKeys[index]!, value ?? null);
+    });
+  }
+  const rings = new Map(host.redisRings);
+  if (readRings.length > 0) {
+    const rows = await kv.readLists(readRings);
+    rows.forEach((list, index) => {
+      for (const row of list) noteReadBytes(host, row);
+      rings.set(readRings[index]!, list);
+    });
+  }
+  const confirm = await kv.get(HOT_KEY);
+  noteReadBytes(host, confirm);
+  const again = parseHotSeq(confirm);
+  if (!again || again.seq !== token.seq || confirm !== tokenRaw) return loadSplit(kv, host);
+  const body = assembleSplit(host, merged, rings, plan);
+  if (!body) return null;
+  rememberSplit(host, merged, rings, confirm);
+  return body;
 }

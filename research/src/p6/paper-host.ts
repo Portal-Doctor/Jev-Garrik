@@ -269,8 +269,26 @@ export interface PaperHost {
   saveCommands: number;
   /** Payload bytes of those commands. */
   saveBytes: number;
+  /** Payload bytes read back from Redis by the history load and the reload. */
+  readBytes: number;
   /** Appends sent for a row that was already stored. The target is 0. */
   duplicateAppends: number;
+  /**
+   * `seq` from the last p6:hot this process loaded. Null when that snapshot
+   * had no sequence. Reload compares it with the snapshot taken after the lease.
+   */
+  redisSeq: number | null;
+  /** Per-key sequence from that same snapshot. Null when the map was absent. */
+  redisKeySeq: Map<string, number> | null;
+  /** Raw values from the last split read. A reload reuses one only when its sequence matches. */
+  redisRaw: Map<string, string | null> | null;
+  /** Ring lists from that same read, oldest first. */
+  redisRings: Map<string, string[]> | null;
+  /**
+   * Keys written outside the atomic flush since the last published keySeq.
+   * The next flush stamps them at the new sequence so a reload cannot skip them.
+   */
+  redisRewrite: Set<string>;
   /** Serializes flushes so two heartbeats cannot append the same bar. */
   flushChain: Promise<void>;
   /** In-flight fill and ledger writes. */
@@ -645,6 +663,12 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     productLocks: new Map(),
     saveCommands: 0,
     saveBytes: 0,
+    readBytes: 0,
+    redisSeq: null,
+    redisKeySeq: null,
+    redisRaw: null,
+    redisRings: null,
+    redisRewrite: new Set(),
     duplicateAppends: 0,
     flushChain: Promise.resolve(),
     durableChain: Promise.resolve(),
