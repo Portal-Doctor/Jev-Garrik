@@ -154,9 +154,9 @@ export default function BooksNav({ drawer }: { drawer: boolean }) {
         Overview
       </Link>
 
-      <Group id="p6" label="P6 paper" pathname={pathname}>
+      <Group id="p6" label="Paper (P6)" pathname={pathname}>
         <Link href="/p6" className={itemClass(onP6, styles.subItem)} aria-current={onP6 ? "page" : undefined}>
-          Overview
+          Summary
         </Link>
       </Group>
 
