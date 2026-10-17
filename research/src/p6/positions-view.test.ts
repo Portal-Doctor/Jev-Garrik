@@ -227,6 +227,24 @@ test("row exit costs are the engine term and the identity does not use the recon
     const cash = pnl.startingUsd + pnl.realizedUsd - cost;
     expect(pnl.equityUsd).toBe(pnl.startingUsd + pnl.realizedUsd + mtm);
     expect(pnl.equityUsd).toBe(cash + active - engineExit);
+    const charged = book.positions.filter((position) => position.entryFeeUsd > 0);
+    expect(charged.length).toBeGreaterThan(0);
+    const view = positionsFooter({
+      snaps,
+      nowMs: SAT,
+      markTs: SAT,
+      equityUsd: pnl.equityUsd,
+      realizedUsd: pnl.realizedUsd,
+      unrealizedUsd: pnl.unrealizedUsd,
+      startingUsd: pnl.startingUsd,
+    });
+    for (const position of charged) {
+      const row = view.rows.find((item) => item.id === position.id)!;
+      expect(row.entryFee).toBeGreaterThan(0);
+      expect(row.costBasisUsd).toBe(row.units * row.fill + row.entryFee);
+    }
+    const tie = view.cashUsd + view.activeUsd - view.exitCostUsd;
+    expect(Math.abs(tie - pnl.equityUsd)).toBeLessThanOrEqual(0.01);
   }
 });
 
