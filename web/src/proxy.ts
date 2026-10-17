@@ -23,4 +23,4 @@ export function proxy(request: Request) {
   return new NextResponse(result.body, { status: result.status, headers });
 }
 
-export const config = { matcher: ["/p6"] };
+export const config = { matcher: ["/p6", "/p6/:path*"] };

@@ -178,6 +178,23 @@ test("a large mget split across packets is still the snapshot", async () => {
   }
 });
 
+test("the proxy matcher covers /p6 and every subpath", () => {
+  const root = join(import.meta.dir, "..", "..", "..");
+  const proxy = readFileSync(join(root, "web/src/proxy.ts"), "utf8");
+  expect(proxy.includes('matcher: ["/p6", "/p6/:path*"]')).toBe(true);
+  const token = "view-token";
+  const cookie = `${P6_COOKIE_NAME}=${dashboardCookieValue(token)}`;
+  expect(applyDashboardProxy(new Request("https://example.test/p6/positions"), token).status).toBe(401);
+  expect(applyDashboardProxy(new Request("https://example.test/p6/trades", { headers: { authorization: "Bearer view-token" } }), token).status).toBe(200);
+  expect(applyDashboardProxy(new Request("https://example.test/p6/health", { headers: { cookie } }), token).status).toBe(200);
+  const opened = applyDashboardProxy(new Request("https://example.test/p6/gates?token=view-token&w=8h"), token);
+  expect(opened.status).toBe(302);
+  expect(opened.headers.Location).toBe("/p6?w=8h");
+  expect(opened.headers.Location?.includes("token=")).toBe(false);
+  expect(opened.headers["Set-Cookie"]?.includes("Path=/p6")).toBe(true);
+  expect(applyDashboardProxy(new Request("https://example.test/p6/jev?token=nope&w=24h"), token).status).toBe(401);
+});
+
 test("the page does not import the cron secret, auth, or a Redis write", () => {
   const root = join(import.meta.dir, "..", "..", "..");
   const files = [
