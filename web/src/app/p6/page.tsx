@@ -4,16 +4,13 @@ import { closedNote, concentrationText, drawdownText, formatCt, PNL_START_USD, s
 import {
   ageText,
   CASH_LABEL,
-  CHECKS_SKIPPED,
-  EMPTY_POSITIONS,
   ENTRY_FEE_NOTE,
   formatUsd,
   MARK_FALLBACK,
-  POSITIONS_UNREPORTED,
   positionsFooter,
+  positionsSectionCopy,
   STABLECOIN_NOTE,
   type PositionSnap,
-  type PositionsView,
 } from "../../../../research/src/p6/positions-view";
 import { RunClock } from "./countdown";
 import styles from "../paper/paper.module.css";
@@ -138,13 +135,6 @@ function toneClass(value: number | null): string {
   return value > 0 ? styles.pos : styles.neg;
 }
 
-function checkLine(view: PositionsView): string {
-  if (!view.reported) return CHECKS_SKIPPED;
-  const problems = view.problems.length > 0 ? ` · ${view.problems.join(" · ")}` : "";
-  const second = view.unrealizedText === view.checkText ? "" : ` · ${view.unrealizedText}`;
-  return `${view.checkText}${problems}${second}`;
-}
-
 export function PositionsSection({
   last,
   nowMs,
@@ -174,8 +164,9 @@ export function PositionsSection({
     omitted,
     skipped,
   });
+  const copy = positionsSectionCopy(view);
   const bad = view.reported && (!view.reconciled || !view.unrealizedMatch || view.problems.length > 0);
-  const grey = view.stale || !view.reported;
+  const grey = copy.grey;
   return (
     <section className={`${styles.pnlBlock} ${grey ? styles.pnlStale : ""}`}>
       <div className={styles.pnlHead}>
@@ -200,13 +191,13 @@ export function PositionsSection({
           {!view.reported ? (
             <tr>
               <td colSpan={14} className={styles.posCell}>
-                {POSITIONS_UNREPORTED}
+                {copy.body}
               </td>
             </tr>
           ) : view.empty ? (
             <tr>
               <td colSpan={14} className={styles.posCell}>
-                {EMPTY_POSITIONS}
+                {copy.body}
               </td>
             </tr>
           ) : (
@@ -233,16 +224,16 @@ export function PositionsSection({
           )}
         </tbody>
       </table>
-      {view.omitted > 0 ? <p className={styles.sub}>{view.omitted} positions not shown</p> : null}
+      {copy.omittedNote ? <p className={styles.sub}>{copy.omittedNote}</p> : null}
       <p className={styles.sub}>
-        total active investment {view.reported ? formatUsd(view.activeUsd) : "—"} · at cost {view.reported ? formatUsd(view.atCostUsd) : "—"}
+        total active investment {copy.active} · at cost {copy.atCost}
       </p>
-      <p className={styles.sub}>est. exit costs {view.reported ? signedUsd(-view.exitCostUsd) : "—"} · already deducted in unrealized</p>
+      <p className={styles.sub}>est. exit costs {copy.exit} · already deducted in unrealized</p>
       <p className={styles.sub}>
-        cash balance {CASH_LABEL} {view.reported ? formatUsd(view.cashUsd) : "—"}
+        cash balance {CASH_LABEL} {copy.cash}
       </p>
-      <p className={styles.sub}>= equity {view.reported ? formatUsd(view.equityUsd) : "—"}</p>
-      <p className={bad ? styles.neg : styles.sub}>{checkLine(view)}</p>
+      <p className={styles.sub}>= equity {copy.equity}</p>
+      <p className={bad ? styles.neg : styles.sub}>{copy.check}</p>
       <p className={styles.sub}>{view.riskText}</p>
       {view.clusters.map((cluster) => (
         <p key={cluster.id} className={styles.sub}>

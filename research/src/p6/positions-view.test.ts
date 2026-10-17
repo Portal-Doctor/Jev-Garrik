@@ -21,6 +21,7 @@ import {
   ageText,
   formatUsd,
   positionSnapBuild,
+  positionsSectionCopy,
   positionSnaps,
   positionsFooter,
   snapBytes,
@@ -371,9 +372,12 @@ test("position rows cap at 64 and product, class, id, and cluster cap at 32", ()
 test("the page renders the positions footer and does not write", () => {
   const page = readFileSync(new URL("../../../web/src/app/p6/page.tsx", import.meta.url), "utf8");
   expect(page.includes("positionsFooter")).toBe(true);
-  expect(page.includes("EMPTY_POSITIONS")).toBe(true);
-  expect(page.includes("POSITIONS_UNREPORTED")).toBe(true);
-  expect(page.includes("CHECKS_SKIPPED")).toBe(true);
+  expect(page.includes("positionsSectionCopy")).toBe(true);
+  expect(page.includes("copy.body")).toBe(true);
+  expect(page.includes("copy.cash")).toBe(true);
+  expect(page.includes("copy.check")).toBe(true);
+  expect(page.includes("copy.grey")).toBe(true);
+  expect(page.includes("copy.omittedNote")).toBe(true);
   expect(page.includes("as of last run")).toBe(true);
   expect(page.includes("!view.reported")).toBe(true);
   expect(page.includes("CASH_LABEL")).toBe(true);
@@ -385,11 +389,7 @@ test("the page renders the positions footer and does not write", () => {
   expect(page.includes("already deducted in unrealized")).toBe(true);
   expect(page.includes("cash balance")).toBe(true);
   expect(page.includes("= equity")).toBe(true);
-  expect(page.includes("view.checkText")).toBe(true);
   expect(page.includes("view.riskText")).toBe(true);
-  expect(page.includes("view.unrealizedText")).toBe(true);
-  expect(page.includes("positions not shown")).toBe(true);
-  expect(page.includes("formatUsd(view.cashUsd)")).toBe(true);
   expect(page.includes("positionsOmitted")).toBe(true);
   expect(page.includes("positionsSkipped")).toBe(true);
   expect(page.includes("tileMarkedGrey(tile)")).toBe(true);
@@ -517,4 +517,52 @@ test("sixteen realistic rows stay under 3 KB", () => {
   expect(built.snaps[0]!.k).toBeUndefined();
   expect(snapBytes(built.snaps)).toBeLessThan(3_072);
   expect(snapBytes(built.snaps) / 16).toBeLessThan(220);
+});
+
+test("the section copy signs cash and does not reconcile a cut or unreported book", () => {
+  const fresh = { nowMs: SAT, markTs: SAT, equityUsd: 8000, realizedUsd: 0, unrealizedUsd: 0, startingUsd: 8000 };
+  const absent = positionsSectionCopy(positionsFooter({ ...fresh, snaps: null }));
+  expect(absent.body).toBe(POSITIONS_UNREPORTED);
+  expect(absent.body).not.toBe(EMPTY_POSITIONS);
+  expect(absent.check).toBe(CHECKS_SKIPPED);
+  expect(absent.check).not.toContain("reconciled");
+  expect(absent.cash).toBe("—");
+  expect(absent.equity).toBe("—");
+  expect(absent.grey).toBe(true);
+  const flat = positionsSectionCopy(positionsFooter({ ...fresh, snaps: [], equityUsd: 2121.6, startingUsd: 2121.6 }));
+  expect(flat.body).toBe(EMPTY_POSITIONS);
+  expect(flat.body).not.toBe(POSITIONS_UNREPORTED);
+  expect(flat.cash).toBe("$2,121.60");
+  expect(flat.check).toContain("reconciled");
+  expect(flat.grey).toBe(false);
+  const zero = positionsSectionCopy(positionsFooter({ ...fresh, snaps: [], equityUsd: 0, startingUsd: 0 }));
+  expect(zero.cash).toBe("$0.00");
+  const negative = positionsSectionCopy(
+    positionsFooter({
+      snaps: [{ id: "n", p: "ETH-USD", c: "C", t: SAT, u: 1, f: 10121.6, m: 10121.6, n: 10121.6, s: 90, ur: 0, x: 0, e: 0, r: 20, k: "ETH-USD" }],
+      nowMs: SAT,
+      markTs: SAT,
+      equityUsd: 8000,
+      realizedUsd: 0,
+      unrealizedUsd: 0,
+      startingUsd: 8000,
+    }),
+  );
+  expect(negative.cash).toBe("-$2,121.60");
+  expect(negative.cash).not.toContain("$-");
+  const book = openTakers(["ETH-USD"]);
+  const one = positionSnaps(book)[0]!;
+  const capped = positionsSectionCopy(
+    positionsFooter({
+      snaps: Array.from({ length: POSITION_ROW_CAP + 1 }, (_, index) => ({ ...one, id: `${"i".repeat(40)}${index}`, k: `CLUSTER-${"X".repeat(40)}` })),
+      nowMs: SAT,
+      markTs: SAT,
+      equityUsd: 0,
+      realizedUsd: 0,
+      unrealizedUsd: 0,
+    }),
+  );
+  expect(capped.omittedNote).toBe("1 positions not shown");
+  expect(capped.check.startsWith(CHECKS_INCOMPLETE)).toBe(true);
+  expect(capped.check).not.toContain("reconciled");
 });

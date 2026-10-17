@@ -14,7 +14,7 @@
 
 import { CLUSTER_MAX_OPEN, OPEN_RISK_CAP_USD } from "../p3/design-rules";
 import { markedPnl, openExitCostUsd, type Book } from "./engine";
-import { endIsStale, PNL_START_USD } from "./pnl-block";
+import { endIsStale, PNL_START_USD, signedUsd } from "./pnl-block";
 
 export const POSITIONS_IDENTITY =
   "equity = cash + total active investment - est. exit costs; cash = start + realized - sum(cost basis); cost basis = qty * fill + entry fee; active = sum(qty * mark); est. exit costs = sum(notional * (taker + live slippage) / 10000), already inside row unrealized";
@@ -336,6 +336,46 @@ export function positionsFooter(input: {
     reported: true,
     omitted,
     skipped,
+  };
+}
+
+/** Visible lines of the positions section. The page prints these strings. */
+export function positionsSectionCopy(view: PositionsView): {
+  grey: boolean;
+  body: string;
+  cash: string;
+  equity: string;
+  active: string;
+  atCost: string;
+  exit: string;
+  check: string;
+  omittedNote: string | null;
+} {
+  if (!view.reported) {
+    return {
+      grey: view.stale || !view.reported,
+      body: POSITIONS_UNREPORTED,
+      cash: "—",
+      equity: "—",
+      active: "—",
+      atCost: "—",
+      exit: "—",
+      check: CHECKS_SKIPPED,
+      omittedNote: null,
+    };
+  }
+  const problems = view.problems.length > 0 ? ` · ${view.problems.join(" · ")}` : "";
+  const second = view.unrealizedText === view.checkText ? "" : ` · ${view.unrealizedText}`;
+  return {
+    grey: view.stale,
+    body: view.empty ? EMPTY_POSITIONS : "",
+    cash: formatUsd(view.cashUsd),
+    equity: formatUsd(view.equityUsd),
+    active: formatUsd(view.activeUsd),
+    atCost: formatUsd(view.atCostUsd),
+    exit: signedUsd(-view.exitCostUsd),
+    check: `${view.checkText}${problems}${second}`,
+    omittedNote: view.omitted > 0 ? `${view.omitted} positions not shown` : null,
   };
 }
 
