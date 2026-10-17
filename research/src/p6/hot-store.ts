@@ -26,6 +26,31 @@ import { barMarker, HOT_KEY, LEASE_KEY, VALUE_MAX_BYTES, type Kv } from "./relay
 /** One record per flush. The dashboard reads this and does not recompute P/L. */
 export const LAST_RUN_KEY = "p6:lastRun";
 
+/** Account revision. Not part of p6:hot. NX so a successor cannot move fromDay. */
+export const ACCT_KEY = "p6:acct";
+
+/**
+ * First full UTC day strictly after the write's UTC day.
+ * A write at 23:59:59.999Z yields the next calendar day.
+ * A write at 00:00:00.000Z yields the day after that, so the write day itself never counts.
+ */
+export function acctFromDay(nowMs: number): string {
+  const dayStart = Math.floor(nowMs / 86_400_000) * 86_400_000;
+  return new Date(dayStart + 86_400_000).toISOString().slice(0, 10);
+}
+
+export function parseAcctMarker(raw: string | null): { rev: 2; fromDay: string } | null {
+  if (!raw) return null;
+  let body: { rev?: unknown; fromDay?: unknown };
+  try {
+    body = JSON.parse(raw) as { rev?: unknown; fromDay?: unknown };
+  } catch {
+    return null;
+  }
+  if (body.rev !== 2 || typeof body.fromDay !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.fromDay)) return null;
+  return { rev: 2, fromDay: body.fromDay };
+}
+
 /** Heartbeat payload cap. Over this, Jev fields are shed and the book is still written. */
 export const HOT_MAX_BYTES = 256 * 1024;
 /** Incident when the hot snapshot reaches 75% of the cap. */
@@ -730,6 +755,8 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
       closed: host.book.closed,
     }),
   );
+  const fromDay = host.book.acctFromDay ?? acctFromDay(host.clock());
+  extra.push({ key: ACCT_KEY, value: JSON.stringify({ rev: 2, fromDay }), nx: true });
   if (host.leaseToken) {
     for (const row of host.jevPacketWrites ?? []) extra.push({ key: row.key, value: row.value, px: JEV_PACKET_TTL_MS, nx: true });
   }
@@ -908,6 +935,7 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
     host.saveCommands += 1;
     host.saveBytes += plan.bytes;
     host.eqHourDone = host.eqPlanHour;
+    if (host.book.acctFromDay == null) host.book.acctFromDay = acctFromDay(host.clock());
   } catch (error) {
     releaseMarks(host, plan.marks);
     if (leaseLost(error) || transportError(error)) throw error;
@@ -940,7 +968,7 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
   const products = [...new Set(host.products)];
   const tapeMinutes: number[] = [];
   for (let i = 0; i < TAPE_LOOKBACK_MIN; i += 1) tapeMinutes.push(minute - i * 60);
-  const keys: string[] = [HOT_KEY, FILLS_KEY, LEDGER_KEY, SEED_CURSOR_KEY, LAST_RUN_KEY];
+  const keys: string[] = [HOT_KEY, FILLS_KEY, LEDGER_KEY, SEED_CURSOR_KEY, LAST_RUN_KEY, ACCT_KEY];
   for (const at of tapeMinutes) keys.push(tapeKey(at));
   for (const productId of products) {
     for (const day of days) keys.push(bar15Key(productId, day));
@@ -1047,6 +1075,8 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
     }
     host.seedChecked = true;
   }
+  const acct = parseAcctMarker(byKey.get(ACCT_KEY) ?? null);
+  if (acct) host.book.acctFromDay = acct.fromDay;
   return {
     ...hot,
     ...(ledger.length > 0 ? { closed: ledger } : {}),

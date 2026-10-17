@@ -176,12 +176,21 @@ export function kellyStatusBody(): {
   };
 }
 
-export function forwardDays(points: readonly ForwardPoint[], nowMs: number): number {
+/**
+ * Days from the later of the first entry date and `fromDay`.
+ * A missing `fromDay` keeps the first entry date. Days before `fromDay` do not count.
+ * `fromDay` does not pull the clock earlier than the first trade.
+ */
+export function forwardDays(points: readonly ForwardPoint[], nowMs: number, fromDay?: string | null): number {
   if (points.length === 0) return 0;
   let first = Number.POSITIVE_INFINITY;
   for (const point of points) {
     const ts = Date.parse(`${point.entryDate}T00:00:00.000Z`);
     if (Number.isFinite(ts) && ts < first) first = ts;
+  }
+  if (fromDay) {
+    const from = Date.parse(`${fromDay}T00:00:00.000Z`);
+    if (Number.isFinite(from) && from > first) first = from;
   }
   if (!Number.isFinite(first) || nowMs < first) return 0;
   return Math.floor((nowMs - first) / 86_400_000);
@@ -231,9 +240,11 @@ export function forwardClassRisk(opts: {
   held: KellyHold | null;
   bootstrapSeed: number;
   reps?: number;
+  /** UTC day from p6:acct. Days before it do not count. Omit to keep the current count. */
+  fromDay?: string | null;
 }): KellySize {
   const reviewMonday = weekKey(new Date(opts.nowMs).toISOString().slice(0, 10));
-  const days = forwardDays(opts.forward, opts.nowMs);
+  const days = forwardDays(opts.forward, opts.nowMs, opts.fromDay);
   if (opts.held && opts.held.reviewMonday === reviewMonday) {
     return {
       riskUsd: opts.held.riskUsd,

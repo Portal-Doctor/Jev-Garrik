@@ -2,7 +2,7 @@
  * Paper book. Events are injected. This module does not open a socket,
  * fetch, or sign. Risk is the forward Kelly schedule on the fixed $8,000
  * bankroll. The 20R kill and the $1,200 backstop use the running high-water
- * mark from amendment 2a. Open MTM includes the cost of a taker exit.
+ * mark from amendment 2a. Open MTM includes the entry fee and the cost of a taker exit.
  */
 
 import { newEntryOrder, type RestingOrder } from "../../vendor/87b35d0/fill.ts";
@@ -209,6 +209,11 @@ export interface Book {
   gapFills: number;
   /** Start of the 15m window whose Jev packets were already counted. */
   jevBarSec?: number;
+  /**
+   * UTC day the promotion clock may start. Null until p6:acct is loaded or written.
+   * Not part of p6:hot. A missing value leaves the day count unrestricted.
+   */
+  acctFromDay: string | null;
 }
 
 export type ForwardEvent =
@@ -368,6 +373,7 @@ export function freshBook(config: Partial<BookConfig> = {}): Book {
     jevPackets: 0,
     jevSkipped: 0,
     gapFills: 0,
+    acctFromDay: null,
   };
 }
 
@@ -413,7 +419,8 @@ function markedPnl(book: Book, position: Position, mark: number): number {
     const net = netBps(position.fillPrice, exitFill, TAKER_FEE_BPS, TAKER_FEE_BPS);
     return (net / 10_000) * position.units * position.fillPrice;
   }
-  return (mark - position.fillPrice) * position.units - exitCostUsd(position, mark);
+  // The close already subtracts entryFeeUsd once. Charging it here keeps equity continuous. Parity already charges the round trip.
+  return (mark - position.fillPrice) * position.units - exitCostUsd(position, mark) - position.entryFeeUsd;
 }
 
 function openMtm(book: Book): number {
@@ -684,6 +691,7 @@ function reviewKelly(book: Book, tsMs: number): void {
       nowMs: tsMs,
       held: book.kelly[classId],
       bootstrapSeed: seed,
+      fromDay: book.acctFromDay,
     });
     book.kelly[classId] = { reviewMonday: size.reviewMonday, riskUsd: size.riskUsd, promoted: size.promoted };
   }
