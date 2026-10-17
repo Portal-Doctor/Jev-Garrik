@@ -5,20 +5,16 @@
  * cost basis = qty * fill + entry fee
  * cash = start + realized - sum(cost basis)
  * active = sum(qty * mark)
- * est. exit cost = notional * (taker bps + live slippage bps) / 10000
+ * est. exit cost = openExitCostUsd, the term markedPnl subtracts
  * row unrealized = notional - exit cost - cost basis, which already includes the entry fee
  * equity = cash + active - est. exit costs
  * That equals start + realized + sum(row unrealized), the engine equity.
  * The exit-cost line is one deduction in that tie. It is not subtracted from unrealized again.
  */
 
-import { TAKER_FEE_BPS } from "../../vendor/87b35d0/config.ts";
-import { OPEN_RISK_CAP_USD } from "../p3/design-rules";
-import { markedPnl, type Book, type Position } from "./engine";
+import { CLUSTER_MAX_OPEN, OPEN_RISK_CAP_USD } from "../p3/design-rules";
+import { markedPnl, openExitCostUsd, type Book } from "./engine";
 import { endIsStale, PNL_START_USD } from "./pnl-block";
-
-/** Quant's displayed cluster cap. The live entry gate remains CLUSTER_MAX_OPEN (3). */
-export const POSITION_CLUSTER_MAX = 2;
 
 export const POSITIONS_IDENTITY =
   "equity = cash + total active investment - est. exit costs; cash = start + realized - sum(cost basis); cost basis = qty * fill + entry fee; active = sum(qty * mark); est. exit costs = sum(notional * (taker + live slippage) / 10000), already inside row unrealized";
@@ -103,10 +99,6 @@ export interface PositionsView {
   empty: boolean;
 }
 
-export function exitCostUsd(position: Pick<Position, "units" | "sLiveBps">, mark: number): number {
-  return (mark * position.units * (TAKER_FEE_BPS + position.sLiveBps)) / 10_000;
-}
-
 function round8(value: number): number {
   return Math.round(value * 1e8) / 1e8;
 }
@@ -117,7 +109,7 @@ export function positionSnaps(book: Book): PositionSnap[] {
     const mark = known ? book.marks[position.productId]! : position.fillPrice;
     const notional = mark * position.units;
     const unrealized = markedPnl(book, position, mark);
-    const exitCost = book.config.parity ? notional - (position.units * position.fillPrice + position.entryFeeUsd) - unrealized : exitCostUsd(position, mark);
+    const exitCost = openExitCostUsd(book, position, mark);
     const snap: PositionSnap = {
       id: position.id,
       p: position.productId,
@@ -129,7 +121,7 @@ export function positionSnaps(book: Book): PositionSnap[] {
       n: round8(notional),
       s: round8(position.stop),
       ur: round8(unrealized),
-      x: round8(exitCost),
+      x: exitCost,
       e: round8(position.entryFeeUsd),
       r: round8(position.riskUsd),
       k: position.clusterId,
@@ -198,7 +190,7 @@ export function positionsFooter(input: {
   for (const row of rows) counts.set(row.cluster, (counts.get(row.cluster) ?? 0) + 1);
   const clusters = [...counts.entries()]
     .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-    .map(([id, n]) => ({ id, n, text: `${id}: ${n} of max ${POSITION_CLUSTER_MAX}` }));
+    .map(([id, n]) => ({ id, n, text: `${id}: ${n} of max ${CLUSTER_MAX_OPEN}` }));
   const riskUsd = rows.reduce((sum, row) => sum + row.risk, 0);
   return {
     rows,

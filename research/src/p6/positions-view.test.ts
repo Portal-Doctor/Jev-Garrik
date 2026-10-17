@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "bun:test";
-import { DEPLOYABLE_USD, TAKER_FEE_BPS } from "../../vendor/87b35d0/config.ts";
-import { OPEN_RISK_CAP_USD } from "../p3/design-rules";
+import { DEPLOYABLE_USD } from "../../vendor/87b35d0/config.ts";
+import { CLUSTER_MAX_OPEN, OPEN_RISK_CAP_USD } from "../p3/design-rules";
 import { readP6Page } from "./dashboard-read";
-import { freshBook, paperPnl, replayInjected, type Book, type ForwardEvent, type Position } from "./engine";
+import { freshBook, openExitCostUsd, paperPnl, replayInjected, type Book, type ForwardEvent, type Position } from "./engine";
 import { captureHot, persistSplit } from "./hot-store";
 import { startPaperHost } from "./paper-host";
 import {
@@ -11,11 +11,9 @@ import {
   EMPTY_POSITIONS,
   ENTRY_FEE_NOTE,
   MARK_FALLBACK,
-  POSITION_CLUSTER_MAX,
   POSITIONS_IDENTITY,
   STABLECOIN_NOTE,
   ageText,
-  exitCostUsd,
   positionSnaps,
   positionsFooter,
   snapBytes,
@@ -81,7 +79,7 @@ test("flat, one, and several positions tie cash + active - exit costs to equity"
   const eth = one.positions[0]!;
   one.marks["ETH-USD"] = 101;
   const single = viewOf(one);
-  const exit = exitCostUsd(eth, 101);
+  const exit = openExitCostUsd(one, eth, 101);
   const cost = eth.units * eth.fillPrice + eth.entryFeeUsd;
   expect(single.rows).toHaveLength(1);
   expect(single.rows[0]!.markSrc).toBeUndefined();
@@ -107,7 +105,7 @@ test("flat, one, and several positions tie cash + active - exit costs to equity"
   expect(several.reconciled).toBe(true);
   expect(several.unrealizedMatch).toBe(true);
   expect(several.riskUsd).toBeCloseTo(several.rows.reduce((sum, row) => sum + row.risk, 0), 8);
-  expect(several.clusters.every((row) => row.text.endsWith(`of max ${POSITION_CLUSTER_MAX}`))).toBe(true);
+  expect(several.clusters.every((row) => row.text.endsWith(`of max ${CLUSTER_MAX_OPEN}`))).toBe(true);
 });
 
 test("a second class on the same product stays its own row", () => {
@@ -119,7 +117,7 @@ test("a second class on the same product stays its own row", () => {
   const view = viewOf(book);
   expect(view.rows.map((row) => row.id).sort()).toEqual(["c-d", first.id].sort());
   expect(view.rows.every((row) => row.product === "ETH-USD")).toBe(true);
-  expect(view.clusters).toEqual([{ id: first.clusterId, n: 2, text: `${first.clusterId}: 2 of max 2` }]);
+  expect(view.clusters).toEqual([{ id: first.clusterId, n: 2, text: `${first.clusterId}: 2 of max ${CLUSTER_MAX_OPEN}` }]);
   expect(view.reconciled).toBe(true);
 });
 
@@ -185,6 +183,53 @@ test("a forced gap, negative cash, and a non-long side fail the check", () => {
   expect(short.reconciled).toBe(true);
 });
 
+function markOf(book: Book, position: Position): number {
+  const price = book.marks[position.productId];
+  return typeof price === "number" && Number.isFinite(price) ? price : position.fillPrice;
+}
+
+test("row exit costs are the engine term and the identity does not use the reconcile band", () => {
+  const live = openTakers(["ETH-USD", "SOL-USD"]);
+  live.positions[0]!.sLiveBps = 4;
+  live.positions[1]!.sLiveBps = 11;
+  live.marks["ETH-USD"] = 103;
+  live.marks["SOL-USD"] = 97;
+  const parity = replayInjected(
+    [
+      { kind: "clock", tsMs: SAT - 60_000 },
+      x1("p0", "ETH-USD", SAT, 90),
+      x1("p1", "BTC-USD", SAT, 90),
+    ],
+    { parity: { riskUsd: 20, sBtBps: 8 }, members: ["ETH-USD", "BTC-USD"] },
+  );
+  parity.marks["ETH-USD"] = 110;
+  parity.marks["BTC-USD"] = 94;
+  for (const book of [live, parity]) {
+    const snaps = positionSnaps(book);
+    const pnl = paperPnl(book);
+    let engineExit = 0;
+    let active = 0;
+    let cost = 0;
+    let mtm = 0;
+    for (const position of book.positions) {
+      const mark = markOf(book, position);
+      const row = snaps.find((snap) => snap.id === position.id)!;
+      const notional = mark * position.units;
+      const basis = position.units * position.fillPrice + position.entryFeeUsd;
+      const exit = openExitCostUsd(book, position, mark);
+      engineExit += exit;
+      active += notional;
+      cost += basis;
+      mtm += notional - row.x - basis;
+      expect(row.x).toBe(exit);
+    }
+    expect(snaps.reduce((sum, row) => sum + row.x, 0)).toBe(engineExit);
+    const cash = pnl.startingUsd + pnl.realizedUsd - cost;
+    expect(pnl.equityUsd).toBe(pnl.startingUsd + pnl.realizedUsd + mtm);
+    expect(pnl.equityUsd).toBe(cash + active - engineExit);
+  }
+});
+
 test("sixteen position rows stay under 3 KB and lastRun is the only new home", async () => {
   const book = openTakers(["ETH-USD"]);
   book.marks["ETH-USD"] = 101;
@@ -208,7 +253,7 @@ test("sixteen position rows stay under 3 KB and lastRun is the only new home", a
   expect(flushes).toBe(1);
   const last = JSON.parse((await kv.get("p6:lastRun")) ?? "{}") as { positions?: PositionSnap[] };
   expect(last.positions).toHaveLength(1);
-  expect(last.positions?.[0]?.x).toBeCloseTo((101 * base.u * (TAKER_FEE_BPS + book.positions[0]!.sLiveBps)) / 10_000, 6);
+  expect(last.positions?.[0]?.x).toBe(openExitCostUsd(book, book.positions[0]!, 101));
   expect(JSON.stringify(captureHot(host))).not.toContain("exitCost");
   expect(await kv.get("p6:positions")).toBeNull();
   let reads = 0;
@@ -244,6 +289,15 @@ test("the page renders the positions footer and does not write", () => {
   expect(page.split("trades unknown").length - 1).toBe(2);
   expect(page.includes("tile.hourNote")).toBe(true);
   expect(page.includes("partial")).toBe(false);
+  expect(page.includes("of max 2")).toBe(false);
+  expect(page.includes("of max 3")).toBe(false);
+  const viewSrc = readFileSync(new URL("./positions-view.ts", import.meta.url), "utf8");
+  expect(viewSrc.includes("CLUSTER_MAX_OPEN")).toBe(true);
+  expect(viewSrc.includes("of max ${CLUSTER_MAX_OPEN}")).toBe(true);
+  expect(viewSrc.includes("of max 2")).toBe(false);
+  expect(viewSrc.includes("of max 3")).toBe(false);
+  expect(/of max \d/.test(viewSrc)).toBe(false);
+  expect(/of max \d/.test(page)).toBe(false);
   expect(page.includes("ownedFlush")).toBe(false);
   expect(page.includes(".set(")).toBe(false);
   expect(EMPTY_POSITIONS).toBe("No open positions");
