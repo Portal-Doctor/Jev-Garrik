@@ -245,10 +245,15 @@ function roundedCents(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+function groupedAbs(cents: number): string {
+  return Math.abs(cents).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Signed dollars. The sign sits before the dollar sign, and thousands are grouped. */
 export function signedUsd(value: number): string {
   const cents = roundedCents(value);
   if (cents === 0) return "$0.00";
-  const body = Math.abs(cents).toFixed(2);
+  const body = groupedAbs(cents);
   return cents < 0 ? `-$${body}` : `+$${body}`;
 }
 
@@ -256,8 +261,9 @@ export function signedUsd(value: number): string {
 export function drawdownText(value: number): string {
   const cents = roundedCents(value);
   if (cents === 0) return "$0.00";
-  if (cents < 0) return `-$${Math.abs(cents).toFixed(2)}`;
-  return `$${cents.toFixed(2)}`;
+  const body = groupedAbs(cents);
+  if (cents < 0) return `-$${body}`;
+  return `$${body}`;
 }
 
 export function signedPct(value: number): string {

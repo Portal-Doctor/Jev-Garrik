@@ -190,11 +190,6 @@
   background: var(--panel);
 }
 
-.pnlStale {
-  background: #4b5563;
-  color: #e5e7eb;
-}
-
 .pnlHead {
   display: flex;
   flex-wrap: wrap;
@@ -221,11 +216,6 @@
   flex-direction: column;
   gap: 4px;
   font-size: 13px;
-}
-
-.pnlTileGrey {
-  background: #4b5563;
-  color: #e5e7eb;
 }
 
 .pnlWindow {

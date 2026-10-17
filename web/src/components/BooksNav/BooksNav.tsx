@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import styles from "./BooksNav.module.css";
 
 const NAV_KEY = "books-nav";
+const GROUP_KEY = "books-nav-group";
 
 const MenuCtx = createContext<{ open: boolean; toggle: () => void }>({
   open: true,
@@ -14,6 +15,42 @@ const MenuCtx = createContext<{ open: boolean; toggle: () => void }>({
 
 export function useBooksMenu() {
   return useContext(MenuCtx);
+}
+
+type GroupId = "p6" | "coinbase" | "tax";
+
+function groupDefault(id: GroupId, pathname: string): boolean {
+  if (id === "p6") return pathname === "/p6" || pathname.startsWith("/p6/");
+  if (id === "coinbase") return pathname === "/paper" || pathname.startsWith("/paper/");
+  return pathname.startsWith("/tax");
+}
+
+function readGroup(id: GroupId): boolean | null {
+  try {
+    const raw = window.localStorage.getItem(GROUP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return typeof parsed[id] === "boolean" ? parsed[id] : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveGroup(id: GroupId, open: boolean) {
+  try {
+    const raw = window.localStorage.getItem(GROUP_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    const next: Record<string, boolean> = {};
+    if (parsed && typeof parsed === "object") {
+      for (const [key, value] of Object.entries(parsed)) {
+        if (typeof value === "boolean") next[key] = value;
+      }
+    }
+    next[id] = open;
+    window.localStorage.setItem(GROUP_KEY, JSON.stringify(next));
+  } catch {
+    /* The menu still toggles when storage is blocked. */
+  }
 }
 
 function MenuIcon({ open }: { open: boolean }) {
@@ -37,16 +74,45 @@ function itemClass(active: boolean, extra?: string): string {
   return `${extra ?? styles.item} ${active ? styles.active : ""}`;
 }
 
-export default function BooksNav() {
+function Group({ id, label, pathname, children }: { id: GroupId; label: string; pathname: string; children: React.ReactNode }) {
+  const active = groupDefault(id, pathname);
+  const [open, setOpen] = useState(active);
+  useEffect(() => {
+    if (active) {
+      setOpen(true);
+      return;
+    }
+    const stored = readGroup(id);
+    if (stored != null) setOpen(stored);
+  }, [active, id]);
+  return (
+    <details
+      className={styles.group}
+      open={open}
+      onToggle={(event) => {
+        const next = event.currentTarget.open;
+        setOpen(next);
+        saveGroup(id, next);
+      }}
+    >
+      <summary className={styles.summary}>{label}</summary>
+      {children}
+    </details>
+  );
+}
+
+export default function BooksNav({ drawer }: { drawer: boolean }) {
   const { open, toggle } = useBooksMenu();
   const pathname = usePathname() ?? "";
   const onOverview = pathname === "/";
+  const onP6 = pathname === "/p6";
   const onCoinbase = pathname === "/paper";
   const onCoinbasePnl = pathname === "/paper/report";
+  const onBacktest = pathname === "/paper/backtest";
   const onTax = pathname === "/tax";
   const onCoinbaseTax = pathname === "/tax/paper";
 
-  if (!open) {
+  if (!open && !drawer) {
     return (
       <div className={styles.rail}>
         <button
@@ -65,7 +131,7 @@ export default function BooksNav() {
   }
 
   return (
-    <nav id="books-nav" className={styles.nav} aria-label="Books">
+    <nav id="books-nav" className={`${styles.nav} ${drawer ? styles.navOpen : ""}`} aria-label="Books">
       <div className={styles.navTop}>
         <Link href="/" className={styles.brand}>
           <span className={styles.brandName}>Paper books</span>
@@ -87,49 +153,51 @@ export default function BooksNav() {
       <Link href="/" className={itemClass(onOverview)} aria-current={onOverview ? "page" : undefined}>
         Overview
       </Link>
-      <Link href="/paper" className={itemClass(onCoinbase)} aria-current={onCoinbase ? "page" : undefined}>
-        Coinbase
-      </Link>
 
-      <div className={styles.group}>
-        <span className={styles.groupLabel}>P&amp;L</span>
-        <Link
-          href="/paper/report"
-          className={itemClass(onCoinbasePnl, styles.subItem)}
-          aria-current={onCoinbasePnl ? "page" : undefined}
-        >
-          Coinbase
+      <Group id="p6" label="P6 paper" pathname={pathname}>
+        <Link href="/p6" className={itemClass(onP6, styles.subItem)} aria-current={onP6 ? "page" : undefined}>
+          Overview
         </Link>
-      </div>
+      </Group>
 
-      <div className={styles.group}>
-        <span className={styles.groupLabel}>Tax</span>
+      <Group id="coinbase" label="Coinbase engine" pathname={pathname}>
+        <Link href="/paper" className={itemClass(onCoinbase, styles.subItem)} aria-current={onCoinbase ? "page" : undefined}>
+          Live view
+        </Link>
+        <Link href="/paper/report" className={itemClass(onCoinbasePnl, styles.subItem)} aria-current={onCoinbasePnl ? "page" : undefined}>
+          P&L report
+        </Link>
+        <Link href="/paper/backtest" className={itemClass(onBacktest, styles.subItem)} aria-current={onBacktest ? "page" : undefined}>
+          Backtest
+        </Link>
+      </Group>
+
+      <Group id="tax" label="Tax" pathname={pathname}>
         <Link href="/tax" className={itemClass(onTax, styles.subItem)} aria-current={onTax ? "page" : undefined}>
           Summary
         </Link>
-        <Link
-          href="/tax/paper"
-          className={itemClass(onCoinbaseTax, styles.subItem)}
-          aria-current={onCoinbaseTax ? "page" : undefined}
-        >
-          Coinbase
+        <Link href="/tax/paper" className={itemClass(onCoinbaseTax, styles.subItem)} aria-current={onCoinbaseTax ? "page" : undefined}>
+          Coinbase worksheet
         </Link>
-      </div>
+      </Group>
     </nav>
   );
 }
 
 export function BooksShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "";
-  const scroll =
-    pathname === "/" ||
-    pathname.startsWith("/tax") ||
-    pathname.endsWith("/report");
+  const scroll = pathname === "/" || pathname.startsWith("/tax") || pathname.endsWith("/report");
+  const p6 = pathname === "/p6" || pathname.startsWith("/p6/");
   const [open, setOpen] = useState(true);
+  const [drawer, setDrawer] = useState(false);
 
   useEffect(() => {
     if (window.localStorage.getItem(NAV_KEY) === "hidden") setOpen(false);
   }, []);
+
+  useEffect(() => {
+    setDrawer(false);
+  }, [pathname]);
 
   const toggle = () => {
     setOpen((prev) => {
@@ -142,8 +210,14 @@ export function BooksShell({ children }: { children: React.ReactNode }) {
   return (
     <MenuCtx.Provider value={{ open, toggle }}>
       <div className={`${styles.shell} ${open ? "" : styles.shellWide}`}>
-        <BooksNav />
-        <div className={`${styles.stage} ${scroll ? styles.stageScroll : ""}`}>{children}</div>
+        <button type="button" className={styles.menuBtn} aria-expanded={drawer} aria-controls="books-nav" onClick={() => setDrawer(true)}>
+          Menu
+        </button>
+        {drawer ? (
+          <button type="button" className={styles.scrim} aria-label="Close menu" onClick={() => setDrawer(false)} />
+        ) : null}
+        <BooksNav drawer={drawer} />
+        <div className={`${styles.stage} ${scroll ? styles.stageScroll : ""} ${p6 ? styles.stagePage : ""}`}>{children}</div>
       </div>
     </MenuCtx.Provider>
   );
