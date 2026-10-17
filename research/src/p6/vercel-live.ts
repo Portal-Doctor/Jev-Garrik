@@ -247,7 +247,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
 
 /** Save counters and the bytes this invocation read back from Redis. */
 export function redisLogLine(host: PaperHost): string {
-  return `redis cmds=${host.saveCommands}, bytes=${host.saveBytes}, readBytes=${host.readBytes}, duplicates=${host.duplicateAppends}`;
+  return `redis cmds=${host.saveCommands}, bytes=${host.saveBytes}, readBytes=${host.readBytes}, duplicates=${host.duplicateAppends}, seqInvalid=${host.seqInvalid}`;
 }
 
 async function loadWarmup(kv: Kv, host: PaperHost): Promise<void> {

@@ -278,9 +278,23 @@ export interface PaperHost {
    * had no sequence. Reload compares it with the snapshot taken after the lease.
    */
   redisSeq: number | null;
+  /** Era of that snapshot's writer. Null when the snapshot had no era. */
+  redisSeenEra: string | null;
+  /** This process's era. Assigned on the first flush that publishes a sequence. */
+  redisEra: string | null;
   /** Per-key sequence from that same snapshot. Null when the map was absent. */
   redisKeySeq: Map<string, number> | null;
-  /** Raw values from the last split read. A reload reuses one only when its sequence matches. Cleared after that reload. */
+  /** Per-key era from that snapshot. A missing key uses redisSeenEra. */
+  redisKeyEra: Map<string, string> | null;
+  /** The stored sequence is unsafe. The next flush publishes no sequence, and the one after starts a new era. */
+  redisPoison: boolean;
+  /** The next published sequence starts a new era and an empty key map. */
+  redisFreshEra: boolean;
+  /** Last hot string this process wrote or loaded. A grouped flush strips this instead of reading Redis. */
+  redisHotRaw: string | null;
+  /** Times a poisoned sequence was refused. Printed on the redis log line. */
+  seqInvalid: number;
+  /** Raw values from the last split read. A reload reuses one only when its era and sequence match. Cleared after that reload. */
   redisRaw: Map<string, string | null> | null;
   /** Ring lists from that same read, oldest first. */
   redisRings: Map<string, string[]> | null;
@@ -665,7 +679,14 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     saveBytes: 0,
     readBytes: 0,
     redisSeq: null,
+    redisSeenEra: null,
+    redisEra: null,
     redisKeySeq: null,
+    redisKeyEra: null,
+    redisPoison: false,
+    redisFreshEra: false,
+    redisHotRaw: null,
+    seqInvalid: 0,
     redisRaw: null,
     redisRings: null,
     redisRewrite: new Set(),
