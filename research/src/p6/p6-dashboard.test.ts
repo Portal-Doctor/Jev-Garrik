@@ -178,6 +178,26 @@ test("a large mget split across packets is still the snapshot", async () => {
   }
 });
 
+test("the proxy matcher covers /p6 and every subpath", () => {
+  const root = join(import.meta.dir, "..", "..", "..");
+  const proxy = readFileSync(join(root, "web/src/proxy.ts"), "utf8");
+  expect(proxy.includes('matcher: ["/p6", "/p6/:path*"]')).toBe(true);
+  const token = "view-token";
+  const cookie = `${P6_COOKIE_NAME}=${dashboardCookieValue(token)}`;
+  const routes = ["/p6/positions", "/p6/trades", "/p6/gates", "/p6/jev", "/p6/health"];
+  for (const route of routes) {
+    expect(applyDashboardProxy(new Request(`https://example.test${route}`), token).status, route).toBe(401);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { headers: { authorization: "Bearer view-token" } }), token).status, route).toBe(200);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { headers: { cookie } }), token).status, route).toBe(200);
+    const opened = applyDashboardProxy(new Request(`https://example.test${route}?token=view-token&w=8h`), token);
+    expect(opened.status, route).toBe(302);
+    expect(opened.headers.Location, route).toBe("/p6?w=8h");
+    expect(opened.headers.Location?.includes("token="), route).toBe(false);
+    expect(opened.headers["Set-Cookie"]?.includes("Path=/p6"), route).toBe(true);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}?token=nope&w=24h`), token).status, route).toBe(401);
+  }
+});
+
 test("the page does not import the cron secret, auth, or a Redis write", () => {
   const root = join(import.meta.dir, "..", "..", "..");
   const files = [
@@ -211,13 +231,20 @@ test("the page does not import the cron secret, auth, or a Redis write", () => {
   expect(page.includes("no_1m_input")).toBe(true);
   expect(page.includes("invalid_response")).toBe(true);
   expect(page.includes("last?.jev")).toBe(true);
-  expect(page.includes("muted")).toBe(true);
+  expect(page.includes("muted")).toBe(false);
+  expect(page.includes("var(--muted)")).toBe(false);
   expect(page.includes("closedNote(tile.closedN)")).toBe(true);
   expect(page.includes("drawdownText(")).toBe(true);
   expect(page.includes("hourly (may understate the intrahour low)")).toBe(true);
   expect(page.includes("trades unknown")).toBe(true);
-  expect(page.includes("partial")).toBe(false);
+  expect(page.includes("Partial · since start")).toBe(true);
+  expect(page.includes("pnlTileGrey")).toBe(false);
+  expect(page.includes("pnlStale")).toBe(false);
+  expect(page.includes("#4b5563")).toBe(false);
   expect(page.includes("anchorLabel")).toBe(true);
+  expect(page.includes("parseSummaryWindow")).toBe(true);
+  expect(page.includes("?w=${id}#breakdown")).toBe(true);
+  expect(page.split("query.w").length - 1).toBe(1);
 });
 
 test("paper P/L separates equity, fees, spread, drawdown, and the backstops", () => {

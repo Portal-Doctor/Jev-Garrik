@@ -1,242 +1,162 @@
 import { headers } from "next/headers";
 import { dashboardAccess, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Page } from "../../../../research/src/p6/dashboard-read";
-import { closedNote, concentrationText, drawdownText, formatCt, PNL_START_USD, signedPct, signedUsd, tileMarkedGrey, wlText, type PnlBlock } from "../../../../research/src/p6/pnl-block";
+import {
+  closedNote,
+  concentrationText,
+  drawdownText,
+  formatCt,
+  PNL_START_USD,
+  signedPct,
+  signedUsd,
+  wlText,
+  type PnlTile,
+} from "../../../../research/src/p6/pnl-block";
 import {
   ageText,
+  BOOK_DRAWDOWN_AMBER_USD,
+  BOOK_DRAWDOWN_HALT_USD,
   CASH_LABEL,
   ENTRY_FEE_NOTE,
   formatUsd,
+  limitWord,
   MARK_FALLBACK,
+  OPEN_RISK_CAP_USD,
+  OPEN_RISK_NEAR_FRACTION,
+  POSITIONS_IDENTITY,
   positionsFooter,
   positionsSectionCopy,
   STABLECOIN_NOTE,
+  type PositionLine,
   type PositionSnap,
+  type PositionsView,
 } from "../../../../research/src/p6/positions-view";
+import { parseSummaryWindow, SUMMARY_WINDOWS } from "../../../../research/src/p6/window-query";
 import { RunClock } from "./countdown";
-import styles from "../paper/paper.module.css";
+import styles from "./p6.module.css";
 
 export const dynamic = "force-dynamic";
 
-function usd(value: unknown): string {
-  const n = typeof value === "number" ? value : Number.NaN;
-  if (!Number.isFinite(n)) return "-";
-  const sign = n > 0 ? "+" : "";
-  return `${sign}${n.toFixed(2)}`;
+const CLASS_IDS = ["A", "B", "C", "D", "E"] as const;
+
+function finite(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function moneyOrDash(value: number | null | undefined, signed = false): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return signed ? signedUsd(value) : formatUsd(value);
+}
+
+function hero(value: number | null): { text: string; kind: "pos" | "neg" | "flat" } {
+  if (value == null || !Number.isFinite(value)) return { text: "—", kind: "flat" };
+  const cents = Math.round(value * 100) / 100;
+  if (cents > 0) return { text: `▲ ${signedUsd(cents)}`, kind: "pos" };
+  if (cents < 0) return { text: `▼ ${signedUsd(cents)}`, kind: "neg" };
+  return { text: signedUsd(0), kind: "flat" };
+}
+
+function tone(kind: "pos" | "neg" | "flat", big = false): string {
+  const color = kind === "pos" ? styles.pos : kind === "neg" ? styles.neg : "";
+  return [big ? styles.big : "", color].filter(Boolean).join(" ");
+}
+
+function usedPct(used: number, limit: number): number {
+  if (!(limit > 0) || !Number.isFinite(used)) return 0;
+  return Math.max(0, Math.min(100, (used / limit) * 100));
+}
+
+/** Chip only for a short history, a stale anchor, or unknown trades. Nothing else. */
+function partialChip(tile: PnlTile): { label: string; title: string } | null {
+  if (tile.status === "no-data") return null;
+  const title: string[] = [];
+  if (tile.since) title.push(tile.since);
+  if (tile.anchorLabel) title.push(tile.anchorLabel);
+  if (tile.tradesUnknown) title.push("trades unknown");
+  if (title.length === 0) return null;
+  const label = tile.since ? "Partial · since start" : tile.anchorLabel ? `Partial · ${tile.anchorLabel}` : "Partial · trades unknown";
+  return { label, title: title.join("; ") };
 }
 
 function jevUsd(value: unknown): string {
-  const n = typeof value === "number" ? value : Number.NaN;
-  if (!Number.isFinite(n)) return "-";
+  const n = finite(value);
+  if (n == null) return "—";
   return `$${n.toFixed(4)}`;
 }
 
-function toneOf(value: unknown): number | undefined {
-  const n = typeof value === "number" ? value : Number.NaN;
-  if (!Number.isFinite(n) || n === 0) return 0;
-  return n > 0 ? 1 : -1;
+function qtyText(units: number): string {
+  if (!Number.isFinite(units)) return "—";
+  return units.toLocaleString("en-US", { maximumFractionDigits: 8 });
 }
 
-function Stat({ label, value, tone, big, muted }: { label: string; value: string; tone?: number; big?: boolean; muted?: boolean }) {
-  const cls = muted ? styles.muted : tone === undefined ? "" : tone > 0 ? styles.pos : tone < 0 ? styles.neg : "";
+function rText(value: number | null): { text: string; kind: "pos" | "neg" | "flat" } {
+  if (value == null || !Number.isFinite(value)) return { text: "—", kind: "flat" };
+  const rounded = Math.round(value * 100) / 100;
+  if (rounded > 0) return { text: `+${rounded.toFixed(2)}`, kind: "pos" };
+  if (rounded < 0) return { text: rounded.toFixed(2), kind: "neg" };
+  return { text: "0.00", kind: "flat" };
+}
+
+function Badge({ kind, text }: { kind: "ok" | "bad" | "warn"; text: string }) {
+  const cls = kind === "ok" ? styles.badgeOk : kind === "bad" ? styles.badgeBad : styles.badgeWarn;
+  const mark = kind === "ok" ? "✓" : kind === "bad" ? "✗" : "!";
   return (
-    <div className={`${styles.stat} ${big ? styles.statBig : ""}`}>
-      <span className={styles.statLabel}>{label}</span>
-      <span className={`${styles.statValue} ${cls}`}>{value}</span>
-    </div>
-  );
-}
-
-function barColor(tone: "green" | "amber" | "yellow" | "red"): string {
-  if (tone === "green") return "#4ade80";
-  if (tone === "amber" || tone === "yellow") return "#fbbf24";
-  return "#f87171";
-}
-
-function Meter({ label, text, pct, tone }: { label: string; text: string; pct: number; tone: "green" | "amber" | "yellow" | "red" }) {
-  return (
-    <div className={styles.stat}>
-      <span className={styles.statLabel}>{label}</span>
-      <span className={styles.statValue}>{text}</span>
-      <span className={styles.countdownBar} style={{ width: 120 }}>
-        <span className={styles.countdownFill} style={{ width: `${Math.max(0, Math.min(100, pct))}%`, background: barColor(tone) }} />
+    <span className={`${styles.badge} ${cls}`}>
+      <span className={styles.badgeMark} aria-hidden="true">
+        {mark}
       </span>
+      {text}
+    </span>
+  );
+}
+
+function Fold({
+  title,
+  note,
+  badge,
+  children,
+  open,
+  id,
+}: {
+  title: string;
+  note?: string;
+  badge?: { kind: "ok" | "bad" | "warn"; text: string };
+  children: React.ReactNode;
+  open?: boolean;
+  id?: string;
+}) {
+  return (
+    <details className={styles.fold} id={id} {...(open ? { open: true } : {})}>
+      <summary>
+        {title}
+        {badge ? <Badge kind={badge.kind} text={badge.text} /> : null}
+        {note ? <span className={styles.note}>{note}</span> : null}
+      </summary>
+      <div className={styles.foldBody}>{children}</div>
+    </details>
+  );
+}
+
+function Kv({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className={styles.kv}>
+      <dt>{label}</dt>
+      <dd>{children}</dd>
     </div>
   );
 }
 
-function classTone(id: string, drawdownR: number): "green" | "yellow" | "red" {
-  if (id === "A" || id === "B") {
-    if (drawdownR < 7) return "green";
-    if (drawdownR < 10) return "yellow";
-    return "red";
-  }
-  return drawdownR < 5 ? "green" : "red";
+function reconBadge(view: PositionsView): { kind: "ok" | "bad" | "warn"; text: string } {
+  if (!view.reported) return { kind: "warn", text: "checks skipped" };
+  if (view.omitted > 0 || view.skipped > 0) return { kind: "warn", text: "checks incomplete" };
+  if (view.reconciled && view.unrealizedMatch && view.problems.length === 0) return { kind: "ok", text: "Reconciled" };
+  if (!view.reconciled) return { kind: "bad", text: `Not reconciled by ${formatUsd(Math.abs(view.gapUsd))}` };
+  return { kind: "bad", text: "Not reconciled" };
 }
 
-function PnlStrip({ block }: { block: PnlBlock }) {
-  const start = PNL_START_USD.toLocaleString("en-US");
-  return (
-    <section className={`${styles.pnlBlock} ${block.stale ? styles.pnlStale : ""}`}>
-      <div className={styles.pnlHead}>
-        <span className={styles.pnlTitle}>PAPER - no capital at risk</span>
-        <span className={styles.sub}>{block.paperStartMs == null ? "paper start —" : `paper start ${formatCt(block.paperStartMs, true)}`}</span>
-        <span className={styles.sub}>
-          last updated {block.lastUpdatedMs == null ? "—" : formatCt(block.lastUpdatedMs, false)}
-          {block.stale ? " · stale" : ""}
-        </span>
-      </div>
-      <div className={styles.pnlGrid}>
-        {block.tiles.map((tile) => (
-          <div key={tile.id} className={`${styles.pnlTile} ${tileMarkedGrey(tile) ? styles.pnlTileGrey : ""}`}>
-            <span className={styles.pnlWindow}>{tile.id}</span>
-            {tile.status === "no-data" ? (
-              <span className={styles.sub}>no data yet</span>
-            ) : (
-              <>
-                <span className={toneClass(tile.totalUsd)}>
-                  Total P/L {tile.totalUsd == null ? "-" : signedUsd(tile.totalUsd)} {tile.totalPct == null ? "" : signedPct(tile.totalPct)} of ${start} start
-                </span>
-                <span className={styles.sub}>
-                  realized <span className={toneClass(tile.realizedUsd)}>{tile.realizedUsd == null ? "-" : signedUsd(tile.realizedUsd)}</span>
-                  {tile.realizedPct == null ? "" : ` ${signedPct(tile.realizedPct)}`}
-                  {" + unrealized "}
-                  <span className={toneClass(tile.unrealizedDelta)}>{tile.unrealizedDelta == null ? "-" : signedUsd(tile.unrealizedDelta)}</span>
-                </span>
-                <span className={styles.sub}>
-                  open now: {block.openPositions} positions, unrealized {block.openUnrealized == null ? "-" : signedUsd(block.openUnrealized)}
-                </span>
-                <span className={styles.sub}>
-                  fees paid {tile.feesUsd == null ? "-" : signedUsd(tile.feesUsd)} · spread+slippage paid {tile.spreadSlipUsd == null ? "-" : signedUsd(tile.spreadSlipUsd)} · included above
-                </span>
-                {tile.tradesUnknown ? (
-                  <span>trades unknown</span>
-                ) : (
-                  <span>
-                    {wlText(tile.wins, tile.losses)}
-                    {closedNote(tile.closedN) ? ` · ${closedNote(tile.closedN)}` : ""}
-                    {tile.hourNote ? ` · ${tile.hourNote}` : ""}
-                  </span>
-                )}
-                <span className={styles.sub}>hourly (may understate the intrahour low) {tile.drawdownUsd == null ? "-" : drawdownText(tile.drawdownUsd)}</span>
-                <span className={styles.sub}>{tile.tradesUnknown ? "trades unknown" : concentrationText(tile.concentrationPct)}</span>
-                {tile.since ? <span className={styles.sub}>{tile.since}</span> : null}
-                {tile.anchorLabel ? <span className={styles.sub}>{tile.anchorLabel}</span> : null}
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function toneClass(value: number | null): string {
-  if (value == null || value === 0) return "";
-  return value > 0 ? styles.pos : styles.neg;
-}
-
-export function PositionsSection({
-  last,
-  nowMs,
-  openUnrealized,
-}: {
-  last: Record<string, unknown> | null;
-  nowMs: number;
-  openUnrealized: number | null;
-}) {
-  const pnl = last && typeof last.pnl === "object" && last.pnl != null ? (last.pnl as { equityUsd?: number; realizedUsd?: number; startingUsd?: number }) : null;
-  const reported = Array.isArray(last?.positions);
-  const snaps = reported ? (last?.positions as PositionSnap[]) : null;
-  const equityUsd = typeof pnl?.equityUsd === "number" ? pnl.equityUsd : 0;
-  const realizedUsd = typeof pnl?.realizedUsd === "number" ? pnl.realizedUsd : 0;
-  const startingUsd = typeof pnl?.startingUsd === "number" ? pnl.startingUsd : PNL_START_USD;
-  const markTs = last && typeof last.end === "number" ? last.end : null;
-  const omitted = typeof last?.positionsOmitted === "number" ? last.positionsOmitted : 0;
-  const skipped = typeof last?.positionsSkipped === "number" ? last.positionsSkipped : 0;
-  const view = positionsFooter({
-    snaps,
-    nowMs,
-    markTs,
-    equityUsd,
-    realizedUsd,
-    unrealizedUsd: openUnrealized ?? 0,
-    startingUsd,
-    omitted,
-    skipped,
-  });
-  const copy = positionsSectionCopy(view);
-  const bad = view.reported && (!view.reconciled || !view.unrealizedMatch || view.problems.length > 0);
-  const grey = copy.grey;
-  return (
-    <section className={`${styles.pnlBlock} ${grey ? styles.pnlStale : ""}`}>
-      <div className={styles.pnlHead}>
-        <span className={styles.pnlTitle}>POSITIONS</span>
-        <span className={styles.sub}>
-          as of last run {view.markTs == null ? "—" : formatCt(view.markTs, false)}
-          {view.stale ? " · stale" : ""}
-        </span>
-        <span className={styles.sub}>{ENTRY_FEE_NOTE}</span>
-      </div>
-      <table className={styles.posTable}>
-        <thead>
-          <tr>
-            {["Pair", "Class", "Qty", "Entry", "Age", "Mark", "Notional", "Unrealized", "Unrealized %", "Initial risk", "Net R", "Stop", "Distance %", "Target"].map((label) => (
-              <th key={label} className={styles.posHead}>
-                {label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {copy.body ? (
-            <tr>
-              <td colSpan={14} className={styles.posCell}>
-                {copy.body}
-              </td>
-            </tr>
-          ) : (
-            view.rows.map((row) => (
-              <tr key={row.id}>
-                <td className={styles.posCell}>{row.product}</td>
-                <td className={styles.posCell}>{row.classId}</td>
-                <td className={styles.posCell}>{row.units}</td>
-                <td className={styles.posCell}>{row.fill}</td>
-                <td className={styles.posCell}>{ageText(row.ageMs)}</td>
-                <td className={styles.posCell}>
-                  {row.mark} {row.markSrc === "entry" ? MARK_FALLBACK : view.markTs == null ? "" : formatCt(view.markTs, false)}
-                </td>
-                <td className={styles.posCell}>{formatUsd(row.notional)}</td>
-                <td className={styles.posCell}>{signedUsd(row.unrealized)}</td>
-                <td className={styles.posCell}>{row.unrealizedPct == null ? "-" : signedPct(row.unrealizedPct)}</td>
-                <td className={styles.posCell}>{formatUsd(row.risk)}</td>
-                <td className={styles.posCell}>{row.netR == null ? "-" : row.netR.toFixed(2)}</td>
-                <td className={styles.posCell}>{row.stop}</td>
-                <td className={styles.posCell}>{row.stopDistancePct == null ? "-" : `${row.stopDistancePct.toFixed(2)}%`}</td>
-                <td className={styles.posCell}>{row.target ?? "—"}</td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-      {copy.omittedNote ? <p className={styles.sub}>{copy.omittedNote}</p> : null}
-      <p className={styles.sub}>
-        total active investment {copy.active} · at cost {copy.atCost}
-      </p>
-      <p className={styles.sub}>est. exit costs {copy.exit} · already deducted in unrealized</p>
-      <p className={styles.sub}>
-        cash balance {CASH_LABEL} {copy.cash}
-      </p>
-      <p className={styles.sub}>= equity {copy.equity}</p>
-      <p className={bad ? styles.neg : styles.sub}>{copy.check}</p>
-      <p className={styles.sub}>{view.riskText}</p>
-      {view.clusters.map((cluster) => (
-        <p key={cluster.id} className={styles.sub}>
-          {cluster.text}
-        </p>
-      ))}
-      <p className={styles.sub}>{STABLECOIN_NOTE}</p>
-    </section>
-  );
+function projectionWord(toneName: "green" | "amber" | "red"): "OK" | "Near limit" | "Over" {
+  if (toneName === "red") return "Over";
+  if (toneName === "amber") return "Near limit";
+  return "OK";
 }
 
 /** Read-only. The view token is not the cron secret. Nothing on this page writes Redis. Open with GET /p6; see dashboardAccess. */
@@ -263,8 +183,8 @@ export default async function P6DashboardPage({
   });
   if (access.action !== "allow") {
     return (
-      <main className={styles.top}>
-        <h1>P6 paper</h1>
+      <main className={styles.page}>
+        <h1 className={styles.title}>P6 paper</h1>
         <p>Unauthorized.</p>
       </main>
     );
@@ -272,15 +192,29 @@ export default async function P6DashboardPage({
   const url = process.env.REDIS_URL;
   if (!url) {
     return (
-      <main className={styles.top}>
-        <div className={styles.title}>
-          <h1>P6 paper</h1>
-          <p className={styles.sub}>No snapshot on this instance.</p>
+      <main className={styles.page}>
+        <h1 className={styles.title}>P6 paper</h1>
+        <p className={styles.sub}>No snapshot on this instance.</p>
+      </main>
+    );
+  }
+  const now = Date.now();
+  let loaded: Awaited<ReturnType<typeof readP6Page>>;
+  try {
+    loaded = await readP6Page(openDashboardKv(url), now);
+  } catch {
+    return (
+      <main className={styles.page}>
+        <h1 className={styles.title}>Paper (P6) · Summary</h1>
+        <div className={styles.alert} role="alert">
+          <strong>Can&apos;t read the latest run.</strong>
+          <span>Nothing is shown rather than old numbers. Reload to retry.</span>
         </div>
       </main>
     );
   }
-  const { view, block } = await readP6Page(openDashboardKv(url), Date.now());
+  const picked = parseSummaryWindow(query.w);
+  const { view, block } = loaded;
   const last = view.lastRun;
   const pnl = (last?.pnl ?? null) as {
     equityUsd?: number;
@@ -288,6 +222,7 @@ export default async function P6DashboardPage({
     unrealizedUsd?: number;
     feesUsd?: number;
     spreadSlipUsd?: number;
+    startingUsd?: number;
     arrivalDelayBps?: number | null;
     feeBps?: { maker?: number; taker?: number };
     book?: { hwmUsd?: number; drawdownUsd?: number; haltUsd?: number; roomUsd?: number };
@@ -296,6 +231,26 @@ export default async function P6DashboardPage({
     classBackstopUsd?: number;
     pairBackstopUsd?: number;
   } | null;
+  const reported = Array.isArray(last?.positions);
+  const snaps = reported ? (last?.positions as PositionSnap[]) : null;
+  const equityUsd = typeof pnl?.equityUsd === "number" ? pnl.equityUsd : 0;
+  const realizedUsd = typeof pnl?.realizedUsd === "number" ? pnl.realizedUsd : 0;
+  const startingUsd = typeof pnl?.startingUsd === "number" ? pnl.startingUsd : PNL_START_USD;
+  const markTs = last && typeof last.end === "number" ? last.end : null;
+  const omitted = typeof last?.positionsOmitted === "number" ? last.positionsOmitted : 0;
+  const skipped = typeof last?.positionsSkipped === "number" ? last.positionsSkipped : 0;
+  const positionView = positionsFooter({
+    snaps,
+    nowMs: now,
+    markTs,
+    equityUsd,
+    realizedUsd,
+    unrealizedUsd: block.openUnrealized ?? 0,
+    startingUsd,
+    omitted,
+    skipped,
+  });
+  const copy = positionsSectionCopy(positionView);
   const rest = (last?.rest ?? {}) as { n?: number; r429?: number; waitedMs?: number };
   const jev = (last?.jev ?? null) as {
     totalUsd?: number;
@@ -323,196 +278,493 @@ export default async function P6DashboardPage({
   const month = monthCommands(typeof completed?.cmds === "number" ? completed.cmds : 0);
   const budget = commandBudget();
   const proj = projectionTone(month);
-  const openIds = new Set(view.positions.map((row) => row.productId).filter((id): id is string => Boolean(id)));
-  const bookDd = pnl?.book?.drawdownUsd ?? 0;
-  const bookTone = bookDd < 800 ? "green" : bookDd < 1600 ? "amber" : "red";
+  const bookDd = typeof pnl?.book?.drawdownUsd === "number" ? pnl.book.drawdownUsd : 0;
+  const classCap = finite(pnl?.classBackstopUsd);
   const healthEnd = typeof completed?.end === "number" ? completed.end : null;
-  const gaps24 = view.gaps.filter((gap) => healthEnd == null || (healthEnd - gap.endMs) < 24 * 60 * 60 * 1000);
+  const gaps24 = view.gaps.filter((gap) => healthEnd == null || healthEnd - gap.endMs < 24 * 60 * 60 * 1000);
+  const equity = finite(pnl?.equityUsd);
+  const delta = equity == null ? null : equity - PNL_START_USD;
+  const deltaPct = delta == null ? null : (delta / PNL_START_USD) * 100;
+  const deltaHero = hero(delta);
+  const start = PNL_START_USD.toLocaleString("en-US");
+  const openRiskWord = positionView.reported
+    ? limitWord(positionView.riskUsd, OPEN_RISK_CAP_USD, OPEN_RISK_CAP_USD * OPEN_RISK_NEAR_FRACTION)
+    : "checks skipped";
+  const bookWord = limitWord(bookDd, BOOK_DRAWDOWN_HALT_USD, BOOK_DRAWDOWN_AMBER_USD);
+  const health = last == null ? "Error" : block.stale ? "Stale" : "Healthy";
+  const dotClass = health === "Error" ? styles.dotErr : health === "Stale" ? styles.dotStale : styles.dot;
+  const gateLines: string[] = [];
+  if (view.killSwitch) gateLines.push("Kill switch on. New entries are blocked.");
+  for (const id of CLASS_IDS) {
+    const row = pnl?.classes?.[id];
+    if (row?.killed) gateLines.push(`Class ${id} killed. New entries in class ${id} are blocked.`);
+    else if (row?.paused) gateLines.push(`Class ${id} paused. New entries in class ${id} are blocked until it resumes.`);
+  }
+  if (bookDd >= BOOK_DRAWDOWN_HALT_USD) gateLines.push("Book halt reached. New entries are blocked until the book recovers.");
+  const ageMin = block.lastUpdatedMs == null ? null : Math.max(0, Math.floor((now - block.lastUpdatedMs) / 60000));
+  const tile = block.tiles.find((row) => row.id === picked.id) ?? block.tiles[0];
+  const paused = CLASS_IDS.filter((id) => pnl?.classes?.[id]?.paused || pnl?.classes?.[id]?.killed);
+  const badge = reconBadge(positionView);
 
   return (
-    <main>
-      <PnlStrip block={block} />
-      <PositionsSection last={last} nowMs={Date.now()} openUnrealized={block.openUnrealized} />
-      <header className={styles.top}>
-        <div className={styles.title}>
-          <h1>
-            P6 paper <span className={styles.safe}>no capital at risk</span>
-          </h1>
-          <p className={styles.sub}>
-            holder {view.lease?.holder ?? "none"}
-            {view.lease ? ` until ${new Date(view.lease.untilMs).toISOString()}` : ""}
-            {" · "}
-            {typeof last?.outcome === "string" ? last.outcome : "no run"}
-            {typeof last?.start === "number" && typeof last?.end === "number" ? ` ${Math.max(0, last.end - last.start)}ms` : ""}
-            {" · "}
-            warm {warm}/50 · cold {cold.length}
-            {cold.length > 0 ? ` [${cold.map((row) => row.id).filter(Boolean).join(",")}]` : ""}
-            {" · "}
-            pending {pending}
-            {" · "}
-            gaps {gaps24.length}
-          </p>
+    <main className={styles.page}>
+      {gateLines.length > 0 ? (
+        <div className={styles.alert} role="alert">
+          <strong>Gate tripped:</strong>
+          <span>{gateLines.join(" ")}</span>
         </div>
-        <RunClock lastEnd={healthEnd} />
-      </header>
-
-      <section className={styles.equityStrip}>
-        {view.killSwitch ? <span className={`${styles.chip} ${styles.chipDown}`}>kill-switch</span> : <span className={`${styles.chip} ${styles.chipOk}`}>gates clear</span>}
-        {pnl?.classes
-          ? (["A", "B", "C", "D", "E"] as const).flatMap((id) => {
-              const row = pnl.classes?.[id];
-              if (!row?.paused && !row?.killed) return [];
-              return [
-                <span key={id} className={`${styles.chip} ${styles.chipDown}`}>
-                  {id} {row.killed ? "killed" : "paused"} ${row.sizingUsd ?? 20}
-                </span>,
-              ];
-            })
-          : null}
-      </section>
-
-      <section className={styles.equityStrip}>
-        <Stat label="Equity" value={usd(pnl?.equityUsd)} tone={toneOf(pnl?.realizedUsd)} big />
-        <Stat label="Realized" value={usd(pnl?.realizedUsd)} tone={toneOf(pnl?.realizedUsd)} />
-        <Stat label="Unrealized" value={usd(pnl?.unrealizedUsd)} tone={toneOf(pnl?.unrealizedUsd)} />
-        <Stat label="Fees" value={usd(pnl?.feesUsd)} />
-        <Stat label="Spread + slippage" value={usd(pnl?.spreadSlipUsd)} />
-        <Stat label="Arrival delay bps" value={pnl?.arrivalDelayBps == null ? "-" : pnl.arrivalDelayBps.toFixed(2)} muted />
-        <Stat label="Fee bps" value={`${pnl?.feeBps?.maker ?? "-"} / ${pnl?.feeBps?.taker ?? "-"}`} />
-      </section>
-
-      <section className={styles.equityStrip}>
-        <Meter
-          label="Book halt"
-          text={`$${bookDd.toFixed(0)} / $${pnl?.book?.haltUsd ?? 1600}`}
-          pct={(bookDd / (pnl?.book?.haltUsd || 1600)) * 100}
-          tone={bookTone}
-        />
-        {pnl?.classes
-          ? (["A", "B", "C", "D", "E"] as const).map((id) => {
-              const row = pnl.classes?.[id];
-              const dd = row?.drawdownR ?? 0;
-              const cap = id === "A" || id === "B" ? 10 : 5;
-              return <Meter key={id} label={`${id} drawdown R`} text={`${dd.toFixed(2)}R / ${cap}R`} pct={(dd / cap) * 100} tone={classTone(id, dd)} />;
-            })
-          : null}
-        {pnl?.classes
-          ? (["A", "B", "C", "D", "E"] as const).map((id) => {
-              const dd = pnl.classes?.[id]?.drawdownR ?? 0;
-              const cap = 20;
-              const tone = dd >= cap ? "red" : dd >= 10 ? "yellow" : "green";
-              return <Meter key={`${id}-kill`} label={`${id} kill R`} text={`${dd.toFixed(2)} / ${cap}R`} pct={(dd / cap) * 100} tone={tone} />;
-            })
-          : null}
-        {pnl?.classes
-          ? (["A", "B"] as const).map((id) => {
-              const usdDd = pnl.classes?.[id]?.drawdownUsd ?? 0;
-              const cap = pnl.classBackstopUsd ?? 1200;
-              return (
-                <Meter
-                  key={`${id}-usd`}
-                  label={`${id} $ backstop`}
-                  text={`$${usdDd.toFixed(0)} / $${cap}`}
-                  pct={(usdDd / cap) * 100}
-                  tone={usdDd >= cap ? "red" : usdDd >= cap * 0.7 ? "yellow" : "green"}
-                />
-              );
-            })
-          : null}
-      </section>
-
-      <section className={styles.equityStrip}>
-        <Stat label="REST" value={`${rest.n ?? 0} / 400`} />
-        <Stat label="429" value={String(rest.r429 ?? 0)} />
-        <Stat label="Applied" value={String(Array.isArray(last?.applied) ? last.applied.length : 0)} />
-        <Stat label="Decisions" value={String(last?.decisions ?? 0)} />
-        <Stat label="Fills" value={String(last?.fills ?? 0)} />
-        <Stat label="Redis cmds" value={String(redis.cmds ?? 0)} />
-        <Stat label="Month" value={`${(month / 1_000_000).toFixed(2)}M / ${(budget / 1_000_000).toFixed(0)}M`} tone={proj === "red" ? -1 : proj === "amber" ? 0 : 1} />
-        <Stat label="Max value" value={String(redis.maxValueBytes ?? 0)} />
-      </section>
-
-      <section className={styles.equityStrip}>
-        <Stat label="Jev spend" value={jevUsd(jev?.totalUsd)} />
-        <Stat label="Jev today" value={jevUsd(jev?.todayUsd)} />
-        <Stat label="Jev calls" value={String(jev?.calls ?? 0)} />
-        <Stat label="Jev cap" value={jevUsd(jev?.capUsd)} />
-        <Stat label="no_1m_input" value={String(jev?.byReason?.no_1m_input ?? 0)} />
-        <Stat label="not_called" value={String(jev?.byReason?.not_called ?? 0)} />
-        <Stat label="timeout" value={String(jev?.byReason?.timeout ?? 0)} />
-        <Stat label="call_error" value={String(jev?.byReason?.call_error ?? 0)} />
-        <Stat label="invalid_response" value={String(jev?.byReason?.invalid_response ?? 0)} />
-        <Stat label="latency <=60s" value={String(jev?.latency?.le60 ?? 0)} />
-        <Stat label="latency <=300s" value={String(jev?.latency?.le300 ?? 0)} />
-        <Stat label="latency <=600s" value={String(jev?.latency?.le600 ?? 0)} />
-        <Stat label="latency late" value={String(jev?.latency?.late ?? 0)} />
-        <Stat label="catch-up 7d" value={String(jev?.catchUp ?? 0)} />
-        <Stat label="catch-up 7d share" value={(jev?.catchUpShare ?? 0).toFixed(3)} />
-        <Stat label="catch-up 7d flag" value={jev?.catchUpFlag ? "yes" : "no"} />
-        <Stat
-          label="skip gate"
-          value={jev?.skipLabel ?? "insufficient data (days 0/7, scheduled 0)"}
-          tone={jev?.skipStatus === "FLAG" ? -1 : jev?.skipStatus === "PASS" ? 1 : 0}
-        />
-        <Stat label="skip share 7d" value={(jev?.skipShare ?? 0).toFixed(3)} />
-        <Stat label="skip days" value={`${jev?.skipDays ?? 0}/7`} />
-        <Stat label="skip scheduled" value={String(jev?.skipScheduled ?? 0)} />
-        <Stat label="legacy, excluded" value={`${jev?.legacySkipped ?? 0} skipped / ${jev?.legacyPackets ?? 0} packets`} />
-      </section>
-
-      <section style={{ padding: "12px 24px" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead>
-            <tr>
-              {["Pair", "Class", "Side", "Entry", "Stop", "Unrealized", "Realized", "Fees", "Backstop"].map((label) => (
-                <th key={label} style={{ textAlign: "left", padding: "6px 8px", color: "var(--muted)" }}>
-                  {label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {(pnl?.pairs ?? []).map((row) => {
-              const open = row.side === "long" || openIds.has(row.productId);
-              return (
-                <tr key={row.productId} style={open ? { background: "rgba(74, 222, 128, 0.12)" } : undefined}>
-                  <td style={{ padding: "6px 8px" }}>{row.productId}</td>
-                  <td style={{ padding: "6px 8px" }}>{row.classId}</td>
-                  <td style={{ padding: "6px 8px" }}>{row.side}</td>
-                  <td style={{ padding: "6px 8px" }}>{row.entry ?? "-"}</td>
-                  <td style={{ padding: "6px 8px" }}>{row.stop ?? "-"}</td>
-                  <td style={{ padding: "6px 8px" }}>{usd(row.unrealizedUsd)}</td>
-                  <td style={{ padding: "6px 8px" }}>{usd(row.realizedUsd)}</td>
-                  <td style={{ padding: "6px 8px" }}>{usd(row.feesUsd)}</td>
-                  <td style={{ padding: "6px 8px" }}>{row.latched ? "latched" : `armed $${row.roomUsd.toFixed(0)}`}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </section>
-
-      <section className={styles.equityStrip}>
-        <div className={styles.stat}>
-          <span className={styles.statLabel}>Decisions</span>
-          <span className={styles.statValue}>{view.emitted.slice(-20).join(", ") || "-"}</span>
-        </div>
-        <div className={styles.stat}>
-          <span className={styles.statLabel}>Fills</span>
-          <span className={styles.statValue}>
-            {view.closed
-              .slice(-20)
-              .map((row) => `${row.productId ?? ""} ${row.classId ?? ""} ${usd(row.netUsd)}`)
-              .join(" · ") || "-"}
+      ) : null}
+      {block.stale ? (
+        <div className={`${styles.alert} ${block.lastUpdatedMs == null ? "" : styles.alertStale}`} role="status">
+          <strong>Data is stale.</strong>
+          <span>
+            {block.lastUpdatedMs == null
+              ? "There is no last run time. Numbers below are stale after 20 min."
+              : `The last run finished at ${formatCt(block.lastUpdatedMs, false)}, ${ageMin} min ago. Numbers below are from that run (stale after 20 min).`}
           </span>
         </div>
+      ) : null}
+
+      <div className={styles.head}>
+        <div>
+          <h1 className={styles.title}>Paper (P6) · Summary</h1>
+          <p className={styles.crumb}>Paper books / Paper (P6) / Summary</p>
+        </div>
+        <div className={styles.equity}>
+          <div className={styles.equityLabel}>Equity</div>
+          <div className={styles.equityValue}>{equity == null ? "—" : formatUsd(equity)}</div>
+          <div className={styles.equityDelta}>
+            <span className={tone(deltaHero.kind)}>{deltaHero.text}</span>
+            {deltaPct == null ? "" : ` (${signedPct(deltaPct)})`} vs ${start} start
+          </div>
+        </div>
+      </div>
+
+      <div className={`${styles.card} ${styles.strip}`} role="status">
+        <span className={styles.chip}>PAPER - no capital at risk</span>
+        <span>{block.paperStartMs == null ? "Paper start —" : `Paper start ${formatCt(block.paperStartMs, true)}`}</span>
+        <span>Last updated {block.lastUpdatedMs == null ? "—" : formatCt(block.lastUpdatedMs, false)}</span>
+        <span className={styles.right}>
+          <span className={styles.health}>
+            <span className={`${styles.dot} ${dotClass}`} aria-hidden="true" />
+            {health}
+          </span>
+          <RunClock overdue={block.stale} />
+        </span>
+      </div>
+
+      <div className={`${styles.card} ${styles.risk}`} aria-label="Risk status">
+        <span className={styles.riskItem}>
+          <span>
+            Open risk (initial) <b>{positionView.reported ? formatUsd(positionView.riskUsd) : "—"}</b> of {formatUsd(OPEN_RISK_CAP_USD)} cap
+          </span>
+          <span className={styles.meter} role="img" aria-label="Open risk used">
+            <i className={styles.meterFill} style={{ width: `${usedPct(positionView.riskUsd, OPEN_RISK_CAP_USD)}%` }} />
+          </span>
+          <span className={styles.state}>{openRiskWord}</span>
+        </span>
+        <span className={styles.riskItem}>
+          <span>
+            Book drawdown (from high-water mark) <b>{formatUsd(bookDd)}</b> of {formatUsd(BOOK_DRAWDOWN_HALT_USD)} halt
+          </span>
+          <span className={styles.meter} role="img" aria-label="Book drawdown used">
+            <i className={styles.meterFill} style={{ width: `${usedPct(bookDd, BOOK_DRAWDOWN_HALT_USD)}%` }} />
+          </span>
+          <span className={styles.state}>{bookWord}</span>
+        </span>
+      </div>
+
+      <div className={styles.grid} role="group" aria-label="Profit and loss by window">
+        {block.tiles.map((row) => {
+          const chip = partialChip(row);
+          const total = hero(row.totalUsd);
+          return (
+            <div key={row.id} className={styles.card}>
+              <div className={styles.win}>{row.id}</div>
+              {row.status === "no-data" ? (
+                <>
+                  <div className={styles.big}>—</div>
+                  <div className={styles.pct}>No data yet</div>
+                </>
+              ) : (
+                <>
+                  <div className={tone(total.kind, true)}>{total.text}</div>
+                  <div className={styles.pct} title={`of $${start} start`}>
+                    {row.totalPct == null ? "—" : signedPct(row.totalPct)}
+                  </div>
+                </>
+              )}
+              {chip ? (
+                <span className={styles.pchip} title={chip.title}>
+                  {chip.label}
+                </span>
+              ) : (
+                <span className={`${styles.pchip} ${styles.pchipGhost}`} aria-hidden="true">
+                  .
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <section className={styles.card} id="positions" aria-labelledby="pos-h">
+        <div className={styles.cardHead}>
+          <h2 id="pos-h">{positionView.reported ? `Open positions (${positionView.rows.length})` : "Open positions"}</h2>
+          <span className={styles.sub}>
+            as of last run {positionView.markTs == null ? "—" : formatCt(positionView.markTs, false)} · {ENTRY_FEE_NOTE}
+          </span>
+        </div>
+        {!positionView.reported ? (
+          <p className={styles.empty}>
+            Waiting for the next run
+            <br />
+            <span className={styles.hint}>{copy.body}</span>
+          </p>
+        ) : positionView.empty ? (
+          <p className={styles.empty}>{copy.body}</p>
+        ) : (
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  {["Pair", "Entry", "Mark", "Unrealized $", "Unrealized %", "Distance to stop %"].map((label) => (
+                    <th key={label} scope="col">
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {positionView.rows.map((row) => (
+                  <PositionRow key={row.id} row={row} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <Fold title="More columns" note="Class, qty, age, notional, initial risk, net R, stop, target">
+          {positionView.rows.length === 0 ? (
+            <p className={styles.empty}>{copy.body}</p>
+          ) : (
+            <div className={`${styles.tableWrap} ${styles.foldBody}`}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    {["Pair", "Class", "Qty", "Age", "Notional", "Initial risk", "Net R", "Stop", "Target"].map((label) => (
+                      <th key={label} scope="col">
+                        {label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {positionView.rows.map((row) => {
+                    const net = rText(row.netR);
+                    return (
+                      <tr key={row.id}>
+                        <th scope="row">{row.product}</th>
+                        <td data-label="Class">{row.classId}</td>
+                        <td data-label="Qty">{qtyText(row.units)}</td>
+                        <td data-label="Age">{ageText(row.ageMs)}</td>
+                        <td data-label="Notional">{formatUsd(row.notional)}</td>
+                        <td data-label="Initial risk">{formatUsd(row.risk)}</td>
+                        <td data-label="Net R" className={tone(net.kind)}>
+                          {net.text}
+                        </td>
+                        <td data-label="Stop">{formatUsd(row.stop)}</td>
+                        <td data-label="Target">{row.target == null ? "—" : formatUsd(row.target)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Fold>
+        <Fold title="Reconciliation" badge={badge} note="cash + active investment - est. exit costs = equity">
+          <dl className={styles.kvs}>
+            <Kv label="Total active investment">{copy.active}</Kv>
+            <Kv label="At cost">{copy.atCost}</Kv>
+            <Kv label="Est. exit costs">
+              {copy.exit}
+              <span className={styles.hint}>already deducted in unrealized</span>
+            </Kv>
+            <Kv label={`cash balance, ${CASH_LABEL}`}>{copy.cash}</Kv>
+            <Kv label="= equity">{copy.equity}</Kv>
+            <Kv label="Checks">{copy.check}</Kv>
+            <Kv label="Open risk (initial)">
+              {positionView.reported ? `${formatUsd(positionView.riskUsd)} of ${formatUsd(OPEN_RISK_CAP_USD)} cap` : "—"}
+              <span className={styles.hint}>sum of initial risk</span>
+            </Kv>
+            <Kv label="Same-cluster limit">{positionView.clusters.map((cluster) => cluster.text).join(" · ") || "—"}</Kv>
+            <Kv label="Holdings">{STABLECOIN_NOTE}</Kv>
+          </dl>
+          {copy.omittedNote ? <p className={styles.sub}>{copy.omittedNote}</p> : null}
+          <p className={styles.hint}>{POSITIONS_IDENTITY}</p>
+        </Fold>
       </section>
 
-      {view.incidents.length > 0 ? (
-        <section style={{ padding: "0 24px 24px" }}>
-          <p className={styles.sub}>{view.incidents.slice(-20).join(" · ")}</p>
-        </section>
+      <nav className={styles.selRow} id="breakdown" aria-label="Window for the breakdown below">
+        <span className={styles.selLabel}>Breakdown for</span>
+        <span className={styles.segGroup}>
+          {SUMMARY_WINDOWS.map((id) => (
+            <a key={id} className={styles.seg} href={`?w=${id}#breakdown`} aria-current={picked.id === id ? "true" : undefined}>
+              {id}
+            </a>
+          ))}
+        </span>
+        <span className={styles.hint}>Choose one window. The four cards above always show all windows.</span>
+      </nav>
+      {tile ? (
+        <Fold
+          id="breakdown-panel"
+          title={`Breakdown, ${picked.id}`}
+          note={`realized ${moneyOrDash(tile.realizedUsd, true)}, unrealized ${moneyOrDash(tile.unrealizedDelta, true)}`}
+          open={picked.open}
+        >
+          <Breakdown tile={tile} />
+        </Fold>
       ) : null}
+
+      <Fold
+        id="gates"
+        title="Risk and gates"
+        badge={
+          gateLines.length === 0
+            ? { kind: "ok", text: "Gates clear" }
+            : { kind: "warn", text: gateLines.length === 1 ? "1 gate tripped" : `${gateLines.length} gates tripped` }
+        }
+        note={`Book drawdown ${formatUsd(bookDd)} of ${formatUsd(BOOK_DRAWDOWN_HALT_USD)} halt · ${paused.length === 0 ? "no class paused" : paused.map((id) => `Class ${id} ${pnl?.classes?.[id]?.killed ? "killed" : "paused"}`).join(", ")}`}
+      >
+        <dl className={styles.kvs}>
+          <Kv label="Kill switch">{view.killSwitch ? "on" : "off"}</Kv>
+          <Kv label="Book halt">
+            {formatUsd(bookDd)} / {formatUsd(BOOK_DRAWDOWN_HALT_USD)}
+            <span className={styles.hint}>drawdown from high-water mark · {bookWord}</span>
+          </Kv>
+          <Kv label="Realized">{moneyOrDash(finite(pnl?.realizedUsd), true)}</Kv>
+          <Kv label="Unrealized">{moneyOrDash(finite(pnl?.unrealizedUsd), true)}</Kv>
+          <Kv label="Fees">{moneyOrDash(finite(pnl?.feesUsd))}</Kv>
+          <Kv label="Spread + slippage">{moneyOrDash(finite(pnl?.spreadSlipUsd))}</Kv>
+          <Kv label="Arrival delay bps">{pnl?.arrivalDelayBps == null ? "—" : pnl.arrivalDelayBps.toFixed(2)}</Kv>
+          <Kv label="Fee bps">{`${pnl?.feeBps?.maker ?? "—"} / ${pnl?.feeBps?.taker ?? "—"}`}</Kv>
+          {CLASS_IDS.map((id) => {
+            const row = pnl?.classes?.[id];
+            const dd = row?.drawdownR ?? 0;
+            const cap = id === "A" || id === "B" ? 10 : 5;
+            const word = id === "A" || id === "B" ? limitWord(dd, 10, 7) : dd < 5 ? "OK" : "Over";
+            return (
+              <Kv key={id} label={`${id} drawdown R`}>
+                {dd.toFixed(2)}R / {cap}R · {word}
+                <span className={styles.hint}>
+                  cum {row?.cumR == null ? "—" : `${row.cumR.toFixed(2)}R`} · {row?.killed ? "killed" : row?.paused ? "paused" : "active"}
+                  {row?.sizingUsd == null ? "" : ` · sizing ${formatUsd(row.sizingUsd)}`}
+                </span>
+              </Kv>
+            );
+          })}
+          {CLASS_IDS.map((id) => {
+            const dd = pnl?.classes?.[id]?.drawdownR ?? 0;
+            return (
+              <Kv key={`${id}-kill`} label={`${id} kill R`}>
+                {dd.toFixed(2)} / 20R · {limitWord(dd, 20, 10)}
+              </Kv>
+            );
+          })}
+          {(["A", "B"] as const).map((id) => {
+            const usdDd = pnl?.classes?.[id]?.drawdownUsd ?? 0;
+            const cap = classCap ?? 0;
+            const word = cap > 0 ? limitWord(usdDd, cap, cap * 0.7) : "OK";
+            return (
+              <Kv key={`${id}-usd`} label={`${id} $ backstop`}>
+                {formatUsd(usdDd)} / {cap > 0 ? formatUsd(cap) : "—"} · {word}
+              </Kv>
+            );
+          })}
+        </dl>
+      </Fold>
+
+      <Fold
+        id="jev"
+        title="Jev shadow"
+        note={`Spend today ${jevUsd(jev?.todayUsd)} of ${jevUsd(jev?.capUsd)} cap · skip gate: ${jev?.skipLabel ?? "insufficient data (days 0/7, scheduled 0)"}`}
+      >
+        <dl className={styles.kvs}>
+          <Kv label="Jev spend">{jevUsd(jev?.totalUsd)}</Kv>
+          <Kv label="Jev today">{jevUsd(jev?.todayUsd)}</Kv>
+          <Kv label="Jev calls">{String(jev?.calls ?? 0)}</Kv>
+          <Kv label="Jev cap">{jevUsd(jev?.capUsd)}</Kv>
+          <Kv label="no_1m_input">{String(jev?.byReason?.no_1m_input ?? 0)}</Kv>
+          <Kv label="not_called">{String(jev?.byReason?.not_called ?? 0)}</Kv>
+          <Kv label="timeout">{String(jev?.byReason?.timeout ?? 0)}</Kv>
+          <Kv label="call_error">{String(jev?.byReason?.call_error ?? 0)}</Kv>
+          <Kv label="invalid_response">{String(jev?.byReason?.invalid_response ?? 0)}</Kv>
+          <Kv label="latency &lt;=60s">{String(jev?.latency?.le60 ?? 0)}</Kv>
+          <Kv label="latency &lt;=300s">{String(jev?.latency?.le300 ?? 0)}</Kv>
+          <Kv label="latency &lt;=600s">{String(jev?.latency?.le600 ?? 0)}</Kv>
+          <Kv label="latency late">{String(jev?.latency?.late ?? 0)}</Kv>
+          <Kv label="catch-up 7d">{String(jev?.catchUp ?? 0)}</Kv>
+          <Kv label="catch-up 7d share">{(jev?.catchUpShare ?? 0).toFixed(3)}</Kv>
+          <Kv label="catch-up 7d flag">{jev?.catchUpFlag ? "yes" : "no"}</Kv>
+          <Kv label="skip gate">{jev?.skipLabel ?? "insufficient data (days 0/7, scheduled 0)"}</Kv>
+          <Kv label="skip share 7d">{(jev?.skipShare ?? 0).toFixed(3)}</Kv>
+          <Kv label="skip days">{`${jev?.skipDays ?? 0}/7`}</Kv>
+          <Kv label="skip scheduled">{String(jev?.skipScheduled ?? 0)}</Kv>
+          <Kv label="legacy, excluded">{`${jev?.legacySkipped ?? 0} skipped / ${jev?.legacyPackets ?? 0} packets`}</Kv>
+        </dl>
+      </Fold>
+
+      <Fold
+        id="health"
+        title="Relay and health"
+        badge={{ kind: health === "Healthy" ? "ok" : "warn", text: health === "Healthy" ? "OK" : health }}
+        note={`Last run ${healthEnd != null && typeof last?.start === "number" ? `${Math.max(0, healthEnd - last.start)} ms` : "—"} · warm ${warm}/50 · gaps ${gaps24.length} in 24h · REST ${rest.n ?? 0} / 400`}
+      >
+        <dl className={styles.kvs}>
+          <Kv label="Holder">
+            {view.lease?.holder ?? "none"}
+            {view.lease ? ` until ${new Date(view.lease.untilMs).toISOString()}` : ""}
+          </Kv>
+          <Kv label="Run outcome">
+            {typeof last?.outcome === "string" ? last.outcome : "no run"}
+            {typeof last?.start === "number" && typeof last?.end === "number" ? ` · ${Math.max(0, last.end - last.start)} ms` : ""}
+          </Kv>
+          <Kv label="Warm / cold / pending">
+            {warm}/50 · cold {cold.length}
+            {cold.length > 0 ? ` [${cold.map((row) => row.id).filter(Boolean).join(",")}]` : ""} · pending {pending}
+          </Kv>
+          <Kv label="Gaps (24h)">{String(gaps24.length)}</Kv>
+          <Kv label="REST / 429">{`${rest.n ?? 0} / 400 · ${rest.r429 ?? 0}`}</Kv>
+          <Kv label="Applied">{String(Array.isArray(last?.applied) ? last.applied.length : 0)}</Kv>
+          <Kv label="Decisions">{String(last?.decisions ?? 0)}</Kv>
+          <Kv label="Fills">{String(last?.fills ?? 0)}</Kv>
+          <Kv label="Redis commands">{String(redis.cmds ?? 0)}</Kv>
+          <Kv label="Redis commands (month)">
+            {(month / 1_000_000).toFixed(2)}M / {(budget / 1_000_000).toFixed(0)}M · {projectionWord(proj)}
+          </Kv>
+          <Kv label="Max value">{String(redis.maxValueBytes ?? 0)}</Kv>
+          {view.incidents.length > 0 ? <Kv label="Incidents">{view.incidents.slice(-20).join(" · ")}</Kv> : null}
+        </dl>
+      </Fold>
+
+      <Fold id="trades" title="Recent trades and decisions" note={`Last ${Math.min(20, view.closed.length)} closed trades`}>
+        <dl className={styles.kvs}>
+          <Kv label="Decisions">{view.emitted.slice(-20).join(", ") || "—"}</Kv>
+          {view.closed.slice(-20).map((row, index) => (
+            <Kv key={`${row.productId ?? "trade"}-${index}`} label={`${row.productId ?? ""} · ${row.classId ?? ""}`}>
+              {moneyOrDash(finite(row.netUsd), true)}
+            </Kv>
+          ))}
+        </dl>
+      </Fold>
+
+      <Fold id="pairs" title="Pairs" note="Class, side, entry, stop, unrealized, realized, fees, backstop">
+        {(pnl?.pairs ?? []).length === 0 ? (
+          <p className={styles.empty}>No pairs in this run</p>
+        ) : (
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  {["Pair", "Class", "Side", "Entry", "Stop", "Unrealized", "Realized", "Fees", "Backstop"].map((label) => (
+                    <th key={label} scope="col">
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(pnl?.pairs ?? []).map((row) => (
+                  <tr key={row.productId}>
+                    <th scope="row">{row.productId}</th>
+                    <td data-label="Class">{row.classId}</td>
+                    <td data-label="Side">{row.side}</td>
+                    <td data-label="Entry">{row.entry == null ? "—" : formatUsd(row.entry)}</td>
+                    <td data-label="Stop">{row.stop == null ? "—" : formatUsd(row.stop)}</td>
+                    <td data-label="Unrealized">{moneyOrDash(row.unrealizedUsd, true)}</td>
+                    <td data-label="Realized">{moneyOrDash(row.realizedUsd, true)}</td>
+                    <td data-label="Fees">{moneyOrDash(row.feesUsd)}</td>
+                    <td data-label="Backstop">{row.latched ? "latched" : `armed ${formatUsd(row.roomUsd)}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Fold>
     </main>
+  );
+}
+
+function PositionRow({ row }: { row: PositionLine }) {
+  const unrealized = hero(row.unrealized);
+  const pctKind = row.unrealizedPct == null || row.unrealizedPct === 0 ? "flat" : row.unrealizedPct > 0 ? "pos" : "neg";
+  return (
+    <tr>
+      <th scope="row">{row.product}</th>
+      <td data-label="Entry">{formatUsd(row.fill)}</td>
+      <td data-label="Mark">
+        {formatUsd(row.mark)}
+        {row.markSrc === "entry" ? ` ${MARK_FALLBACK}` : ""}
+      </td>
+      <td data-label="Unrealized $" className={tone(unrealized.kind)}>
+        {unrealized.text}
+      </td>
+      <td data-label="Unrealized %" className={tone(pctKind)}>
+        {row.unrealizedPct == null ? "—" : signedPct(row.unrealizedPct)}
+      </td>
+      <td data-label="Distance to stop %">{row.stopDistancePct == null ? "—" : `${row.stopDistancePct.toFixed(2)}%`}</td>
+    </tr>
+  );
+}
+
+function Breakdown({ tile }: { tile: PnlTile }) {
+  const realized = hero(tile.realizedUsd);
+  const unrealized = hero(tile.unrealizedDelta);
+  const draw = tile.drawdownUsd == null ? null : -Math.abs(tile.drawdownUsd);
+  const drawHero = hero(draw);
+  return (
+    <>
+      <dl className={styles.kvs}>
+        <Kv label="Realized (closed trades)">
+          <span className={tone(realized.kind)}>{realized.text}</span>
+        </Kv>
+        <Kv label="Unrealized change (open positions)">
+          <span className={tone(unrealized.kind)}>{unrealized.text}</span>
+        </Kv>
+        <Kv label="Fees paid">
+          {moneyOrDash(tile.feesUsd)}
+          <span className={styles.hint}>already included in P/L</span>
+        </Kv>
+        <Kv label="Spread and slippage paid">
+          {moneyOrDash(tile.spreadSlipUsd)}
+          <span className={styles.hint}>already included in P/L</span>
+        </Kv>
+        <Kv label="Trades won / lost">
+          {tile.tradesUnknown ? "trades unknown" : wlText(tile.wins, tile.losses)}
+          {tile.tradesUnknown ? null : closedNote(tile.closedN) ? (
+            <span className={styles.hint}>
+              Not enough trades yet (need 30)
+              <br />
+              {closedNote(tile.closedN)}
+            </span>
+          ) : null}
+        </Kv>
+        <Kv label="Biggest trade">
+          {tile.tradesUnknown ? "trades unknown" : concentrationText(tile.concentrationPct)}
+          <span className={styles.hint}>largest trade = share of window realized</span>
+        </Kv>
+        <Kv label="hourly (may understate the intrahour low)">
+          <span className={tone(drawHero.kind)}>{tile.drawdownUsd == null ? "—" : drawdownText(tile.drawdownUsd)}</span>
+          <span className={styles.hint}>worst hourly drop in this window</span>
+        </Kv>
+      </dl>
+      <ul className={styles.notes}>
+        {tile.since ? <li>{tile.since}</li> : null}
+        {tile.anchorLabel ? <li>{tile.anchorLabel}</li> : null}
+        <li>{tile.hourNote ?? "counts complete hours only"}</li>
+      </ul>
+    </>
   );
 }

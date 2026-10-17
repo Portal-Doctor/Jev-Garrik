@@ -7,12 +7,15 @@ import { freshBook, openExitCostUsd, paperPnl, replayInjected, type Book, type F
 import { captureHot, persistSplit } from "./hot-store";
 import { startPaperHost } from "./paper-host";
 import {
+  BOOK_DRAWDOWN_AMBER_USD,
+  BOOK_DRAWDOWN_HALT_USD,
   CASH_LABEL,
   CHECKS_INCOMPLETE,
   CHECKS_SKIPPED,
   EMPTY_POSITIONS,
   ENTRY_FEE_NOTE,
   MARK_FALLBACK,
+  OPEN_RISK_NEAR_FRACTION,
   POSITION_FIELD_CAP,
   POSITION_ROW_CAP,
   POSITIONS_IDENTITY,
@@ -20,6 +23,7 @@ import {
   STABLECOIN_NOTE,
   ageText,
   formatUsd,
+  limitWord,
   positionSnapBuild,
   positionsSectionCopy,
   positionSnaps,
@@ -376,28 +380,42 @@ test("the page renders the positions footer and does not write", () => {
   expect(page.includes("copy.body")).toBe(true);
   expect(page.includes("copy.cash")).toBe(true);
   expect(page.includes("copy.check")).toBe(true);
-  expect(page.includes("copy.grey")).toBe(true);
+  expect(page.includes("copy.grey")).toBe(false);
   expect(page.includes("copy.omittedNote")).toBe(true);
   expect(page.includes("as of last run")).toBe(true);
-  expect(page.includes("copy.body ?")).toBe(true);
+  expect(page.includes("{copy.body}")).toBe(true);
   expect(page.includes("CASH_LABEL")).toBe(true);
   expect(page.includes("STABLECOIN_NOTE")).toBe(true);
   expect(page.includes("ENTRY_FEE_NOTE")).toBe(true);
   expect(page.includes("MARK_FALLBACK")).toBe(true);
-  expect(page.includes("total active investment")).toBe(true);
+  expect(page.includes("Total active investment")).toBe(true);
+  expect(page.includes("POSITIONS_IDENTITY")).toBe(true);
+  expect(POSITIONS_IDENTITY.includes("total active investment")).toBe(true);
+  expect(page.includes("cash balance")).toBe(true);
   expect(page.includes("est. exit costs")).toBe(true);
   expect(page.includes("already deducted in unrealized")).toBe(true);
-  expect(page.includes("cash balance")).toBe(true);
   expect(page.includes("= equity")).toBe(true);
-  expect(page.includes("view.riskText")).toBe(true);
+  expect(page.includes("view.riskText")).toBe(false);
+  expect(page.includes("positionView.riskUsd")).toBe(true);
+  expect(page.includes("OPEN_RISK_CAP_USD")).toBe(true);
+  expect(page.includes("BOOK_DRAWDOWN_HALT_USD")).toBe(true);
+  expect(page.includes("?? 1600")).toBe(false);
+  expect(page.includes("1200")).toBe(false);
   expect(page.includes("positionsOmitted")).toBe(true);
   expect(page.includes("positionsSkipped")).toBe(true);
-  expect(page.includes("tileMarkedGrey(tile)")).toBe(true);
+  expect(page.includes("tileMarkedGrey")).toBe(false);
   expect(page.includes("tile.since")).toBe(true);
   expect(page.includes("tile.anchorLabel")).toBe(true);
-  expect(page.split("trades unknown").length - 1).toBe(2);
+  expect(page.includes("tile.tradesUnknown")).toBe(true);
+  expect(page.split("trades unknown").length - 1).toBe(4);
   expect(page.includes("tile.hourNote")).toBe(true);
-  expect(page.includes("partial")).toBe(false);
+  expect(page.includes("Partial · since start")).toBe(true);
+  expect(page.includes("Waiting for the next run")).toBe(true);
+  expect(page.includes("More columns")).toBe(true);
+  expect(page.includes("Reconciliation")).toBe(true);
+  expect(page.includes("Distance to stop %")).toBe(true);
+  expect(page.includes("pnlTileGrey")).toBe(false);
+  expect(page.includes("pnlStale")).toBe(false);
   expect(page.includes("of max 2")).toBe(false);
   expect(page.includes("of max 3")).toBe(false);
   const viewSrc = readFileSync(new URL("./positions-view.ts", import.meta.url), "utf8");
@@ -416,6 +434,21 @@ test("the page renders the positions footer and does not write", () => {
   expect(CASH_LABEL).toBe("USD (paper, derived)");
   expect(STABLECOIN_NOTE).toBe("book holds no stablecoins");
   expect(ENTRY_FEE_NOTE).toBe("unrealized includes the entry fee");
+  expect(BOOK_DRAWDOWN_HALT_USD).toBe(Math.abs(-1600));
+  expect(BOOK_DRAWDOWN_HALT_USD).toBe(1600);
+  expect(BOOK_DRAWDOWN_AMBER_USD).toBe(800);
+  expect(OPEN_RISK_CAP_USD).toBe(480);
+  expect(OPEN_RISK_NEAR_FRACTION).toBe(0.8);
+  expect(limitWord(799, BOOK_DRAWDOWN_HALT_USD, BOOK_DRAWDOWN_AMBER_USD)).toBe("OK");
+  expect(limitWord(800, BOOK_DRAWDOWN_HALT_USD, BOOK_DRAWDOWN_AMBER_USD)).toBe("Near limit");
+  expect(limitWord(1600, BOOK_DRAWDOWN_HALT_USD, BOOK_DRAWDOWN_AMBER_USD)).toBe("Over");
+  expect(limitWord(383.99, OPEN_RISK_CAP_USD, OPEN_RISK_CAP_USD * OPEN_RISK_NEAR_FRACTION)).toBe("OK");
+  expect(limitWord(384, OPEN_RISK_CAP_USD, OPEN_RISK_CAP_USD * OPEN_RISK_NEAR_FRACTION)).toBe("Near limit");
+  expect(limitWord(480, OPEN_RISK_CAP_USD, OPEN_RISK_CAP_USD * OPEN_RISK_NEAR_FRACTION)).toBe("Over");
+  expect(page.includes("limitWord(dd, 10, 7)")).toBe(true);
+  expect(page.includes("dd < 5 ? \"OK\" : \"Over\"")).toBe(true);
+  expect(page.includes("limitWord(dd, 20, 10)")).toBe(true);
+  expect(page.includes("cap * 0.7")).toBe(true);
 });
 
 test("a one-cent gap reconciles and 1.1 cents does not, on both checks", () => {

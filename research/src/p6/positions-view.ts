@@ -12,9 +12,26 @@
  * The exit-cost line is one deduction in that tie. It is not subtracted from unrealized again.
  */
 
-import { CLUSTER_MAX_OPEN, OPEN_RISK_CAP_USD } from "../p3/design-rules";
+import { BOOK_HALT_USD, CLUSTER_MAX_OPEN, OPEN_RISK_CAP_USD } from "../p3/design-rules";
 import { markedPnl, openExitCostUsd, type Book } from "./engine";
 import { endIsStale, PNL_START_USD, signedUsd } from "./pnl-block";
+
+export { BOOK_HALT_USD, OPEN_RISK_CAP_USD };
+
+/** Book halt the page shows. The engine stores this same absolute value on pnl.book.haltUsd. */
+export const BOOK_DRAWDOWN_HALT_USD = Math.abs(BOOK_HALT_USD);
+/** Amber drawdown. Half the halt, which is the line the page already used. */
+export const BOOK_DRAWDOWN_AMBER_USD = BOOK_DRAWDOWN_HALT_USD * 0.5;
+/** Open-risk Near limit. Drawdown does not use this fraction. */
+export const OPEN_RISK_NEAR_FRACTION = 0.8;
+
+/** OK below nearAt, Near limit until the limit, Over at the limit. */
+export function limitWord(used: number, limit: number, nearAt: number): "OK" | "Near limit" | "Over" {
+  if (!(limit > 0) || !Number.isFinite(used)) return "OK";
+  if (used >= limit) return "Over";
+  if (used >= nearAt) return "Near limit";
+  return "OK";
+}
 
 export const POSITIONS_IDENTITY =
   "equity = cash + total active investment - est. exit costs; cash = start + realized - sum(cost basis); cost basis = qty * fill + entry fee; active = sum(qty * mark); est. exit costs = sum(notional * (taker + live slippage) / 10000), already inside row unrealized";
