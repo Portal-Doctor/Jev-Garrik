@@ -6,6 +6,7 @@
 
 import { GAP_MAX_MS, gapWeekReport, handoverCause, type VolHour } from "./amendment-v6";
 import { SAVE_HEARTBEAT_MS, type PaperStateBody } from "./paper-host";
+import { decodeStored, encodeStored, redisFlushPayload } from "./redis-gzip";
 
 export { SAVE_HEARTBEAT_MS };
 
@@ -54,6 +55,25 @@ export interface Kv {
   readLists(keys: string[]): Promise<string[][]>;
 }
 
+interface MemoryStore {
+  live: (key: string) => { value: string } | null;
+  plant: (key: string, stored: string) => void;
+}
+
+const memoryStores = new WeakMap<Kv, MemoryStore>();
+
+/** Raw stored bytes, including a gz1: value. Null when this Kv is not the memory store. */
+export function peekStored(kv: Kv, key: string): string | null {
+  return memoryStores.get(kv)?.live(key)?.value ?? null;
+}
+
+/** Write stored bytes without encoding. Used to plant legacy JSON and a bad gzip. */
+export function plantStored(kv: Kv, key: string, stored: string): void {
+  const store = memoryStores.get(kv);
+  if (!store) throw new Error("plantStored needs the memory kv");
+  store.plant(key, stored);
+}
+
 export function memoryKv(clock: () => number = Date.now): Kv {
   const rows = new Map<string, { value: string; expiresAt: number | null }>();
   const live = (key: string, now = clock()) => {
@@ -67,12 +87,12 @@ export function memoryKv(clock: () => number = Date.now): Kv {
   };
   const kv: Kv = {
     async get(key) {
-      return live(key)?.value ?? null;
+      return decodeStored(key, live(key)?.value ?? null);
     },
     async set(key, value, opts) {
       const current = live(key);
       if (opts?.nx && current) return false;
-      rows.set(key, { value, expiresAt: opts?.px != null ? clock() + opts.px : null });
+      rows.set(key, { value: encodeStored(key, value), expiresAt: opts?.px != null ? clock() + opts.px : null });
       return true;
     },
     async del(key) {
@@ -89,7 +109,7 @@ export function memoryKv(clock: () => number = Date.now): Kv {
       const lease = decodeLease(live(leaseKey)?.value ?? null);
       if (!lease || lease.token !== token || lease.release !== "none") return false;
       if (Buffer.byteLength(value) > VALUE_MAX_BYTES) return false;
-      rows.set(key, { value, expiresAt: opts?.px != null ? clock() + opts.px : null });
+      rows.set(key, { value: encodeStored(key, value), expiresAt: opts?.px != null ? clock() + opts.px : null });
       return true;
     },
     async ownedAppend(leaseKey, token, key, member, opts) {
@@ -114,12 +134,18 @@ export function memoryKv(clock: () => number = Date.now): Kv {
       return applyMemoryFlush(rows, clock, leaseKey, token, nowMs, payload);
     },
     async mget(keys) {
-      return Promise.all(keys.map(async (key) => live(key)?.value ?? null));
+      return keys.map((key) => decodeStored(key, live(key)?.value ?? null));
     },
     async readLists(keys) {
       return keys.map((key) => listItems(live(key)?.value ?? null));
     },
   };
+  memoryStores.set(kv, {
+    live: (key) => live(key),
+    plant: (key, stored) => {
+      rows.set(key, { value: stored, expiresAt: null });
+    },
+  });
   return kv;
 }
 
@@ -183,7 +209,7 @@ export function applyMemoryFlush(
   const exp = clock() + ttl;
   rows.set(leaseKey, { value: next, expiresAt: exp });
   rows.set(LEASE_META_KEY, { value: next, expiresAt: null });
-  if (body.hot) rows.set(HOT_KEY, { value: body.hot, expiresAt: null });
+  if (body.hot) rows.set(HOT_KEY, { value: encodeStored(HOT_KEY, body.hot), expiresAt: null });
   for (const tape of body.tapes ?? []) rows.set(tape.key, { value: tape.value, expiresAt: clock() + tape.px });
   for (const [key, row] of staged) rows.set(key, { value: row.value, expiresAt: row.px > 0 ? clock() + row.px : null });
   for (const mark of body.marks ?? []) {
@@ -197,7 +223,7 @@ export function applyMemoryFlush(
   }
   for (const row of body.extra ?? []) {
     if (row.nx && rows.get(row.key)) continue;
-    rows.set(row.key, { value: row.value, expiresAt: row.px != null && row.px > 0 ? clock() + row.px : null });
+    rows.set(row.key, { value: encodeStored(row.key, row.value), expiresAt: row.px != null && row.px > 0 ? clock() + row.px : null });
   }
   return 1;
 }
@@ -297,7 +323,7 @@ export async function saveState(kv: Kv, body: PaperStateBody, opts?: { writeWarm
 }
 
 export async function loadState(kv: Kv): Promise<PaperStateBody | null> {
-  const raw = await kv.get(HOT_KEY);
+  const raw = decodeStored(HOT_KEY, await kv.get(HOT_KEY));
   if (!raw) return null;
   const body = JSON.parse(raw) as PaperStateBody;
   if (!body.warmup) {
@@ -1097,10 +1123,10 @@ export function redisKvFromUrl(url: string): Kv {
   const asString = (reply: RedisReply): string | null => (typeof reply === "string" ? reply : null);
   return {
     async get(key) {
-      return asString(await send(["GET", key]));
+      return decodeStored(key, asString(await send(["GET", key])));
     },
     async set(key, value, opts) {
-      const parts = ["SET", key, value];
+      const parts = ["SET", key, encodeStored(key, value)];
       if (opts?.nx) parts.push("NX");
       if (opts?.px != null) parts.push("PX", String(opts.px));
       const reply = await send(parts);
@@ -1114,7 +1140,7 @@ export function redisKvFromUrl(url: string): Kv {
       return reply === "1";
     },
     async ownedSet(leaseKey, token, key, value, opts) {
-      const reply = await send(["EVAL", OWNED_SET_LUA, "2", leaseKey, key, token, value, String(opts?.px ?? 0)]);
+      const reply = await send(["EVAL", OWNED_SET_LUA, "2", leaseKey, key, token, encodeStored(key, value), String(opts?.px ?? 0)]);
       return reply === "1";
     },
     async ownedAppend(leaseKey, token, key, member, opts) {
@@ -1135,7 +1161,7 @@ export function redisKvFromUrl(url: string): Kv {
       return code === 1 || code === 2 || code === 3 ? code : 0;
     },
     async ownedFlush(leaseKey, token, nowMs, payload) {
-      const reply = await send(["EVAL", FLUSH_LUA, "1", leaseKey, token, payload, String(nowMs)]);
+      const reply = await send(["EVAL", FLUSH_LUA, "1", leaseKey, token, redisFlushPayload(payload, VALUE_MAX_BYTES), String(nowMs)]);
       const code = Number(reply);
       return code === 1 || code === 3 ? code : 0;
     },
@@ -1143,7 +1169,7 @@ export function redisKvFromUrl(url: string): Kv {
       if (keys.length === 0) return [];
       const reply = await send(["MGET", ...keys]);
       if (!Array.isArray(reply)) return keys.map(() => null);
-      return reply.map((item) => (typeof item === "string" ? item : null));
+      return reply.map((item, index) => decodeStored(keys[index] ?? "", typeof item === "string" ? item : null));
     },
     async readLists(keys) {
       if (keys.length === 0) return [];

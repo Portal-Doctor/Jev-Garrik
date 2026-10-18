@@ -23,6 +23,7 @@ import {
   type PaperStateBody,
   retainDailyCloses,
 } from "./paper-host";
+import { decodeStored } from "./redis-gzip";
 import { barMarker, HOT_KEY, LEASE_KEY, VALUE_MAX_BYTES, type Kv } from "./relay";
 
 /** One record per flush. The dashboard reads this and does not recompute P/L. */
@@ -75,7 +76,10 @@ function acctDayOk(day: string, nowMs: number): boolean {
   return true;
 }
 
-/** Heartbeat payload cap. Over this, Jev fields are shed and the book is still written. */
+/**
+ * Heartbeat payload cap. Over this, Jev fields are shed and the book is still written.
+ * This is the JSON size. The Kv stores gzip after the check. A smaller gzip does not raise the cap.
+ */
 export const HOT_MAX_BYTES = 256 * 1024;
 /**
  * Sparse keySeq JSON cap. Two copies of the mutable plan (this UTC day and the
@@ -372,6 +376,7 @@ function jevShed(host: PaperHost, shed: { answers: boolean; minutes: boolean; do
 export function hotSnapshot(host: PaperHost): string {
   const shed = { answers: false, minutes: false, done: false, first: false };
   let json = JSON.stringify(jevShed(host, shed));
+  // Uncompressed JSON. The stored gzip is not this cap.
   let bytes = Buffer.byteLength(json);
   if (bytes >= HOT_WARN_BYTES && !host.book.incidents.some((row) => row.includes("75% of 256 KB"))) {
     host.book.incidents.push(`hot ${bytes} bytes at 75% of 256 KB`);
@@ -1137,10 +1142,12 @@ interface HotClass {
 
 function classifyHot(raw: string | null): HotClass {
   const none = (): HotClass => ({ kind: "none", era: "", seq: 0, base: null, keySeq: new Map() });
-  if (!raw) return none();
+  // Kv.get already gunzipped a gz1: value. This second call is a prefix check unless the bytes are still stored form.
+  const json = decodeStored(HOT_KEY, raw);
+  if (!json) return none();
   let body: unknown;
   try {
-    body = JSON.parse(raw);
+    body = JSON.parse(json);
   } catch {
     return none();
   }
@@ -1291,6 +1298,7 @@ function stampFlush(host: PaperHost, payload: string): HotStamp {
     }
     body.hot = JSON.stringify(hot);
     const nextPayload = JSON.stringify(body);
+    // Uncompressed JSON. Gzip runs at the Kv and does not change this cap.
     if (Buffer.byteLength(body.hot) > HOT_MAX_BYTES) return null;
     if (Buffer.byteLength(nextPayload) > VALUE_MAX_BYTES) return null;
     if (payloadTooBig({ payload: nextPayload, bytes: Buffer.byteLength(nextPayload), marks: [], minutes: [] })) return null;
@@ -1327,10 +1335,11 @@ async function publishUnsequencedHot(kv: Kv, host: PaperHost): Promise<void> {
     raw = await kv.get(HOT_KEY);
     noteReadBytes(host, raw);
   }
-  if (!raw) return;
+  const text = decodeStored(HOT_KEY, raw);
+  if (!text) return;
   let hot: HotBody;
   try {
-    hot = JSON.parse(raw) as HotBody;
+    hot = JSON.parse(text) as HotBody;
   } catch {
     return;
   }
@@ -1539,7 +1548,7 @@ function rememberSplit(host: PaperHost, byKey: Map<string, string | null>, rings
 }
 
 function assembleSplit(host: PaperHost, byKey: Map<string, string | null>, ringsByKey: Map<string, string[]>, plan: SplitPlan): PaperStateBody | null {
-  const raw = byKey.get(HOT_KEY) ?? null;
+  const raw = decodeStored(HOT_KEY, byKey.get(HOT_KEY) ?? null);
   if (!raw) return null;
   const hot = JSON.parse(raw) as HotBody;
   const { seq, keySeq, era, base, keyEra, ...book } = hot;
@@ -1633,7 +1642,7 @@ function assembleSplit(host: PaperHost, byKey: Map<string, string | null>, rings
       host.seedMarks.set(productId, mark);
       if (mark.status === "cold") host.cold.add(productId);
     }
-    const lastRaw = byKey.get(LAST_RUN_KEY) ?? null;
+    const lastRaw = decodeStored(LAST_RUN_KEY, byKey.get(LAST_RUN_KEY) ?? null);
     if (lastRaw) {
       const prev = JSON.parse(lastRaw) as { outcome?: string; end?: number; redis?: { cmds?: number }; completed?: { end: number; cmds: number; outcome: string } | null };
       if (prev.outcome && prev.outcome !== "running") {
@@ -1708,6 +1717,7 @@ export async function reloadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBo
   if (host.redisSeq == null || host.redisKeySeq == null || host.redisRaw == null || host.redisRings == null) {
     return loadSplit(kv, host);
   }
+  // seq and era are read from the gunzipped JSON. A corrupt gzip is null here and takes the full load below.
   const tokenRaw = await kv.get(HOT_KEY);
   noteReadBytes(host, tokenRaw);
   const token = parseHotSeq(tokenRaw);

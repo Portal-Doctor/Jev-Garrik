@@ -5,6 +5,7 @@
 
 import type { SourceDay } from "../p3/bar-access";
 import { loadSplit, noteReadBytes, persistSplit, reloadSplit, warmReadyCount, warmupKey } from "./hot-store";
+import { decodeStored } from "./redis-gzip";
 import { acceptRestBar, applyRestCold, attachMemberCloses, attachRestLease, backfillTapeIfNeeded, catchUpHistory, coldResetEnabled, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, seedRetryList, stageColdReset, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
 import { createRestRun, restLogLine } from "./rest-limit";
 import type { OhlcvBar } from "./rest-bars";
@@ -277,7 +278,7 @@ async function loadWarmup(kv: Kv, host: PaperHost): Promise<void> {
 }
 
 export async function loadDashboard(kv: Kv): Promise<Dashboard> {
-  const raw = await kv.get(HOT_KEY);
+  const raw = decodeStored(HOT_KEY, await kv.get(HOT_KEY));
   const lease = decodeLease(await kv.get(LEASE_KEY));
   const body = raw
     ? (JSON.parse(raw) as {

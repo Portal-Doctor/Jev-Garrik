@@ -269,7 +269,7 @@ export interface PaperHost {
   saveCommands: number;
   /** Payload bytes of those commands. */
   saveBytes: number;
-  /** Payload bytes read back from Redis by the history load and the reload. */
+  /** Payload bytes read back from Redis by the history load and the reload. Counts the JSON after a gz1: value is gunzipped. */
   readBytes: number;
   /** Appends sent for a row that was already stored. The target is 0. */
   duplicateAppends: number;
@@ -290,7 +290,7 @@ export interface PaperHost {
   redisPoison: boolean;
   /** The next published sequence starts a new era and an empty key map. */
   redisFreshEra: boolean;
-  /** Last hot string this process wrote or loaded. A grouped flush strips this instead of reading Redis. */
+  /** Last hot JSON this process wrote or loaded. Not the gz1: Redis bytes. A grouped flush strips this instead of reading Redis. */
   redisHotRaw: string | null;
   /** Times a poisoned sequence was refused. Printed on the redis log line. Not a gate. */
   seqInvalid: number;

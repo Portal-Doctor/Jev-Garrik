@@ -6,6 +6,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { connect as connectNet, isIP } from "node:net";
 import { connect as connectTls } from "node:tls";
+import { decodeStored } from "./redis-gzip";
 import type { Kv } from "./relay";
 import { commandBudget, healthStale, monthCommands, nextCronMs, projectionTone } from "./dashboard-format";
 import {
@@ -231,8 +232,9 @@ function leaseOf(raw: string | null): DashboardLease | null {
 /** One mget of lastRun, hot, and the lease. No INFO and no writes. */
 export async function readP6Dashboard(kv: Pick<Kv, "mget">): Promise<DashboardView> {
   const values = await kv.mget([LAST_RUN_KEY, HOT_KEY, LEASE_KEY]);
-  const lastRaw = values[0] ?? null;
-  const hotRaw = values[1] ?? null;
+  // Legacy JSON passes through. A bad gzip is null, so the page does not throw.
+  const lastRaw = decodeStored(LAST_RUN_KEY, values[0] ?? null);
+  const hotRaw = decodeStored(HOT_KEY, values[1] ?? null);
   const leaseRaw = values[2] ?? null;
   const hot = hotRaw ? (JSON.parse(hotRaw) as Record<string, unknown>) : {};
   const incidents = Array.isArray(hot.incidents) ? hot.incidents.filter((row): row is string => typeof row === "string").map(stripUrls) : [];
