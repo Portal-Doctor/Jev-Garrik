@@ -15,6 +15,8 @@ import {
   LEDGER_KEY,
   loadSplit,
   persistSplit,
+  reloadSplit,
+  SEQ_MAP_MAX_BYTES,
   ringKey,
   tapeKey,
   writeThroughBook,
@@ -183,7 +185,7 @@ test("readBytes counts redis payload bytes on the history load", async () => {
   host.saveBytes = 9;
   host.duplicateAppends = 1;
   expect(redisLogLine(host)).toBe(
-    `redis cmds=4, bytes=9, readBytes=${Buffer.byteLength(hot) + Buffer.byteLength(four)}, duplicates=1, seqInvalid=0`,
+    `redis cmds=4, bytes=9, readBytes=${Buffer.byteLength(hot) + Buffer.byteLength(four)}, duplicates=1, seqInvalid=0, seqOverflow=0`,
   );
 });
 
@@ -323,11 +325,12 @@ test("a sequence change between the token and the data reloads instead of mixing
       torn = true;
       const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as {
         seq: number;
-        keySeq: Record<string, number>;
+        keySeq?: Record<string, number>;
         realizedUsd: number;
       };
       hot.seq += 1;
       hot.realizedUsd = 777;
+      hot.keySeq = hot.keySeq ?? {};
       hot.keySeq[bar4hKey("BTC-USD")] = hot.seq;
       await kv.set(HOT_KEY, JSON.stringify(hot));
       const fours = JSON.parse((await kv.get(bar4hKey("BTC-USD"))) ?? "[]") as { ts: number }[];
@@ -370,8 +373,9 @@ test("a restarted sequence does not reuse bars warmed at seq N", async () => {
   const kv = memoryKv(clock);
   await seedBook(kv);
   const n = 4;
-  const warmed = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; keySeq?: Record<string, number> };
+  const warmed = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; base?: number; keySeq?: Record<string, number> };
   warmed.seq = n;
+  warmed.base = n;
   for (const key of Object.keys(warmed.keySeq ?? {})) warmed.keySeq![key] = n;
   await kv.set(HOT_KEY, JSON.stringify(warmed));
   const host = startPaperHost(PRODUCTS, {});
@@ -379,9 +383,10 @@ test("a restarted sequence does not reuse bars warmed at seq N", async () => {
   const holder = hostHolder(host, kv, [], "standby");
   await holder.warm();
   expect(host.redisSeq).toBe(n);
-  const stripped = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; keySeq?: unknown };
+  const stripped = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; keySeq?: unknown; base?: unknown };
   delete stripped.seq;
   delete stripped.keySeq;
+  delete stripped.base;
   await kv.set(HOT_KEY, JSON.stringify(stripped));
   const fresh = startPaperHost(PRODUCTS, {});
   fresh.clock = clock;
@@ -472,19 +477,21 @@ test("prod-sized hot with keySeq stays under 256 KB and a steady flush is not gr
   const firstPayload = payloads[payloads.length - 1] ?? 0;
   const stored = await kv.get(HOT_KEY);
   if (!stored) throw new Error("hot");
-  const parsed = JSON.parse(stored) as { era?: string; seq?: number; keySeq?: Record<string, number> };
+  const parsed = JSON.parse(stored) as { era?: string; seq?: number; base?: number; keySeq?: Record<string, number> };
   const keySeq = parsed.keySeq ?? {};
-  const rest = { ...parsed } as { seq?: number; keySeq?: unknown; era?: unknown; keyEra?: unknown };
+  const rest = { ...parsed } as { seq?: number; base?: unknown; keySeq?: unknown; era?: unknown; keyEra?: unknown };
   delete rest.seq;
+  delete rest.base;
   delete rest.keySeq;
   delete rest.era;
   delete rest.keyEra;
   const hotBefore = Buffer.byteLength(JSON.stringify(rest));
   const hotAfter = Buffer.byteLength(stored);
   expect(parsed.era).toMatch(/^[0-9a-f]{16}$/);
+  expect(parsed.base).toBe(parsed.seq);
   expect(hotAfter).toBeLessThan(64 * 1024);
   expect(hotAfter).toBeLessThan(HOT_MAX_BYTES);
-  expect(Object.keys(keySeq).length).toBeGreaterThan(names.length);
+  expect(Object.keys(keySeq).length).toBe(0);
   barSets = 0;
   const steady: number[] = [];
   for (let i = 0; i < 3; i += 1) {
@@ -537,9 +544,41 @@ test("prod-sized hot with keySeq stays under 256 KB and a steady flush is not gr
   await persistSplit(kv, host);
   countGets = false;
   expect(host.saveBytes - saveBefore).toBe(accounted);
+  const groupedStrips = stripSets - stripBefore;
+  const groupedStripBytes = stripBytes - stripBytesBefore;
+  let heartbeatSum = 0;
+  const heartbeatPayloads: number[] = [];
+  for (let i = 0; i < 27; i += 1) {
+    host.book.realizedUsd = 200 + i;
+    const before = payloads.length;
+    await persistSplit(kv, host);
+    const bytes = payloads[before] ?? 0;
+    heartbeatPayloads.push(bytes);
+    heartbeatSum += bytes;
+  }
+  const successor = startPaperHost(names, {});
+  successor.clock = clock;
+  successor.warmupStored = true;
+  successor.leaseToken = lease.token;
+  successor.holderId = "holder";
+  const taken = await loadSplit(kv, successor);
+  if (!taken) throw new Error("takeover load");
+  installPaperState(successor, taken);
+  successor.book.realizedUsd = 900;
+  const beforeTake = payloads.length;
+  await persistSplit(kv, successor);
+  const takeoverFlush = payloads[beforeTake] ?? 0;
+  const status = readFileSync("/proc/self/status", "utf8");
+  const hwm = Number(status.match(/VmHWM:\s+(\d+)/)?.[1] ?? 0);
   console.log(
-    `t1 prod asOf=${latest?.date} products=${names.length} hotBefore=${hotBefore} hotAfter=${hotAfter} keySeqKeys=${Object.keys(keySeq).length} firstBarSets=${firstBarSets} firstPayload=${firstPayload} steadyStripSets=${steadyStrip} steadyPayloads=${steady.join(",")} barPayload=${barPayload} steadyBarSets=${steadyGrouped} againBarSets=${barSets - barsBefore} againStripSets=${stripSets - stripBefore} againStripBytes=${stripBytes - stripBytesBefore} againHotGets=${hotGets} againHotGetBytes=${hotGetBytes}`,
+    `t1 prod asOf=${latest?.date} products=${names.length} hotBefore=${hotBefore} hotAfter=${hotAfter} keySeqKeys=${Object.keys(keySeq).length} firstBarSets=${firstBarSets} firstPayload=${firstPayload} steadyStripSets=${steadyStrip} steadyPayloads=${steady.join(",")} barPayload=${barPayload} steadyBarSets=${steadyGrouped} againBarSets=${barSets - barsBefore} againStripSets=${groupedStrips} againStripBytes=${groupedStripBytes} againHotGets=${hotGets} againHotGetBytes=${hotGetBytes} heartbeat27=${heartbeatSum} heartbeatEach=${heartbeatPayloads[0] ?? 0} takeoverFlush=${takeoverFlush} VmHWM_kB=${hwm}`,
   );
+  expect(hotAfter).toBeLessThan(8_000);
+  expect(heartbeatSum).toBeLessThan(250_000);
+  for (const bytes of heartbeatPayloads) expect(bytes).toBeLessThan(12_000);
+  expect(takeoverFlush).toBeGreaterThan(0);
+  expect(takeoverFlush).toBeLessThan(16_000);
+  expect(hwm).toBeLessThan(1024 * 1024);
   expect(hotAfter).toBeLessThan(HOT_MAX_BYTES);
   expect(firstBarSets).toBeGreaterThan(0);
   expect(firstPayload).toBeLessThan(1_048_576);
@@ -547,8 +586,8 @@ test("prod-sized hot with keySeq stays under 256 KB and a steady flush is not gr
   expect(steadyStrip).toBe(0);
   for (const bytes of steady) expect(bytes).toBeLessThan(1_048_576);
   expect(barPayload).toBeLessThan(1_048_576);
-  expect(stripSets - stripBefore).toBe(1);
-}, 30_000);
+  expect(groupedStrips).toBe(1);
+}, 60_000);
 
 test("takeover switch time stays under a second and is no worse than a full reload", async () => {
   const neu = await takeover("new");
@@ -722,9 +761,10 @@ test("a standby takeover reuses keys the previous holder stamped and does no ful
     keyEra?: Record<string, string>;
   };
   expect(published.era).toMatch(/^[0-9a-f]{16}$/);
-  expect(published.era).not.toBe(warmedEra);
-  expect(published.keyEra?.[bar4hKey("ETH-USD")]).toBe(warmedEra);
-  expect(published.keySeq?.[bar4hKey("ETH-USD")]).toBe(ethSeq);
+  expect(published.era).toBe(warmedEra);
+  expect(published.keyEra).toBeUndefined();
+  const publishedBase = (published as { base?: number }).base;
+  expect(published.keySeq?.[bar4hKey("ETH-USD")] ?? publishedBase).toBe(ethSeq);
   expect(published.keySeq?.[bar4hKey("BTC-USD")]).toBe(published.seq);
   const watch = watchMget(kv);
   await holder.reload();
@@ -752,6 +792,7 @@ async function behindClock(strip: "seq" | "hot" | "all", seconds: number[]): Pro
     const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as Record<string, unknown>;
     delete hot.seq;
     delete hot.keySeq;
+    delete hot.base;
     await kv.set(HOT_KEY, JSON.stringify(hot));
   } else if (strip === "hot") await kv.del(HOT_KEY);
   else await wipeBook(kv);
@@ -772,10 +813,11 @@ async function behindClock(strip: "seq" | "hot" | "all", seconds: number[]): Pro
   const published = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as {
     era?: string;
     seq?: number;
+    base?: number;
     keySeq?: Record<string, number>;
   };
   expect(published.seq).toBe(warmedSeq);
-  expect(published.keySeq?.[bar4hKey("BTC-USD")]).toBe(warmedBarSeq);
+  expect(published.keySeq?.[bar4hKey("BTC-USD")] ?? published.base).toBe(warmedBarSeq);
   expect(published.era).toMatch(/^[0-9a-f]{16}$/);
   expect(published.era).not.toBe(warmedEra);
   const at = () => seconds[seconds.length - 1]! * 1000 + 1000;
@@ -809,7 +851,7 @@ const POISON: { name: string; patch: (hot: { seq?: number; keySeq?: Record<strin
   { name: "MAX_SAFE", patch: (hot) => { hot.seq = Number.MAX_SAFE_INTEGER; } },
   { name: "keySeq lastRun", patch: (hot) => { hot.keySeq![LAST_RUN_KEY] = (hot.seq ?? 0) + 1_000_000; } },
   { name: "keySeq bar4h", patch: (hot) => { hot.keySeq![bar4hKey("BTC-USD")] = (hot.seq ?? 0) + 1_000_000; } },
-  { name: "keySeq 1e12", patch: (hot) => { hot.seq = 3; for (const key of Object.keys(hot.keySeq ?? {})) hot.keySeq![key] = 1e12; } },
+  { name: "keySeq 1e12", patch: (hot) => { hot.seq = 3; hot.keySeq = hot.keySeq ?? {}; for (const key of Object.keys(hot.keySeq)) hot.keySeq[key] = 1e12; } },
 ];
 
 for (const poison of POISON) {
@@ -817,6 +859,7 @@ for (const poison of POISON) {
     const kv = memoryKv(clock);
     await seedBook(kv);
     const stored = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; keySeq?: Record<string, number> };
+    if (!stored.keySeq || Object.keys(stored.keySeq).length === 0) stored.keySeq = { [LAST_RUN_KEY]: stored.seq ?? 1 };
     poison.patch(stored);
     await kv.set(HOT_KEY, JSON.stringify(stored));
     const host = startPaperHost(PRODUCTS, {});
@@ -846,10 +889,13 @@ for (const poison of POISON) {
     host.fourBars.set("BTC-USD", more);
     host.book.realizedUsd = 88;
     await persistSplit(kv, host);
-    const second = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { era?: string; seq?: number; realizedUsd?: number };
+    const second = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { era?: string; seq?: number; realizedUsd?: number; incidents?: string[] };
     expect(second.realizedUsd).toBe(88);
     expect(second.era).toMatch(/^[0-9a-f]{16}$/);
     expect(typeof second.seq).toBe("number");
+    expect(second.incidents ?? []).not.toContain("seq invalid");
+    expect(host.book.incidents).not.toContain("seq invalid");
+    expect(host.seqInvalid).toBe(1);
     const writtenB = JSON.parse((await kv.get(bar4hKey("BTC-USD"))) ?? "[]") as { ts: number }[];
     expect(writtenB.some((bar) => bar.ts === barA)).toBe(true);
     expect(writtenB.some((bar) => bar.ts === barB)).toBe(true);
@@ -870,7 +916,8 @@ test("three invocations still save the book when the stored sequence is poisoned
   let t = NOW;
   const kv = memoryKv(() => t);
   await seedBook(kv);
-  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq: number; keySeq: Record<string, number> };
+  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq: number; keySeq?: Record<string, number> };
+  hot.keySeq = hot.keySeq ?? {};
   hot.keySeq[LAST_RUN_KEY] = hot.seq + 1_000_000;
   await kv.set(HOT_KEY, JSON.stringify(hot));
   const lines: string[] = [];
@@ -909,7 +956,7 @@ test("three invocations still save the book when the stored sequence is poisoned
   expect(lines[0]).toContain("seqInvalid=1");
   const last = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { realizedUsd?: number; incidents?: string[]; era?: string; seq?: number };
   expect(last.realizedUsd).toBe(6);
-  expect(last.incidents).toContain("seq invalid");
+  expect(last.incidents ?? []).not.toContain("seq invalid");
   expect(last.era).toMatch(/^[0-9a-f]{16}$/);
   expect(typeof last.seq).toBe("number");
 });
@@ -1061,9 +1108,10 @@ test("a backwards token sequence forces a full reload", async () => {
     editor.book.realizedUsd = 8;
   });
   const { standby, holder } = await warmStandby(kv);
-  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { era?: string; seq: number; keySeq: Record<string, number> };
+  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { era?: string; seq: number; base?: number; keySeq?: Record<string, number> };
   const barKey = bar4hKey("BTC-USD");
-  const barSeq = hot.keySeq[barKey];
+  hot.keySeq = hot.keySeq ?? {};
+  const barSeq = hot.keySeq[barKey] ?? hot.base;
   if (barSeq == null || !(barSeq < hot.seq) || standby.redisSeq !== hot.seq) throw new Error("seq setup");
   const added = TODAY - 770 * 14_400;
   const rows = JSON.parse((await kv.get(barKey)) ?? "[]") as ReturnType<typeof ohlc>[];
@@ -1101,25 +1149,30 @@ test("a token with no sequence after warm is loaded in full", async () => {
   expect(snap(standby)).toEqual(snap(await twinOf(kv)));
 });
 
-test("a key omitted from a same-era map is reloaded", async () => {
+test("a same-era sequence change reloads that key", async () => {
   const kv = memoryKv(clock);
   await seedBook(kv);
   const { standby, holder } = await warmStandby(kv);
   const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as {
     seq: number;
     era: string;
-    keySeq: Record<string, number>;
-    keyEra?: Record<string, string>;
+    base?: number;
+    keySeq?: Record<string, number>;
   };
   const ethKey = bar4hKey("ETH-USD");
-  delete hot.keySeq[ethKey];
-  if (hot.keyEra) delete hot.keyEra[ethKey];
+  const cached = standby.redisKeySeq?.get(ethKey);
+  if (cached == null || cached < 2 || standby.redisSeenEra !== hot.era) throw new Error("same-era setup");
+  hot.keySeq = { ...(hot.keySeq ?? {}), [ethKey]: cached - 1 };
   await kv.set(HOT_KEY, JSON.stringify(hot));
   const ethTs = TODAY - 730 * 14_400;
   const eth = JSON.parse((await kv.get(ethKey)) ?? "[]") as ReturnType<typeof ohlc>[];
   eth.push({ ...ohlc(ethTs), close: 44 });
   await kv.set(ethKey, JSON.stringify(eth));
+  const watch = watchMget(kv);
   await holder.reload();
+  watch.restore();
+  expect(watch.full()).toBe(0);
+  expect(watch.calls.flat()).toContain(ethKey);
   expect(standby.fourBars.get("ETH-USD")?.some((bar) => bar.ts === ethTs && bar.close === 44)).toBe(true);
   expect(snap(standby)).toEqual(snap(await twinOf(kv)));
 });
@@ -1152,3 +1205,324 @@ test("a partial map published after an unsequenced hot does not skip the keys it
   expect(standby.fourBars.get("BTC-USD")?.some((bar) => bar.ts === btcTs && bar.close === 17)).toBe(true);
   expect(snap(standby)).toEqual(snap(await twinOf(kv)));
 });
+
+test("chained standbys keep the sequence a second reload just read", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const standby = startPaperHost(PRODUCTS, {});
+  standby.clock = clock;
+  const warmed = await loadSplit(kv, standby);
+  if (!warmed) throw new Error("warm");
+  installPaperState(standby, warmed);
+  const warmSeq = standby.redisSeq;
+  const btcTs = TODAY - 720 * 14_400;
+  await saveSinceWarm(kv, clock, (editor) => {
+    const rows = editor.fourBars.get("BTC-USD") ?? [];
+    rows.push({ ...ohlc(btcTs), close: 11 });
+    editor.fourBars.set("BTC-USD", rows);
+    editor.book.realizedUsd = 31;
+  });
+  const first = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number };
+  const firstSeq = first.seq;
+  if (firstSeq == null) throw new Error("seq");
+  const body = await reloadSplit(kv, standby);
+  if (!body) throw new Error("reload");
+  installPaperState(standby, body);
+  expect(standby.redisSeq).toBe(firstSeq);
+  expect(standby.redisSeq).not.toBe(warmSeq);
+  const ethTs = TODAY - 710 * 14_400;
+  await saveSinceWarm(kv, clock, (editor) => {
+    const rows = editor.fourBars.get("ETH-USD") ?? [];
+    rows.push({ ...ohlc(ethTs), close: 12 });
+    editor.fourBars.set("ETH-USD", rows);
+    editor.book.realizedUsd = 32;
+  });
+  const second = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number };
+  const secondSeq = second.seq;
+  if (secondSeq == null) throw new Error("seq");
+  const again = await reloadSplit(kv, standby);
+  if (!again) throw new Error("second reload");
+  installPaperState(standby, again);
+  expect(standby.redisSeq).toBe(secondSeq);
+  expect(standby.redisSeq).not.toBe(firstSeq);
+  expect(standby.fourBars.get("BTC-USD")?.some((bar) => bar.ts === btcTs && bar.close === 11)).toBe(true);
+  expect(standby.fourBars.get("ETH-USD")?.some((bar) => bar.ts === ethTs && bar.close === 12)).toBe(true);
+  expect(snap(standby)).toEqual(snap(await twinOf(kv)));
+});
+
+test("a moved acct marker is reloaded", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const { standby, holder } = await warmStandby(kv);
+  expect(standby.book.acctFromDay).toBe("2026-10-13");
+  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq: number; base?: number; keySeq?: Record<string, number> };
+  const cached = standby.redisKeySeq?.get(ACCT_KEY);
+  if (cached == null || cached < 2) throw new Error("acct seq");
+  hot.keySeq = { ...(hot.keySeq ?? {}), [ACCT_KEY]: cached - 1 };
+  await kv.set(HOT_KEY, JSON.stringify(hot));
+  await kv.set(ACCT_KEY, JSON.stringify({ rev: 2, fromDay: "2026-10-01" }));
+  await holder.reload();
+  expect(standby.book.acctFromDay).toBe("2026-10-01");
+  expect(snap(standby)).toEqual(snap(await twinOf(kv)));
+});
+
+test("a bar missing from the cached raw map is reloaded", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const host = startPaperHost(PRODUCTS, {});
+  host.clock = clock;
+  const loaded = await loadSplit(kv, host);
+  if (!loaded) throw new Error("load");
+  installPaperState(host, loaded);
+  const key = bar4hKey("BTC-USD");
+  if (!host.redisRaw?.has(key)) throw new Error("cached bar");
+  host.redisRaw.delete(key);
+  const ts = TODAY - 690 * 14_400;
+  const rows = JSON.parse((await kv.get(key)) ?? "[]") as ReturnType<typeof ohlc>[];
+  rows.push({ ...ohlc(ts), close: 57 });
+  await kv.set(key, JSON.stringify(rows));
+  const body = await reloadSplit(kv, host);
+  if (!body) throw new Error("reload");
+  installPaperState(host, body);
+  expect(host.fourBars.get("BTC-USD")?.some((bar) => bar.ts === ts && bar.close === 57)).toBe(true);
+});
+
+test("a hot with no era after a valid warm is loaded in full", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const { standby, holder } = await warmStandby(kv);
+  if (standby.redisSeq == null || standby.redisSeenEra == null) throw new Error("warm era");
+  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as Record<string, unknown>;
+  delete hot.era;
+  await kv.set(HOT_KEY, JSON.stringify(hot));
+  const key = bar4hKey("SOL-USD");
+  const ts = TODAY - 680 * 14_400;
+  const rows = JSON.parse((await kv.get(key)) ?? "[]") as ReturnType<typeof ohlc>[];
+  rows.push({ ...ohlc(ts), close: 63 });
+  await kv.set(key, JSON.stringify(rows));
+  const watch = watchMget(kv);
+  await holder.reload();
+  watch.restore();
+  expect(watch.full()).toBeGreaterThan(0);
+  expect(standby.fourBars.get("SOL-USD")?.some((bar) => bar.ts === ts && bar.close === 63)).toBe(true);
+  expect(snap(standby)).toEqual(snap(await twinOf(kv)));
+});
+
+test("one 4h change is the only bar exception and matches a full load", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const { standby, holder } = await warmStandby(kv);
+  const ts = TODAY - 670 * 14_400;
+  await saveSinceWarm(kv, clock, (editor) => {
+    const rows = editor.fourBars.get("XRP-USD") ?? [];
+    rows.push({ ...ohlc(ts), close: 28 });
+    editor.fourBars.set("XRP-USD", rows);
+  });
+  const published = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; base?: number; keySeq?: Record<string, number> };
+  const changed = bar4hKey("XRP-USD");
+  expect(published.keySeq?.[changed]).toBe(published.seq);
+  expect(published.base).not.toBe(published.seq);
+  for (const productId of PRODUCTS) {
+    if (productId === "XRP-USD") continue;
+    expect(published.keySeq?.[bar4hKey(productId)]).toBeUndefined();
+    expect(published.keySeq?.[bar1hKey(productId)]).toBeUndefined();
+    expect(published.keySeq?.[d1Key(productId)]).toBeUndefined();
+  }
+  await holder.reload();
+  expect(standby.fourBars.get("XRP-USD")?.some((bar) => bar.ts === ts && bar.close === 28)).toBe(true);
+  expect(snap(standby)).toEqual(snap(await twinOf(kv)));
+});
+
+test("an era is minted once per poison and does not flap", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const host = startPaperHost(PRODUCTS, {});
+  host.clock = clock;
+  host.warmupStored = true;
+  const loaded = await loadSplit(kv, host);
+  if (!loaded) throw new Error("load");
+  installPaperState(host, loaded);
+  const firstEra = host.redisEra ?? host.redisSeenEra;
+  if (!firstEra) throw new Error("era");
+  for (let i = 0; i < 4; i += 1) {
+    host.book.realizedUsd = 10 + i;
+    await persistSplit(kv, host);
+    expect(host.redisEra).toBe(firstEra);
+  }
+  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number };
+  hot.seq = 1e300;
+  await kv.set(HOT_KEY, JSON.stringify(hot));
+  const poisonedLoad = await loadSplit(kv, host);
+  if (!poisonedLoad) throw new Error("poison load");
+  installPaperState(host, poisonedLoad);
+  expect(host.redisPoison).toBe(true);
+  host.book.realizedUsd = 70;
+  await persistSplit(kv, host);
+  const stripped = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: unknown; incidents?: string[] };
+  expect(stripped.seq).toBeUndefined();
+  expect(stripped.incidents).toContain("seq invalid");
+  expect(host.seqInvalid).toBe(1);
+  host.book.realizedUsd = 71;
+  await persistSplit(kv, host);
+  const recovered = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { era?: string; incidents?: string[] };
+  expect(recovered.era).toMatch(/^[0-9a-f]{16}$/);
+  expect(recovered.era).not.toBe(firstEra);
+  expect(recovered.incidents ?? []).not.toContain("seq invalid");
+  expect(host.book.incidents).not.toContain("seq invalid");
+  const nextEra = recovered.era;
+  for (let i = 0; i < 3; i += 1) {
+    host.book.realizedUsd = 80 + i;
+    await persistSplit(kv, host);
+    const published = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { era?: string };
+    expect(published.era).toBe(nextEra);
+  }
+});
+
+test("an exception map past the cap restamps and still saves", async () => {
+  const names = Array.from({ length: 40 }, (_, index) => `N${String(index).padStart(2, "0")}-USD`);
+  const kv = memoryKv(clock);
+  const host = startPaperHost(names, {});
+  host.clock = clock;
+  host.warmupStored = true;
+  await persistSplit(kv, host);
+  const era = host.redisEra;
+  if (!era || host.redisBase == null || !host.redisKeySeq || host.redisKeySeq.size < 100) throw new Error("stamp");
+  host.redisBase = 1;
+  for (const key of host.redisKeySeq.keys()) host.redisKeySeq.set(key, 2);
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  let threw = false;
+  try {
+    host.book.realizedUsd = 55;
+    await persistSplit(kv, host);
+  } catch {
+    threw = true;
+  } finally {
+    console.log = log;
+  }
+  expect(threw).toBe(false);
+  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as {
+    era?: string;
+    seq?: number;
+    base?: number;
+    keySeq?: Record<string, number>;
+    realizedUsd?: number;
+    incidents?: string[];
+  };
+  expect(lines).toContain("seq map overflow");
+  expect(host.seqOverflow).toBeGreaterThanOrEqual(1);
+  expect(hot.incidents ?? []).not.toContain("seq map overflow");
+  expect(host.book.incidents).not.toContain("seq map overflow");
+  expect(hot.era).toMatch(/^[0-9a-f]{16}$/);
+  expect(hot.era).not.toBe(era);
+  expect(hot.keySeq).toBeUndefined();
+  expect(hot.base).toBe(hot.seq);
+  expect(hot.realizedUsd).toBe(55);
+  expect(redisLogLine(host)).toContain("seqOverflow=1");
+  expect(Buffer.byteLength(JSON.stringify(hot.keySeq ?? {}))).toBeLessThan(SEQ_MAP_MAX_BYTES);
+  const standby = startPaperHost(names, {});
+  standby.clock = clock;
+  const loaded = await loadSplit(kv, standby);
+  if (!loaded) throw new Error("load");
+  installPaperState(standby, loaded);
+  host.book.realizedUsd = 56;
+  await persistSplit(kv, host);
+  const watch = watchMget(kv);
+  const body = await reloadSplit(kv, standby);
+  watch.restore();
+  if (!body) throw new Error("reload");
+  installPaperState(standby, body);
+  expect(watch.full()).toBe(0);
+  expect(standby.book.realizedUsd).toBe(56);
+});
+
+async function horizon(names: string[]): Promise<{ heartbeatSum: number; takeoverFlush: number; hotBytes: number; mapKeys: number; mapBytes: number; readBytes: number; fullBytes: number }> {
+  let t = NOW;
+  // The lease TTL follows the Kv clock. The book clock is the one that walks 14 days.
+  const kv = memoryKv(() => NOW);
+  expect(await tryAcquire(kv, "holder", NOW + 60 * 86_400_000, NOW)).toBe(true);
+  const lease = decodeLease(await kv.get(LEASE_KEY));
+  if (!lease?.token) throw new Error("lease");
+  const host = startPaperHost(names, {});
+  host.clock = () => t;
+  host.warmupStored = true;
+  host.leaseToken = lease.token;
+  host.holderId = "holder";
+  for (const productId of names) host.fourBars.set(productId, [ohlc(TODAY - 14_400)]);
+  const payloads: number[] = [];
+  const ownedFlush = kv.ownedFlush.bind(kv);
+  kv.ownedFlush = async (leaseKey, token, nowMs, payload) => {
+    payloads.push(Buffer.byteLength(payload));
+    return ownedFlush(leaseKey, token, nowMs, payload);
+  };
+  await persistSplit(kv, host);
+  const eras = new Set<string>();
+  if (host.redisEra) eras.add(host.redisEra);
+  let heartbeatSum = 0;
+  for (let step = 0; step < 28; step += 1) {
+    t += 12 * 60 * 60 * 1000;
+    host.book.realizedUsd = step + 1;
+    const before = payloads.length;
+    await persistSplit(kv, host);
+    heartbeatSum += payloads[before] ?? 0;
+    if (host.redisEra) eras.add(host.redisEra);
+  }
+  expect(eras.size).toBe(1);
+  const published = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { keySeq?: Record<string, number>; era?: string };
+  const mapKeys = Object.keys(published.keySeq ?? {});
+  expect(mapKeys.some((key) => key.startsWith("p6:tape:"))).toBe(false);
+  expect(mapKeys.length).toBeLessThanOrEqual(8);
+  const mapBytes = Buffer.byteLength(JSON.stringify(published.keySeq ?? {}));
+  expect(mapBytes).toBeLessThan(SEQ_MAP_MAX_BYTES);
+  const standby = startPaperHost(names, {});
+  standby.clock = () => t;
+  const fullBefore = standby.readBytes;
+  const loaded = await loadSplit(kv, standby);
+  if (!loaded) throw new Error("horizon load");
+  installPaperState(standby, loaded);
+  const fullBytes = standby.readBytes - fullBefore;
+  standby.readBytes = 0;
+  host.book.realizedUsd = 900;
+  const beforeTake = payloads.length;
+  await persistSplit(kv, host);
+  const takeoverFlush = payloads[beforeTake] ?? 0;
+  const partial = await reloadSplit(kv, standby);
+  if (!partial) throw new Error("horizon reload");
+  installPaperState(standby, partial);
+  expect(standby.book.realizedUsd).toBe(900);
+  const hotBytes = Buffer.byteLength((await kv.get(HOT_KEY)) ?? "");
+  return { heartbeatSum, takeoverFlush, hotBytes, mapKeys: mapKeys.length, mapBytes, readBytes: standby.readBytes, fullBytes };
+}
+
+test("a 14-day takeover on 27 products keeps the sequence map inside the plan", async () => {
+  const path = fileURLToPath(new URL("../../data/reports/universe-membership.json", import.meta.url));
+  const membership = JSON.parse(readFileSync(path, "utf8")) as { members: { date: string; names: string[] }[] };
+  const names = membership.members[membership.members.length - 1]?.names ?? [];
+  expect(names.length).toBe(27);
+  const measured = await horizon(names);
+  const status = readFileSync("/proc/self/status", "utf8");
+  const hwm = Number(status.match(/VmHWM:\s+(\d+)/)?.[1] ?? 0);
+  console.log(
+    `t1 horizon27 heartbeatSum=${measured.heartbeatSum} takeoverFlush=${measured.takeoverFlush} hotBytes=${measured.hotBytes} mapKeys=${measured.mapKeys} mapBytes=${measured.mapBytes} readBytes=${measured.readBytes} fullBytes=${measured.fullBytes} VmHWM_kB=${hwm}`,
+  );
+  expect(measured.heartbeatSum).toBeLessThan(250_000);
+  expect(measured.takeoverFlush).toBeLessThan(16_000);
+  expect(hwm).toBeLessThan(1024 * 1024);
+}, 60_000);
+
+test("a 14-day takeover on 40 products keeps the sequence map inside the plan", async () => {
+  const path = fileURLToPath(new URL("../../data/reports/universe-membership.json", import.meta.url));
+  const membership = JSON.parse(readFileSync(path, "utf8")) as { members: { date: string; names: string[] }[] };
+  const names = [...(membership.members[membership.members.length - 1]?.names ?? [])];
+  while (names.length < 40) names.push(`SYN-${String(names.length).padStart(2, "0")}-USD`);
+  expect(names.length).toBe(40);
+  const measured = await horizon(names);
+  console.log(
+    `t1 horizon40 heartbeatSum=${measured.heartbeatSum} takeoverFlush=${measured.takeoverFlush} hotBytes=${measured.hotBytes} mapKeys=${measured.mapKeys} mapBytes=${measured.mapBytes} readBytes=${measured.readBytes} fullBytes=${measured.fullBytes}`,
+  );
+  expect(measured.heartbeatSum).toBeLessThan(250_000);
+  expect(measured.takeoverFlush).toBeLessThan(16_000);
+}, 60_000);

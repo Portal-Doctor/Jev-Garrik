@@ -77,6 +77,12 @@ function acctDayOk(day: string, nowMs: number): boolean {
 
 /** Heartbeat payload cap. Over this, Jev fields are shed and the book is still written. */
 export const HOT_MAX_BYTES = 256 * 1024;
+/**
+ * Sparse keySeq JSON cap. Past this the flush restamps every mutable plan key
+ * at the new sequence, starts one new era, and publishes an empty exception map.
+ * The book is still written. `seq map overflow` is telemetry, not a gate.
+ */
+export const SEQ_MAP_MAX_BYTES = 4096;
 /** Incident when the hot snapshot reaches 75% of the cap. */
 export const HOT_WARN_BYTES = 192 * 1024;
 export const BAR15_TTL_MS = 9 * 24 * 60 * 60 * 1000;
@@ -225,18 +231,24 @@ interface HotBody {
   /**
    * Monotonic flush sequence. Written in the same atomic flush as hot and the
    * bars. Absent on snapshots stored before this field existed.
-   * Restore (T5/T11) writes a new era and sets seq to
-   * max(restored, redisSeq, floor(nowMs / 1000)) + 1, with every keySeq at that seq.
+   * Restore (T5/T11) writes one new era and sets seq to
+   * max(restored, redisSeq, floor(nowMs / 1000)) + 1, with `base` at that seq.
    */
   seq?: number;
   /**
-   * Redis key to the sequence of the flush that last wrote it. Same atomic
-   * snapshot as `seq`. A key that is missing changed outside this map.
+   * Exceptions only: mutable plan keys whose sequence is not `base`.
+   * Same atomic snapshot as `seq`. A mutable plan key absent from this map is at `base`.
+   * Anything that is not a mutable plan key is never listed and is always re-read.
    */
   keySeq?: Record<string, number>;
   /** Process era that wrote this hot. 16 hex chars. Absent before eras existed. */
   era?: string;
-  /** Per-key era when it is not `era`. Same atomic snapshot. */
+  /**
+   * Sequence implied for every mutable plan key absent from `keySeq`.
+   * One era covers the whole hot. There is no per-key era.
+   */
+  base?: number;
+  /** Ignored. Older snapshots may still carry it. Readers use `era` only. */
   keyEra?: Record<string, string>;
 }
 
@@ -945,14 +957,42 @@ export function noteKeySeqMissing(): void {
   console.log("redis keySeq missing");
 }
 
-/** A poisoned sequence was not continued. The book is still written. */
+/**
+ * A poisoned sequence was not continued. The book is still written.
+ * The string is telemetry. It does not skip the flush, and the next era's
+ * first published hot drops it.
+ */
 export function noteSeqInvalid(host: PaperHost): void {
   host.seqInvalid += 1;
   if (!host.book.incidents.includes("seq invalid")) host.book.incidents.push("seq invalid");
   console.log("seq invalid");
 }
 
-function trackedSeqKey(key: string): boolean {
+/** The exception map would pass SEQ_MAP_MAX_BYTES. The flush restamps and still saves. */
+export function noteSeqOverflow(host: PaperHost): void {
+  host.seqOverflow += 1;
+  if (!host.book.incidents.includes("seq map overflow")) host.book.incidents.push("seq map overflow");
+  console.log("seq map overflow");
+}
+
+const SEQ_TELEMETRY = new Set(["seq invalid", "seq map overflow"]);
+
+function stripSeqTelemetry(host: PaperHost, hot: HotBody): void {
+  host.book.incidents = host.book.incidents.filter((item) => !SEQ_TELEMETRY.has(item));
+  if (hot.incidents) hot.incidents = hot.incidents.filter((item) => !SEQ_TELEMETRY.has(item));
+}
+
+/**
+ * Keys whose bytes a later flush can change in place, and which reload may skip.
+ * Fail-safe default: anything else is not stamped and is always re-read.
+ *
+ * Tape blocks are not in this list. `buildFlush` writes a closed minute at most
+ * once (`tapeWritten`), and `reloadSplit` always MGETs the 10-minute lookback.
+ * Stamping those keys would keep every minute in the map until the clock moved,
+ * and a minute that left the lookback could be reused from a stale cache if the
+ * plan rolled it back in. Ten small blocks are the whole cost of leaving them out.
+ */
+function mutableSeqKey(key: string): boolean {
   if (key === SEED_CURSOR_KEY || key === LAST_RUN_KEY || key === ACCT_KEY) return true;
   return (
     key.startsWith("p6:bar15:") ||
@@ -960,7 +1000,6 @@ function trackedSeqKey(key: string): boolean {
     key.startsWith("p6:bar1h:") ||
     key.startsWith("p6:d1:") ||
     key.startsWith("p6:ring1m:") ||
-    key.startsWith("p6:tape:") ||
     key.startsWith("p6:seed:wm:")
   );
 }
@@ -976,11 +1015,31 @@ interface FlushPayload {
 
 function touchedSeqKeys(body: FlushPayload): string[] {
   const keys: string[] = [];
-  for (const row of body.bars ?? []) if (trackedSeqKey(row.key)) keys.push(row.key);
-  for (const row of body.rings ?? []) if (trackedSeqKey(row.key)) keys.push(row.key);
-  for (const row of body.tapes ?? []) if (trackedSeqKey(row.key)) keys.push(row.key);
-  for (const row of body.extra ?? []) if (trackedSeqKey(row.key)) keys.push(row.key);
+  for (const row of body.bars ?? []) if (mutableSeqKey(row.key)) keys.push(row.key);
+  for (const row of body.rings ?? []) if (mutableSeqKey(row.key)) keys.push(row.key);
+  for (const row of body.tapes ?? []) if (mutableSeqKey(row.key)) keys.push(row.key);
+  for (const row of body.extra ?? []) if (mutableSeqKey(row.key)) keys.push(row.key);
   return keys;
+}
+
+function planMutableKeys(host: PaperHost): Set<string> {
+  const plan = splitPlan(host);
+  const keys = new Set<string>();
+  for (const key of plan.keys) if (mutableSeqKey(key)) keys.add(key);
+  for (const key of plan.ringKeys) if (mutableSeqKey(key)) keys.add(key);
+  return keys;
+}
+
+/** Every mutable plan key, with an omitted key filled from `base`. No base means the sparse map only. */
+function expandKeySeq(host: PaperHost, sparse: Map<string, number>, base: number | null): Map<string, number> {
+  const plan = planMutableKeys(host);
+  const out = new Map<string, number>();
+  if (base == null) {
+    for (const [key, value] of sparse) if (plan.has(key)) out.set(key, value);
+    return out;
+  }
+  for (const key of plan) out.set(key, sparse.get(key) ?? base);
+  return out;
 }
 
 const ERA_RE = /^[0-9a-f]{16}$/;
@@ -995,15 +1054,19 @@ function newEra(): string {
  * or a key sequence that is not a safe integer, is the same. A string,
  * negative, zero, or fractional seq is absent, not poison.
  */
-function stampPoison(seq: unknown, keySeq: unknown): boolean {
+function stampPoison(seq: unknown, keySeq: unknown, base?: unknown): boolean {
   if (
     typeof seq === "number" &&
     (!Number.isFinite(seq) || seq >= Number.MAX_SAFE_INTEGER || (!Number.isSafeInteger(seq) && Math.abs(seq) > Number.MAX_SAFE_INTEGER))
   ) {
     return true;
   }
-  if (keySeq == null || typeof keySeq !== "object" || Array.isArray(keySeq)) return false;
   const seqOk = typeof seq === "number" && Number.isSafeInteger(seq) && seq >= 1 && seq < Number.MAX_SAFE_INTEGER;
+  if (typeof base === "number") {
+    if (!Number.isFinite(base) || base >= Number.MAX_SAFE_INTEGER || (!Number.isSafeInteger(base) && Math.abs(base) > Number.MAX_SAFE_INTEGER)) return true;
+    if (seqOk && Number.isSafeInteger(base) && base > seq) return true;
+  }
+  if (keySeq == null || typeof keySeq !== "object" || Array.isArray(keySeq)) return false;
   for (const value of Object.values(keySeq as Record<string, unknown>)) {
     if (typeof value !== "number") continue;
     if (!Number.isFinite(value) || !Number.isSafeInteger(value) || value >= Number.MAX_SAFE_INTEGER) return true;
@@ -1014,67 +1077,69 @@ function stampPoison(seq: unknown, keySeq: unknown): boolean {
 
 function loadedStampPoison(host: PaperHost): boolean {
   if (host.redisPoison) return true;
-  return stampPoison(host.redisSeq, host.redisKeySeq ? Object.fromEntries(host.redisKeySeq) : null);
+  return stampPoison(host.redisSeq, host.redisKeySeq ? Object.fromEntries(host.redisKeySeq) : null, host.redisBase);
 }
 
 interface HotClass {
   kind: "none" | "poison" | "ok";
   era: string;
   seq: number;
+  base: number | null;
   keySeq: Map<string, number>;
-  keyEra: Map<string, string>;
 }
 
 function classifyHot(raw: string | null): HotClass {
-  const none: HotClass = { kind: "none", era: "", seq: 0, keySeq: new Map(), keyEra: new Map() };
-  if (!raw) return none;
+  const none = (): HotClass => ({ kind: "none", era: "", seq: 0, base: null, keySeq: new Map() });
+  if (!raw) return none();
   let body: unknown;
   try {
     body = JSON.parse(raw);
   } catch {
-    return none;
+    return none();
   }
-  if (body == null || typeof body !== "object" || Array.isArray(body)) return none;
-  const record = body as { seq?: unknown; keySeq?: unknown; era?: unknown; keyEra?: unknown };
-  if (stampPoison(record.seq, record.keySeq)) return { ...none, kind: "poison" };
+  if (body == null || typeof body !== "object" || Array.isArray(body)) return none();
+  const record = body as { seq?: unknown; keySeq?: unknown; era?: unknown; base?: unknown };
+  if (stampPoison(record.seq, record.keySeq, record.base)) return { ...none(), kind: "poison" };
   const era = record.era;
   const seq = record.seq;
-  const keySeq = record.keySeq;
-  if (typeof era !== "string" || !ERA_RE.test(era)) return none;
-  if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 1 || seq >= Number.MAX_SAFE_INTEGER) return none;
-  if (keySeq == null || typeof keySeq !== "object" || Array.isArray(keySeq)) return none;
+  if (typeof era !== "string" || !ERA_RE.test(era)) return none();
+  if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 1 || seq >= Number.MAX_SAFE_INTEGER) return none();
   const seqMap = new Map<string, number>();
-  const eraMap = new Map<string, string>();
-  const foreign = record.keyEra;
-  for (const [key, value] of Object.entries(keySeq as Record<string, unknown>)) {
-    if (typeof value !== "number" || !Number.isFinite(value) || !Number.isSafeInteger(value) || value >= Number.MAX_SAFE_INTEGER) {
-      return { ...none, kind: "poison" };
-    }
-    if (value > seq) return { ...none, kind: "poison" };
-    if (value < 1) return none;
-    seqMap.set(key, value);
-    let keyEra = era;
-    if (foreign != null && typeof foreign === "object" && !Array.isArray(foreign)) {
-      const override = (foreign as Record<string, unknown>)[key];
-      if (typeof override === "string") {
-        if (!ERA_RE.test(override)) return none;
-        keyEra = override;
+  const keySeq = record.keySeq;
+  if (keySeq != null) {
+    if (typeof keySeq !== "object" || Array.isArray(keySeq)) return none();
+    for (const [key, value] of Object.entries(keySeq as Record<string, unknown>)) {
+      if (typeof value !== "number" || !Number.isFinite(value) || !Number.isSafeInteger(value) || value >= Number.MAX_SAFE_INTEGER) {
+        return { ...none(), kind: "poison" };
       }
+      if (value > seq) return { ...none(), kind: "poison" };
+      if (value < 1) return none();
+      seqMap.set(key, value);
     }
-    eraMap.set(key, keyEra);
   }
-  if (seqMap.size === 0) return none;
-  return { kind: "ok", era, seq, keySeq: seqMap, keyEra: eraMap };
+  let base: number | null = null;
+  if (record.base != null) {
+    if (typeof record.base !== "number" || !Number.isSafeInteger(record.base) || record.base < 1 || record.base > seq) return none();
+    base = record.base;
+  }
+  if (seqMap.size === 0 && base == null) return none();
+  return { kind: "ok", era, seq, base, keySeq: seqMap };
 }
 
-function unsequencedPayload(payload: string): string {
+function unsequencedPayload(payload: string, incident?: string): string {
   const body = JSON.parse(payload) as FlushPayload;
   if (!body.hot) return payload;
   const hot = JSON.parse(body.hot) as HotBody;
   delete hot.seq;
   delete hot.keySeq;
   delete hot.era;
+  delete hot.base;
   delete hot.keyEra;
+  if (incident) {
+    const incidents = hot.incidents ?? [];
+    if (!incidents.includes(incident)) incidents.push(incident);
+    hot.incidents = incidents;
+  }
   body.hot = JSON.stringify(hot);
   return JSON.stringify(body);
 }
@@ -1083,90 +1148,92 @@ interface HotStamp {
   payload: string;
   seq: number | null;
   era: string | null;
+  base: number | null;
   keySeq: Map<string, number> | null;
-  keyEra: Map<string, string> | null;
   invalid: boolean;
 }
 
+function refuseSeq(host: PaperHost, payload: string): HotStamp {
+  noteSeqInvalid(host);
+  host.redisPoison = false;
+  host.redisSeq = null;
+  host.redisKeySeq = null;
+  host.redisBase = null;
+  host.redisSeenEra = null;
+  host.redisEra = null;
+  host.redisFreshEra = true;
+  return { payload: unsequencedPayload(payload, "seq invalid"), seq: null, era: null, base: null, keySeq: null, invalid: true };
+}
+
 /**
- * Put `era`, `seq`, and `keySeq` inside p6:hot before the flush payload is written.
- * They share the EVAL with the bars. A map that would push hot over 256 KB,
- * or the payload over 1 MB, is left off. The sequence number is left off too
- * if it alone does not fit, and the original payload is written.
+ * Put `era`, `seq`, `base`, and the exception `keySeq` inside p6:hot before the
+ * flush payload is written. They share the EVAL with the bars. A map that would
+ * push hot over 256 KB, or the payload over 1 MB, is left off.
  *
- * `seq` is max(loaded + 1, clock seconds). Each process has its own 64-bit era.
- * A cached key is reused only when both era and seq match, so a later process
- * whose clock is behind cannot collide with an old sequence. A poisoned stored
- * sequence publishes this hot with no sequence and does not throw. The next
- * flush starts a new era.
- * Restore (T5/T11) writes a new era with seq = max(restored, redisSeq, floor(nowMs / 1000)) + 1
- * and every keySeq set to that seq.
+ * `seq` is max(loaded + 1, clock seconds). One era covers the hot. A successor
+ * keeps the era it loaded. A poisoned sequence publishes this hot with no
+ * sequence and does not throw. The next flush starts one new era. An exception
+ * map past SEQ_MAP_MAX_BYTES restamps every mutable plan key, starts one new
+ * era, and publishes an empty exception map. The book is still written.
+ * Restore (T5/T11) writes one new era with seq = max(restored, redisSeq, floor(nowMs / 1000)) + 1
+ * and `base` at that seq.
  */
 function stampFlush(host: PaperHost, payload: string): HotStamp {
   const body = JSON.parse(payload) as FlushPayload;
-  if (!body.hot) return { payload, seq: null, era: null, keySeq: null, keyEra: null, invalid: false };
-  if (loadedStampPoison(host)) {
-    noteSeqInvalid(host);
-    host.redisPoison = false;
-    host.redisSeq = null;
-    host.redisKeySeq = null;
-    host.redisKeyEra = null;
-    host.redisSeenEra = null;
-    host.redisEra = null;
-    host.redisFreshEra = true;
-    return { payload: unsequencedPayload(payload), seq: null, era: null, keySeq: null, keyEra: null, invalid: true };
-  }
+  if (!body.hot) return { payload, seq: null, era: null, base: null, keySeq: null, invalid: false };
+  if (loadedStampPoison(host)) return refuseSeq(host, payload);
   const clockSec = Math.floor(host.clock() / 1000);
   const next = Math.max((host.redisSeq ?? 0) + 1, clockSec);
-  if (!Number.isSafeInteger(next) || next < clockSec || (host.redisSeq != null && next <= host.redisSeq)) {
-    noteSeqInvalid(host);
-    host.redisSeq = null;
-    host.redisKeySeq = null;
-    host.redisKeyEra = null;
-    host.redisSeenEra = null;
-    host.redisEra = null;
-    host.redisFreshEra = true;
-    return { payload: unsequencedPayload(payload), seq: null, era: null, keySeq: null, keyEra: null, invalid: true };
-  }
+  if (!Number.isSafeInteger(next) || next < clockSec || (host.redisSeq != null && next <= host.redisSeq)) return refuseSeq(host, payload);
   const fresh = host.redisFreshEra;
-  const era = fresh || host.redisEra == null ? newEra() : host.redisEra;
-  const keySeq = fresh || host.redisKeySeq == null ? new Map<string, number>() : new Map(host.redisKeySeq);
-  const keyEra = fresh || host.redisKeyEra == null ? new Map<string, string>() : new Map(host.redisKeyEra);
-  const hot = JSON.parse(body.hot) as HotBody;
-  hot.era = era;
-  hot.seq = next;
+  let era = fresh ? newEra() : (host.redisEra ?? host.redisSeenEra ?? newEra());
+  let base = fresh || host.redisBase == null ? next : host.redisBase;
+  const planSet = planMutableKeys(host);
+  const carried = fresh || host.redisKeySeq == null ? new Map<string, number>() : new Map(host.redisKeySeq);
+  for (const key of [...carried.keys()]) if (!planSet.has(key)) carried.delete(key);
   for (const key of body.drop ?? []) {
-    if (key.startsWith("p6:seed:wm:")) {
-      keySeq.delete(key);
-      keyEra.delete(key);
-    }
+    if (key.startsWith("p6:seed:wm:") && planSet.has(key)) carried.set(key, next);
   }
-  for (const key of host.redisRewrite) {
-    keySeq.set(key, next);
-    keyEra.set(key, era);
-  }
-  for (const key of touchedSeqKeys(body)) {
-    keySeq.set(key, next);
-    keyEra.set(key, era);
-  }
-  if (keySeq.size > 0) {
+  const touch = (key: string) => {
+    if (!planSet.has(key)) return;
+    carried.set(key, next);
+  };
+  for (const key of host.redisRewrite) touch(key);
+  for (const key of touchedSeqKeys(body)) touch(key);
+  const sparse = new Map<string, number>();
+  for (const [key, value] of carried) if (value !== base) sparse.set(key, value);
+  const sparseJson = (): string => {
     const sorted: Record<string, number> = {};
-    for (const key of [...keySeq.keys()].sort()) sorted[key] = keySeq.get(key)!;
-    hot.keySeq = sorted;
+    for (const key of [...sparse.keys()].sort()) sorted[key] = sparse.get(key)!;
+    return JSON.stringify(sorted);
+  };
+  if (Buffer.byteLength(sparseJson()) > SEQ_MAP_MAX_BYTES) {
+    noteSeqOverflow(host);
+    era = newEra();
+    base = next;
+    carried.clear();
+    for (const key of planSet) carried.set(key, next);
+    sparse.clear();
   }
-  const foreign: Record<string, string> = {};
-  for (const [key, value] of keyEra) if (value !== era) foreign[key] = value;
-  const pack = (withMap: boolean): string | null => {
-    if (!withMap) {
+  const hot = JSON.parse(body.hot) as HotBody;
+  const pack = (keep: boolean): string | null => {
+    if (!keep) {
       delete hot.seq;
       delete hot.keySeq;
       delete hot.era;
+      delete hot.base;
       delete hot.keyEra;
     } else {
+      stripSeqTelemetry(host, hot);
       hot.era = era;
       hot.seq = next;
-      if (Object.keys(foreign).length > 0) hot.keyEra = foreign;
-      else delete hot.keyEra;
+      hot.base = base;
+      delete hot.keyEra;
+      if (sparse.size > 0) {
+        const sorted: Record<string, number> = {};
+        for (const key of [...sparse.keys()].sort()) sorted[key] = sparse.get(key)!;
+        hot.keySeq = sorted;
+      } else delete hot.keySeq;
     }
     body.hot = JSON.stringify(hot);
     const nextPayload = JSON.stringify(body);
@@ -1175,19 +1242,20 @@ function stampFlush(host: PaperHost, payload: string): HotStamp {
     if (payloadTooBig({ payload: nextPayload, bytes: Buffer.byteLength(nextPayload), marks: [], minutes: [] })) return null;
     return nextPayload;
   };
-  let nextPayload = pack(keySeq.size > 0);
-  let published = keySeq.size > 0 ? keySeq : null;
-  if (!nextPayload && published) {
-    published = null;
+  let nextPayload = pack(true);
+  let published = true;
+  if (!nextPayload) {
+    published = false;
     nextPayload = pack(false);
   }
-  if (!nextPayload) return { payload, seq: null, era: null, keySeq: null, keyEra: null, invalid: false };
+  if (!nextPayload) return { payload, seq: null, era: null, base: null, keySeq: null, invalid: false };
+  if (!published) return { payload: nextPayload, seq: null, era: null, base: null, keySeq: null, invalid: false };
   return {
     payload: nextPayload,
-    seq: published ? next : null,
-    era: published ? era : null,
-    keySeq: published,
-    keyEra: published ? keyEra : null,
+    seq: next,
+    era,
+    base,
+    keySeq: expandKeySeq(host, sparse, base),
     invalid: false,
   };
 }
@@ -1212,10 +1280,11 @@ async function publishUnsequencedHot(kv: Kv, host: PaperHost): Promise<void> {
   } catch {
     return;
   }
-  if (hot.seq == null && hot.keySeq == null && hot.era == null && hot.keyEra == null) return;
+  if (hot.seq == null && hot.keySeq == null && hot.era == null && hot.base == null && hot.keyEra == null) return;
   delete hot.seq;
   delete hot.keySeq;
   delete hot.era;
+  delete hot.base;
   delete hot.keyEra;
   const next = JSON.stringify(hot);
   if (host.leaseToken) {
@@ -1286,19 +1355,19 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
     host.acctRepair = false;
     const writtenHot = (JSON.parse(plan.payload) as { hot?: string }).hot ?? null;
     if (writtenHot) host.redisHotRaw = writtenHot;
-    if (stamped.keySeq && stamped.seq != null && stamped.era != null) {
+    if (stamped.keySeq && stamped.seq != null && stamped.era != null && stamped.base != null) {
       host.redisEra = stamped.era;
       host.redisSeenEra = stamped.era;
       host.redisSeq = stamped.seq;
+      host.redisBase = stamped.base;
       host.redisKeySeq = stamped.keySeq;
-      host.redisKeyEra = stamped.keyEra;
       host.redisPoison = false;
       host.redisFreshEra = false;
       host.redisRewrite = new Set();
     } else {
-      // The hot we stored has no key map. A later flush must not republish a map that missed this write.
+      // The hot we stored has no sequence. A later flush must not republish a map that missed this write.
       host.redisKeySeq = null;
-      host.redisKeyEra = null;
+      host.redisBase = null;
       host.redisSeenEra = null;
       host.redisEra = null;
       if (stamped.invalid) {
@@ -1356,7 +1425,7 @@ function splitPlan(host: PaperHost): SplitPlan {
   return { keys, ringKeys: products.map((productId) => ringKey(productId)), days, tapeMinutes, products };
 }
 
-function parseHotSeq(raw: string | null): { era: string; seq: number; keySeq: Map<string, number>; keyEra: Map<string, string> } | null {
+function parseHotSeq(raw: string | null): HotClass | null {
   const classified = classifyHot(raw);
   if (classified.kind !== "ok") return null;
   return classified;
@@ -1365,21 +1434,20 @@ function parseHotSeq(raw: string | null): { era: string; seq: number; keySeq: Ma
 /**
  * True only when this key's sequence in the token is the one warm() loaded.
  * Fills and the ledger are appended outside the flush, so they never match.
- * Dropping this comparison reloads a stale bar after the holder has saved.
+ * A key that is not in the mutable plan is never reused.
+ * Dropping the sequence comparison reloads a stale bar after the holder has saved.
  */
 function reuseSplitKey(
   host: PaperHost,
-  token: { era: string; seq: number; keySeq: Map<string, number>; keyEra: Map<string, string> },
+  token: { seq: number; keySeq: Map<string, number> },
   key: string,
 ): boolean {
   if (key === FILLS_KEY || key === LEDGER_KEY || key === HOT_KEY) return false;
+  if (!mutableSeqKey(key)) return false;
   if (host.redisSeq == null || host.redisKeySeq == null || host.redisSeenEra == null) return false;
   const next = token.keySeq.get(key);
   const prev = host.redisKeySeq.get(key);
   if (next == null || prev == null || next !== prev) return false;
-  const nextEra = token.keyEra.get(key) ?? token.era;
-  const prevEra = host.redisKeyEra?.get(key) ?? host.redisSeenEra;
-  if (nextEra !== prevEra) return false;
   if (key.startsWith("p6:ring1m:")) return host.redisRings?.has(key) ?? false;
   return host.redisRaw?.has(key) ?? false;
 }
@@ -1393,7 +1461,7 @@ function rememberSplit(host: PaperHost, byKey: Map<string, string | null>, rings
     host.redisPoison = true;
     host.redisSeq = null;
     host.redisKeySeq = null;
-    host.redisKeyEra = null;
+    host.redisBase = null;
     host.redisSeenEra = null;
     return;
   }
@@ -1402,13 +1470,13 @@ function rememberSplit(host: PaperHost, byKey: Map<string, string | null>, rings
     if (hotRaw) noteKeySeqMissing();
     host.redisSeq = null;
     host.redisKeySeq = null;
-    host.redisKeyEra = null;
+    host.redisBase = null;
     host.redisSeenEra = null;
     return;
   }
   host.redisSeq = classified.seq;
-  host.redisKeySeq = classified.keySeq;
-  host.redisKeyEra = classified.keyEra;
+  host.redisBase = classified.base;
+  host.redisKeySeq = expandKeySeq(host, classified.keySeq, classified.base);
   host.redisSeenEra = classified.era;
 }
 
@@ -1416,10 +1484,11 @@ function assembleSplit(host: PaperHost, byKey: Map<string, string | null>, rings
   const raw = byKey.get(HOT_KEY) ?? null;
   if (!raw) return null;
   const hot = JSON.parse(raw) as HotBody;
-  const { seq, keySeq, era, keyEra, ...book } = hot;
+  const { seq, keySeq, era, base, keyEra, ...book } = hot;
   void seq;
   void keySeq;
   void era;
+  void base;
   void keyEra;
   const fifteen: PaperStateBody["fifteen"] = [];
   const hourWarm: [string, BarOHLC[]][] = [];
@@ -1551,7 +1620,7 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
   if (!body) {
     host.redisSeq = null;
     host.redisKeySeq = null;
-    host.redisKeyEra = null;
+    host.redisBase = null;
     host.redisSeenEra = null;
     host.redisHotRaw = null;
     host.redisPoison = false;
@@ -1585,6 +1654,8 @@ export async function reloadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBo
   noteReadBytes(host, tokenRaw);
   const token = parseHotSeq(tokenRaw);
   if (!token || token.seq < host.redisSeq) return loadSplit(kv, host);
+  if (token.era !== host.redisSeenEra) return loadSplit(kv, host);
+  token.keySeq = expandKeySeq(host, token.keySeq, token.base);
   const plan = splitPlan(host);
   const readKeys: string[] = [];
   for (const key of plan.keys) {

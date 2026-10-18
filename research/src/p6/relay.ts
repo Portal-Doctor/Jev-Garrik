@@ -275,9 +275,9 @@ export function markerBytesPerDay(products: number, example = barMarker("BTC-USD
 }
 
 /**
- * Writes p6:hot from a snapshot. A restore (T5/T11) writes a new era and sets seq to
- * max(restored, redisSeq, floor(nowMs / 1000)) + 1, with every keySeq at that seq.
- * This function does not assign a sequence.
+ * Writes p6:hot from a snapshot. A restore (T5/T11) writes one new era and sets seq to
+ * max(restored, redisSeq, floor(nowMs / 1000)) + 1, with `base` at that seq and every
+ * mutable plan key implied by it. This function does not assign a sequence.
  */
 export async function saveState(kv: Kv, body: PaperStateBody, opts?: { writeWarmup?: boolean }): Promise<void> {
   const { warmup, memberCloses, fifteen, hourWarm, dailyCloses, dailyBars, fourBars, rings, tape, ...live } = body;
