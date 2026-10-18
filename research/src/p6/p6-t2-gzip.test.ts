@@ -496,6 +496,7 @@ async function measureSim(width: 27 | 40): Promise<Record<string, unknown>> {
   await persistSplit(kv, host);
   const openLogical = flush.logical;
   const openWire = flush.wire;
+  const saveAtOpen = host.saveBytes;
   const slots = 96;
   for (let day = 0; day < 14; day += 1) {
     const daySec = Math.floor(t / 1000);
@@ -508,9 +509,14 @@ async function measureSim(width: 27 | 40): Promise<Record<string, unknown>> {
   }
   const dayLogical = flush.logical - openLogical;
   const dayWire = flush.wire - openWire;
-  const hot = pair(await kv.get(HOT_KEY), peekStored(kv, HOT_KEY));
-  const last = pair(await kv.get(LAST_RUN_KEY), peekStored(kv, LAST_RUN_KEY));
-  const seqBody = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { keySeq?: Record<string, number> };
+  const saveBytesDay = host.saveBytes - saveAtOpen;
+  const hotJson = (await kv.get(HOT_KEY)) ?? "";
+  const lastJson = (await kv.get(LAST_RUN_KEY)) ?? "";
+  const hotGz = peekStored(kv, HOT_KEY) ?? "";
+  const lastGz = peekStored(kv, LAST_RUN_KEY) ?? "";
+  const hot = pair(hotJson, hotGz);
+  const last = pair(lastJson, lastGz);
+  const seqBody = JSON.parse(hotJson || "{}") as { keySeq?: Record<string, number> };
   const keySeqBytes = Buffer.byteLength(JSON.stringify(seqBody.keySeq ?? {}));
   const keySeqKeys = Object.keys(seqBody.keySeq ?? {}).length;
   const read = watchRead(kv);
@@ -537,18 +543,20 @@ async function measureSim(width: 27 | 40): Promise<Record<string, unknown>> {
   const logicalPartial = reader.readBytes;
   const wirePartial = read.wire;
   read.restore();
-  const hotJson = (await kv.get(HOT_KEY)) ?? "";
-  const lastJson = (await kv.get(LAST_RUN_KEY)) ?? "";
-  const hotGz = peekStored(kv, HOT_KEY) ?? "";
-  const lastGz = peekStored(kv, LAST_RUN_KEY) ?? "";
+  const hotAfter = pair(await kv.get(HOT_KEY), peekStored(kv, HOT_KEY));
   return {
     fixture: "sim14",
     names: width,
-    hotBeforeBeat,
     keySeqBytes,
     keySeqKeys,
     hot,
+    hotAfter,
     last,
+    dayLogical,
+    dayWire,
+    saveBytesDay,
+    beatLogical,
+    beatWire,
     logicalWrite: flush.logical,
     wireWrite: flush.wire,
     hotWrite: flush.hot,
