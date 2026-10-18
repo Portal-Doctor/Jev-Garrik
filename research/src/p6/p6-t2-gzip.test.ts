@@ -228,7 +228,7 @@ test("seq and era are read from the gunzipped hot", async () => {
   await persistSplit(kv, writer);
   expect(peekStored(kv, HOT_KEY)?.startsWith(GZIP_PREFIX)).toBe(true);
   const published = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { era?: string; seq?: number; realizedUsd?: number };
-  expect(published.era).toBe(era);
+  expect(published.era).toBe(era ?? undefined);
   expect(published.seq).toBeGreaterThan(seq ?? 0);
   expect(published.realizedUsd).toBe(9);
   const watch = watchMget(kv);
@@ -238,7 +238,7 @@ test("seq and era are read from the gunzipped hot", async () => {
   expect(watch.full()).toBe(0);
   expect(body.realizedUsd).toBe(9);
   expect(standby.redisSeenEra).toBe(era);
-  expect(standby.redisSeq).toBe(published.seq);
+  expect(standby.redisSeq).toBe(published.seq ?? null);
 });
 
 test("the 256 KB hot cap is the uncompressed JSON", async () => {

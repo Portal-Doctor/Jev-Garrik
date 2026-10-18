@@ -16,7 +16,7 @@
  * The 256 KB cap is the JSON size, applied before this encoding.
  */
 
-import { gzipSync, gunzipSync } from "node:zlib";
+import { gzipSync, gunzipSync, type ZlibOptions } from "node:zlib";
 
 /** ASCII marker. Versioned so a later layout can use a different prefix. */
 export const GZIP_PREFIX = "gz1:";
@@ -31,7 +31,8 @@ export function storesGzip(key: string): boolean {
 export function encodeStored(key: string, value: string): string {
   if (!storesGzip(key)) return value;
   if (value.startsWith(GZIP_PREFIX)) return value;
-  return GZIP_PREFIX + gzipSync(Buffer.from(value, "utf8"), { mtime: 0 }).toString("base64");
+  // mtime 0 keeps the stored bytes stable. @types/node omits it on ZlibOptions; Node still reads it.
+  return GZIP_PREFIX + gzipSync(Buffer.from(value, "utf8"), { mtime: 0 } as ZlibOptions).toString("base64");
 }
 
 /**
