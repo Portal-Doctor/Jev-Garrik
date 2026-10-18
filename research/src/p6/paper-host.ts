@@ -282,7 +282,7 @@ export interface PaperHost {
   redisSeenEra: string | null;
   /** This process's era. Assigned on the first flush that publishes a sequence. */
   redisEra: string | null;
-  /** Per-key sequence from that same snapshot, expanded with `base`. Null when the map was absent. */
+  /** Per-key sequence expanded with `base`, plus the next UTC day and keys this flush wrote. Null when the map was absent. */
   redisKeySeq: Map<string, number> | null;
   /** Sequence implied for mutable plan keys omitted from the published exception map. */
   redisBase: number | null;

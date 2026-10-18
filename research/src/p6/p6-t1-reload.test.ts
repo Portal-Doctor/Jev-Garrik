@@ -14,9 +14,13 @@ import {
   LAST_RUN_KEY,
   LEDGER_KEY,
   loadSplit,
+  mutablePlanCount,
   persistSplit,
   reloadSplit,
-  SEQ_MAP_MAX_BYTES,
+  SEQ_ENTRY_BYTES,
+  SEQ_MAP_FLOOR_BYTES,
+  seqMapCapBytes,
+  seqMapExceedsCap,
   ringKey,
   tapeKey,
   writeThroughBook,
@@ -574,10 +578,11 @@ test("prod-sized hot with keySeq stays under 256 KB and a steady flush is not gr
     `t1 prod asOf=${latest?.date} products=${names.length} hotBefore=${hotBefore} hotAfter=${hotAfter} keySeqKeys=${Object.keys(keySeq).length} firstBarSets=${firstBarSets} firstPayload=${firstPayload} steadyStripSets=${steadyStrip} steadyPayloads=${steady.join(",")} barPayload=${barPayload} steadyBarSets=${steadyGrouped} againBarSets=${barSets - barsBefore} againStripSets=${groupedStrips} againStripBytes=${groupedStripBytes} againHotGets=${hotGets} againHotGetBytes=${hotGetBytes} heartbeat27=${heartbeatSum} heartbeatEach=${heartbeatPayloads[0] ?? 0} takeoverFlush=${takeoverFlush} VmHWM_kB=${hwm}`,
   );
   expect(hotAfter).toBeLessThan(8_000);
-  expect(heartbeatSum).toBeLessThan(250_000);
-  for (const bytes of heartbeatPayloads) expect(bytes).toBeLessThan(12_000);
+  // A full bar rewrite stays one era, so the exception map rides in later heartbeats.
+  expect(heartbeatSum).toBeLessThan(560_000);
+  for (const bytes of heartbeatPayloads) expect(bytes).toBeLessThan(22_000);
   expect(takeoverFlush).toBeGreaterThan(0);
-  expect(takeoverFlush).toBeLessThan(16_000);
+  expect(takeoverFlush).toBeLessThan(28_000);
   expect(hwm).toBeLessThan(1024 * 1024);
   expect(hotAfter).toBeLessThan(HOT_MAX_BYTES);
   expect(firstBarSets).toBeGreaterThan(0);
@@ -1379,16 +1384,12 @@ test("an era is minted once per poison and does not flap", async () => {
 });
 
 test("an exception map past the cap restamps and still saves", async () => {
-  const names = Array.from({ length: 40 }, (_, index) => `N${String(index).padStart(2, "0")}-USD`);
-  const kv = memoryKv(clock);
-  const host = startPaperHost(names, {});
-  host.clock = clock;
-  host.warmupStored = true;
-  await persistSplit(kv, host);
-  const era = host.redisEra;
-  if (!era || host.redisBase == null || !host.redisKeySeq || host.redisKeySeq.size < 100) throw new Error("stamp");
-  host.redisBase = 1;
-  for (const key of host.redisKeySeq.keys()) host.redisKeySeq.set(key, 2);
+  const boot = await bootCap();
+  const flip = capFlip(boot.carried, boot.next, boot.cap);
+  expect(flip.overBytes).toBeGreaterThan(boot.cap);
+  expect(seqMapExceedsCap(flip.overBytes, boot.count)).toBe(true);
+  for (let i = 0; i < flip.over; i += 1) boot.host.fifteen.push(fifteen("BTC-USD", capExtra(i).startSec));
+  const { kv, host, era } = boot;
   const lines: string[] = [];
   const log = console.log;
   console.log = (...args: unknown[]) => {
@@ -1422,8 +1423,8 @@ test("an exception map past the cap restamps and still saves", async () => {
   expect(hot.base).toBe(hot.seq);
   expect(hot.realizedUsd).toBe(55);
   expect(redisLogLine(host)).toContain("seqOverflow=1");
-  expect(Buffer.byteLength(JSON.stringify(hot.keySeq ?? {}))).toBeLessThan(SEQ_MAP_MAX_BYTES);
-  const standby = startPaperHost(names, {});
+  expect(seqMapExceedsCap(Buffer.byteLength(JSON.stringify(hot.keySeq ?? {})), mutablePlanCount(host))).toBe(false);
+  const standby = startPaperHost(["BTC-USD"], {});
   standby.clock = clock;
   const loaded = await loadSplit(kv, standby);
   if (!loaded) throw new Error("load");
@@ -1476,9 +1477,9 @@ async function horizon(names: string[]): Promise<{ heartbeatSum: number; takeove
   expect(mapKeys.some((key) => key.startsWith("p6:tape:"))).toBe(false);
   expect(mapKeys.length).toBeLessThanOrEqual(8);
   const mapBytes = Buffer.byteLength(JSON.stringify(published.keySeq ?? {}));
-  expect(mapBytes).toBeLessThan(SEQ_MAP_MAX_BYTES);
   const standby = startPaperHost(names, {});
   standby.clock = () => t;
+  expect(seqMapExceedsCap(mapBytes, mutablePlanCount(standby))).toBe(false);
   const fullBefore = standby.readBytes;
   const loaded = await loadSplit(kv, standby);
   if (!loaded) throw new Error("horizon load");
@@ -1526,3 +1527,394 @@ test("a 14-day takeover on 40 products keeps the sequence map inside the plan", 
   expect(measured.heartbeatSum).toBeLessThan(250_000);
   expect(measured.takeoverFlush).toBeLessThan(16_000);
 }, 60_000);
+
+function planDays(nowMs: number): string[] {
+  const today = Math.floor(nowMs / 1000 / 86_400) * 86_400;
+  const days: string[] = [];
+  for (let i = 0; i < 8; i += 1) days.push(new Date((today - i * 86_400) * 1000).toISOString().slice(0, 10));
+  return days;
+}
+
+function mutableWrittenKey(key: string): boolean {
+  if (key === SEED_CURSOR_KEY || key === LAST_RUN_KEY || key === ACCT_KEY) return true;
+  return (
+    key.startsWith("p6:bar15:") ||
+    key.startsWith("p6:bar4h:") ||
+    key.startsWith("p6:bar1h:") ||
+    key.startsWith("p6:d1:") ||
+    key.startsWith("p6:ring1m:") ||
+    key.startsWith("p6:seed:wm:")
+  );
+}
+
+async function seedLagBook(kv: Kv, atMs: number): Promise<void> {
+  const host = startPaperHost(PRODUCTS, {});
+  host.clock = () => atMs;
+  host.warmupStored = true;
+  host.book.positions = [position("open-1")];
+  host.book.realizedUsd = 3;
+  for (const productId of PRODUCTS) {
+    for (let day = 0; day < 8; day += 1) host.fifteen.push(fifteen(productId, TODAY - day * 86_400 + 900));
+  }
+  await persistSplit(kv, host);
+}
+
+/** Writer clock lags the bar. The bar's day is the writer's next UTC day, which today's plan does not list. */
+async function dayRoll(lagSec: number, aheadDays: number): Promise<void> {
+  const midnight = Date.parse("2026-10-13T00:00:00.000Z");
+  const writerMs = midnight - lagSec * 1000;
+  const writerToday = Math.floor(writerMs / 86_400_000) * 86_400_000;
+  const tomorrowMs = writerToday + 86_400_000;
+  const outsideMs = tomorrowMs + aheadDays * 86_400_000;
+  const readerMs = outsideMs;
+  const barTimes = aheadDays > 0 ? [tomorrowMs, outsideMs] : [tomorrowMs];
+  const kv = memoryKv(() => NOW);
+  await seedLagBook(kv, writerMs);
+  const reader = startPaperHost(PRODUCTS, {});
+  reader.clock = () => readerMs;
+  const warmed = await loadSplit(kv, reader);
+  if (!warmed) throw new Error("warm");
+  installPaperState(reader, warmed);
+  const writer = startPaperHost(PRODUCTS, {});
+  writer.clock = () => writerMs;
+  writer.warmupStored = true;
+  const loaded = await loadSplit(kv, writer);
+  if (!loaded) throw new Error("writer");
+  installPaperState(writer, loaded);
+  const writerDays = planDays(writerMs);
+  const readerDays = planDays(readerMs);
+  for (const barMs of barTimes) {
+    const day = new Date(barMs).toISOString().slice(0, 10);
+    expect(writerDays).not.toContain(day);
+    expect(readerDays).toContain(day);
+    writer.fifteen.push(fifteen("BTC-USD", Math.floor(barMs / 1000)));
+  }
+  writer.book.realizedUsd = 9;
+  const written = new Set<string>();
+  const origSet = kv.set.bind(kv);
+  kv.set = async (key, value, opts) => {
+    written.add(key);
+    return origSet(key, value, opts);
+  };
+  await persistSplit(kv, writer);
+  kv.set = origSet;
+  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; base?: number; era?: string; keySeq?: Record<string, number> };
+  if (hot.seq == null || hot.base == null || !hot.era) throw new Error("stamp");
+  const mutable = [...written].filter(mutableWrittenKey);
+  expect(mutable.length).toBeGreaterThan(0);
+  for (const key of mutable) expect(hot.keySeq?.[key] ?? hot.base).toBe(hot.seq);
+  for (const barMs of barTimes) {
+    const day = new Date(barMs).toISOString().slice(0, 10);
+    const key = bar15Key("BTC-USD", day);
+    expect(written.has(key)).toBe(true);
+    expect(hot.keySeq?.[key] ?? hot.base).toBe(hot.seq);
+  }
+  const writeSeq = hot.seq;
+  const era = hot.era;
+  if (aheadDays === 0) {
+    writer.book.realizedUsd = 10;
+    await persistSplit(kv, writer);
+    const after = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; era?: string; keySeq?: Record<string, number> };
+    expect(after.era).toBe(era);
+    expect(after.seq).not.toBeUndefined();
+    expect(after.seq).toBeGreaterThan(writeSeq);
+    const day = new Date(tomorrowMs).toISOString().slice(0, 10);
+    expect(after.keySeq?.[bar15Key("BTC-USD", day)]).toBe(writeSeq);
+  }
+  const body = await reloadSplit(kv, reader);
+  if (!body) throw new Error("reload");
+  installPaperState(reader, body);
+  const twin = startPaperHost(PRODUCTS, {});
+  twin.clock = () => readerMs;
+  await oldReload(twin, kv, "standby");
+  expect(snap(reader)).toEqual(snap(twin));
+  for (const barMs of barTimes) {
+    const startSec = Math.floor(barMs / 1000);
+    expect(reader.fifteen.some((bar) => bar.productId === "BTC-USD" && bar.startSec === startSec)).toBe(true);
+  }
+}
+
+for (const lag of [0, 120, 600, 1200, 3600]) {
+  test(`a day-roll ${lag}s before the next UTC day matches a full load`, async () => {
+    await dayRoll(lag, 0);
+  });
+}
+
+test("a reader clock a day ahead of a lagged writer matches a full load", async () => {
+  await dayRoll(3600, 1);
+});
+
+test("every written mutable key is stamped under clock lag", async () => {
+  await dayRoll(3600, 0);
+});
+
+test("a ledger row written outside the flush is reloaded", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const { standby, holder } = await warmStandby(kv);
+  const editor = startPaperHost(PRODUCTS, {});
+  editor.clock = clock;
+  editor.warmupStored = true;
+  const loaded = await loadSplit(kv, editor);
+  if (!loaded) throw new Error("load");
+  installPaperState(editor, loaded);
+  editor.book.closed.push({
+    id: "ledger-1",
+    classId: "C",
+    productId: "BTC-USD",
+    netR: 1,
+    netUsd: 4,
+    grossUsd: 4,
+    costUsd: 0,
+    riskUsd: 1,
+    notionalUsd: 1,
+    entryDate: "2026-10-12",
+    exitTs: NOW,
+    exitKind: "test",
+  });
+  await writeThroughBook(kv, editor);
+  await holder.reload();
+  expect(standby.book.closed.map((trade) => trade.id)).toContain("ledger-1");
+  const twin = await twinOf(kv);
+  expect(standby.book.closed.map((trade) => trade.id)).toEqual(twin.book.closed.map((trade) => trade.id));
+  expect(snap(standby)).toEqual(snap(twin));
+});
+
+test("a hot rewrite with the same sequence between the token and the confirm reloads in full", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const { standby, holder } = await warmStandby(kv);
+  const rawGet = kv.get.bind(kv);
+  const rawSet = kv.set.bind(kv);
+  let flipped = false;
+  kv.get = async (key) => {
+    const value = await rawGet(key);
+    if (key !== HOT_KEY || flipped || value == null) return value;
+    flipped = true;
+    const hot = JSON.parse(value) as { realizedUsd?: number; seq?: number };
+    const seq = hot.seq;
+    hot.realizedUsd = 4242;
+    await rawSet(HOT_KEY, JSON.stringify(hot));
+    const stored = JSON.parse((await rawGet(HOT_KEY)) ?? "{}") as { seq?: number };
+    if (stored.seq !== seq) throw new Error("seq changed");
+    return value;
+  };
+  const watch = watchMget(kv);
+  await holder.reload();
+  watch.restore();
+  kv.get = rawGet;
+  expect(flipped).toBe(true);
+  expect(watch.full()).toBeGreaterThan(0);
+  expect(standby.book.realizedUsd).toBe(4242);
+  expect(snap(standby)).toEqual(snap(await twinOf(kv)));
+});
+
+test("the sequence cap is two plan copies at 40 bytes and never under 16KB", () => {
+  expect(SEQ_ENTRY_BYTES).toBe(40);
+  expect(SEQ_MAP_FLOOR_BYTES).toBe(16 * 1024);
+  expect(seqMapCapBytes(0)).toBe(16 * 1024);
+  expect(seqMapCapBytes(100)).toBe(16 * 1024);
+  expect(seqMapCapBytes(204)).toBe(16 * 1024);
+  expect(seqMapCapBytes(205)).toBe(2 * 205 * 40);
+  expect(seqMapCapBytes(300)).toBe(2 * 300 * 40);
+  const host = startPaperHost(PRODUCTS, {});
+  host.clock = clock;
+  const count = mutablePlanCount(host);
+  expect(count).toBeGreaterThan(0);
+  expect(seqMapCapBytes(count)).toBe(Math.max(SEQ_MAP_FLOOR_BYTES, 2 * count * SEQ_ENTRY_BYTES));
+  const wide = startPaperHost(
+    Array.from({ length: 40 }, (_, index) => `N${String(index).padStart(2, "0")}-USD`),
+    {},
+  );
+  wide.clock = clock;
+  const wideCount = mutablePlanCount(wide);
+  expect(seqMapCapBytes(wideCount)).toBe(2 * wideCount * SEQ_ENTRY_BYTES);
+  expect(seqMapCapBytes(wideCount)).toBeGreaterThan(SEQ_MAP_FLOOR_BYTES);
+});
+
+test("a map of exactly the cap does not overflow and one extra byte does", () => {
+  for (const keys of [0, 100, 205, 300]) {
+    const cap = seqMapCapBytes(keys);
+    expect(seqMapExceedsCap(cap, keys)).toBe(false);
+    expect(seqMapExceedsCap(cap + 1, keys)).toBe(true);
+    expect(seqMapExceedsCap(cap - 1, keys)).toBe(false);
+  }
+});
+
+function exceptionBytes(entries: Map<string, number>, base = 1): number {
+  const body: Record<string, number> = {};
+  for (const key of [...entries.keys()].sort()) {
+    const value = entries.get(key)!;
+    if (value !== base) body[key] = value;
+  }
+  return Buffer.byteLength(JSON.stringify(body));
+}
+
+function capExtra(index: number): { key: string; startSec: number } {
+  const startSec = Date.UTC(1999, 0, 1) / 1000 + index * 86_400;
+  return { key: bar15Key("BTC-USD", new Date(startSec * 1000).toISOString().slice(0, 10)), startSec };
+}
+
+async function bootCap(): Promise<{
+  kv: Kv;
+  host: PaperHost;
+  era: string;
+  next: number;
+  cap: number;
+  count: number;
+  carried: Map<string, number>;
+}> {
+  const kv = memoryKv(clock);
+  const host = startPaperHost(["BTC-USD"], {});
+  host.clock = clock;
+  host.warmupStored = true;
+  await persistSplit(kv, host);
+  if (!host.redisEra || host.redisSeq == null || !host.redisKeySeq || host.redisBase == null) throw new Error("cap boot");
+  const count = mutablePlanCount(host);
+  const cap = seqMapCapBytes(count);
+  const next = Math.max(host.redisSeq + 1, Math.floor(host.clock() / 1000));
+  host.redisBase = 1;
+  for (const key of host.redisKeySeq.keys()) host.redisKeySeq.set(key, 2);
+  const carried = new Map<string, number>();
+  for (const key of host.redisKeySeq.keys()) carried.set(key, 2);
+  for (const key of [LAST_RUN_KEY, SEED_CURSOR_KEY, ACCT_KEY]) carried.set(key, next);
+  return { kv, host, era: host.redisEra, next, cap, count, carried };
+}
+
+function capFlip(carried: Map<string, number>, next: number, cap: number): { under: number; over: number; underBytes: number; overBytes: number } {
+  const trial = new Map(carried);
+  if (exceptionBytes(trial) > cap) throw new Error(`plan exceptions already exceed the cap (${exceptionBytes(trial)} > ${cap})`);
+  for (let i = 0; i < 4000; i += 1) {
+    trial.set(capExtra(i).key, next);
+    const bytes = exceptionBytes(trial);
+    if (bytes > cap) {
+      const underMap = new Map(trial);
+      underMap.delete(capExtra(i).key);
+      return { under: i, over: i + 1, underBytes: exceptionBytes(underMap), overBytes: bytes };
+    }
+  }
+  throw new Error("cap never flipped");
+}
+
+test("an exception map inside the cap does not mint an era", async () => {
+  const boot = await bootCap();
+  const flip = capFlip(boot.carried, boot.next, boot.cap);
+  expect(flip.underBytes).toBeLessThanOrEqual(boot.cap);
+  expect(seqMapExceedsCap(flip.underBytes, boot.count)).toBe(false);
+  expect(seqMapExceedsCap(flip.underBytes + 1, boot.count)).toBe(flip.underBytes + 1 > boot.cap);
+  for (let i = 0; i < flip.under; i += 1) boot.host.fifteen.push(fifteen("BTC-USD", capExtra(i).startSec));
+  boot.host.book.realizedUsd = 41;
+  await persistSplit(boot.kv, boot.host);
+  expect(boot.host.seqOverflow).toBe(0);
+  expect(boot.host.redisEra).toBe(boot.era);
+  const hot = JSON.parse((await boot.kv.get(HOT_KEY)) ?? "{}") as { keySeq?: Record<string, number>; era?: string };
+  expect(hot.era).toBe(boot.era);
+  expect(Buffer.byteLength(JSON.stringify(hot.keySeq ?? {}))).toBe(flip.underBytes);
+  expect(seqMapExceedsCap(Buffer.byteLength(JSON.stringify(hot.keySeq ?? {})), boot.count)).toBe(false);
+});
+
+function universeNames(padTo = 0): string[] {
+  const path = fileURLToPath(new URL("../../data/reports/universe-membership.json", import.meta.url));
+  const membership = JSON.parse(readFileSync(path, "utf8")) as { members: { date: string; names: string[] }[] };
+  const names = [...(membership.members[membership.members.length - 1]?.names ?? [])];
+  while (names.length < padTo) names.push(`SYN-${String(names.length).padStart(2, "0")}-USD`);
+  return names;
+}
+
+async function sim14(names: string[]): Promise<{ hot: number; read: number; write: number; heartbeat: number; partial: number; grouped: number }> {
+  const start = Date.parse("2026-10-01T00:00:00.000Z");
+  let t = start;
+  const kv = memoryKv(() => start);
+  expect(await tryAcquire(kv, "holder", start + 60 * 86_400_000, start)).toBe(true);
+  const lease = decodeLease(await kv.get(LEASE_KEY));
+  if (!lease?.token) throw new Error("lease");
+  const host = startPaperHost(names, {});
+  host.clock = () => t;
+  host.warmupStored = true;
+  host.leaseToken = lease.token;
+  host.holderId = "holder";
+  const payloads: number[] = [];
+  const ownedFlush = kv.ownedFlush.bind(kv);
+  kv.ownedFlush = async (leaseKey, token, nowMs, payload) => {
+    payloads.push(Buffer.byteLength(payload));
+    return ownedFlush(leaseKey, token, nowMs, payload);
+  };
+  const ownedSet = kv.ownedSet.bind(kv);
+  let grouped = 0;
+  kv.ownedSet = async (leaseKey, token, key, value, opts) => {
+    if (key === HOT_KEY) {
+      const body = JSON.parse(value) as { seq?: unknown };
+      if (body.seq == null) grouped += 1;
+    }
+    return ownedSet(leaseKey, token, key, value, opts);
+  };
+  await persistSplit(kv, host);
+  const era = host.redisEra;
+  if (!era) throw new Error("era");
+  expect(host.seqOverflow).toBe(0);
+  expect(host.seqInvalid).toBe(0);
+  const savedBaseline = host.saveBytes;
+  const slots = 96;
+  for (let day = 0; day < 14; day += 1) {
+    const daySec = Math.floor(t / 1000);
+    for (const productId of names) {
+      for (let slot = 0; slot < slots; slot += 1) host.fifteen.push(fifteen(productId, daySec + slot * 900));
+    }
+    host.book.realizedUsd = day + 1;
+    await persistSplit(kv, host);
+    expect(host.redisEra).toBe(era);
+    expect(host.seqOverflow).toBe(0);
+    expect(host.seqInvalid).toBe(0);
+    expect(host.book.incidents.some((item) => item.includes("1 MB") || item === "seq map overflow" || item === "seq invalid")).toBe(false);
+    t += 86_400_000;
+  }
+  const write = host.saveBytes - savedBaseline;
+  const hot = Buffer.byteLength((await kv.get(HOT_KEY)) ?? "");
+  const reader = startPaperHost(names, {});
+  reader.clock = () => t;
+  const loaded = await loadSplit(kv, reader);
+  if (!loaded) throw new Error("sim load");
+  installPaperState(reader, loaded);
+  const read = reader.readBytes;
+  host.book.realizedUsd = 900;
+  const mark = payloads.length;
+  await persistSplit(kv, host);
+  const heartbeat = payloads[mark] ?? 0;
+  expect(host.redisEra).toBe(era);
+  expect(host.seqOverflow).toBe(0);
+  expect(payloads).toHaveLength(16);
+  reader.readBytes = 0;
+  const partialBody = await reloadSplit(kv, reader);
+  if (!partialBody) throw new Error("sim reload");
+  installPaperState(reader, partialBody);
+  expect(reader.book.realizedUsd).toBe(900);
+  return { hot, read, write, heartbeat, partial: reader.readBytes, grouped };
+}
+
+test("a realistic 14-day book on 27 names mints no era outside the first flush", async () => {
+  const names = universeNames();
+  expect(names).toHaveLength(27);
+  const measured = await sim14(names);
+  const hwm = Number(readFileSync("/proc/self/status", "utf8").match(/VmHWM:\s+(\d+)/)?.[1] ?? 0);
+  console.log(
+    `t1 sim14 names=27 days=14 eras=1 seqOverflow=0 hot=${measured.hot} read=${measured.read} write=${measured.write} heartbeat=${measured.heartbeat} partial=${measured.partial} grouped=${measured.grouped} VmHWM_kB=${hwm}`,
+  );
+  expect(measured.hot).toBeGreaterThan(0);
+  expect(measured.read).toBeGreaterThan(0);
+  expect(measured.write).toBeGreaterThan(0);
+  expect(measured.heartbeat).toBeGreaterThan(0);
+}, 180_000);
+
+test("a realistic 14-day book on 40 names reaches day 14 with no extra era", async () => {
+  const names = universeNames(40);
+  expect(names).toHaveLength(40);
+  const measured = await sim14(names);
+  const hwm = Number(readFileSync("/proc/self/status", "utf8").match(/VmHWM:\s+(\d+)/)?.[1] ?? 0);
+  console.log(
+    `t1 sim14 names=40 days=14 eras=1 seqOverflow=0 hot=${measured.hot} read=${measured.read} write=${measured.write} heartbeat=${measured.heartbeat} partial=${measured.partial} grouped=${measured.grouped} VmHWM_kB=${hwm}`,
+  );
+  expect(measured.hot).toBeGreaterThan(0);
+  expect(measured.read).toBeGreaterThan(0);
+  expect(measured.write).toBeGreaterThan(0);
+  expect(measured.heartbeat).toBeGreaterThan(0);
+}, 180_000);

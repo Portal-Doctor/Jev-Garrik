@@ -78,11 +78,25 @@ function acctDayOk(day: string, nowMs: number): boolean {
 /** Heartbeat payload cap. Over this, Jev fields are shed and the book is still written. */
 export const HOT_MAX_BYTES = 256 * 1024;
 /**
- * Sparse keySeq JSON cap. Past this the flush restamps every mutable plan key
- * at the new sequence, starts one new era, and publishes an empty exception map.
- * The book is still written. `seq map overflow` is telemetry, not a gate.
+ * Sparse keySeq JSON cap. Two copies of the mutable plan (this UTC day and the
+ * next) at about 40 bytes per key, and never under 16 KB. Past this the flush
+ * restamps every mutable plan key at the new sequence, starts one new era, and
+ * publishes an empty exception map. The book is still written. `seq map overflow`
+ * is telemetry, not a gate.
  */
-export const SEQ_MAP_MAX_BYTES = 4096;
+export const SEQ_ENTRY_BYTES = 40;
+export const SEQ_MAP_FLOOR_BYTES = 16 * 1024;
+
+/** Byte cap for a sparse exception map of `mutableKeys` plan keys. Equal to the cap is inside it. */
+export function seqMapCapBytes(mutableKeys: number): number {
+  const count = Number.isFinite(mutableKeys) && mutableKeys > 0 ? Math.floor(mutableKeys) : 0;
+  return Math.max(SEQ_MAP_FLOOR_BYTES, 2 * count * SEQ_ENTRY_BYTES);
+}
+
+/** True only when the sparse JSON is strictly larger than the plan cap. */
+export function seqMapExceedsCap(sparseBytes: number, mutableKeys: number): boolean {
+  return sparseBytes > seqMapCapBytes(mutableKeys);
+}
 /** Incident when the hot snapshot reaches 75% of the cap. */
 export const HOT_WARN_BYTES = 192 * 1024;
 export const BAR15_TTL_MS = 9 * 24 * 60 * 60 * 1000;
@@ -968,7 +982,7 @@ export function noteSeqInvalid(host: PaperHost): void {
   console.log("seq invalid");
 }
 
-/** The exception map would pass SEQ_MAP_MAX_BYTES. The flush restamps and still saves. */
+/** The exception map would pass the plan cap. The flush restamps and still saves. */
 export function noteSeqOverflow(host: PaperHost): void {
   host.seqOverflow += 1;
   if (!host.book.incidents.includes("seq map overflow")) host.book.incidents.push("seq map overflow");
@@ -1022,12 +1036,29 @@ function touchedSeqKeys(body: FlushPayload): string[] {
   return keys;
 }
 
-function planMutableKeys(host: PaperHost): Set<string> {
-  const plan = splitPlan(host);
+function mutableKeysAt(host: PaperHost, nowMs: number): Set<string> {
+  const plan = splitPlanAt(host, nowMs);
   const keys = new Set<string>();
   for (const key of plan.keys) if (mutableSeqKey(key)) keys.add(key);
   for (const key of plan.ringKeys) if (mutableSeqKey(key)) keys.add(key);
   return keys;
+}
+
+function planMutableKeys(host: PaperHost): Set<string> {
+  return mutableKeysAt(host, host.clock());
+}
+
+/** Mutable keys a flush may still need: this clock's plan and the plan one UTC day ahead. */
+function keepMutableKeys(host: PaperHost): Set<string> {
+  const now = host.clock();
+  const keep = mutableKeysAt(host, now);
+  for (const key of mutableKeysAt(host, now + 86_400_000)) keep.add(key);
+  return keep;
+}
+
+/** Mutable keys in the current load plan. The sequence cap is sized from this count. */
+export function mutablePlanCount(host: PaperHost): number {
+  return planMutableKeys(host).size;
 }
 
 /** Every mutable plan key, with an omitted key filled from `base`. No base means the sparse map only. */
@@ -1039,6 +1070,18 @@ function expandKeySeq(host: PaperHost, sparse: Map<string, number>, base: number
     return out;
   }
   for (const key of plan) out.set(key, sparse.get(key) ?? base);
+  return out;
+}
+
+/**
+ * Writer memory. The published map stays sparse. The next flush still has to
+ * see tomorrow's keys and any mutable key this flush wrote outside both plans.
+ */
+function writerKeySeq(host: PaperHost, sparse: Map<string, number>, base: number, written: ReadonlySet<string>): Map<string, number> {
+  const out = expandKeySeq(host, sparse, base);
+  const extra = mutableKeysAt(host, host.clock() + 86_400_000);
+  for (const key of written) if (mutableSeqKey(key)) extra.add(key);
+  for (const key of extra) if (!out.has(key)) out.set(key, sparse.get(key) ?? base);
   return out;
 }
 
@@ -1173,8 +1216,8 @@ function refuseSeq(host: PaperHost, payload: string): HotStamp {
  * `seq` is max(loaded + 1, clock seconds). One era covers the hot. A successor
  * keeps the era it loaded. A poisoned sequence publishes this hot with no
  * sequence and does not throw. The next flush starts one new era. An exception
- * map past SEQ_MAP_MAX_BYTES restamps every mutable plan key, starts one new
- * era, and publishes an empty exception map. The book is still written.
+ * map past the plan cap restamps every mutable plan key, starts one new era,
+ * and publishes an empty exception map. The book is still written.
  * Restore (T5/T11) writes one new era with seq = max(restored, redisSeq, floor(nowMs / 1000)) + 1
  * and `base` at that seq.
  */
@@ -1189,17 +1232,24 @@ function stampFlush(host: PaperHost, payload: string): HotStamp {
   let era = fresh ? newEra() : (host.redisEra ?? host.redisSeenEra ?? newEra());
   let base = fresh || host.redisBase == null ? next : host.redisBase;
   const planSet = planMutableKeys(host);
-  const carried = fresh || host.redisKeySeq == null ? new Map<string, number>() : new Map(host.redisKeySeq);
-  for (const key of [...carried.keys()]) if (!planSet.has(key)) carried.delete(key);
-  for (const key of body.drop ?? []) {
-    if (key.startsWith("p6:seed:wm:") && planSet.has(key)) carried.set(key, next);
-  }
-  const touch = (key: string) => {
-    if (!planSet.has(key)) return;
-    carried.set(key, next);
+  // Stamp every mutable key this flush writes, whether or not this clock's plan
+  // lists it. A 15m bar for the next UTC day is outside today's plan when the
+  // writer clock is still on the previous day. Prune to the union of the two
+  // plans, and never drop a key written on this flush.
+  const written = new Set<string>();
+  const note = (key: string) => {
+    if (mutableSeqKey(key)) written.add(key);
   };
-  for (const key of host.redisRewrite) touch(key);
-  for (const key of touchedSeqKeys(body)) touch(key);
+  for (const key of host.redisRewrite) note(key);
+  for (const key of touchedSeqKeys(body)) note(key);
+  for (const key of body.drop ?? []) note(key);
+  const keep = keepMutableKeys(host);
+  const carried = fresh || host.redisKeySeq == null ? new Map<string, number>() : new Map(host.redisKeySeq);
+  for (const key of [...carried.keys()]) {
+    if (written.has(key)) continue;
+    if (!keep.has(key)) carried.delete(key);
+  }
+  for (const key of written) carried.set(key, next);
   const sparse = new Map<string, number>();
   for (const [key, value] of carried) if (value !== base) sparse.set(key, value);
   const sparseJson = (): string => {
@@ -1207,7 +1257,7 @@ function stampFlush(host: PaperHost, payload: string): HotStamp {
     for (const key of [...sparse.keys()].sort()) sorted[key] = sparse.get(key)!;
     return JSON.stringify(sorted);
   };
-  if (Buffer.byteLength(sparseJson()) > SEQ_MAP_MAX_BYTES) {
+  if (seqMapExceedsCap(Buffer.byteLength(sparseJson()), planSet.size)) {
     noteSeqOverflow(host);
     era = newEra();
     base = next;
@@ -1216,8 +1266,8 @@ function stampFlush(host: PaperHost, payload: string): HotStamp {
     sparse.clear();
   }
   const hot = JSON.parse(body.hot) as HotBody;
-  const pack = (keep: boolean): string | null => {
-    if (!keep) {
+  const pack = (sequenced: boolean): string | null => {
+    if (!sequenced) {
       delete hot.seq;
       delete hot.keySeq;
       delete hot.era;
@@ -1255,7 +1305,7 @@ function stampFlush(host: PaperHost, payload: string): HotStamp {
     seq: next,
     era,
     base,
-    keySeq: expandKeySeq(host, sparse, base),
+    keySeq: writerKeySeq(host, sparse, base, written),
     invalid: false,
   };
 }
@@ -1408,7 +1458,11 @@ interface SplitPlan {
 }
 
 function splitPlan(host: PaperHost): SplitPlan {
-  const nowSec = Math.floor(host.clock() / 1000);
+  return splitPlanAt(host, host.clock());
+}
+
+function splitPlanAt(host: PaperHost, nowMs: number): SplitPlan {
+  const nowSec = Math.floor(nowMs / 1000);
   const today = Math.floor(nowSec / 86400) * 86400;
   const days: string[] = [];
   for (let i = 0; i < 8; i += 1) days.push(new Date((today - i * 86400) * 1000).toISOString().slice(0, 10));
