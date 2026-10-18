@@ -274,6 +274,11 @@ export function markerBytesPerDay(products: number, example = barMarker("BTC-USD
   return products * 96 * Buffer.byteLength(example);
 }
 
+/**
+ * Writes p6:hot from a snapshot. A restore (T5/T11) writes one new era and sets seq to
+ * max(restored, redisSeq, floor(nowMs / 1000)) + 1, with `base` at that seq and every
+ * mutable plan key implied by it. This function does not assign a sequence.
+ */
 export async function saveState(kv: Kv, body: PaperStateBody, opts?: { writeWarmup?: boolean }): Promise<void> {
   const { warmup, memberCloses, fifteen, hourWarm, dailyCloses, dailyBars, fourBars, rings, tape, ...live } = body;
   void memberCloses;
@@ -313,7 +318,11 @@ export interface AsyncPaperStore {
   save(body: PaperStateBody): Promise<void>;
 }
 
-/** Redis, or any Kv, behind the same snapshot the file store writes. The vendor client is not imported. */
+/**
+ * Redis, or any Kv, behind the same snapshot the file store writes. The vendor client is not imported.
+ * A restore (T5/T11) must not store a `seq` or any `keySeq` value lower than a sequence already
+ * published on p6:hot. This writer does not assign one. The flush stamps max(loaded + 1, clock seconds).
+ */
 export function kvPaperStore(kv: Kv): AsyncPaperStore {
   return {
     async load() {

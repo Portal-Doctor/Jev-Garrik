@@ -269,8 +269,42 @@ export interface PaperHost {
   saveCommands: number;
   /** Payload bytes of those commands. */
   saveBytes: number;
+  /** Payload bytes read back from Redis by the history load and the reload. */
+  readBytes: number;
   /** Appends sent for a row that was already stored. The target is 0. */
   duplicateAppends: number;
+  /**
+   * `seq` from the last p6:hot this process loaded. Null when that snapshot
+   * had no sequence. Reload compares it with the snapshot taken after the lease.
+   */
+  redisSeq: number | null;
+  /** Era of that snapshot's writer. Null when the snapshot had no era. */
+  redisSeenEra: string | null;
+  /** This process's era. Assigned on the first flush that publishes a sequence. */
+  redisEra: string | null;
+  /** Per-key sequence expanded with `base`, plus the next UTC day and keys this flush wrote. Null when the map was absent. */
+  redisKeySeq: Map<string, number> | null;
+  /** Sequence implied for mutable plan keys omitted from the published exception map. */
+  redisBase: number | null;
+  /** The stored sequence is unsafe. The next flush publishes no sequence, and the one after starts a new era. */
+  redisPoison: boolean;
+  /** The next published sequence starts a new era and an empty key map. */
+  redisFreshEra: boolean;
+  /** Last hot string this process wrote or loaded. A grouped flush strips this instead of reading Redis. */
+  redisHotRaw: string | null;
+  /** Times a poisoned sequence was refused. Printed on the redis log line. Not a gate. */
+  seqInvalid: number;
+  /** Times the key map was restamped because it would pass the cap. Not a gate. */
+  seqOverflow: number;
+  /** Raw values from the last split read. A reload reuses one only when its era and sequence match. Cleared after that reload. */
+  redisRaw: Map<string, string | null> | null;
+  /** Ring lists from that same read, oldest first. */
+  redisRings: Map<string, string[]> | null;
+  /**
+   * Keys written outside the atomic flush since the last published keySeq.
+   * The next flush stamps them at the new sequence so a reload cannot skip them.
+   */
+  redisRewrite: Set<string>;
   /** Serializes flushes so two heartbeats cannot append the same bar. */
   flushChain: Promise<void>;
   /** In-flight fill and ledger writes. */
@@ -645,6 +679,20 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     productLocks: new Map(),
     saveCommands: 0,
     saveBytes: 0,
+    readBytes: 0,
+    redisSeq: null,
+    redisSeenEra: null,
+    redisEra: null,
+    redisKeySeq: null,
+    redisBase: null,
+    redisPoison: false,
+    redisFreshEra: false,
+    redisHotRaw: null,
+    seqInvalid: 0,
+    seqOverflow: 0,
+    redisRaw: null,
+    redisRings: null,
+    redisRewrite: new Set(),
     duplicateAppends: 0,
     flushChain: Promise.resolve(),
     durableChain: Promise.resolve(),

@@ -4,7 +4,7 @@
  */
 
 import type { SourceDay } from "../p3/bar-access";
-import { loadSplit, persistSplit, warmReadyCount, warmupKey } from "./hot-store";
+import { loadSplit, noteReadBytes, persistSplit, reloadSplit, warmReadyCount, warmupKey } from "./hot-store";
 import { acceptRestBar, applyRestCold, attachMemberCloses, attachRestLease, backfillTapeIfNeeded, catchUpHistory, coldResetEnabled, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, seedRetryList, stageColdReset, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
 import { createRestRun, restLogLine } from "./rest-limit";
 import type { OhlcvBar } from "./rest-bars";
@@ -85,11 +85,17 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
           host.leaseUntilMs = lease.untilMs;
         }
       }
-      const saved = await loadSplit(kv, host);
-      if (!saved) return;
-      installPaperState(host, saved);
-      rememberPersistedBars(host);
-      attachMemberCloses(host);
+      try {
+        const saved = await reloadSplit(kv, host);
+        if (!saved) return;
+        installPaperState(host, saved);
+        rememberPersistedBars(host);
+        attachMemberCloses(host);
+      } finally {
+        // One reload after the lease. The raw strings exist so that reload can reuse unchanged keys.
+        host.redisRaw = null;
+        host.redisRings = null;
+      }
     },
     async resetCold() {
       if (!coldResetEnabled(process.env) || host.stopped) return;
@@ -217,7 +223,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       } finally {
         const cold = [...host.seedMarks.entries()].filter(([, mark]) => mark.status === "cold").map(([id, mark]) => ({ id, reason: mark.reason }));
         const warm = warmReadyCount(host);
-        console.log(`redis cmds=${host.saveCommands}, bytes=${host.saveBytes}, duplicates=${host.duplicateAppends}`);
+        console.log(redisLogLine(host));
         console.log(restLogLine(host.restRun, { warm, total: host.products.length, seedIdx: host.seedCursor.idx, cold }));
       }
     },
@@ -239,10 +245,16 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
   };
 }
 
+/** Save counters and the bytes this invocation read back from Redis. */
+export function redisLogLine(host: PaperHost): string {
+  return `redis cmds=${host.saveCommands}, bytes=${host.saveBytes}, readBytes=${host.readBytes}, duplicates=${host.duplicateAppends}, seqInvalid=${host.seqInvalid}, seqOverflow=${host.seqOverflow}`;
+}
+
 async function loadWarmup(kv: Kv, host: PaperHost): Promise<void> {
   const missing = [...new Set([...host.products, "BTC-USD"])].filter((id) => (host.warmup.get(id)?.length ?? 0) === 0);
   if (missing.length === 0) return;
   const values = await kv.mget(missing.map((id) => warmupKey(id)));
+  for (const raw of values) noteReadBytes(host, raw);
   missing.forEach((id, index) => {
     const raw = values[index];
     if (!raw) return;
@@ -252,6 +264,7 @@ async function loadWarmup(kv: Kv, host: PaperHost): Promise<void> {
   const still = missing.filter((id) => (host.warmup.get(id)?.length ?? 0) === 0);
   if (still.length > 0) {
     const legacy = await kv.get(WARMUP_KEY);
+    noteReadBytes(host, legacy);
     if (legacy) {
       const rows = JSON.parse(legacy) as [string, SourceDay[]][];
       for (const [id, days] of rows) {
