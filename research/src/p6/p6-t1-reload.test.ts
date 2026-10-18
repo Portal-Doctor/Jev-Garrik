@@ -578,7 +578,11 @@ test("prod-sized hot with keySeq stays under 256 KB and a steady flush is not gr
     `t1 prod asOf=${latest?.date} products=${names.length} hotBefore=${hotBefore} hotAfter=${hotAfter} keySeqKeys=${Object.keys(keySeq).length} firstBarSets=${firstBarSets} firstPayload=${firstPayload} steadyStripSets=${steadyStrip} steadyPayloads=${steady.join(",")} barPayload=${barPayload} steadyBarSets=${steadyGrouped} againBarSets=${barSets - barsBefore} againStripSets=${groupedStrips} againStripBytes=${groupedStripBytes} againHotGets=${hotGets} againHotGetBytes=${hotGetBytes} heartbeat27=${heartbeatSum} heartbeatEach=${heartbeatPayloads[0] ?? 0} takeoverFlush=${takeoverFlush} VmHWM_kB=${hwm}`,
   );
   expect(hotAfter).toBeLessThan(8_000);
-  // A full bar rewrite stays one era, so the exception map rides in later heartbeats.
+  // Loosened when the exception map stopped being wiped by the 4 KB cap.
+  // The hot carries that map. It plateaus near 17 KB at 27 names and near 22 KB at 40.
+  // 27 heartbeats: 250 KB -> 560 KB (measured 500,861).
+  // One heartbeat: 12 KB -> 22 KB (measured 18,550).
+  // Takeover flush: 16 KB -> 28 KB (measured 23,163).
   expect(heartbeatSum).toBeLessThan(560_000);
   for (const bytes of heartbeatPayloads) expect(bytes).toBeLessThan(22_000);
   expect(takeoverFlush).toBeGreaterThan(0);
@@ -1904,6 +1908,221 @@ test("a realistic 14-day book on 27 names mints no era outside the first flush",
   expect(measured.write).toBeGreaterThan(0);
   expect(measured.heartbeat).toBeGreaterThan(0);
 }, 180_000);
+
+test("tape keys stay unstamped and a 1200s holder lag matches a full load", async () => {
+  const midnight = Date.parse("2026-10-13T00:00:00.000Z");
+  const writerMs = midnight - 1200 * 1000;
+  const readerMs = midnight;
+  const kv = memoryKv(() => NOW);
+  await seedLagBook(kv, writerMs);
+  const reader = startPaperHost(PRODUCTS, {});
+  reader.clock = () => readerMs;
+  const warmed = await loadSplit(kv, reader);
+  if (!warmed) throw new Error("warm");
+  installPaperState(reader, warmed);
+  const writer = startPaperHost(PRODUCTS, {});
+  writer.clock = () => writerMs;
+  writer.warmupStored = true;
+  const loaded = await loadSplit(kv, writer);
+  if (!loaded) throw new Error("writer");
+  installPaperState(writer, loaded);
+  const tomorrowMs = Math.floor(writerMs / 86_400_000) * 86_400_000 + 86_400_000;
+  const startSec = Math.floor(tomorrowMs / 1000);
+  writer.fifteen.push(fifteen("BTC-USD", startSec));
+  const minute = Math.floor(writerMs / 1000 / 60) * 60 - 60;
+  writer.trades.push({ productId: "BTC-USD", tsSec: minute + 5, price: 123.5, size: 0.25, side: "buy" });
+  writer.book.realizedUsd = 9;
+  const written = new Set<string>();
+  const origSet = kv.set.bind(kv);
+  kv.set = async (key, value, opts) => {
+    written.add(key);
+    return origSet(key, value, opts);
+  };
+  await persistSplit(kv, writer);
+  kv.set = origSet;
+  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; base?: number; keySeq?: Record<string, number> };
+  if (hot.seq == null || hot.base == null) throw new Error("stamp");
+  expect(hot.base).not.toBe(hot.seq);
+  const tapeWritten = [...written].filter((key) => key.startsWith("p6:tape:"));
+  expect(tapeWritten.length).toBeGreaterThan(0);
+  expect(tapeWritten).toContain(tapeKey(minute));
+  for (const key of tapeWritten) expect(hot.keySeq?.[key]).toBeUndefined();
+  expect([...written].some((key) => hot.keySeq?.[key] === hot.seq)).toBe(true);
+  const body = await reloadSplit(kv, reader);
+  if (!body) throw new Error("reload");
+  installPaperState(reader, body);
+  const twin = startPaperHost(PRODUCTS, {});
+  twin.clock = () => readerMs;
+  await oldReload(twin, kv, "standby");
+  expect(snap(reader)).toEqual(snap(twin));
+  expect(reader.fifteen.some((bar) => bar.productId === "BTC-USD" && bar.startSec === startSec)).toBe(true);
+  expect(reader.trades.some((trade) => trade.tsSec === minute + 5)).toBe(twin.trades.some((trade) => trade.tsSec === minute + 5));
+});
+
+test("a missing era is not accepted and a changed bar is loaded in full", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as Record<string, unknown>;
+  if (typeof hot.seq !== "number" || typeof hot.base !== "number") throw new Error("stamp");
+  delete hot.era;
+  await kv.set(HOT_KEY, JSON.stringify(hot));
+  const host = startPaperHost(PRODUCTS, {});
+  host.clock = clock;
+  const loaded = await loadSplit(kv, host);
+  if (!loaded) throw new Error("load");
+  installPaperState(host, loaded);
+  expect(host.redisPoison).toBe(false);
+  expect(host.redisSeq).toBeNull();
+  expect(host.redisSeenEra).toBeNull();
+  const key = bar4hKey("ETH-USD");
+  const ts = TODAY - 660 * 14_400;
+  const rows = JSON.parse((await kv.get(key)) ?? "[]") as ReturnType<typeof ohlc>[];
+  rows.push({ ...ohlc(ts), close: 64 });
+  await kv.set(key, JSON.stringify(rows));
+  const watch = watchMget(kv);
+  const body = await reloadSplit(kv, host);
+  watch.restore();
+  if (!body) throw new Error("reload");
+  installPaperState(host, body);
+  expect(watch.full()).toBeGreaterThan(0);
+  expect(host.fourBars.get("ETH-USD")?.some((bar) => bar.ts === ts && bar.close === 64)).toBe(true);
+  expect(snap(host)).toEqual(snap(await twinOf(kv)));
+});
+
+test("an era that fails the hex pattern is not adopted", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { era?: string };
+  hot.era = "not-a-valid-era";
+  await kv.set(HOT_KEY, JSON.stringify(hot));
+  const host = startPaperHost(PRODUCTS, {});
+  host.clock = clock;
+  host.warmupStored = true;
+  const loaded = await loadSplit(kv, host);
+  if (!loaded) throw new Error("load");
+  installPaperState(host, loaded);
+  expect(host.redisSeenEra).toBeNull();
+  host.book.realizedUsd = 81;
+  await persistSplit(kv, host);
+  const published = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { era?: string; realizedUsd?: number };
+  expect(published.realizedUsd).toBe(81);
+  expect(published.era).toMatch(/^[0-9a-f]{16}$/);
+  expect(published.era).not.toBe("not-a-valid-era");
+});
+
+test("a non-number keySeq value is poison and the changed bar is loaded", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const { standby, holder } = await warmStandby(kv);
+  const key = bar4hKey("BTC-USD");
+  const base = standby.redisBase;
+  if (base == null) throw new Error("base");
+  expect(standby.redisKeySeq?.get(key)).toBe(base);
+  const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; base?: number; keySeq?: Record<string, unknown> };
+  if (hot.seq == null || hot.base == null) throw new Error("stamp");
+  hot.keySeq = { ...(hot.keySeq ?? {}), [key]: "7" };
+  await kv.set(HOT_KEY, JSON.stringify(hot));
+  const ts = TODAY - 650 * 14_400;
+  const rows = JSON.parse((await kv.get(key)) ?? "[]") as ReturnType<typeof ohlc>[];
+  rows.push({ ...ohlc(ts), close: 65 });
+  await kv.set(key, JSON.stringify(rows));
+  const watch = watchMget(kv);
+  await holder.reload();
+  watch.restore();
+  expect(standby.redisPoison).toBe(true);
+  expect(watch.full()).toBeGreaterThan(0);
+  expect(standby.fourBars.get("BTC-USD")?.some((bar) => bar.ts === ts && bar.close === 65)).toBe(true);
+  expect(snap(standby)).toEqual(snap(await twinOf(kv)));
+});
+
+async function expectBasePoison(base: number): Promise<void> {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const stored = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; base?: number };
+  if (typeof stored.seq !== "number") throw new Error("seq");
+  stored.base = base;
+  await kv.set(HOT_KEY, JSON.stringify(stored));
+  const host = startPaperHost(PRODUCTS, {});
+  host.clock = clock;
+  host.warmupStored = true;
+  const loaded = await loadSplit(kv, host);
+  if (!loaded) throw new Error("load");
+  installPaperState(host, loaded);
+  expect(host.redisPoison).toBe(true);
+  expect(host.redisSeq).toBeNull();
+  host.book.realizedUsd = 77;
+  await persistSplit(kv, host);
+  const first = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: unknown; realizedUsd?: number; incidents?: string[] };
+  expect(first.realizedUsd).toBe(77);
+  expect(first.seq).toBeUndefined();
+  expect(host.seqInvalid).toBe(1);
+  expect(host.book.incidents).toContain("seq invalid");
+}
+
+test("a base above seq is poison and the book is still saved", async () => {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  const stored = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number };
+  if (typeof stored.seq !== "number") throw new Error("seq");
+  await expectBasePoison(stored.seq + 1000);
+});
+
+test("a huge base is poison and the book is still saved", async () => {
+  await expectBasePoison(1e300);
+});
+
+async function expectClassStamp(key: string, mutate: (host: PaperHost) => void): Promise<void> {
+  const kv = memoryKv(clock);
+  await seedBook(kv);
+  await saveSinceWarm(kv, clock, mutate);
+  const published = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number; keySeq?: Record<string, number> };
+  expect(published.seq).toBeGreaterThan(0);
+  expect(published.keySeq?.[key]).toBe(published.seq);
+}
+
+test("every written 4h key is stamped", async () => {
+  const ts = TODAY - 640 * 14_400;
+  await expectClassStamp(bar4hKey("BTC-USD"), (editor) => {
+    const rows = editor.fourBars.get("BTC-USD") ?? [];
+    rows.push({ ...ohlc(ts), close: 44 });
+    editor.fourBars.set("BTC-USD", rows);
+  });
+});
+
+test("every written 1h key is stamped", async () => {
+  const ts = TODAY - 390 * 3_600;
+  await expectClassStamp(bar1hKey("ETH-USD"), (editor) => {
+    const rows = editor.hourWarm.get("ETH-USD") ?? [];
+    rows.push({ ...ohlc(ts), close: 18 });
+    editor.hourWarm.set("ETH-USD", rows);
+  });
+});
+
+test("every written daily key is stamped", async () => {
+  const ts = TODAY - 30 * 86_400;
+  await expectClassStamp(d1Key("SOL-USD"), (editor) => {
+    const rows = editor.dailyBars.get("SOL-USD") ?? [];
+    rows.push({ ...ohlc(ts), close: 22 });
+    editor.dailyBars.set("SOL-USD", rows);
+  });
+});
+
+test("every written ring key is stamped", async () => {
+  const ts = (Math.floor(NOW / 1000 / 60) * 60 - 180) * 1000;
+  await expectClassStamp(ringKey("XRP-USD"), (editor) => {
+    editor.book.mids.completed.push({ productId: "XRP-USD", ts, open: 5, high: 5, low: 5, close: 5, volumeBase: 1 });
+  });
+});
+
+test("every written seed mark is stamped", async () => {
+  await expectClassStamp(seedMarkKey("BTC-USD"), (editor) => {
+    editor.seedMarks.set("BTC-USD", { oldestTs: 1, newestTs: 2, status: "cold", reason: "qa" });
+  });
+});
+
+test("a 1200s lag keeps the next-day bar in keySeq after the heartbeat", async () => {
+  await dayRoll(1200, 0);
+});
 
 test("a realistic 14-day book on 40 names reaches day 14 with no extra era", async () => {
   const names = universeNames(40);

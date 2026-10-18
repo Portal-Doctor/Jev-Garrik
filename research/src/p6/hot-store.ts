@@ -83,6 +83,10 @@ export const HOT_MAX_BYTES = 256 * 1024;
  * restamps every mutable plan key at the new sequence, starts one new era, and
  * publishes an empty exception map. The book is still written. `seq map overflow`
  * is telemetry, not a gate.
+ *
+ * Safety net, not the steady state. A realistic exception map is about 12.6 KB
+ * at 27 names and 18.3 KB at 40 names. Those plans are 3 + 13 keys per name
+ * (354 and 523), so the caps are about 28.3 KB and 41.8 KB.
  */
 export const SEQ_ENTRY_BYTES = 40;
 export const SEQ_MAP_FLOOR_BYTES = 16 * 1024;
