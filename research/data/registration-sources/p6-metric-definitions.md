@@ -241,7 +241,17 @@ The colours are computed from the same numbers and can only flag earlier.
 
 ## Joint resolution (Quant + Trader, Oct 11 2026)
 Everything is AGREED. Quant accepts all three of Trader's counters, and they supersede the text above where it differs:
-1. **Cost reference price:** entries and rule, trail and time exits are measured against the **arrival mid**, the live L2 mid when the taker order is sent (for X1, the next 1h open). Stop exits are measured against the stop price, with gap fills beyond the stop counted as slippage. Decision-to-arrival drift is reported separately as **'delay' (bps, GREY)**, outside cost$. This matches the backtest, where gross runs from the next 1h open and s_bt is the only spread term.
+1. **Cost reference price (amended Oct 20 per X1 amendment 2dd80f67 and its Erratum 1 d01c3e0bec84e7fc3f651a57656ea7b25139c2b693fb4648dec90089a2b0f732, Brian-approved 7:07 AM CT):** two separate fields.
+   - `sBtMagnitudeBps` = the backtest per-leg spread charge: max(5, 0.5 × Corwin-Schultz on 15m bars), capped at 15 bps, with 2× stress. "15m" applies to this estimator only.
+   - `fillAnchorOpen` = the registered entry open per class, i.e. the price the backtest fills at. B uses the next 1h open (Mon 01:00 UTC). A and E use their own registered rules.
+   - `execCostBps` = (fill − the mid of the first fresh L2 update used for the fill) / that mid × 1e4. Positive = cost; mirrored for sells.
+   - `driftBps` = (that mid − fillAnchorOpen) / fillAnchorOpen × 1e4. Signed, GREY, outside cost$.
+   - `delayBps` = (that mid − mid at decision) / mid at decision × 1e4. Signed, GREY, outside cost$, informational only.
+   - Stop and gap exits are measured against the first fresh bid at or after the trigger, never the stop price. Distance below the stop counts in execCostBps.
+   - Fills tagged `fillSrc:"modelled"` are reported separately. A class with more than 10% modelled fills shows execCost as "unreliable".
+   - Promotion and spread-fragile checks compare execCostBps + driftBps with sBtMagnitudeBps.
+   - The four pre-fix B fills (AERO, ENA, NEAR, SUI) are tagged and excluded from slippage stats. They count in B's registered test at the modelled shadow fill.
+   - *Superseded Oct 11 text:* measuring against the arrival mid (X1: next 1h open), stop exits against the stop price, and decision-to-arrival drift as GREY 'delay'.
 2. **Max drawdown cut points for A/B:** GREEN <7R, YELLOW 7R to <10R, RED at the registered 10R pause / 20R kill. C/D/E keep GREEN <5R.
 3. **Ex-top-3 for A/B:** an ex-top-3 net ≤0 scores GREY, with the flag shown, and is excluded from the 2/3-GREEN count. RED is unchanged (ex-top-3 <0 AND median <−0.5R). C/D/E stay as written.
 Confirmed: the master seed derivation uses the final approved v3.1 sha f4f7657329237bd29a3fe8f752daca82d4ef2a2b887346772e112146e7272c1d (approval record research/data/reports/p5-v31-approval.json, commit bc558c4), giving seed 4,109,854,067.

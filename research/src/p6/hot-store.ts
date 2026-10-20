@@ -246,6 +246,15 @@ interface HotBody {
   fourSeedThrough: [string, number][];
   overlapSeen: boolean;
   working?: PaperStateBody["working"];
+  /** V7 rev 6. Absent on a snapshot from before running extremes. */
+  hotRev?: number;
+  pendingFills?: PaperStateBody["pendingFills"];
+  quotes?: PaperStateBody["quotes"];
+  sBtMagnitudeBps?: PaperStateBody["sBtMagnitudeBps"];
+  sBtStressBps?: PaperStateBody["sBtStressBps"];
+  csPrev?: PaperStateBody["csPrev"];
+  csBarSec?: PaperStateBody["csBarSec"];
+  feedLive?: boolean;
   /**
    * Monotonic flush sequence. Written in the same atomic flush as hot and the
    * bars. Absent on snapshots stored before this field existed.
@@ -336,6 +345,17 @@ export function captureHot(host: PaperHost): HotBody {
     fourSeedThrough: [...host.fourSeedThrough.entries()],
     overlapSeen: host.overlapSeen,
     ...(book.working.length > 0 ? { working: book.working } : {}),
+    hotRev: 6,
+    ...(book.pendingFills.length > 0 ? { pendingFills: book.pendingFills } : {}),
+    quotes: book.positions.flatMap((position) => {
+      const quote = book.quotes[position.productId];
+      return quote && quote.bid > 0 ? [[position.productId, quote.bid, quote.tsMs] as [string, number, number]] : [];
+    }),
+    sBtMagnitudeBps: book.sBtMagnitudeBps,
+    sBtStressBps: book.sBtStressBps,
+    csPrev: book.csPrev,
+    csBarSec: book.csBarSec,
+    feedLive: host.status === "live",
   };
 }
 

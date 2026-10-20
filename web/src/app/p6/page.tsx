@@ -341,6 +341,13 @@ export default async function P6DashboardPage({
         </span>
       </div>
 
+      {shown.mark ? (
+        <section className={styles.card} id="mark-now" aria-label="P/L if closed now">
+          <h2>P/L if closed now</h2>
+          <p className={view.mark?.state === "rest" ? styles.restMark : view.mark?.state === "stale" ? styles.grey : undefined}>{shown.mark}</p>
+        </section>
+      ) : null}
+
       <div className={styles.grid} role="group" aria-label="Profit and loss by window">
         {block.tiles.map((row) => {
           const chip = partialChip(row);

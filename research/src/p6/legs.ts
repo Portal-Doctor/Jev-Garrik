@@ -42,6 +42,21 @@ export interface LegLog {
   decisionTs?: number;
   /** When the signal bar closed. Logged. The close-to-send delay does not reject the leg. */
   barCloseTs?: number;
+  /** Mid of the L2 update that priced the fill. */
+  midAtFill?: number;
+  /** Mid when the signal was known. */
+  midAtDecision?: number;
+  /** Registered entry open for the class. Drift is against this, not the decision. */
+  fillAnchorOpen?: number;
+  fillSrc?: "l2" | "modelled" | "pre-fix fill model";
+  /** Positive is a cost. Sells are mirrored. No absolute value. */
+  execCostBps?: number | null;
+  /** GREY. Outside cost$. Versus fillAnchorOpen. */
+  driftBps?: number | null;
+  /** GREY. Informational. No check reads it. */
+  delayBps?: number | null;
+  /** execCostBps + driftBps. Compared with sBtMagnitudeBps. Not a gate by itself. */
+  liveCostBps?: number | null;
 }
 
 /** Decision-to-arrival drift in bps. GREY, and not part of cost. */

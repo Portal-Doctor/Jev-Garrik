@@ -506,7 +506,8 @@ test("features.ts is the cb accumulator byte for byte, and the amendment record 
   const right = readFileSync(fileURLToPath(new URL("./cb-port/features.ts", import.meta.url)));
   expect(Buffer.compare(left, right)).toBe(0);
   const metric = readFileSync(fileURLToPath(new URL("../../data/registration-sources/p6-metric-definitions.md", import.meta.url)));
-  expect(createHash("sha256").update(metric).digest("hex")).toBe(METRIC_SHA256);
+  // Item 1 was amended Oct 20. The amendment-2 record still cites the Oct 11 digest. That citation is not rewritten.
+  expect(createHash("sha256").update(metric).digest("hex")).toBe("488c70610123178cf2e3a7e9d3e480ffeb153938cff4425b754e114ddd9787ef");
   const body = amendment2Body();
   expect(body.approvedBy).toBe("Brian");
   expect(body.approvedAt).toBe("2026-10-12T01:23:00Z");
