@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
-import { absoluteDashboardLocation, applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, dashboardSetCookie, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard, redactP6View } from "./dashboard-read";
+import { absoluteDashboardLocation, applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, dashboardSetCookie, formatP6Public, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard, redactP6View } from "./dashboard-read";
 import { cronAuthorized } from "./relay";
 import { handleEngineRequest } from "./vercel-live";
 import { applyForward, paperPnl, replayInjected } from "./engine";
@@ -233,15 +233,156 @@ test("a no-cookie GET /p6 returns 200 and the public output is redacted", () => 
   expect(output).toContain("handover");
   expect(shown.lease?.holder).toBe("");
   expect(shown.lease?.untilMs).toBe(10);
-  expect(shown.incidents[0]).toBe("kv set [redis] down");
+  expect(shown.incidents[0]).toBe("redacted");
   expect(shown.incidents[1]).toBe("call_error");
+  expect(shown.incidents[2]).toBe("redacted");
+  const rendered = formatP6Public(shown);
+  expect(rendered.incidents).toBe("redacted · call_error · redacted");
+  expect(rendered.outcome).toBe("handover");
   const root = join(import.meta.dir, "..", "..", "..");
   const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
   expect(page.includes("redactP6View(")).toBe(true);
+  expect(page.includes("formatP6Public(view)")).toBe(true);
+  expect(page.includes("shown.incidents")).toBe(true);
+  expect(page.includes("shown.decisions")).toBe(true);
   expect(page.includes("lease?.holder")).toBe(false);
   expect(page.includes("lease.holder")).toBe(false);
+  expect(page.includes("loaded.view.emitted")).toBe(false);
+  expect(page.includes("loaded.view.incidents")).toBe(false);
   expect(page.includes("JSON.stringify(last)")).toBe(false);
   expect(page.includes("JSON.stringify(view.lastRun)")).toBe(false);
+});
+
+function publicView(over: Partial<ReturnType<typeof redactP6View>> = {}) {
+  return {
+    lease: null,
+    lastRun: null,
+    killSwitch: false,
+    incidents: [] as string[],
+    gaps: [] as { startMs: number; endMs: number; cause?: string }[],
+    positions: [],
+    closed: [],
+    emitted: [] as string[],
+    ...over,
+  };
+}
+
+test("unknown incident text renders as a generic code", () => {
+  const leaks = [
+    "getaddrinfo ENOTFOUND x.upstash.io",
+    "[::1]:6379",
+    "::1",
+    "[2001:db8::7]:6380",
+    "user:PASSWORD@host:6379",
+    "rediss%3A%2F%2Fdefault%3Apw%40x.upstash.io%3A6379",
+    '{"host":"x.upstash.io","port":6379}',
+    "x.upstash.\nio",
+    "h.example.com:6",
+    "x.upstash.io.",
+  ];
+  const shown = redactP6View(publicView({ incidents: ["lease lost", ...leaks], lastRun: { outcome: "handover" } }));
+  const rendered = formatP6Public(shown);
+  expect(shown.incidents[0]).toBe("lease lost");
+  expect(shown.incidents.slice(1)).toEqual(leaks.map(() => "redacted"));
+  expect(rendered.incidents.startsWith("lease lost · redacted")).toBe(true);
+  const output = `${rendered.incidents}\n${JSON.stringify(shown)}`;
+  for (const secret of ["upstash", "PASSWORD", "::1", "2001:db8", "example.com", "rediss%3A", "getaddrinfo", "host"]) {
+    expect(output.includes(secret), secret).toBe(false);
+  }
+});
+
+test("a gap cause outside the allowlist renders as redacted", () => {
+  const shown = redactP6View(publicView({
+    gaps: [
+      { startMs: 1, endMs: 2, cause: "uncovered" },
+      { startMs: 3, endMs: 4, cause: "uncovered BTC-USD" },
+      { startMs: 5, endMs: 6, cause: "getaddrinfo ENOTFOUND x.upstash.io" },
+    ],
+  }));
+  const rendered = formatP6Public(shown);
+  expect(shown.gaps.map((gap) => gap.cause)).toEqual(["uncovered", "uncovered BTC-USD", "redacted"]);
+  expect(rendered.causes).toBe("uncovered · uncovered BTC-USD · redacted");
+  expect(rendered.causes.includes("upstash")).toBe(false);
+});
+
+test("decision ids outside the allowlist are not rendered", () => {
+  const kept = "A-BTC-USD-1710000000000";
+  const shown = redactP6View(publicView({ emitted: [kept, "user:PASSWORD@host:6379", "x.upstash.io"] }));
+  const rendered = formatP6Public(shown);
+  expect(shown.emitted).toEqual([kept, "redacted", "redacted"]);
+  expect(rendered.decisions).toBe(`${kept}, redacted, redacted`);
+  expect(rendered.decisions.includes("PASSWORD")).toBe(false);
+  expect(rendered.decisions.includes("upstash")).toBe(false);
+});
+
+test("a jev-call failed string renders as call_error", () => {
+  const line = "jev-call failed: connect ECONNREFUSED x.upstash.io";
+  const shown = redactP6View(publicView({ incidents: [line], lastRun: { outcome: "handover", jev: { error: line, calls: 2 } } }));
+  const rendered = formatP6Public(shown);
+  expect(shown.incidents).toEqual(["call_error"]);
+  expect(rendered.incidents).toBe("call_error");
+  expect(JSON.stringify(shown).includes("jev-call failed")).toBe(false);
+  expect(JSON.stringify(shown).includes("upstash")).toBe(false);
+  expect((shown.lastRun?.jev as { error?: string; calls?: number }).error).toBe("call_error");
+  expect((shown.lastRun?.jev as { calls?: number }).calls).toBe(2);
+});
+
+test("benign stack text maps to redacted and is not rewritten as a host", () => {
+  const shown = redactP6View(publicView({ incidents: ["at net.js:12"] }));
+  const rendered = formatP6Public(shown);
+  expect(shown.incidents).toEqual(["redacted"]);
+  expect(rendered.incidents).toBe("redacted");
+  expect(rendered.incidents.includes("[redis]")).toBe(false);
+  expect(rendered.incidents.includes("net.js")).toBe(false);
+});
+
+test("a HEAD of /p6 with no cookie returns 200", () => {
+  const head = applyDashboardProxy(new Request("https://example.test/p6", { method: "HEAD" }), undefined);
+  expect(head.status).toBe(200);
+  expect(head.body).toBeNull();
+  expect(head.headers["X-Robots-Tag"]).toBe("noindex");
+  const sub = applyDashboardProxy(new Request("https://example.test/p6/positions", { method: "HEAD" }), undefined);
+  expect(sub.status).toBe(200);
+  expect(sub.headers["X-Robots-Tag"]).toBe("noindex");
+});
+
+test("jev counts stay on the public last run", () => {
+  const shown = redactP6View(publicView({
+    lastRun: {
+      outcome: "handover",
+      jev: { calls: 4, totalUsd: 0.5, byReason: { call_error: 2, timeout: 1 }, holder: "lease-holder-cron-9", error: "jev caller secret" },
+    },
+  }));
+  const jev = shown.lastRun?.jev as { calls?: number; byReason?: { call_error?: number }; holder?: string; error?: string };
+  expect(jev.calls).toBe(4);
+  expect(jev.byReason?.call_error).toBe(2);
+  expect(jev.holder).toBeUndefined();
+  expect(jev.error).toBe("call_error");
+  expect(JSON.stringify(shown).includes("lease-holder-cron-9")).toBe(false);
+  expect(formatP6Public(shown).outcome).toBe("handover");
+});
+
+test("a GET with ?token= redirects and the token is not rendered", () => {
+  const token = "view-token";
+  const opened = applyDashboardProxy(new Request("https://example.test/p6?token=view-token&w=8h", { method: "GET" }), token);
+  expect(opened.status).toBe(302);
+  expect(opened.body).toBeNull();
+  expect(opened.headers.Location).toBe("/p6?w=8h");
+  expect(opened.headers.Location?.includes("token=")).toBe(false);
+  expect(opened.headers["Set-Cookie"]?.includes(token)).toBe(false);
+  const head = applyDashboardProxy(new Request("https://example.test/p6/positions?token=view-token", { method: "HEAD" }), token);
+  expect(head.status).toBe(302);
+  expect(head.headers.Location).toBe("/p6/positions");
+  expect(head.body).toBeNull();
+  const wrongToken = "not-the-dashboard-token";
+  const wrong = applyDashboardProxy(new Request(`https://example.test/p6?token=${wrongToken}`, { method: "GET" }), token);
+  expect(wrong.status).toBe(401);
+  expect(wrong.body).toBe("unauthorized");
+  expect(wrong.body?.includes(wrongToken)).toBe(false);
+  const root = join(import.meta.dir, "..", "..", "..");
+  const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
+  expect(page.includes("query.token")).toBe(false);
+  expect(page.includes("searchParams.token")).toBe(false);
 });
 
 test("the /p6 page sends a noindex meta tag and an X-Robots-Tag header", () => {
@@ -263,9 +404,6 @@ test("a GET of /p6 needs no cookie or token", () => {
   expect(open.headers["Set-Cookie"]).toBeUndefined();
   const missing = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET" }), undefined);
   expect(missing.status).toBe(200);
-  const ignored = applyDashboardProxy(new Request("https://example.test/p6?token=nope", { method: "GET" }), "view-token");
-  expect(ignored.status).toBe(200);
-  expect(ignored.headers["Set-Cookie"]).toBeUndefined();
 });
 
 test("a GET of a /p6 subpath needs no cookie or token", () => {

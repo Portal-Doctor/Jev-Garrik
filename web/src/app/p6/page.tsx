@@ -1,4 +1,4 @@
-import { monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Page, redactP6View, summaryFreshness } from "../../../../research/src/p6/dashboard-read";
+import { monthCommands, commandBudget, formatP6Public, openDashboardKv, projectionTone, readP6Page, redactP6View, summaryFreshness } from "../../../../research/src/p6/dashboard-read";
 import {
   closedNote,
   concentrationText,
@@ -193,6 +193,7 @@ export default async function P6DashboardPage({
   const picked = parseSummaryWindow(query.w);
   const { block } = loaded;
   const view = redactP6View(loaded.view);
+  const shown = formatP6Public(view);
   const last = view.lastRun;
   const pnl = (last?.pnl ?? null) as {
     equityUsd?: number;
@@ -594,7 +595,7 @@ export default async function P6DashboardPage({
             {view.lease ? ` until ${new Date(view.lease.untilMs).toISOString()}` : ""}
           </Kv>
           <Kv label="Run outcome">
-            {typeof last?.outcome === "string" ? last.outcome : "no run"}
+            {shown.outcome}
             {typeof last?.start === "number" && typeof last?.end === "number" ? ` · ${Math.max(0, last.end - last.start)} ms` : ""}
           </Kv>
           <Kv label="Warm / cold / pending">
@@ -611,13 +612,13 @@ export default async function P6DashboardPage({
             {(month / 1_000_000).toFixed(2)}M / {(budget / 1_000_000).toFixed(0)}M · {projectionWord(proj)}
           </Kv>
           <Kv label="Max value">{String(redis.maxValueBytes ?? 0)}</Kv>
-          {view.incidents.length > 0 ? <Kv label="Incidents">{view.incidents.slice(-20).join(" · ")}</Kv> : null}
+          {shown.incidents ? <Kv label="Incidents">{shown.incidents}</Kv> : null}
         </dl>
       </Fold>
 
       <Fold id="trades" title="Recent trades and decisions" note={`Last ${Math.min(20, view.closed.length)} closed trades`}>
         <dl className={styles.kvs}>
-          <Kv label="Decisions">{view.emitted.slice(-20).join(", ") || "—"}</Kv>
+          <Kv label="Decisions">{shown.decisions}</Kv>
           {view.closed.slice(-20).map((row, index) => (
             <Kv key={`${row.productId ?? "trade"}-${index}`} label={`${row.productId ?? ""} · ${row.classId ?? ""}`}>
               {moneyOrDash(finite(row.netUsd), true)}

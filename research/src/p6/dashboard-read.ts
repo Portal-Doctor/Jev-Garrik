@@ -32,16 +32,19 @@ const LEASE_KEY = "p6:lease";
 /**
  * How to open the dashboard.
  *
- * GET and HEAD of `/p6` and every path under `/p6/` are open. They do not read
- * DASHBOARD_TOKEN, the `p6_dash` cookie, or `?token=`. The variable stays defined
- * for writes. A plain GET renders the page.
+ * GET and HEAD of `/p6` and every path under `/p6/` are open when `token` is absent.
+ * They do not read DASHBOARD_TOKEN or the `p6_dash` cookie. The variable stays defined
+ * for writes and for stripping `?token=`. A plain GET renders the page.
+ *
+ * A present `token` query on GET, HEAD, or a write is never rendered. A value equal to
+ * DASHBOARD_TOKEN answers 302 to the same path with that parameter removed (other query
+ * parameters stay) and sets the cookie below. Any other present value is 401, body
+ * "unauthorized", with no page payload.
  *
  * POST, PUT, DELETE, and every other method still require the dashboard token.
  * Query: put the dashboard token in the `token` parameter:
  * https://<your-vercel-domain>/p6?token=<DASHBOARD_TOKEN>
- * Do not send the token in the path. On a write, a valid `token` answers 302 to the
- * same path with that parameter removed (other query parameters stay), and sets the
- * cookie below.
+ * Do not send the token in the path.
  *
  * Cookie name: p6_dash
  * Attributes: HttpOnly; Secure; SameSite=Strict; Path=/p6; Max-Age=2592000 (30 days). No Domain.
@@ -175,7 +178,7 @@ export function absoluteDashboardLocation(requestUrl: string, location: string):
   return absolute.toString();
 }
 
-/** Proxy result for /p6. GET and HEAD are open. Other methods still require the dashboard token. */
+/** Proxy result for /p6. GET and HEAD are open. A `token` query is stripped before the page renders. Other methods still require the dashboard token. */
 export function applyDashboardProxy(request: Request, dashboardToken: string | undefined): { status: number; body: string | null; headers: Record<string, string> } {
   const url = new URL(request.url);
   const headers: Record<string, string> = {
@@ -184,10 +187,11 @@ export function applyDashboardProxy(request: Request, dashboardToken: string | u
   };
   const path = dashboardPathname(url.pathname);
   if (!path) return { status: 401, body: "unauthorized", headers };
-  if (request.method === "GET" || request.method === "HEAD") {
+  const tokenParam = url.searchParams.has("token") ? (url.searchParams.get("token") ?? "") : null;
+  const isRead = request.method === "GET" || request.method === "HEAD";
+  if (isRead && tokenParam === null) {
     return { status: 200, body: null, headers: { ...headers, "X-Robots-Tag": "noindex" } };
   }
-  const tokenParam = url.searchParams.has("token") ? (url.searchParams.get("token") ?? "") : null;
   const access = dashboardAccess({
     authorization: request.headers.get("authorization"),
     cookieHeader: request.headers.get("cookie"),
@@ -207,32 +211,169 @@ function stripUrls(line: string): string {
   return line.replace(/https?:\/\/\S+/g, "[url]");
 }
 
+const PRODUCT = "[A-Z0-9]{2,12}(?:-[A-Z0-9]{2,12})+";
+const DECISION = "[A-E]-[A-Z0-9]+(?:-[A-Z0-9]+)*-\\d{9,16}(?::[a-z0-9]+)*";
+const PRODUCT_RE = new RegExp(`^${PRODUCT}$`);
+const DECISION_RE = new RegExp(`^${DECISION}$`);
+
+const OUTCOMES = new Set([
+  "handover",
+  "running",
+  "crash",
+  "uncovered",
+  "missed-cron",
+  "missed-cron-covered",
+  "overlap-warm",
+  "duplicate",
+  "kill",
+  "save failed",
+]);
+
+const GAP_CAUSES = new Set([
+  "uncovered",
+  "crash",
+  "kill",
+  "duplicate",
+  "missed-cron",
+  "missed-cron-covered",
+  "overlap-warm",
+  "handover",
+  "handover_micro",
+  "seed",
+  "engine_gap",
+  "takeover",
+  "save failed",
+]);
+
+const EXACT_INCIDENTS = new Set([
+  "redacted",
+  "call_error",
+  "save failed",
+  "lease lost",
+  "kv set lease lost",
+  "registration flags unavailable",
+  "daily warmup unavailable",
+  "seq invalid",
+  "seq map overflow",
+  "kv value exceeds 1 MB",
+  "kv value exceeds 1 MB p6:fills",
+  "kv value exceeds 1 MB p6:ledger",
+  "tape window indeterminate",
+]);
+
+const INCIDENT_PATTERNS: RegExp[] = [
+  /^hot \d{1,9} bytes at 75% of 256 KB$/,
+  /^heartbeat write \d{1,9} exceeds 256 KB$/,
+  new RegExp(`^daily warmup missing ${PRODUCT}$`),
+  /^socket \d{1,3} closed$/,
+  /^socket \d{1,3} error$/,
+  new RegExp(`^l2 sequence shard \\d{1,3} \\d{1,16} -> \\d{1,16}$`),
+  new RegExp(`^l2 resync ${PRODUCT}$`),
+  new RegExp(`^rest book ${PRODUCT} (?:budget-stop|429|failed|\\d{3})$`),
+  new RegExp(`^l2 rest snapshot ${PRODUCT}(?: (?:budget-stop|429|failed|\\d{3}))?$`),
+  new RegExp(`^tick missing ${PRODUCT}$`),
+  new RegExp(`^missed_send_stale_quote ${DECISION}$`),
+  new RegExp(`^rest 15m missed ${PRODUCT} \\d{1,16} after 120s; (?:trades-built bar|no trades)$`),
+  new RegExp(`^buffer overflow \\d{4}-\\d{2}-\\d{2} \\d{1,6}$`),
+  new RegExp(`^rest 15m ${PRODUCT} budget-stop$`),
+  new RegExp(`^history daily ${PRODUCT} (?:failed|\\d{3})$`),
+  new RegExp(`^history rest ${PRODUCT} \\d{1,16} \\d{3}$`),
+  new RegExp(`^history missing ${PRODUCT} \\d{1,16} bars \\d{1,6}$`),
+  new RegExp(`^hour delta ${PRODUCT} (?:budget|\\d{3})$`),
+  new RegExp(`^4h fold mismatch ${PRODUCT} \\d{1,16}$`),
+  new RegExp(`^tape (?:backfill|candle) ${PRODUCT} (?:failed|\\d{3})$`),
+  new RegExp(`^tape gap ${PRODUCT} \\d{1,6}$`),
+  new RegExp(`^4h seed rest ${PRODUCT} (?:failed|\\d{3})$`),
+  new RegExp(`^4h seed rest ${PRODUCT} \\d{1,6} seed_src=rest_1h$`),
+  new RegExp(`^4h seed short ${PRODUCT} \\d{1,6}$`),
+  new RegExp(`^kv value exceeds 1 MB (?:p6:[a-z0-9:_-]{1,48}|warmup ${PRODUCT})$`),
+  new RegExp(`^jev (?:no_1m_input|not_called|timeout|call_error|invalid_response) ${PRODUCT} \\d{1,16}(?: (?:no_trades_feed|no_book_feed))?$`),
+  new RegExp(`^jev skip ${PRODUCT} \\d{1,16}$`),
+  new RegExp(`^handover_micro ${DECISION}$`),
+  new RegExp(`^gap fill ${DECISION}$`),
+  new RegExp(`^generator ${PRODUCT} failed$`),
+  new RegExp(`^rest ${PRODUCT} \\d{1,16} failed$`),
+  /^saved A pick [A-Za-z0-9-]{1,40} ignored$/,
+];
+
+/** Jev caller failures, including the `jev-call failed` variant. Known `jev <reason>` lines are matched earlier. */
 function isJevCallerError(line: string): boolean {
-  return /jev[\s_-]*caller|experimental_evaluate|typesafe[\s_-]*ai/i.test(line);
+  if (/jev[\s_-]*caller|experimental_evaluate|typesafe[\s_-]*ai/i.test(line)) return true;
+  if (/jev[\s_-]*call[\s_-]*failed/i.test(line)) return true;
+  return false;
 }
 
-/** Drop redis:// URLs, host:port, and IPv4 addresses from a public incident line. */
-function redactRedisHosts(line: string): string {
-  return line
-    .replace(/rediss?:\/\/\S+/gi, "[redis]")
-    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{2,5})?\b/g, "[redis]")
-    .replace(/\b(?=[a-z0-9.-]*[a-z])[a-z0-9.-]+:\d{2,5}\b/gi, "[redis]");
+function knownIncident(line: string): string | null {
+  const text = line.trim();
+  if (EXACT_INCIDENTS.has(text)) return text;
+  for (const pattern of INCIDENT_PATTERNS) {
+    if (pattern.test(text)) return text;
+  }
+  const reconnect = text.match(/^socket reconnect (\d{1,6}) (closed|heartbeat|late-heartbeat): ([A-Z0-9,-]+)$/);
+  if (!reconnect) return null;
+  const products = reconnect[3]?.split(",") ?? [];
+  if (products.length === 0 || products.some((id) => !PRODUCT_RE.test(id))) return null;
+  return `socket reconnect ${reconnect[1]} ${reconnect[2]}: ${products.join(",")}`;
 }
 
-function redactPublicString(line: string): string {
-  const stripped = stripUrls(line);
-  if (isJevCallerError(stripped)) return "call_error";
-  return redactRedisHosts(stripped);
+function publicIncident(line: string): string {
+  const known = knownIncident(line);
+  if (known) return known;
+  if (isJevCallerError(line)) return "call_error";
+  return "redacted";
 }
 
-function scrubPublic(value: unknown): unknown {
-  if (typeof value === "string") return redactPublicString(value);
-  if (Array.isArray(value)) return value.map(scrubPublic);
+function publicOutcome(value: string): string {
+  if (value === "redacted") return "redacted";
+  return OUTCOMES.has(value) ? value : "redacted";
+}
+
+function publicCause(value: string): string {
+  if (value === "redacted") return "redacted";
+  if (GAP_CAUSES.has(value)) return value;
+  const uncovered = value.match(new RegExp(`^uncovered (${PRODUCT})$`));
+  if (uncovered?.[1]) return `uncovered ${uncovered[1]}`;
+  return "redacted";
+}
+
+function publicEmitted(value: string): string {
+  if (value === "redacted") return "redacted";
+  return DECISION_RE.test(value) ? value : "redacted";
+}
+
+function publicSkipLabel(value: string): string {
+  if (value === "FLAG" || value === "PASS" || value === "INSUFFICIENT_DATA") return value;
+  if (/^insufficient data \(days \d{1,4}\/7, scheduled \d{1,8}\)$/.test(value)) return value;
+  return "redacted";
+}
+
+function publicScalar(value: string, key?: string): string {
+  if (isJevCallerError(value)) return "call_error";
+  if (key === "outcome") return publicOutcome(value);
+  if (key === "cause") return publicCause(value);
+  if (key === "skipLabel") return publicSkipLabel(value);
+  if (key === "skipStatus") return value === "FLAG" || value === "PASS" || value === "INSUFFICIENT_DATA" ? value : "redacted";
+  if (key === "side") return value === "long" || value === "short" ? value : "redacted";
+  if (key === "src") return value === "entry" ? value : "redacted";
+  if (key === "classId" || key === "c") return /^[A-E]$/.test(value) ? value : "redacted";
+  if (key === "productId" || key === "p" || key === "k") return PRODUCT_RE.test(value) ? value : "redacted";
+  if (key === "id") return DECISION_RE.test(value) || PRODUCT_RE.test(value) ? value : "redacted";
+  if (key === "reason") return /^[a-z0-9-]{1,40}$/.test(value) ? value : "redacted";
+  if (key === "applied") return new RegExp(`^${PRODUCT}:\\d{1,16}$`).test(value) ? value : "redacted";
+  const incident = knownIncident(value);
+  if (incident) return incident;
+  if (OUTCOMES.has(value) || PRODUCT_RE.test(value) || DECISION_RE.test(value)) return value;
+  return "redacted";
+}
+
+function scrubPublic(value: unknown, key?: string): unknown {
+  if (typeof value === "string") return publicScalar(value, key);
+  if (Array.isArray(value)) return value.map((item) => scrubPublic(item, key));
   if (!value || typeof value !== "object") return value;
   const out: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    if (key === "holder") continue;
-    out[key] = scrubPublic(item);
+  for (const [child, item] of Object.entries(value as Record<string, unknown>)) {
+    if (child === "holder") continue;
+    out[child] = scrubPublic(item, child);
   }
   return out;
 }
@@ -274,15 +415,33 @@ function publicLastRun(raw: Record<string, unknown> | null): Record<string, unkn
 }
 
 /**
- * Public /p6 view. Drops lease.holder, any lastRun field outside the page allowlist,
- * Redis hosts in text, and Jev-caller error strings.
+ * Public /p6 view. Drops lease.holder and any lastRun field outside the page allowlist.
+ * Incident text, outcome codes, gap causes, and decision ids are allowlisted.
+ * Anything else becomes `redacted`, and a Jev-caller error becomes `call_error`.
  */
 export function redactP6View(view: DashboardView): DashboardView {
   return {
     ...view,
     lease: view.lease ? { holder: "", untilMs: view.lease.untilMs } : null,
     lastRun: publicLastRun(view.lastRun),
-    incidents: view.incidents.map(redactPublicString),
+    incidents: view.incidents.map(publicIncident),
+    gaps: view.gaps.map((gap) => ({
+      ...gap,
+      ...(typeof gap.cause === "string" ? { cause: publicCause(gap.cause) } : {}),
+    })),
+    emitted: view.emitted.map(publicEmitted),
+  };
+}
+
+/** The incident, decision, outcome, and gap-cause strings the /p6 page interpolates. */
+export function formatP6Public(view: DashboardView): { incidents: string; decisions: string; outcome: string; causes: string } {
+  const safe = redactP6View(view);
+  const outcome = safe.lastRun && typeof safe.lastRun.outcome === "string" ? safe.lastRun.outcome : "no run";
+  return {
+    incidents: safe.incidents.slice(-20).join(" · "),
+    decisions: safe.emitted.slice(-20).join(", ") || "—",
+    outcome,
+    causes: safe.gaps.map((gap) => (typeof gap.cause === "string" ? gap.cause : "")).filter((cause) => cause.length > 0).join(" · "),
   };
 }
 
