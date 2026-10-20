@@ -184,7 +184,7 @@ test("the proxy matcher covers /p6 and every subpath", () => {
   expect(proxy.includes('matcher: ["/p6", "/p6/:path*"]')).toBe(true);
   const token = "view-token";
   const cookie = `${P6_COOKIE_NAME}=${dashboardCookieValue(token)}`;
-  const routes = ["/p6", "/p6/positions", "/p6/trades", "/p6/gates", "/p6/jev", "/p6/health"];
+  const routes = ["/p6", "/p6/positions", "/p6/trades", "/p6/gates", "/p6/jev", "/p6/health", "/p6/health.json"];
   for (const route of routes) {
     expect(applyDashboardProxy(new Request(`https://example.test${route}`), token).status, route).toBe(401);
     expect(applyDashboardProxy(new Request(`https://example.test${route}`, { headers: { authorization: "Bearer view-token" } }), token).status, route).toBe(200);
@@ -196,6 +196,59 @@ test("the proxy matcher covers /p6 and every subpath", () => {
     expect(opened.headers["Set-Cookie"]?.includes("Path=/p6"), route).toBe(true);
     expect(opened.headers["Set-Cookie"]?.includes("Path=/p6/"), route).toBe(false);
     expect(applyDashboardProxy(new Request(`https://example.test${route}?token=nope&w=24h`), token).status, route).toBe(401);
+  }
+});
+
+/** Same shape Next 16.3.4 compiles into the proxy matcher. `:path*` keeps dots, so `/p6/health.json` matches. */
+function proxyMatcherCovers(pathname: string): boolean {
+  const root = join(import.meta.dir, "..", "..", "..");
+  const proxy = readFileSync(join(root, "web/src/proxy.ts"), "utf8");
+  const found = proxy.match(/matcher:\s*(\[[\s\S]*?\])/);
+  if (!found?.[1]) throw new Error("proxy matcher missing");
+  const parsed: unknown = JSON.parse(found[1]);
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) throw new Error("proxy matcher must be a list of strings");
+  const prefix = String.raw`(?:\/(_next\/data\/[^/]{1,}))?`;
+  const suffix = String.raw`(\.json|\.rsc|\.segments\/.+\.segment\.rsc)?[\/#\?]?`;
+  return parsed.some((source) => {
+    const pattern = source.endsWith("/:path*")
+      ? `${source.slice(0, -"/:path*".length).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\/((?:[^\\/#\\?]+?)(?:\\/(?:[^\\/#\\?]+?))*))?`
+      : source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`^${prefix}${pattern}${suffix}$`).test(pathname);
+  });
+}
+
+test("a request without the cookie is refused on /p6 and on every /p6 subpath", () => {
+  const token = "view-token";
+  const bare = applyDashboardProxy(new Request("https://example.test/p6"), token);
+  expect(bare.status).toBe(401);
+  expect(bare.body).toBe("unauthorized");
+  expect(proxyMatcherCovers("/p6")).toBe(true);
+  for (const route of ["/p6/health.json", "/p6/positions", "/p6/positions/open"]) {
+    const sub = applyDashboardProxy(new Request(`https://example.test${route}`), token);
+    expect(sub.status, route).toBe(bare.status);
+    expect(sub.body, route).toBe(bare.body);
+    expect(sub.headers["Cache-Control"], route).toBe(bare.headers["Cache-Control"]);
+    expect(sub.headers["Referrer-Policy"], route).toBe(bare.headers["Referrer-Policy"]);
+    expect(sub.headers.Location, route).toBeUndefined();
+    expect(sub.headers["Set-Cookie"], route).toBeUndefined();
+    expect(proxyMatcherCovers(route), route).toBe(true);
+  }
+});
+
+test("a valid dashboard cookie still passes on /p6 and on /p6 subpaths", () => {
+  const token = "view-token";
+  const cookie = `${P6_COOKIE_NAME}=${dashboardCookieValue(token)}`;
+  for (const route of ["/p6", "/p6/health.json", "/p6/gates"]) {
+    const response = applyDashboardProxy(new Request(`https://example.test${route}`, { headers: { cookie } }), token);
+    expect(response.status, route).toBe(200);
+    expect(response.body, route).toBeNull();
+    expect(proxyMatcherCovers(route), route).toBe(true);
+  }
+});
+
+test("routes outside /p6 stay outside the proxy matcher", () => {
+  for (const route of ["/", "/api/engine", "/p6evil", "/health.json", "/other", "/p6evil/health.json"]) {
+    expect(proxyMatcherCovers(route), route).toBe(false);
   }
 });
 
