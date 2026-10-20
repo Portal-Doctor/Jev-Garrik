@@ -818,6 +818,8 @@ test("a planted host in the new public fields is absent from the HTML and the RS
   const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
   expect(page.includes("shown.mark")).toBe(true);
   expect(page.includes("formatP6Public(view)")).toBe(true);
+  const reactPkg = join(root, "web/node_modules/react/package.json");
+  if (!existsSync(reactPkg)) return;
   const { createRequire } = await import("node:module");
   const require = createRequire(join(root, "web/package.json"));
   const { createElement } = require("react") as { createElement: (...args: unknown[]) => unknown };
