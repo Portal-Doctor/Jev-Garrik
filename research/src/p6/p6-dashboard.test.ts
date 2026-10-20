@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
-import { absoluteDashboardLocation, applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, dashboardSetCookie, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard } from "./dashboard-read";
+import { absoluteDashboardLocation, applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, dashboardSetCookie, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard, redactP6View } from "./dashboard-read";
 import { cronAuthorized } from "./relay";
 import { handleEngineRequest } from "./vercel-live";
 import { applyForward, paperPnl, replayInjected } from "./engine";
@@ -201,6 +201,60 @@ test("the proxy matcher covers /p6 and every subpath", () => {
   }
 });
 
+test("a no-cookie GET /p6 returns 200 and the public output is redacted", () => {
+  const open = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET" }), undefined);
+  expect(open.status).toBe(200);
+  const holder = "lease-holder-cron-9";
+  const rawMarker = "raw-last-run-object";
+  const jevError = "Jev caller Error: invalid api key sk-live-jev-secret";
+  const shown = redactP6View({
+    lease: { holder, untilMs: 10 },
+    lastRun: {
+      outcome: "handover",
+      warm: 1,
+      secretBlob: rawMarker,
+      jev: { holder, totalUsd: 1, error: jevError },
+      redis: { cmds: 3, host: "redis.internal:6379" },
+    },
+    killSwitch: false,
+    incidents: [`kv set redis://default:pw@redis.internal:6379 down`, jevError, "connect ECONNREFUSED 10.1.2.3:6379"],
+    gaps: [],
+    positions: [],
+    closed: [],
+    emitted: [],
+  });
+  const output = JSON.stringify(shown);
+  expect(output).not.toContain(holder);
+  expect(output).not.toContain(rawMarker);
+  expect(output).not.toContain("redis.internal");
+  expect(output).not.toContain("redis://");
+  expect(output).not.toContain("10.1.2.3");
+  expect(output).not.toContain("sk-live-jev-secret");
+  expect(output).toContain("handover");
+  expect(shown.lease?.holder).toBe("");
+  expect(shown.lease?.untilMs).toBe(10);
+  expect(shown.incidents[0]).toBe("kv set [redis] down");
+  expect(shown.incidents[1]).toBe("call_error");
+  const root = join(import.meta.dir, "..", "..", "..");
+  const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
+  expect(page.includes("redactP6View(")).toBe(true);
+  expect(page.includes("lease?.holder")).toBe(false);
+  expect(page.includes("lease.holder")).toBe(false);
+  expect(page.includes("JSON.stringify(last)")).toBe(false);
+  expect(page.includes("JSON.stringify(view.lastRun)")).toBe(false);
+});
+
+test("the /p6 page sends a noindex meta tag and an X-Robots-Tag header", () => {
+  const root = join(import.meta.dir, "..", "..", "..");
+  const open = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET" }), undefined);
+  expect(open.status).toBe(200);
+  expect(open.headers["X-Robots-Tag"]).toBe("noindex");
+  const sub = applyDashboardProxy(new Request("https://example.test/p6/positions", { method: "GET" }), undefined);
+  expect(sub.headers["X-Robots-Tag"]).toBe("noindex");
+  const layout = readFileSync(join(root, "web/src/app/p6/layout.tsx"), "utf8");
+  expect(layout.includes('robots: "noindex"')).toBe(true);
+});
+
 test("a GET of /p6 needs no cookie or token", () => {
   const open = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET" }), "view-token");
   expect(open.status).toBe(200);
@@ -237,10 +291,13 @@ test("POST, PUT, and DELETE on /p6 still refuse a missing cookie", () => {
 });
 
 test("the cron route still refuses a request with no authorization", async () => {
+  const urls = ["https://example.test/api/engine", "https://example.test/api/engine?read=1"];
   for (const method of ["GET", "POST"]) {
-    const response = await handleEngineRequest(new Request("https://example.test/api/engine", { method }), { CRON_SECRET: "cron-secret" });
-    expect(response.status, method).toBe(401);
-    expect(await response.text(), method).toBe("unauthorized");
+    for (const url of urls) {
+      const response = await handleEngineRequest(new Request(url, { method }), { CRON_SECRET: "cron-secret" });
+      expect(response.status, `${method} ${url}`).toBe(401);
+      expect(await response.text(), `${method} ${url}`).toBe("unauthorized");
+    }
   }
 });
 

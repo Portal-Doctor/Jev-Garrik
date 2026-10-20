@@ -184,7 +184,9 @@ export function applyDashboardProxy(request: Request, dashboardToken: string | u
   };
   const path = dashboardPathname(url.pathname);
   if (!path) return { status: 401, body: "unauthorized", headers };
-  if (request.method === "GET" || request.method === "HEAD") return { status: 200, body: null, headers };
+  if (request.method === "GET" || request.method === "HEAD") {
+    return { status: 200, body: null, headers: { ...headers, "X-Robots-Tag": "noindex" } };
+  }
   const tokenParam = url.searchParams.has("token") ? (url.searchParams.get("token") ?? "") : null;
   const access = dashboardAccess({
     authorization: request.headers.get("authorization"),
@@ -203,6 +205,85 @@ export function applyDashboardProxy(request: Request, dashboardToken: string | u
 
 function stripUrls(line: string): string {
   return line.replace(/https?:\/\/\S+/g, "[url]");
+}
+
+function isJevCallerError(line: string): boolean {
+  return /jev[\s_-]*caller|experimental_evaluate|typesafe[\s_-]*ai/i.test(line);
+}
+
+/** Drop redis:// URLs, host:port, and IPv4 addresses from a public incident line. */
+function redactRedisHosts(line: string): string {
+  return line
+    .replace(/rediss?:\/\/\S+/gi, "[redis]")
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{2,5})?\b/g, "[redis]")
+    .replace(/\b(?=[a-z0-9.-]*[a-z])[a-z0-9.-]+:\d{2,5}\b/gi, "[redis]");
+}
+
+function redactPublicString(line: string): string {
+  const stripped = stripUrls(line);
+  if (isJevCallerError(stripped)) return "call_error";
+  return redactRedisHosts(stripped);
+}
+
+function scrubPublic(value: unknown): unknown {
+  if (typeof value === "string") return redactPublicString(value);
+  if (Array.isArray(value)) return value.map(scrubPublic);
+  if (!value || typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (key === "holder") continue;
+    out[key] = scrubPublic(item);
+  }
+  return out;
+}
+
+const PUBLIC_LAST_RUN_KEYS = [
+  "start",
+  "end",
+  "outcome",
+  "applied",
+  "decisions",
+  "fills",
+  "rest",
+  "redis",
+  "cold",
+  "warm",
+  "pending",
+  "completed",
+  "pnl",
+  "positions",
+  "positionsOmitted",
+  "positionsSkipped",
+  "jev",
+] as const;
+
+function publicRedis(value: unknown): { cmds?: unknown; bytes?: unknown; maxValueBytes?: unknown } | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  return { cmds: row.cmds, bytes: row.bytes, maxValueBytes: row.maxValueBytes };
+}
+
+function publicLastRun(raw: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  const out: Record<string, unknown> = {};
+  for (const key of PUBLIC_LAST_RUN_KEYS) {
+    if (!(key in raw)) continue;
+    out[key] = key === "redis" ? publicRedis(raw.redis) : scrubPublic(raw[key]);
+  }
+  return out;
+}
+
+/**
+ * Public /p6 view. Drops lease.holder, any lastRun field outside the page allowlist,
+ * Redis hosts in text, and Jev-caller error strings.
+ */
+export function redactP6View(view: DashboardView): DashboardView {
+  return {
+    ...view,
+    lease: view.lease ? { holder: "", untilMs: view.lease.untilMs } : null,
+    lastRun: publicLastRun(view.lastRun),
+    incidents: view.incidents.map(redactPublicString),
+  };
 }
 
 export interface DashboardLease {

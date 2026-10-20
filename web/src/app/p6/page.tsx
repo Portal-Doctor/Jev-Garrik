@@ -1,4 +1,4 @@
-import { monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Page, summaryFreshness } from "../../../../research/src/p6/dashboard-read";
+import { monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Page, redactP6View, summaryFreshness } from "../../../../research/src/p6/dashboard-read";
 import {
   closedNote,
   concentrationText,
@@ -191,7 +191,8 @@ export default async function P6DashboardPage({
     );
   }
   const picked = parseSummaryWindow(query.w);
-  const { view, block } = loaded;
+  const { block } = loaded;
+  const view = redactP6View(loaded.view);
   const last = view.lastRun;
   const pnl = (last?.pnl ?? null) as {
     equityUsd?: number;
@@ -589,7 +590,7 @@ export default async function P6DashboardPage({
       >
         <dl className={styles.kvs}>
           <Kv label="Holder">
-            {view.lease?.holder ?? "none"}
+            {view.lease ? "held" : "none"}
             {view.lease ? ` until ${new Date(view.lease.untilMs).toISOString()}` : ""}
           </Kv>
           <Kv label="Run outcome">
