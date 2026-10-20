@@ -15,5 +15,9 @@
   "amendment1Edited": false,
   "approval": "approved",
   "kellyIncluded": false,
-  "note": "Amendment 2 is the frozen metric definitions plus the confirmed 1c pause re-arm. The Architect Kelly ruling is recorded separately and is not part of this amendment."
+  "note": "Amendment 2 is the frozen metric definitions plus the confirmed 1c pause re-arm. The Architect Kelly ruling is recorded separately and is not part of this amendment.",
+  "citationNotes": [
+    "p6-metric-definitions 1ddfd23d3f21552398cd2e9f11a392fc4652da1537ca04b1e2c6536b93420789 superseded by 488c70610123178cf2e3a7e9d3e480ffeb153938cff4425b754e114ddd9787ef via the X1 (2dd80f673396210f2c175e77d4abc102627bf485bcd63b60d989df16c8c966fc) and Erratum 1 (d01c3e0bec84e7fc3f651a57656ea7b25139c2b693fb4648dec90089a2b0f732) edit; diff 6fbcc3945dbd6d81f9f7cbeeb5a1d9abcd842556b9464481d27ad36e1d44a61f.",
+    "Erratum 2 e0e82d3617d7d9531ec98635c09c1cbe56505d849b5fafd0dc68426f29469d76; erratum-2 diff sha256 1d5ffc4a99adeb32a64c47cc68db080517a16443393cd2c527b7666bd0988cdf; p6-metric-definitions digest ea0695042a6c5c26415f5bc6b0b9266d17d56292bee02f48a5976f75556dc483."
+  ]
 }

@@ -6,6 +6,7 @@
 import { TAKER_FEE_BPS } from "../../vendor/87b35d0/config.ts";
 import { formatCt } from "./pnl-block";
 import { publicTicker } from "./rest-limit";
+import { FRESH_L2_MS, vwapFill } from "./x1-fill";
 
 export const MARK_LABEL = "marked to bid, taker 0.90% exit";
 export const REST_LABEL = "REST mark";
@@ -26,6 +27,8 @@ export interface MarkPosition {
 export interface MarkQuote {
   bid: number;
   tsMs: number;
+  /** Bid ladder. Absent means the touch is the whole book. */
+  bids?: readonly [number, number][];
 }
 
 export interface MarkNowRow {
@@ -46,6 +49,8 @@ export interface MarkNow {
   openRNet: number | null;
   grossUsd: number | null;
   riskUsd: number;
+  /** False when a bid used for the mark is older than 2s. The 60s / 15 min display is `state`. */
+  quoteFresh: boolean;
   rows: MarkNowRow[];
 }
 
@@ -93,6 +98,7 @@ export function closedNow(
   let pnl = 0;
   let gross = 0;
   let risk = 0;
+  let quoteFresh = true;
   const rank = { live: 0, stale: 1, rest: 2, na: 3 };
   for (const position of positions) {
     if (!finitePosition(position)) {
@@ -109,10 +115,12 @@ export function closedNow(
     }
     const age = nowMs - quote.tsMs;
     const state = quoteAgeState(age, opts?.disconnected === true);
+    if (!(age >= 0 && age <= FRESH_L2_MS)) quoteFresh = false;
     if (rank[state] > rank[worst]) worst = state;
     if (quote.tsMs < oldest) oldest = quote.tsMs;
     const rest = opts?.restBids?.[position.productId];
-    const bid = state === "rest" && rest != null && rest > 0 && Number.isFinite(rest) ? rest : bid0;
+    const walked = vwapFill("sell", bid0, quote.bids ? [...quote.bids] : undefined, position.units);
+    const bid = state === "rest" && rest != null && rest > 0 && Number.isFinite(rest) ? rest : walked;
     const pnlRow = positionPnlNow(position, bid);
     const grossRow = positionGrossUsd(position, bid);
     pnl += pnlRow;
@@ -127,10 +135,10 @@ export function closedNow(
     });
   }
   if (positions.length === 0) {
-    return { pnlNow: 0, label: MARK_LABEL, state: "live", openRGross: null, openRNet: null, grossUsd: 0, riskUsd: 0, rows };
+    return { pnlNow: 0, label: MARK_LABEL, state: "live", openRGross: null, openRNet: null, grossUsd: 0, riskUsd: 0, quoteFresh: true, rows };
   }
   if (missing) {
-    return { pnlNow: null, label: MARK_LABEL, state: "na", openRGross: null, openRNet: null, grossUsd: null, riskUsd: risk, rows };
+    return { pnlNow: null, label: MARK_LABEL, state: "na", openRGross: null, openRNet: null, grossUsd: null, riskUsd: risk, quoteFresh: false, rows };
   }
   const staleText = worst === "stale" || worst === "rest" ? `stale since ${formatCt(oldest, false)}` : undefined;
   return {
@@ -143,6 +151,7 @@ export function closedNow(
     openRNet: risk > 0 ? pnl / risk : null,
     grossUsd: gross,
     riskUsd: risk,
+    quoteFresh,
     rows,
   };
 }

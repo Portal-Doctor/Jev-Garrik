@@ -211,8 +211,11 @@ test("entries send at the next open and staleness is the wall clock, not the sig
   };
   host.queued.set(`C-ETH-USD-${closeTs}`, entry);
   flushEntries(host, now);
-  expect(host.book.rejected.some((row) => row.id === `C-ETH-USD-${closeTs}` && row.reason === "missed_send_stale_quote")).toBe(true);
-  expect(host.book.positions.some((row) => row.id === `C-ETH-USD-${closeTs}`)).toBe(false);
+  const missed = host.book.legs.find((leg) => leg.id === `C-ETH-USD-${closeTs}`);
+  expect(missed?.fillSrc).toBe("stale_quote_modelled");
+  expect(host.book.positions.some((row) => row.id === `C-ETH-USD-${closeTs}`)).toBe(true);
+  expect(host.book.staleQuoteMisses).toBeGreaterThan(0);
+  host.book.positions = [];
 
   host.restQuotes.set("ETH-USD", { bid: 100, ask: 100.2, tsMs: now - 1_000 });
   const fallbackId = `C-ETH-USD-${closeTs + 1}`;

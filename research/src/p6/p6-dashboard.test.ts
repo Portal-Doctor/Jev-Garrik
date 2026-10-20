@@ -772,13 +772,14 @@ test("a planted host in the new public fields is absent from the HTML and the RS
       openRNet: Number.NaN,
       grossUsd: -21.4,
       riskUsd: 80,
+      quoteFresh: false,
       rows: [
         { productId: "BTC-USD", pnl: -5.35, grossUsd: -5.35, grossR: -0.27, netR: -0.3 },
         { productId: host, pnl: Number.POSITIVE_INFINITY, grossUsd: Number.NaN, grossR: host as never, netR: -1 },
       ],
     },
     fills: [
-      { classId: "B", share: 0.25, execCost: "unreliable" },
+      { classId: "B", share: 0.25, execCost: "red" },
       { classId: host, share: Number.NaN, execCost: host as never },
     ],
     markInputs: { positions: [], quotes: { [host]: { bid: 1, tsMs: 1 } }, disconnected: true },
@@ -793,7 +794,7 @@ test("a planted host in the new public fields is absent from the HTML and the RS
   expect(output.includes("NaN")).toBe(false);
   expect(rendered.mark).toContain("marked to bid, taker 0.90% exit");
   expect(rendered.mark).toContain("n/a");
-  expect(rendered.mark).toContain("B unreliable");
+  expect(rendered.mark).toContain("B red");
   expect(rendered.mark).toContain("-0.27R");
   expect(rendered.trades[0]?.label).toBe("ETH-USD · B");
   expect(shown.positions[0]?.mfeBasis).toBe("bid1m");
@@ -810,7 +811,7 @@ test("a planted host in the new public fields is absent from the HTML and the RS
   expect(shown.mark?.restLabel).toBeUndefined();
   expect(shown.mark?.rows[1]?.productId).toBe("redacted");
   expect(shown.mark?.rows[1]?.pnl).toBeNull();
-  expect(shown.fills?.[0]?.execCost).toBe("unreliable");
+  expect(shown.fills?.[0]?.execCost).toBe("red");
   expect(shown.fills?.[1]?.classId).toBeUndefined();
   expect(shown.fills?.[1]?.execCost).toBe("ok");
   expect(shown.markInputs).toBeUndefined();

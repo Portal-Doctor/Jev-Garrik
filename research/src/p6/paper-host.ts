@@ -1405,14 +1405,20 @@ export function flushEntries(host: PaperHost, nowMs: number, opts?: { keepUntrie
     if (entry.tsMs > nowMs) continue;
     const quoteKind = publishLiveQuote(host, entry.productId, nowMs);
     const quoted = host.book.quotes[entry.productId];
-    if (quoteKind === "stale" || !quoted || nowMs - quoted.tsMs > STALE_QUOTE_MS) {
+    const quoteAge = quoted ? nowMs - quoted.tsMs : Number.POSITIVE_INFINITY;
+    const staleMiss = quoteKind === "stale" || !quoted || quoteAge > STALE_QUOTE_MS;
+    if (staleMiss) {
       if (opts?.keepUntried && !host.quoteTried.has(id)) continue;
-      host.queued.delete(id);
-      host.emitted.add(id);
-      host.book.rejected.push({ id, reason: MISSED_SEND_STALE_QUOTE });
-      host.book.incidents.push(`${MISSED_SEND_STALE_QUOTE} ${id}`);
-      continue;
+      const priced = quoted != null && quoted.bid > 0 && quoted.ask > 0;
+      if (entry.kind === "d-order" || !priced) {
+        host.queued.delete(id);
+        host.emitted.add(id);
+        host.book.rejected.push({ id, reason: MISSED_SEND_STALE_QUOTE });
+        host.book.incidents.push(`${MISSED_SEND_STALE_QUOTE} ${id}`);
+        continue;
+      }
     }
+    if (!quoted) continue;
     host.queued.delete(id);
     const top = { bid: quoted.bid, ask: quoted.ask };
     const quoteFallback = quoted.quoteSrc === "rest_fallback";
@@ -1757,9 +1763,11 @@ export interface PaperStateBody {
   overlapSeen?: boolean;
   hotRev?: number;
   pendingFills?: Book["pendingFills"];
-  quotes?: [string, number, number][];
+  quotes?: [string, number, number, [number, number][]?][];
   sBtMagnitudeBps?: Book["sBtMagnitudeBps"];
-  sBtStressBps?: Book["sBtStressBps"];
+  sBtUncappedBps?: Book["sBtUncappedBps"];
+  staleQuoteMisses?: number;
+  runLabel?: "X1" | "non-X1";
   csPrev?: Book["csPrev"];
   csBarSec?: Book["csBarSec"];
   feedLive?: boolean;
@@ -1910,7 +1918,8 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   for (const position of host.book.positions) restoreExtremes(position, body.hotRev);
   host.book.pendingFills = body.pendingFills ?? [];
   if (body.sBtMagnitudeBps) host.book.sBtMagnitudeBps = body.sBtMagnitudeBps;
-  if (body.sBtStressBps) host.book.sBtStressBps = body.sBtStressBps;
+  if (body.sBtUncappedBps) host.book.sBtUncappedBps = body.sBtUncappedBps;
+  if (typeof body.staleQuoteMisses === "number") host.book.staleQuoteMisses = body.staleQuoteMisses;
   if (body.csPrev) host.book.csPrev = body.csPrev;
   if (body.csBarSec) host.book.csBarSec = body.csBarSec;
   if (body.quotes) {

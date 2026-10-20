@@ -21,7 +21,7 @@ import {
   type PnlBlock,
 } from "./pnl-block";
 import { closedNow, fetchRestBids, type MarkNow, type MarkPosition, type MarkQuote } from "./mark-now";
-import { execCostWord, modelledShare } from "./x1-fill";
+import { classStress, execCostWord, modelledShare, quoteMissStats, type ClassStress, type ExecWord, type StressGrade, type StressTrade } from "./x1-fill";
 
 export { type PnlBlock };
 
@@ -456,15 +456,18 @@ export function redactP6View(view: DashboardView): DashboardView {
     positions: view.positions.map(publicPosition),
     mark: publicMark(view.mark),
     fills: publicFills(view.fills ?? []),
+    runLabel: publicEnum(view.runLabel, RUN_LABEL) === "non-X1" ? "non-X1" : publicEnum(view.runLabel, RUN_LABEL) === "X1" ? "X1" : undefined,
   };
   delete shown.markInputs;
   return shown;
 }
 
 const BASIS = new Set(["bid1m", "mid-half-spread", "bar15-high", "bar15-low"]);
-const FILL_SRC = new Set(["l2", "modelled", "pre-fix fill model"]);
+const FILL_SRC = new Set(["l2", "modelled", "stale_quote_modelled", "pre-fix fill model"]);
 const MARK_STATE = new Set(["live", "stale", "rest", "na"]);
-const EXEC_WORD = new Set(["ok", "unreliable"]);
+const EXEC_WORD = new Set(["ok", "yellow", "red"]);
+const STRESS_GRADE = new Set(["insufficient", "indicative", "decision-grade"]);
+const RUN_LABEL = new Set(["X1", "non-X1"]);
 const PUBLIC_MARK_LABEL = "marked to bid, taker 0.90% exit";
 const PUBLIC_REST_LABEL = "REST mark";
 
@@ -566,6 +569,7 @@ function publicMark(mark: MarkNow | null | undefined): MarkNow | null {
     openRNet: publicNumber(mark.openRNet) ?? null,
     grossUsd: publicNumber(mark.grossUsd) ?? null,
     riskUsd: publicNumber(mark.riskUsd) ?? 0,
+    quoteFresh: mark.quoteFresh === true,
     rows,
   };
 }
@@ -574,10 +578,21 @@ function publicFills(rows: DashboardView["fills"]): DashboardView["fills"] {
   return (rows ?? []).map((row) => {
     const classId = typeof row.classId === "string" ? publicScalar(row.classId, "classId") : undefined;
     const word = publicEnum(row.execCost, EXEC_WORD);
+    const grade = publicEnum(row.stressGrade, STRESS_GRADE);
+    const execCost: ExecWord = word === "yellow" || word === "red" ? word : "ok";
     return {
       ...(classId && classId !== "redacted" ? { classId } : {}),
       share: publicNumber(row.share) ?? 0,
-      execCost: word === "unreliable" ? "unreliable" : "ok",
+      execCost,
+      capHitCount: publicNumber(row.capHitCount) ?? 0,
+      missCount: publicNumber(row.missCount) ?? 0,
+      missRate: publicNumber(row.missRate) ?? 0,
+      gapSlippageBps: publicNumber(row.gapSlippageBps) ?? null,
+      stressN: publicNumber(row.stressN) ?? 0,
+      stressGrade: (grade as StressGrade | undefined) ?? "insufficient",
+      stressNetR: publicNumber(row.stressNetR) ?? null,
+      cappedNetR: publicNumber(row.cappedNetR) ?? null,
+      spreadFragile: row.spreadFragile === true,
     };
   });
 }
@@ -612,6 +627,7 @@ function markLine(view: DashboardView): string {
   const mark = view.mark;
   if (!mark) return "";
   const pnl = mark.state === "na" || mark.pnlNow == null ? "n/a" : mark.pnlNow.toFixed(2);
+  const grossUsd = mark.grossUsd == null ? "n/a" : mark.grossUsd.toFixed(2);
   const openR = mark.openRGross == null ? "n/a" : `${mark.openRGross.toFixed(2)}R`;
   const netR = mark.openRNet == null ? "n/a" : `${mark.openRNet.toFixed(2)}R`;
   const rows = mark.rows
@@ -624,12 +640,40 @@ function markLine(view: DashboardView): string {
     })
     .join(" | ");
   const fills = (view.fills ?? [])
-    .filter((row) => row.execCost === "unreliable")
-    .map((row) => `${row.classId ?? ""} unreliable`)
+    .filter((row) => row.execCost === "yellow" || row.execCost === "red")
+    .map((row) => `${row.classId ?? ""} ${row.execCost}`.trim())
     .join(" ");
-  return [mark.label, mark.state, pnl, mark.staleText, mark.restLabel, `open R ${openR} gross ${netR} net`, rows, fills]
+  const caps = (view.fills ?? [])
+    .filter((row) => (row.capHitCount ?? 0) > 0)
+    .map((row) => `${row.classId ?? ""} cap ${row.capHitCount}`.trim())
+    .join(" ");
+  const gaps = (view.fills ?? [])
+    .filter((row) => row.gapSlippageBps != null)
+    .map((row) => `${row.classId ?? ""} gap slippage ${row.gapSlippageBps!.toFixed(2)}`.trim())
+    .join(" ");
+  const stress = (view.fills ?? [])
+    .filter((row) => (row.stressN ?? 0) > 0)
+    .map((row) => stressLine(row))
+    .filter((line) => line.length > 0)
+    .join(" ");
+  const misses = (view.fills ?? [])
+    .filter((row) => (row.missCount ?? 0) > 0)
+    .map((row) => `${row.classId ?? ""} misses ${row.missCount} ${(row.missRate ?? 0).toFixed(2)}`.trim())
+    .join(" ");
+  const fresh = mark.quoteFresh === false ? "stale quote" : undefined;
+  const run = view.runLabel === "non-X1" ? "non-X1" : undefined;
+  return [mark.label, mark.state, fresh, `gross $${grossUsd}`, `net $${pnl}`, `open R ${openR} gross ${netR} net`, rows, fills, caps, gaps, stress, misses, run]
     .filter((part) => part && part.length > 0)
     .join(" · ");
+}
+
+function stressLine(row: NonNullable<DashboardView["fills"]>[number]): string {
+  const id = row.classId ?? "";
+  if (row.stressGrade === "insufficient" || (row.stressN ?? 0) < 10) return `${id} insufficient n ${row.stressN ?? 0}`.trim();
+  const fragile = row.spreadFragile === true ? "spread-fragile" : row.stressGrade ?? "";
+  const net = row.stressNetR == null ? "" : `${row.stressNetR.toFixed(2)}R`;
+  const capped = row.cappedNetR == null ? "" : `2x capped, report-only ${row.cappedNetR.toFixed(2)}R`;
+  return [id, fragile, net, capped].filter((part) => part && part.length > 0).join(" ");
 }
 
 export interface DashboardLease {
@@ -680,7 +724,22 @@ export interface DashboardView {
   closed: DashboardClosed[];
   emitted: string[];
   mark?: MarkNow | null;
-  fills?: { classId?: string; share: number; execCost: "ok" | "unreliable" }[];
+  fills?: {
+    classId?: string;
+    share: number;
+    execCost: ExecWord;
+    capHitCount?: number;
+    missCount?: number;
+    missRate?: number;
+    gapSlippageBps?: number | null;
+    stressN?: number;
+    stressGrade?: StressGrade;
+    stressNetR?: number | null;
+    cappedNetR?: number | null;
+    spreadFragile?: boolean;
+  }[];
+  /** Parity runs are non-X1 and are excluded from the X1 promotion stats above. */
+  runLabel?: "X1" | "non-X1";
   /** Present only between the hot read and the mark build. Redact drops it. */
   markInputs?: { positions: MarkPosition[]; quotes: Record<string, MarkQuote>; disconnected: boolean };
 }
@@ -711,9 +770,10 @@ export async function readP6Dashboard(kv: Pick<Kv, "mget">): Promise<DashboardVi
   if (Array.isArray(hot.quotes)) {
     for (const row of hot.quotes) {
       if (!Array.isArray(row) || row.length < 3) continue;
-      const [productId, bid, tsMs] = row as [unknown, unknown, unknown];
+      const [productId, bid, tsMs, levels] = row as [unknown, unknown, unknown, unknown];
       if (typeof productId !== "string" || typeof bid !== "number" || typeof tsMs !== "number") continue;
-      quotes[productId] = { bid, tsMs };
+      const bids = bidLevels(levels);
+      quotes[productId] = bids ? { bid, tsMs, bids } : { bid, tsMs };
     }
   }
   const markPositions: MarkPosition[] = positions.map((row) => {
@@ -726,9 +786,43 @@ export async function readP6Dashboard(kv: Pick<Kv, "mget">): Promise<DashboardVi
       riskUsd: typeof source.riskUsd === "number" ? source.riskUsd : Number.NaN,
     };
   });
+  const runLabel = hot.runLabel === "non-X1" ? "non-X1" : "X1";
+  const stressRows = runLabel === "non-X1" ? [] : stressTrades(closed);
   const fills = (["A", "B", "C", "D", "E"] as const).map((classId) => {
-    const share = modelledShare(closed.map((row) => ({ classId: row.classId ?? "", side: "entry", fillSrc: row.fillSrc })), classId);
-    return { classId, share, execCost: execCostWord(share) };
+    const mine = stressRows.filter((row) => row.classId === classId);
+    const share = modelledShare(
+      mine.map((row) => ({
+        classId: row.classId,
+        side: "entry" as const,
+        fillSrc: row.exitFillSrc === "modelled" || row.exitFillSrc === "stale_quote_modelled" ? row.exitFillSrc : row.fillSrc,
+        anchorMissing: row.anchorMissing,
+      })),
+      classId,
+    );
+    const stress: ClassStress = classStress(mine, classId);
+    const misses = quoteMissStats(
+      mine.flatMap((row) => [
+        { classId: row.classId, fillSrc: row.fillSrc },
+        { classId: row.classId, fillSrc: row.exitFillSrc },
+      ]),
+      classId,
+    );
+    const gaps = mine.filter((row) => row.gap === true && row.gapSlippageBps != null && Number.isFinite(row.gapSlippageBps));
+    const gapSlippageBps = gaps.length === 0 ? null : gaps.reduce((sum, row) => sum + (row.gapSlippageBps ?? 0), 0) / gaps.length;
+    return {
+      classId,
+      share,
+      execCost: execCostWord(share),
+      capHitCount: stress.capHitCount,
+      missCount: misses.missCount,
+      missRate: misses.missRate,
+      gapSlippageBps,
+      stressN: stress.n,
+      stressGrade: stress.grade,
+      stressNetR: stress.netR2xUncapped,
+      cappedNetR: stress.netR2xCapped,
+      spreadFragile: stress.spreadFragile,
+    };
   });
   const emitted = Array.isArray(hot.emitted) ? hot.emitted.filter((row): row is string => typeof row === "string") : [];
   let lastRun: Record<string, unknown> | null = null;
@@ -747,8 +841,47 @@ export async function readP6Dashboard(kv: Pick<Kv, "mget">): Promise<DashboardVi
     emitted,
     mark: null,
     fills,
+    runLabel,
     markInputs: { positions: markPositions, quotes, disconnected: hot.feedLive === false },
   };
+}
+
+function bidLevels(value: unknown): [number, number][] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const levels: [number, number][] = [];
+  for (const row of value) {
+    if (!Array.isArray(row) || row.length < 2) return undefined;
+    const price = typeof row[0] === "number" ? row[0] : Number.NaN;
+    const qty = typeof row[1] === "number" ? row[1] : Number.NaN;
+    if (!(price > 0) || !(qty > 0) || !Number.isFinite(price) || !Number.isFinite(qty)) return undefined;
+    levels.push([price, qty]);
+  }
+  return levels.length > 0 ? levels : undefined;
+}
+
+function stressTrades(closed: DashboardView["closed"]): StressTrade[] {
+  return closed.map((row) => {
+    const source = row as DashboardView["closed"][number] & Record<string, unknown>;
+    const num = (key: string): number | null => {
+      const value = source[key];
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
+    };
+    return {
+      classId: typeof source.classId === "string" ? source.classId : "",
+      netUsd: num("netUsd") ?? 0,
+      riskUsd: num("riskUsd") ?? 0,
+      notionalUsd: num("notionalUsd") ?? 0,
+      ...(num("exitNotionalUsd") != null ? { exitNotionalUsd: num("exitNotionalUsd")! } : {}),
+      sBtUncappedBps: num("sBtUncappedBps"),
+      sBtMagnitudeBps: num("sBtMagnitudeBps"),
+      sBtCapped: source.sBtCapped === true,
+      fillSrc: typeof source.fillSrc === "string" ? source.fillSrc : null,
+      exitFillSrc: typeof source.exitFillSrc === "string" ? source.exitFillSrc : null,
+      anchorMissing: source.anchorMissing === true,
+      gap: source.gap === true,
+      gapSlippageBps: num("gapSlippageBps"),
+    };
+  });
 }
 
 function refuse(): never {

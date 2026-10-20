@@ -632,22 +632,10 @@ test("an exit uses the book at send and a day-old quote is not a trade", () => {
     low: 70,
     close: 80,
   });
-  expect(host.book.closed).toHaveLength(0);
-  expect(host.book.rejected.some((row) => row.reason === "missed_send_stale_quote")).toBe(true);
-  const next = start + 900;
-  host.book.quotes["ETH-USD"] = { bid: 79, ask: 79.2, tsMs: next * 1000, quoteSrc: "l2" };
-  applyForward(host.book, {
-    kind: "bar15",
-    productId: "ETH-USD",
-    startSec: next,
-    nowSec: next + 900,
-    open: 78,
-    high: 79,
-    low: 70,
-    close: 78,
-  });
+  expect(host.book.closed).toHaveLength(1);
   expect(host.book.closed[0]?.exitKind).toBe("stop");
-  expect(host.book.legs.find((leg) => leg.id === "held:exit")?.arrivalSnapshotTs).toBe(next * 1000);
+  expect(host.book.legs.find((leg) => leg.id === "held:exit")?.fillSrc).toBe("stale_quote_modelled");
+  expect(host.book.positions).toHaveLength(0);
 });
 
 test("redis urls carry tls, username, and timeout, and auth is checked before Redis", async () => {

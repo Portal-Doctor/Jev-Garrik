@@ -251,7 +251,9 @@ interface HotBody {
   pendingFills?: PaperStateBody["pendingFills"];
   quotes?: PaperStateBody["quotes"];
   sBtMagnitudeBps?: PaperStateBody["sBtMagnitudeBps"];
-  sBtStressBps?: PaperStateBody["sBtStressBps"];
+  sBtUncappedBps?: PaperStateBody["sBtUncappedBps"];
+  staleQuoteMisses?: number;
+  runLabel?: "X1" | "non-X1";
   csPrev?: PaperStateBody["csPrev"];
   csBarSec?: PaperStateBody["csBarSec"];
   feedLive?: boolean;
@@ -349,10 +351,15 @@ export function captureHot(host: PaperHost): HotBody {
     ...(book.pendingFills.length > 0 ? { pendingFills: book.pendingFills } : {}),
     quotes: book.positions.flatMap((position) => {
       const quote = book.quotes[position.productId];
-      return quote && quote.bid > 0 ? [[position.productId, quote.bid, quote.tsMs] as [string, number, number]] : [];
+      if (!quote || !(quote.bid > 0)) return [];
+      const row: [string, number, number, [number, number][]?] = [position.productId, quote.bid, quote.tsMs];
+      if (quote.bids && quote.bids.length > 0) row.push(quote.bids.slice(0, 8));
+      return [row];
     }),
     sBtMagnitudeBps: book.sBtMagnitudeBps,
-    sBtStressBps: book.sBtStressBps,
+    sBtUncappedBps: book.sBtUncappedBps,
+    staleQuoteMisses: book.staleQuoteMisses,
+    runLabel: book.config.parity ? "non-X1" : "X1",
     csPrev: book.csPrev,
     csBarSec: book.csBarSec,
     feedLive: host.status === "live",

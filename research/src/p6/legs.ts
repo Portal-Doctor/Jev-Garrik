@@ -48,15 +48,21 @@ export interface LegLog {
   midAtDecision?: number;
   /** Registered entry open for the class. Drift is against this, not the decision. */
   fillAnchorOpen?: number;
-  fillSrc?: "l2" | "modelled" | "pre-fix fill model";
+  fillSrc?: "l2" | "modelled" | "stale_quote_modelled" | "pre-fix fill model";
+  /** The registered entry open was missing. Drift is null. Not promotion evidence. */
+  anchorMissing?: boolean;
   /** Positive is a cost. Sells are mirrored. No absolute value. */
   execCostBps?: number | null;
   /** GREY. Outside cost$. Versus fillAnchorOpen. */
   driftBps?: number | null;
   /** GREY. Informational. No check reads it. */
   delayBps?: number | null;
-  /** execCostBps + driftBps. Compared with sBtMagnitudeBps. Not a gate by itself. */
+  /** execCostBps + driftBps. Compared with the capped sBtMagnitudeBps. Not a gate by itself. */
   liveCostBps?: number | null;
+  sBtMagnitudeBps?: number;
+  sBtUncappedBps?: number;
+  /** True when sBtUncappedBps is above 15. Counted on the execution light. */
+  sBtCapped?: boolean;
 }
 
 /** Decision-to-arrival drift in bps. GREY, and not part of cost. */

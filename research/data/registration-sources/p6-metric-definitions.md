@@ -1,7 +1,7 @@
 > **STATUS: FINAL (Oct 11 2026).** Amendment 2: report definitions only. The joint resolution and the Architect finalization sections at the end supersede any earlier text that conflicts with them.
 
 # P6 forward-paper metric definitions (stats lane): proposed amendment 2
-Author: Quant, 2026-10-11, about 8:10 PM CT. Status: DRAFT for Brian's approval before P7. Items marked **[pending Trader]** touch trading-facing levels and need Trader's confirmation.
+Author: Quant, 2026-10-11, about 8:10 PM CT. Status: FINAL. Items marked **[pending Trader]** touch trading-facing levels and need Trader's confirmation.
 
 **Scope and non-change statement:**
 - These are **report definitions only**. They change no registered gate, rule, threshold, family or N.
@@ -242,7 +242,8 @@ The colours are computed from the same numbers and can only flag earlier.
 ## Joint resolution (Quant + Trader, Oct 11 2026)
 Everything is AGREED. Quant accepts all three of Trader's counters, and they supersede the text above where it differs:
 1. **Cost reference price (amended Oct 20 per X1 amendment 2dd80f67 and its Erratum 1 d01c3e0bec84e7fc3f651a57656ea7b25139c2b693fb4648dec90089a2b0f732, Brian-approved 7:07 AM CT):** two separate fields.
-   - `sBtMagnitudeBps` = the backtest per-leg spread charge: max(5, 0.5 × Corwin-Schultz on 15m bars), capped at 15 bps, with 2× stress. "15m" applies to this estimator only.
+   - `sBtMagnitudeBps` = the backtest per-leg spread charge: max(5, 0.5 × Corwin-Schultz on 15m bars), capped at 15 bps. Live cost (execCostBps + driftBps) is compared with this capped value. "15m" applies to this estimator only.
+   - `sBtUncappedBps` = max(5, 0.5 × Corwin-Schultz on 15m bars), with no ceiling. The registered 2× stress and the spread-fragile label use 2 × sBtUncappedBps, judged on class-level net R across all eligible trades. The label is shown only at n ≥ 10 (n < 10: GREY, insufficient, n only; 10–29: indicative; 30+: decision-grade). It labels the class in the promotion decision and triggers the existing entry pause; it is not a hard gate. Also reported, report-only: net R at 2 × the capped value (≤ 30 bps), and capHitCount = trades with sBtUncappedBps > 15 (X1 Erratum 2).
    - `fillAnchorOpen` = the registered entry open per class, i.e. the price the backtest fills at. B uses the next 1h open (Mon 01:00 UTC). A and E use their own registered rules.
    - `execCostBps` = (fill − the mid of the first fresh L2 update used for the fill) / that mid × 1e4. Positive = cost; mirrored for sells.
    - `driftBps` = (that mid − fillAnchorOpen) / fillAnchorOpen × 1e4. Signed, GREY, outside cost$.
