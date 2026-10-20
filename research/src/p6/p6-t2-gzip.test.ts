@@ -21,7 +21,10 @@ import {
   VALUE_MAX_BYTES,
   type Kv,
 } from "./relay";
-import { decodeStored, encodeStored, GZIP_PREFIX, gzipFlushPayload, redisFlushPayload, storesGzip } from "./redis-gzip";
+import { decodeStored, encodeStored, GZIP_PREFIX, gzipFlushPayload, installStoredEncoder, redisFlushPayload, storesGzip, takeGzipMismatches } from "./redis-gzip";
+
+const previousGzipWrites = process.env.P6_GZIP_WRITES;
+process.env.P6_GZIP_WRITES = "1";
 
 const NOW = Date.parse("2026-10-12T17:01:00Z");
 const TODAY = Math.floor(NOW / 1000 / 86_400) * 86_400;
@@ -260,6 +263,53 @@ test("the 256 KB hot cap is the uncompressed JSON", async () => {
   expect(Buffer.byteLength(stored)).toBeLessThan(Buffer.byteLength(logical));
   const barKey = bar15Key("ETH-USD", new Date(startSec * 1000).toISOString().slice(0, 10));
   expect(peekStored(kv, barKey)?.startsWith("[")).toBe(true);
+});
+
+test("writes stay plain when P6_GZIP_WRITES is off and a planted gz1 value still loads", async () => {
+  delete process.env.P6_GZIP_WRITES;
+  try {
+    const kv = memoryKv(clock);
+    const host = startPaperHost(["BTC-USD"], {});
+    host.clock = clock;
+    host.warmupStored = true;
+    host.book.realizedUsd = 6;
+    await persistSplit(kv, host);
+    const stored = peekStored(kv, HOT_KEY);
+    expect(stored?.startsWith("{")).toBe(true);
+    expect(stored?.startsWith(GZIP_PREFIX)).toBe(false);
+    const logical = await kv.get(HOT_KEY);
+    expect(logical).toBe(stored);
+    const gz = encodeStored(HOT_KEY, logical ?? "");
+    plantStored(kv, HOT_KEY, gz);
+    plantStored(kv, LAST_RUN_KEY, encodeStored(LAST_RUN_KEY, (await kv.get(LAST_RUN_KEY)) ?? "{}"));
+    const reader = startPaperHost(["BTC-USD"], {});
+    reader.clock = clock;
+    const loaded = await loadSplit(kv, reader);
+    expect(loaded?.realizedUsd).toBe(6);
+    expect(peekStored(kv, HOT_KEY)).toBe(gz);
+  } finally {
+    process.env.P6_GZIP_WRITES = "1";
+  }
+});
+
+test("a corrupting encoder stores plain JSON and logs the mismatch", async () => {
+  takeGzipMismatches();
+  const kv = memoryKv(clock);
+  const host = startPaperHost(["BTC-USD"], {});
+  host.clock = clock;
+  host.warmupStored = true;
+  host.book.realizedUsd = 2;
+  installStoredEncoder(() => `${GZIP_PREFIX}!!!!`);
+  try {
+    await persistSplit(kv, host);
+  } finally {
+    installStoredEncoder(null);
+  }
+  const stored = peekStored(kv, HOT_KEY);
+  expect(stored?.startsWith("{")).toBe(true);
+  expect(JSON.parse(stored ?? "{}")).toMatchObject({ realizedUsd: 2 });
+  expect(await kv.get(HOT_KEY)).toBe(stored);
+  expect(host.book.incidents.some((row) => row === "gzip mismatch p6:hot")).toBe(true);
 });
 
 function universeNames(padTo = 0): string[] {

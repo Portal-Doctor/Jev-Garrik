@@ -6,7 +6,7 @@
 
 import { GAP_MAX_MS, gapWeekReport, handoverCause, type VolHour } from "./amendment-v6";
 import { SAVE_HEARTBEAT_MS, type PaperStateBody } from "./paper-host";
-import { decodeStored, encodeStored, redisFlushPayload } from "./redis-gzip";
+import { classifyStored, commitStored, decodeStored, readText, redisFlushPayload, type KvRead } from "./redis-gzip";
 
 export { SAVE_HEARTBEAT_MS };
 
@@ -28,7 +28,10 @@ export const CRON_KEY = "p6:cron";
 export const VALUE_MAX_BYTES = 1_048_576;
 
 export interface Kv {
+  /** Logical JSON, or null when the key is missing or unreadable. */
   get(key: string): Promise<string | null>;
+  /** Tagged read. Unreadable is not null and is not missing. */
+  read(key: string): Promise<KvRead>;
   /** Returns true when the write happened. nx refuses an existing key. px is a TTL in milliseconds. */
   set(key: string, value: string, opts?: { nx?: boolean; px?: number }): Promise<boolean>;
   del(key: string): Promise<void>;
@@ -49,8 +52,10 @@ export interface Kv {
   ): Promise<number>;
   /** One EVAL: check the lease token, renew it, then write the flush. 1 applied, 0 lost, 3 over 1 MB (nothing written). */
   ownedFlush(leaseKey: string, token: string, nowMs: number, payload: string): Promise<number>;
-  /** One command for many string keys. */
+  /** One command for many string keys. Null is missing or unreadable. */
   mget(keys: string[]): Promise<(string | null)[]>;
+  /** Tagged form of mget. One entry per key, never null. */
+  readMany(keys: string[]): Promise<KvRead[]>;
   /** One command. Each entry is the JSON text of one list element, oldest first. */
   readLists(keys: string[]): Promise<string[][]>;
 }
@@ -85,14 +90,18 @@ export function memoryKv(clock: () => number = Date.now): Kv {
     }
     return row;
   };
+  const readKey = (key: string): KvRead => classifyStored(key, live(key)?.value ?? null);
   const kv: Kv = {
+    async read(key) {
+      return readKey(key);
+    },
     async get(key) {
-      return decodeStored(key, live(key)?.value ?? null);
+      return readText(readKey(key));
     },
     async set(key, value, opts) {
       const current = live(key);
       if (opts?.nx && current) return false;
-      rows.set(key, { value: encodeStored(key, value), expiresAt: opts?.px != null ? clock() + opts.px : null });
+      rows.set(key, { value: commitStored(key, value), expiresAt: opts?.px != null ? clock() + opts.px : null });
       return true;
     },
     async del(key) {
@@ -109,7 +118,7 @@ export function memoryKv(clock: () => number = Date.now): Kv {
       const lease = decodeLease(live(leaseKey)?.value ?? null);
       if (!lease || lease.token !== token || lease.release !== "none") return false;
       if (Buffer.byteLength(value) > VALUE_MAX_BYTES) return false;
-      rows.set(key, { value: encodeStored(key, value), expiresAt: opts?.px != null ? clock() + opts.px : null });
+      rows.set(key, { value: commitStored(key, value), expiresAt: opts?.px != null ? clock() + opts.px : null });
       return true;
     },
     async ownedAppend(leaseKey, token, key, member, opts) {
@@ -133,8 +142,11 @@ export function memoryKv(clock: () => number = Date.now): Kv {
       }
       return applyMemoryFlush(rows, clock, leaseKey, token, nowMs, payload);
     },
+    async readMany(keys) {
+      return keys.map((key) => readKey(key));
+    },
     async mget(keys) {
-      return keys.map((key) => decodeStored(key, live(key)?.value ?? null));
+      return keys.map((key) => readText(readKey(key)));
     },
     async readLists(keys) {
       return keys.map((key) => listItems(live(key)?.value ?? null));
@@ -209,7 +221,7 @@ export function applyMemoryFlush(
   const exp = clock() + ttl;
   rows.set(leaseKey, { value: next, expiresAt: exp });
   rows.set(LEASE_META_KEY, { value: next, expiresAt: null });
-  if (body.hot) rows.set(HOT_KEY, { value: encodeStored(HOT_KEY, body.hot), expiresAt: null });
+  if (body.hot) rows.set(HOT_KEY, { value: commitStored(HOT_KEY, body.hot), expiresAt: null });
   for (const tape of body.tapes ?? []) rows.set(tape.key, { value: tape.value, expiresAt: clock() + tape.px });
   for (const [key, row] of staged) rows.set(key, { value: row.value, expiresAt: row.px > 0 ? clock() + row.px : null });
   for (const mark of body.marks ?? []) {
@@ -223,7 +235,7 @@ export function applyMemoryFlush(
   }
   for (const row of body.extra ?? []) {
     if (row.nx && rows.get(row.key)) continue;
-    rows.set(row.key, { value: encodeStored(row.key, row.value), expiresAt: row.px != null && row.px > 0 ? clock() + row.px : null });
+    rows.set(row.key, { value: commitStored(row.key, row.value), expiresAt: row.px != null && row.px > 0 ? clock() + row.px : null });
   }
   return 1;
 }
@@ -1121,12 +1133,16 @@ export function redisKvFromUrl(url: string): Kv {
     return writeCommand(parts);
   };
   const asString = (reply: RedisReply): string | null => (typeof reply === "string" ? reply : null);
+  const readKey = async (key: string): Promise<KvRead> => classifyStored(key, asString(await send(["GET", key])));
   return {
+    async read(key) {
+      return readKey(key);
+    },
     async get(key) {
-      return decodeStored(key, asString(await send(["GET", key])));
+      return readText(await readKey(key));
     },
     async set(key, value, opts) {
-      const parts = ["SET", key, encodeStored(key, value)];
+      const parts = ["SET", key, commitStored(key, value)];
       if (opts?.nx) parts.push("NX");
       if (opts?.px != null) parts.push("PX", String(opts.px));
       const reply = await send(parts);
@@ -1140,7 +1156,7 @@ export function redisKvFromUrl(url: string): Kv {
       return reply === "1";
     },
     async ownedSet(leaseKey, token, key, value, opts) {
-      const reply = await send(["EVAL", OWNED_SET_LUA, "2", leaseKey, key, token, encodeStored(key, value), String(opts?.px ?? 0)]);
+      const reply = await send(["EVAL", OWNED_SET_LUA, "2", leaseKey, key, token, commitStored(key, value), String(opts?.px ?? 0)]);
       return reply === "1";
     },
     async ownedAppend(leaseKey, token, key, member, opts) {
@@ -1165,11 +1181,17 @@ export function redisKvFromUrl(url: string): Kv {
       const code = Number(reply);
       return code === 1 || code === 3 ? code : 0;
     },
+    async readMany(keys) {
+      if (keys.length === 0) return [];
+      const reply = await send(["MGET", ...keys]);
+      if (!Array.isArray(reply)) return keys.map(() => ({ tag: "missing" as const }));
+      return keys.map((key, index) => classifyStored(key, typeof reply[index] === "string" ? reply[index] : null));
+    },
     async mget(keys) {
       if (keys.length === 0) return [];
       const reply = await send(["MGET", ...keys]);
       if (!Array.isArray(reply)) return keys.map(() => null);
-      return reply.map((item, index) => decodeStored(keys[index] ?? "", typeof item === "string" ? item : null));
+      return keys.map((key, index) => readText(classifyStored(key, typeof reply[index] === "string" ? reply[index] : null)));
     },
     async readLists(keys) {
       if (keys.length === 0) return [];

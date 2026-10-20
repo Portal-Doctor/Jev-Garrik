@@ -1,19 +1,18 @@
 /**
  * Stored form of p6:hot and p6:lastRun.
  *
- * The bytes are the ASCII prefix "gz1:" plus base64 of a gzip (mtime 0). A reader
- * sees the prefix without decoding. Base64 keeps the value inside the UTF-8 Redis
- * client; raw gzip bytes would be torn by that client. A value that does not start
- * with the prefix is legacy JSON and is returned unchanged.
+ * Readers always accept plain JSON and the ASCII prefix "gz1:" plus base64 of a
+ * gzip (mtime 0). Base64 keeps the value inside the UTF-8 Redis client. Writes
+ * gzip only when P6_GZIP_WRITES=1. The default is off: the next flush stores
+ * plain JSON and does not delete the old value.
  *
- * Gunzip failure, a truncated body, or output that is not a JSON value becomes null.
- * It does not throw. Callers already treat null as a missing hot and take a full load.
+ * Kv.read / Kv.readMany return a tagged result. A gz1: body that does not gunzip
+ * to JSON, and plain text that does not parse, is `unreadable`, not missing.
+ * seq, era, base, and keySeq stay inside the JSON. A partial reload pays for two
+ * hot reads (the token and the confirm).
  *
- * seq, era, base, and keySeq stay inside the JSON. Kv.get gunzips once, then the
- * existing token compare reads those fields. A second decodeStored on that JSON is
- * only a prefix check. A partial reload pays for two hot GETs (the token and the confirm).
- *
- * The 256 KB cap is the JSON size, applied before this encoding.
+ * The 256 KB cap is the JSON size, applied before encoding.
+ * Quant soak review uses classifyStored and decodeStored from this file.
  */
 
 import { gzipSync, gunzipSync, type ZlibOptions } from "node:zlib";
@@ -27,12 +26,112 @@ export function storesGzip(key: string): boolean {
   return GZIP_KEYS.has(key);
 }
 
-/** Gzip a logical JSON string. A value that is already stored form is kept as-is. */
+/** True only when writes should store gz1:. Default off. */
+export function gzipWritesEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.P6_GZIP_WRITES === "1";
+}
+
+/** Gzip a logical JSON string. A value that is already stored form is kept as-is. Ignores the write flag. */
 export function encodeStored(key: string, value: string): string {
   if (!storesGzip(key)) return value;
   if (value.startsWith(GZIP_PREFIX)) return value;
   // mtime 0 keeps the stored bytes stable. @types/node omits it on ZlibOptions; Node still reads it.
   return GZIP_PREFIX + gzipSync(Buffer.from(value, "utf8"), { mtime: 0 } as ZlibOptions).toString("base64");
+}
+
+export type StoredHeader = "gz1:" | "{" | "other";
+
+export type KvRead =
+  | { tag: "missing" }
+  | { tag: "unreadable"; raw: string; bytes: number; header: StoredHeader }
+  | { tag: "value"; value: string; wireBytes: number };
+
+const PARSED_KEYS: ReadonlySet<string> = new Set(["p6:hot", "p6:lastRun", "p6:acct", "p6:eq:first"]);
+
+export function storedHeader(raw: string): StoredHeader {
+  if (raw.startsWith(GZIP_PREFIX)) return "gz1:";
+  if (raw.startsWith("{")) return "{";
+  return "other";
+}
+
+/** Tagged read. Never null. Decode or JSON failure is unreadable, not missing. */
+export function classifyStored(key: string, raw: string | null): KvRead {
+  if (raw == null) return { tag: "missing" };
+  const bytes = Buffer.byteLength(raw);
+  if (raw.startsWith(GZIP_PREFIX) && (storesGzip(key) || PARSED_KEYS.has(key))) {
+    const json = gunzipJson(raw);
+    if (json == null) return { tag: "unreadable", raw, bytes, header: "gz1:" };
+    return { tag: "value", value: json, wireBytes: bytes };
+  }
+  if (PARSED_KEYS.has(key)) {
+    if (!parsesJson(raw)) return { tag: "unreadable", raw, bytes, header: storedHeader(raw) };
+    return { tag: "value", value: raw, wireBytes: bytes };
+  }
+  return { tag: "value", value: raw, wireBytes: bytes };
+}
+
+export function readText(row: KvRead): string | null {
+  return row.tag === "value" ? row.value : null;
+}
+
+function parsesJson(raw: string): boolean {
+  try {
+    JSON.parse(raw);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function gunzipJson(raw: string): string | null {
+  try {
+    const json = gunzipSync(Buffer.from(raw.slice(GZIP_PREFIX.length), "base64")).toString("utf8");
+    const head = json[0];
+    if (head !== "{" && head !== "[") return null;
+    JSON.parse(json);
+    return json;
+  } catch {
+    return null;
+  }
+}
+
+const mismatches: string[] = [];
+
+/** Keys whose gzip did not round-trip since the last take. The plain JSON was stored instead. */
+export function takeGzipMismatches(): string[] {
+  const copy = mismatches.slice();
+  mismatches.length = 0;
+  return copy;
+}
+
+type StoredEncoder = (key: string, value: string) => string;
+
+function defaultStoredEncoder(key: string, value: string): string {
+  if (!gzipWritesEnabled() || !storesGzip(key)) return value;
+  return encodeStored(key, value);
+}
+
+let storedEncoder: StoredEncoder = defaultStoredEncoder;
+
+/** Test hook. A corrupting encoder is checked by the round-trip guard. Pass null to restore. */
+export function installStoredEncoder(fn: StoredEncoder | null): void {
+  storedEncoder = fn ?? defaultStoredEncoder;
+}
+
+/**
+ * Bytes to store. Gzip runs only when the flag is on. After encoding, the value
+ * is decoded and compared to the source. A mismatch stores the plain JSON.
+ */
+export function commitStored(key: string, value: string): string {
+  if (!storesGzip(key)) return value;
+  const encoded = storedEncoder(key, value);
+  if (encoded === value) return value;
+  if (decodeStored(key, encoded) !== value) {
+    mismatches.push(key);
+    console.log("gzip mismatch", { key, bytes: Buffer.byteLength(value) });
+    return value;
+  }
+  return encoded;
 }
 
 /**
@@ -69,11 +168,11 @@ export function gzipFlushPayload(payload: string): string {
   } catch {
     return payload;
   }
-  if (typeof body.hot === "string" && body.hot !== "") body.hot = encodeStored("p6:hot", body.hot);
+  if (typeof body.hot === "string" && body.hot !== "") body.hot = commitStored("p6:hot", body.hot);
   if (Array.isArray(body.extra)) {
     for (const row of body.extra) {
       if (!row || typeof row.key !== "string" || typeof row.value !== "string") continue;
-      row.value = encodeStored(row.key, row.value);
+      row.value = commitStored(row.key, row.value);
     }
   }
   return JSON.stringify(body);

@@ -6,7 +6,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { connect as connectNet, isIP } from "node:net";
 import { connect as connectTls } from "node:tls";
-import { decodeStored } from "./redis-gzip";
+import { classifyStored, readText } from "./redis-gzip";
 import type { Kv } from "./relay";
 import { commandBudget, healthStale, monthCommands, nextCronMs, projectionTone } from "./dashboard-format";
 import {
@@ -232,9 +232,11 @@ function leaseOf(raw: string | null): DashboardLease | null {
 /** One mget of lastRun, hot, and the lease. No INFO and no writes. */
 export async function readP6Dashboard(kv: Pick<Kv, "mget">): Promise<DashboardView> {
   const values = await kv.mget([LAST_RUN_KEY, HOT_KEY, LEASE_KEY]);
-  // Legacy JSON passes through. A bad gzip is null, so the page does not throw.
-  const lastRaw = decodeStored(LAST_RUN_KEY, values[0] ?? null);
-  const hotRaw = decodeStored(HOT_KEY, values[1] ?? null);
+  // Plain JSON and gz1: both decode. Unreadable is an empty view, not a throw.
+  const lastRead = classifyStored(LAST_RUN_KEY, values[0] ?? null);
+  const hotRead = classifyStored(HOT_KEY, values[1] ?? null);
+  const lastRaw = readText(lastRead);
+  const hotRaw = readText(hotRead);
   const leaseRaw = values[2] ?? null;
   const hot = hotRaw ? (JSON.parse(hotRaw) as Record<string, unknown>) : {};
   const incidents = Array.isArray(hot.incidents) ? hot.incidents.filter((row): row is string => typeof row === "string").map(stripUrls) : [];
@@ -483,9 +485,23 @@ export async function readP6Page(kv: Pick<Kv, "mget">, nowMs: number): Promise<{
 
 /** A Kv that can only MGET. Every write throws before a socket opens. */
 export function openDashboardKv(url: string): Kv {
+  const readMany = async (keys: string[]) => {
+    const raw = await mgetRaw(url, keys);
+    return keys.map((key, index) => classifyStored(key, raw[index] ?? null));
+  };
   return {
-    get: async (key) => (await mgetRaw(url, [key]))[0] ?? null,
-    mget: (keys) => mgetRaw(url, keys),
+    async read(key) {
+      return (await readMany([key]))[0]!;
+    },
+    async readMany(keys) {
+      return readMany(keys);
+    },
+    async get(key) {
+      return readText((await readMany([key]))[0]!);
+    },
+    async mget(keys) {
+      return (await readMany(keys)).map((row) => readText(row));
+    },
     set: async () => refuse(),
     del: async () => refuse(),
     cas: async () => refuse(),

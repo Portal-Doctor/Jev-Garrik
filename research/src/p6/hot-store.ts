@@ -23,7 +23,7 @@ import {
   type PaperStateBody,
   retainDailyCloses,
 } from "./paper-host";
-import { decodeStored } from "./redis-gzip";
+import { decodeStored, takeGzipMismatches } from "./redis-gzip";
 import { barMarker, HOT_KEY, LEASE_KEY, VALUE_MAX_BYTES, type Kv } from "./relay";
 
 /** One record per flush. The dashboard reads this and does not recompute P/L. */
@@ -1452,8 +1452,22 @@ async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
  * is checked, the lease is renewed, then hot, the last closed tape minute,
  * the ring, and any closed bars are written. A value over 1 MB is not written.
  */
+function noteGzipMismatch(host: PaperHost): void {
+  for (const key of takeGzipMismatches()) {
+    const line = `gzip mismatch ${key}`;
+    if (!host.book.incidents.includes(line)) host.book.incidents.push(line);
+    console.log(line);
+  }
+}
+
 export function persistSplit(kv: Kv, host: PaperHost): Promise<void> {
-  return queueFlush(host, () => persistSplitBody(kv, host));
+  return queueFlush(host, async () => {
+    try {
+      await persistSplitBody(kv, host);
+    } finally {
+      noteGzipMismatch(host);
+    }
+  });
 }
 
 function parseList<T>(raw: string | null): T[] {
