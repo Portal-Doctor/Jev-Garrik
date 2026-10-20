@@ -13,7 +13,7 @@ import {
   type Book,
   type ForwardEvent,
 } from "./engine";
-import { BID_BASIS, FALLBACK_BASIS, HOT_REV, MAE15_BASIS, MFE15_BASIS, minuteBucket, noteBidExtreme } from "./extremes";
+import { BID_BASIS, FALLBACK_BASIS, HOT_REV, MAE15_BASIS, MFE15_BASIS, minuteBucket, noteBar15Extreme, noteBidExtreme } from "./extremes";
 import { HOT_MAX_BYTES, hotBytes, hotSnapshot } from "./hot-store";
 import { clearRestCache, closedNow, MARK_LABEL, positionPnlNow, quoteAgeState, REST_LABEL } from "./mark-now";
 import { installPaperState, startPaperHost, type PaperStateBody } from "./paper-host";
@@ -29,6 +29,7 @@ import {
   l2Fresh,
   modelledPx,
   modelledShare,
+  type FillSrc,
   PRE_FIX_BEFORE_MS,
   PRE_FIX_FILL_SRC,
   PRE_FIX_PRODUCTS,
@@ -318,6 +319,108 @@ test("a mid-bar quote is not the stop fill when the decision clock is the bar cl
   expect(book.closed[0]?.gap).toBeUndefined();
 });
 
+test("a non-fresh stop is modelled from the lower of the open and the stop", () => {
+  const startSec = Math.floor(OPEN / 1000) + 900;
+  const nowSec = startSec + 900;
+  const decisionMs = nowSec * 1000;
+  const closeAt = (id: string, quote: { tsMs: number; bid: number; ask: number } | null, open = 100) => {
+    const book = live(["ETH-USD"]);
+    applyForward(book, x1({ id, productId: "ETH-USD", bid: 100, ask: 100, nextOpen: 100, stop: 95 }));
+    if (quote) applyForward(book, { kind: "mid", productId: "ETH-USD", tsMs: quote.tsMs, bid: quote.bid, ask: quote.ask });
+    else delete book.quotes["ETH-USD"];
+    applyForward(book, {
+      kind: "bar15",
+      productId: "ETH-USD",
+      startSec,
+      nowSec,
+      open,
+      high: 101,
+      low: 94,
+      close: 96,
+      countJev: false,
+    });
+    return book;
+  };
+  const cases: { id: string; quote: { tsMs: number; bid: number; ask: number } | null; fillSrc: FillSrc; misses: number }[] = [
+    { id: "mid", quote: { tsMs: startSec * 1000 + 5 * 60_000, bid: 99, ask: 101 }, fillSrc: STALE_QUOTE_FILL_SRC, misses: 1 },
+    { id: "pre", quote: { tsMs: startSec * 1000 - 1_000, bid: 99, ask: 101 }, fillSrc: STALE_QUOTE_FILL_SRC, misses: 1 },
+    { id: "slow", quote: { tsMs: decisionMs - 20_000, bid: 99, ask: 101 }, fillSrc: STALE_QUOTE_FILL_SRC, misses: 1 },
+    { id: "late", quote: { tsMs: decisionMs - 2_500, bid: 99, ask: 101 }, fillSrc: "modelled", misses: 0 },
+    { id: "none", quote: null, fillSrc: STALE_QUOTE_FILL_SRC, misses: 1 },
+  ];
+  for (const row of cases) {
+    const book = closeAt(row.id, row.quote);
+    expect(book.positions).toHaveLength(0);
+    expect(book.closed[0]?.exitKind).toBe("stop");
+    expect(book.closed[0]?.gap).toBeUndefined();
+    expect(book.staleQuoteMisses).toBe(row.misses);
+    const exit = book.legs.find((leg) => leg.side === "exit")!;
+    const bid = row.quote?.bid ?? 100;
+    const ask = row.quote?.ask ?? 100;
+    expect(exit.fillSrc).toBe(row.fillSrc);
+    expect(exit.fillPrice).toBeLessThanOrEqual(95);
+    expect(exit.fillPrice).toBeCloseTo(modelledPx(95, bid, ask, "sell"), 8);
+  }
+  const early = closeAt("clock", { tsMs: decisionMs - 1_000, bid: 99, ask: 101 });
+  const earlyExit = early.legs.find((leg) => leg.side === "exit")!;
+  expect(earlyExit.fillSrc).toBe("modelled");
+  expect(earlyExit.fillPrice).toBeLessThanOrEqual(95);
+  expect(earlyExit.fillPrice).toBeCloseTo(modelledPx(95, 99, 101, "sell"), 8);
+  expect(early.staleQuoteMisses).toBe(0);
+  const touched = live(["ETH-USD"]);
+  applyForward(touched, x1({ id: "touch", productId: "ETH-USD", bid: 100, ask: 100, nextOpen: 100, stop: 95 }));
+  applyForward(touched, { kind: "mid", productId: "ETH-USD", tsMs: decisionMs, bid: 95, ask: 96, l2AgeMs: 0, l2Src: "ws" });
+  applyForward(touched, {
+    kind: "bar15",
+    productId: "ETH-USD",
+    startSec,
+    nowSec,
+    open: 100,
+    high: 101,
+    low: 94,
+    close: 96,
+    countJev: false,
+  });
+  expect(touched.legs.find((leg) => leg.side === "exit")?.fillSrc).toBe("l2");
+  expect(touched.closed[0]?.gap).toBeUndefined();
+  const through = closeAt("through", { tsMs: decisionMs - 20_000, bid: 99, ask: 101 }, 95);
+  expect(through.closed[0]?.gap).toBe(true);
+  expect(through.legs.find((leg) => leg.side === "exit")?.fillPrice).toBeLessThanOrEqual(95);
+  const atClose = live(["ETH-USD"]);
+  applyForward(atClose, x1({ id: "at-close", productId: "ETH-USD", bid: 100, ask: 100, nextOpen: 100, stop: 95 }));
+  applyForward(atClose, { kind: "mid", productId: "ETH-USD", tsMs: (startSec + 900) * 1000, bid: 99, ask: 101 });
+  applyForward(atClose, {
+    kind: "bar15",
+    productId: "ETH-USD",
+    startSec,
+    nowSec: startSec + 901,
+    open: 100,
+    high: 101,
+    low: 94,
+    close: 96,
+    countJev: false,
+  });
+  const closeExit = atClose.legs.find((leg) => leg.side === "exit")!;
+  expect(closeExit.fillSrc).toBe("l2");
+  expect(closeExit.fillPrice).toBeCloseTo(99, 6);
+});
+
+test("a non-positive or non-finite bar print does not set the 15m extreme", () => {
+  const row: { mfe15?: number | null; mae15?: number | null } = {};
+  noteBar15Extreme(row, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
+  expect(row.mfe15 ?? null).toBeNull();
+  expect(row.mae15 ?? null).toBeNull();
+  noteBar15Extreme(row, 0, -1);
+  expect(row.mfe15 ?? null).toBeNull();
+  expect(row.mae15 ?? null).toBeNull();
+  noteBar15Extreme(row, 10, 4);
+  expect(row.mfe15).toBe(10);
+  expect(row.mae15).toBe(4);
+  noteBar15Extreme(row, 10, 4);
+  expect(row.mfe15).toBe(10);
+  expect(row.mae15).toBe(4);
+});
+
 test("exec cost and drift stay signed, and a fill under the mid is a negative cost", () => {
   const book = live(["ETH-USD"]);
   applyForward(book, x1({ id: "sign", productId: "ETH-USD", bid: 100, ask: 101, nextOpen: 100, decisionMid: 99 }));
@@ -571,6 +674,7 @@ test("with live quotes off, netUsd and netR match the dev book, including seven 
 
 test("the first quote at or after the open fills the entry: ≤2s walks, >2s is entry_stale_quote, >15s is a logged miss", () => {
   expect(entryQuoteFillSrc(2_000, true)).toBe("l2");
+  expect(entryQuoteFillSrc(2_000, false)).toBe("modelled");
   expect(entryQuoteFillSrc(2_001, false)).toBe(ENTRY_STALE_FILL_SRC);
   expect(entryQuoteFillSrc(15_000, false)).toBe(ENTRY_STALE_FILL_SRC);
   expect(entryQuoteFillSrc(15_001, false)).toBe(STALE_QUOTE_FILL_SRC);
@@ -859,6 +963,11 @@ test("a missing fill anchor leaves drift null and is not promotion evidence", ()
   expect(leg.anchorMissing).toBe(true);
   expect(leg.fillSrc).toBe("l2");
   expect(inSlippageStats(leg.fillSrc, leg.anchorMissing)).toBe(false);
+  const position = book.positions[0]!;
+  expect(position.anchorMissing).toBe(true);
+  expect(position.rawEntry).toBe(position.fillPrice);
+  expect(position.rawEntry).not.toBe(100);
+  expect(position.notionalUsd).toBeGreaterThan(500);
 });
 
 test("mark age boundaries, net R, and the walked bid", () => {
@@ -902,9 +1011,15 @@ test("2x uncapped stress is a class label, and parity runs are non-X1", () => {
   const band = classStress(Array.from({ length: 10 }, (_, index) => row(index, 40)), "B");
   expect(band.grade).toBe("indicative");
   expect(band.capHitCount).toBe(10);
-  expect(band.netR2xUncapped).not.toBeNull();
+  expect(band.netR2xUncapped).toBeCloseTo(0.34, 8);
   expect(band.netR2xCapped).not.toBeNull();
   expect(band.netR2xUncapped!).toBeLessThan(band.netR2xCapped!);
+  expect(band.spreadFragile).toBe(false);
+  const floored = classStress(Array.from({ length: 10 }, (_, index) => row(index, 0)), "B");
+  expect(floored.netR2xUncapped).toBeCloseTo(0.48, 8);
+  const flat = classStress(Array.from({ length: 10 }, (_, index) => ({ ...row(index, 40), netUsd: 3.2 })), "B");
+  expect(flat.netR2xUncapped).toBeCloseTo(0, 8);
+  expect(flat.spreadFragile).toBe(true);
   const grade = classStress(Array.from({ length: 30 }, (_, index) => row(index, 5)), "B");
   expect(grade.grade).toBe("decision-grade");
   expect(grade.capHitCount).toBe(0);
@@ -914,4 +1029,9 @@ test("2x uncapped stress is a class label, and parity runs are non-X1", () => {
   host.book.config.parity = { riskUsd: 20, sBtBps: 5 };
   const hot = JSON.parse(hotSnapshot(host)) as { runLabel: string };
   expect(hot.runLabel).toBe("non-X1");
+  const quotesOff = startPaperHost(["ETH-USD"], {});
+  quotesOff.book.config.liveQuotes = false;
+  expect((JSON.parse(hotSnapshot(quotesOff)) as { runLabel: string }).runLabel).toBe("non-X1");
+  const quotesOn = startPaperHost(["ETH-USD"], {});
+  expect((JSON.parse(hotSnapshot(quotesOn)) as { runLabel: string }).runLabel).toBe("X1");
 });

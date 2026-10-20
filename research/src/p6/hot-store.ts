@@ -6,6 +6,7 @@
 import { randomBytes } from "node:crypto";
 import type { BarOHLC } from "../p3/signals";
 import { paperPnl } from "./engine";
+import { x1TakerOn } from "./x1-fill";
 import { equityExtras, hourStartSec } from "./pnl-block";
 import { positionSnapBuild } from "./positions-view";
 import { boundJevDone, JEV_PACKET_TTL_MS, queuedForHandover, skipShareReport } from "./jev-call";
@@ -359,7 +360,7 @@ export function captureHot(host: PaperHost): HotBody {
     sBtMagnitudeBps: book.sBtMagnitudeBps,
     sBtUncappedBps: book.sBtUncappedBps,
     staleQuoteMisses: book.staleQuoteMisses,
-    runLabel: book.config.parity ? "non-X1" : "X1",
+    runLabel: x1TakerOn(book.config) ? "X1" : "non-X1",
     csPrev: book.csPrev,
     csBarSec: book.csBarSec,
     feedLive: host.status === "live",

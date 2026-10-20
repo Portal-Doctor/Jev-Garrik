@@ -1466,7 +1466,7 @@ export function resolvePendingFills(book: Book, productId: string, quote: FillQu
       }
       if (fillSrc === STALE_QUOTE_FILL_SRC) book.staleQuoteMisses += 1;
       const touch = quote.ask;
-      const ref = slot.fillAnchorOpen > 0 ? slot.fillAnchorOpen : slot.modelOpen;
+      const anchorOpen = slot.fillAnchorOpen > 0 ? slot.fillAnchorOpen : 0;
       const rough = paperUnits(book, slot, sLive, touch);
       const fill = action === "l2" ? vwapFill("buy", touch, quote.asks, rough) : modelledPx(slot.modelOpen, quote.bid, quote.ask, "buy");
       tryEnter(book, {
@@ -1474,7 +1474,7 @@ export function resolvePendingFills(book: Book, productId: string, quote: FillQu
         classId: slot.classId,
         productId: slot.productId,
         tsMs: slot.tsMs,
-        stopBps: ref > 0 ? ((ref - slot.stop) / ref) * 10_000 : 0,
+        stopBps: anchorOpen > 0 ? ((anchorOpen - slot.stop) / anchorOpen) * 10_000 : 0,
         sLive,
         bid: quote.bid,
         ask: quote.ask,
@@ -1490,7 +1490,7 @@ export function resolvePendingFills(book: Book, productId: string, quote: FillQu
         dailyAtr: slot.dailyAtr,
         priorDailyCloses: slot.priorDailyCloses,
         tick: slot.tick,
-        rawEntry: ref,
+        ...(anchorOpen > 0 ? { rawEntry: anchorOpen } : {}),
         aConfig: slot.aConfig,
         quoteFallback: quote.src === "rest_snapshot",
         decisionTs: slot.decisionTs,
@@ -1526,8 +1526,8 @@ export function resolvePendingFills(book: Book, productId: string, quote: FillQu
 }
 
 function paperUnits(book: Book, slot: PendingFill, sLive: number, touch: number): number {
-  const ref = slot.fillAnchorOpen > 0 ? slot.fillAnchorOpen : slot.modelOpen;
-  const stopBps = ref > 0 ? ((ref - slot.stop) / ref) * 10_000 : 0;
+  const anchorOpen = slot.fillAnchorOpen > 0 ? slot.fillAnchorOpen : 0;
+  const stopBps = anchorOpen > 0 ? ((anchorOpen - slot.stop) / anchorOpen) * 10_000 : 0;
   if (!(stopBps > 0) || !(touch > 0)) return 0;
   const decision = paperDecision({
     classId: slot.classId,
@@ -1911,9 +1911,11 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
         book.staleQuoteMisses += 1;
         book.incidents.push(`${STALE_QUOTE_FILL_SRC} ${position.id}`);
       }
+      const modelFrom = kind === "stop" ? Math.min(open, position.stop) : open;
+      const gap = kind === "stop" && open <= position.stop;
       closePosition(book, position, {
         tsMs: decisionMs,
-        fill: modelledPx(open, bid, ask, "sell"),
+        fill: modelledPx(modelFrom, bid, ask, "sell"),
         kind,
         triggerBarTs: triggerMs,
         decisionMid: bid > 0 && ask > 0 ? (bid + ask) / 2 : open,
@@ -1922,6 +1924,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
         fillSrc: miss ? STALE_QUOTE_FILL_SRC : "modelled",
         bid,
         ask,
+        ...(gap ? { gap: true } : {}),
       });
     };
     for (const position of [...book.positions]) {
