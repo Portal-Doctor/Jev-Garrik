@@ -1210,7 +1210,7 @@ export function redisKvFromUrl(url: string): Kv {
   };
   const asString = (reply: RedisReply): string | null => (typeof reply === "string" ? reply : null);
   const readKey = async (key: string): Promise<KvRead> => classifyStored(key, asString(await send(["GET", key])));
-  return {
+  const kv: Kv = {
     async read(key) {
       return readKey(key);
     },
@@ -1299,6 +1299,7 @@ export function redisKvFromUrl(url: string): Kv {
       });
     },
   };
+  return kv;
 }
 
 export { GAP_MAX_MS };
