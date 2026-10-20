@@ -99,7 +99,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       }
     },
     async resetCold() {
-      if (!coldResetEnabled(process.env) || host.stopped) return;
+      if (host.entriesHeld || !coldResetEnabled(process.env) || host.stopped) return;
       const lease = decodeLease(await kv.get(LEASE_KEY));
       const priorMarks = new Map(host.seedMarks);
       const priorCold = new Set(host.cold);
@@ -132,6 +132,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       console.log(`p6 cold reset ${ids.length}${ids.length > 0 ? `: ${ids.join(" ")}` : ""}`);
     },
     async applyDueBars() {
+      if (host.entriesHeld) return [];
       const applied: string[] = [];
       for (const bar of bars) {
         const before = host.fifteen.length;

@@ -3,10 +3,10 @@
  * A save checks the lease token in the same Redis script as the write.
  */
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { BarOHLC } from "../p3/signals";
 import { paperPnl } from "./engine";
-import { equityExtras, hourStartSec } from "./pnl-block";
+import { equityExtras, EQ_FIRST_KEY, hourStartSec } from "./pnl-block";
 import { positionSnapBuild } from "./positions-view";
 import { boundJevDone, JEV_PACKET_TTL_MS, queuedForHandover, skipShareReport } from "./jev-call";
 import { packMinute, type JevMinuteTuple } from "./jev-minute";
@@ -23,8 +23,8 @@ import {
   type PaperStateBody,
   retainDailyCloses,
 } from "./paper-host";
-import { decodeStored, takeGzipMismatches } from "./redis-gzip";
-import { barMarker, HOT_KEY, LEASE_KEY, VALUE_MAX_BYTES, type Kv } from "./relay";
+import { decodeStored, takeGzipMismatches, type KvRead } from "./redis-gzip";
+import { barMarker, HOT_KEY, LEASE_KEY, peekStored, VALUE_MAX_BYTES, type Kv } from "./relay";
 
 /** One record per flush. The dashboard reads this and does not recompute P/L. */
 export const LAST_RUN_KEY = "p6:lastRun";
@@ -542,6 +542,7 @@ function queueFlush(host: PaperHost, fn: () => Promise<void>): Promise<void> {
 
 /** Fills and the ledger are written before the next event, not on the 60s flush. */
 export async function writeThroughBook(kv: Kv, host: PaperHost): Promise<void> {
+  if (host.entriesHeld) return;
   while (host.fillStored < host.book.legs.length) {
     const leg = host.book.legs[host.fillStored]!;
     const result = await appendOwned(kv, host, FILLS_KEY, leg, "id", leg.id, 0);
@@ -920,7 +921,7 @@ async function applyUnowned(kv: Kv, host: PaperHost, plan: FlushPlan): Promise<v
     await kv.set(mark.key, mark.value);
   }
   for (const row of body.extra ?? []) {
-    if (row.nx && (await kv.get(row.key))) continue;
+    if (row.nx && (peekStored(kv, row.key) ?? (await kv.get(row.key)))) continue;
     const wrote = await kv.set(row.key, row.value, row.px != null && row.px > 0 ? { px: row.px } : undefined);
     if (!wrote) throw new Error(`kv set ${row.key} failed`);
   }
@@ -1364,6 +1365,8 @@ async function publishUnsequencedHot(kv: Kv, host: PaperHost): Promise<void> {
 
 async function persistSplitBody(kv: Kv, host: PaperHost): Promise<void> {
   if (host.stopped) throw new Error("lease lost");
+  if (host.entriesHeld && !host.hotRewrite) await tryResumeEntries(kv, host, process.env.P6_RESUME_ENTRIES);
+  if (host.entriesHeld && !host.hotRewrite) return;
   if (host.kv && host.leaseToken) await host.durableChain;
   await writeWarmupOnce(kv, host);
   let plan = buildFlush(host);
@@ -1685,19 +1688,184 @@ function assembleSplit(host: PaperHost, byKey: Map<string, string | null>, rings
   };
 }
 
+/** Side copy of an unreadable hot. Not part of the load plan. */
+export const CORRUPT_HOT_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+export const INCIDENTS_KEY = "p6:incidents";
+const HOT_RETRY_GAP_MS = 1000;
+
+export function corruptHotKey(incidentId: string): string {
+  return `p6:hot:corrupt:${incidentId}`;
+}
+
+export function hotResumeToken(hold: { incidentId: string; raw: string; bytes: number }): string {
+  return `${hold.incidentId}:${hold.bytes}:${createHash("sha256").update(hold.raw).digest("hex")}`;
+}
+
+/**
+ * The only way to clear an entries hold. Restore and tie-out are not built.
+ * The caller installs a validated hot, then calls this.
+ */
+export function markHotRestored(host: PaperHost): void {
+  host.hotRestored = true;
+}
+
+export function liftHold(host: PaperHost): boolean {
+  if (!host.entriesHeld || !host.hotRestored) return false;
+  host.entriesHeld = false;
+  host.hotHold = null;
+  host.hotRewrite = false;
+  host.hotReread = false;
+  return true;
+}
+
+/**
+ * Manual P6_RESUME_ENTRIES. The token is incidentId:byteLength:sha256 of the
+ * unreadable bytes. A match copies those bytes aside and allows one new-era
+ * overwrite. Entries stay paused. A mismatch writes nothing.
+ */
+export async function tryResumeEntries(kv: Kv, host: PaperHost, token: string | undefined): Promise<"absent" | "refused" | "authorized"> {
+  if (!host.hotHold) return "absent";
+  const parts = token?.split(":") ?? [];
+  const sha = createHash("sha256").update(host.hotHold.raw).digest("hex");
+  if (parts.length !== 3 || parts[0] !== host.hotHold.incidentId || parts[1] !== String(host.hotHold.bytes) || parts[2] !== sha) return "refused";
+  await kv.set(corruptHotKey(host.hotHold.incidentId), host.hotHold.raw, { px: CORRUPT_HOT_TTL_MS });
+  host.hotRewrite = true;
+  host.redisFreshEra = true;
+  host.redisSeq = null;
+  host.redisKeySeq = null;
+  host.redisBase = null;
+  host.redisEra = null;
+  host.redisSeenEra = null;
+  host.redisPoison = false;
+  return "authorized";
+}
+
+function noteTagged(host: PaperHost, row: KvRead): void {
+  if (row.tag === "value") {
+    noteReadBytes(host, row.value);
+    host.wireReadBytes += row.wireBytes;
+  } else if (row.tag === "unreadable") host.wireReadBytes += row.bytes;
+}
+
+async function appendIncident(kv: Kv, detail: Record<string, unknown>): Promise<void> {
+  const raw = await kv.get(INCIDENTS_KEY);
+  let list: unknown[] = [];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {
+      list = [];
+    }
+  }
+  list.push(detail);
+  await kv.set(INCIDENTS_KEY, JSON.stringify(list));
+}
+
+async function declareHotUnreadable(kv: Kv, host: PaperHost, row: Extract<KvRead, { tag: "unreadable" }>, attempts: number): Promise<void> {
+  const incidentId = randomBytes(8).toString("hex");
+  host.entriesHeld = true;
+  host.hotReread = false;
+  host.hotHold = { incidentId, raw: row.raw, bytes: row.bytes, header: row.header, attempts };
+  const detail = { kind: "hot unreadable", incidentId, key: HOT_KEY, bytes: row.bytes, header: row.header, attempts };
+  console.log("hot unreadable", detail);
+  if (!host.book.incidents.includes("hot unreadable")) host.book.incidents.push("hot unreadable");
+  await appendIncident(kv, detail);
+}
+
+async function readHotForLoad(kv: Kv, host: PaperHost, first: KvRead): Promise<KvRead> {
+  if (first.tag !== "unreadable") return first;
+  if (!host.leaseToken) {
+    host.hotReread = true;
+    host.entriesHeld = true;
+    return first;
+  }
+  let row = first;
+  let attempts = 1;
+  const sleep = host.holdSleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  while (attempts < 3) {
+    await sleep(HOT_RETRY_GAP_MS);
+    attempts += 1;
+    const again = await kv.read(HOT_KEY);
+    noteTagged(host, again);
+    if (again.tag !== "unreadable") return again;
+    row = again;
+  }
+  await declareHotUnreadable(kv, host, row, attempts);
+  return row;
+}
+
+function textOf(row: KvRead | undefined): string | null {
+  return row?.tag === "value" ? row.value : null;
+}
+
 /** Rebuild the host from one MGET of hot and the last 10 tape minutes, plus the bar strings in that same read. */
 export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody | null> {
   const plan = splitPlan(host);
-  const values = await kv.mget(plan.keys);
-  for (const value of values) noteReadBytes(host, value);
-  const byKey = new Map(plan.keys.map((key, index) => [key, values[index] ?? null]));
+  const tagged = await kv.readMany(plan.keys);
+  for (const row of tagged) noteTagged(host, row);
+  const hotIndex = plan.keys.indexOf(HOT_KEY);
+  const hot = await readHotForLoad(kv, host, tagged[hotIndex] ?? { tag: "missing" });
+  if (hot.tag === "unreadable") {
+    host.redisSeq = null;
+    host.redisKeySeq = null;
+    host.redisBase = null;
+    host.redisSeenEra = null;
+    host.redisHotRaw = null;
+    host.redisPoison = false;
+    host.redisRaw = null;
+    host.redisRings = null;
+    return null;
+  }
+  const last = tagged[plan.keys.indexOf(LAST_RUN_KEY)];
+  if (last?.tag === "unreadable") {
+    host.lastRunUnreadable = true;
+    const detail = { kind: "lastRun unreadable", key: LAST_RUN_KEY, bytes: last.bytes, header: last.header };
+    console.log("lastRun unreadable", detail);
+    if (!host.book.incidents.includes("lastRun unreadable")) host.book.incidents.push("lastRun unreadable");
+    await appendIncident(kv, detail);
+  } else host.lastRunUnreadable = false;
+  const acct = tagged[plan.keys.indexOf(ACCT_KEY)];
+  if (acct?.tag === "unreadable") {
+    host.acctUnreadable = true;
+    const detail = { kind: "K2", key: ACCT_KEY, bytes: acct.bytes, header: acct.header };
+    console.log("K2 acct unreadable", detail);
+    if (!host.book.incidents.includes("K2 acct unreadable")) host.book.incidents.push("K2 acct unreadable");
+    await appendIncident(kv, detail);
+  } else host.acctUnreadable = false;
+  const eq = await kv.read(EQ_FIRST_KEY);
+  noteTagged(host, eq);
+  if (eq.tag === "unreadable") {
+    host.eqFirstUnreadable = true;
+    const detail = { kind: "K2", key: EQ_FIRST_KEY, bytes: eq.bytes, header: eq.header };
+    console.log("K2 eq:first unreadable", detail);
+    if (!host.book.incidents.includes("K2 eq:first unreadable")) host.book.incidents.push("K2 eq:first unreadable");
+    await appendIncident(kv, detail);
+  } else host.eqFirstUnreadable = false;
+  const byKey = new Map(plan.keys.map((key, index) => [key, textOf(tagged[index])]));
+  if (hot.tag === "value") byKey.set(HOT_KEY, hot.value);
   const ringRows = await kv.readLists(plan.ringKeys);
   const rings = new Map<string, string[]>();
   ringRows.forEach((rows, index) => {
-    for (const row of rows) noteReadBytes(host, row);
+    for (const row of rows) {
+      noteReadBytes(host, row);
+      host.wireReadBytes += Buffer.byteLength(row);
+    }
     rings.set(plan.ringKeys[index]!, rows);
   });
   const body = assembleSplit(host, byKey, rings, plan);
+  if (body) {
+    const lines = [
+      ...(host.lastRunUnreadable ? ["lastRun unreadable"] : []),
+      ...(host.acctUnreadable ? ["K2 acct unreadable"] : []),
+      ...(host.eqFirstUnreadable ? ["K2 eq:first unreadable"] : []),
+    ];
+    if (lines.length > 0) {
+      const incidents = [...(body.incidents ?? [])];
+      for (const line of lines) if (!incidents.includes(line)) incidents.push(line);
+      body.incidents = incidents;
+    }
+  }
   if (!body) {
     host.redisSeq = null;
     host.redisKeySeq = null;

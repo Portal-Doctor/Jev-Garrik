@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import {
   bar15Key,
   HOT_MAX_BYTES,
@@ -25,6 +25,10 @@ import { decodeStored, encodeStored, GZIP_PREFIX, gzipFlushPayload, installStore
 
 const previousGzipWrites = process.env.P6_GZIP_WRITES;
 process.env.P6_GZIP_WRITES = "1";
+afterAll(() => {
+  if (previousGzipWrites == null) delete process.env.P6_GZIP_WRITES;
+  else process.env.P6_GZIP_WRITES = previousGzipWrites;
+});
 
 const NOW = Date.parse("2026-10-12T17:01:00Z");
 const TODAY = Math.floor(NOW / 1000 / 86_400) * 86_400;
@@ -160,44 +164,34 @@ async function expectUnreadable(spoil: (stored: string) => string): Promise<void
   await persistSplit(kv, host);
   const good = peekStored(kv, HOT_KEY);
   if (!good?.startsWith(GZIP_PREFIX)) throw new Error("expected gzip");
+  plantStored(kv, HOT_KEY, spoil(good));
+  const spoiled = peekStored(kv, HOT_KEY);
   const reader = startPaperHost(["BTC-USD"], {});
   reader.clock = clock;
-  const loaded = await loadSplit(kv, reader);
-  if (!loaded) throw new Error("warm");
-  installPaperState(reader, loaded);
-  expect(reader.redisSeq).not.toBeNull();
-  plantStored(kv, HOT_KEY, spoil(good));
-  const watch = watchMget(kv);
+  reader.leaseToken = "holder";
+  reader.holdSleep = async () => {};
   let threw = false;
   let body: unknown = "unread";
   try {
-    body = await reloadSplit(kv, reader);
+    body = await loadSplit(kv, reader);
   } catch {
     threw = true;
   }
-  watch.restore();
   expect(threw).toBe(false);
   expect(body).toBeNull();
-  expect(watch.full()).toBeGreaterThan(0);
-  expect(reader.book.realizedUsd).toBe(3);
-  reader.book.realizedUsd = 11;
-  let persistThrew = false;
-  try {
-    await persistSplit(kv, reader);
-  } catch {
-    persistThrew = true;
-  }
-  expect(persistThrew).toBe(false);
-  const again = peekStored(kv, HOT_KEY);
-  expect(again?.startsWith(GZIP_PREFIX)).toBe(true);
-  expect(decodeStored(HOT_KEY, again)).toContain('"realizedUsd":11');
+  expect(reader.entriesHeld).toBe(true);
+  expect(reader.book.realizedUsd).toBe(0);
+  expect(reader.book.incidents.includes("hot unreadable")).toBe(true);
+  expect(peekStored(kv, HOT_KEY)).toBe(spoiled);
+  await persistSplit(kv, reader);
+  expect(peekStored(kv, HOT_KEY)).toBe(spoiled);
 }
 
-test("a corrupt gzip falls back to a full load and does not throw", async () => {
+test("a corrupt gzip holds entries and does not throw", async () => {
   await expectUnreadable(() => `${GZIP_PREFIX}!!!!`);
 });
 
-test("a truncated gzip falls back to a full load and does not throw", async () => {
+test("a truncated gzip holds entries and does not throw", async () => {
   await expectUnreadable((stored) => {
     const buf = Buffer.from(stored.slice(GZIP_PREFIX.length), "base64");
     return GZIP_PREFIX + buf.subarray(0, Math.floor(buf.length / 2)).toString("base64");
