@@ -1,5 +1,4 @@
-import { headers } from "next/headers";
-import { dashboardAccess, monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Page, summaryFreshness } from "../../../../research/src/p6/dashboard-read";
+import { monthCommands, commandBudget, openDashboardKv, projectionTone, readP6Page, summaryFreshness } from "../../../../research/src/p6/dashboard-read";
 import {
   closedNote,
   concentrationText,
@@ -160,36 +159,13 @@ function projectionWord(toneName: "green" | "amber" | "red"): "OK" | "Near limit
   return "OK";
 }
 
-/** Read-only. The view token is not the cron secret. Nothing on this page writes Redis. Open with GET /p6; see dashboardAccess. */
+/** Read-only. A GET renders with no dashboard token and no cookie. Nothing on this page writes Redis. */
 export default async function P6DashboardPage({
   searchParams,
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const headerList = await headers();
   const query = searchParams ? await searchParams : {};
-  const rawToken = query.token;
-  const tokenParam = rawToken == null ? null : Array.isArray(rawToken) ? (rawToken[0] ?? "") : rawToken;
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
-    if (typeof value === "string") params.append(key, value);
-    else if (Array.isArray(value)) for (const item of value) params.append(key, item);
-  }
-  const access = dashboardAccess({
-    authorization: headerList.get("authorization"),
-    cookieHeader: headerList.get("cookie"),
-    tokenParam,
-    searchParams: params,
-    dashboardToken: process.env.DASHBOARD_TOKEN,
-  });
-  if (access.action !== "allow") {
-    return (
-      <main className={styles.page}>
-        <h1 className={styles.title}>P6 paper</h1>
-        <p>Unauthorized.</p>
-      </main>
-    );
-  }
   const url = process.env.REDIS_URL;
   if (!url) {
     return (

@@ -32,13 +32,16 @@ const LEASE_KEY = "p6:lease";
 /**
  * How to open the dashboard.
  *
- * Path: GET /p6. A plain GET is enough. POST is not required and is not a login step.
+ * GET and HEAD of `/p6` and every path under `/p6/` are open. They do not read
+ * DASHBOARD_TOKEN, the `p6_dash` cookie, or `?token=`. The variable stays defined
+ * for writes. A plain GET renders the page.
+ *
+ * POST, PUT, DELETE, and every other method still require the dashboard token.
  * Query: put the dashboard token in the `token` parameter:
  * https://<your-vercel-domain>/p6?token=<DASHBOARD_TOKEN>
- * Do not send the token in the path. A valid `token` answers 302 to the same path with that
- * parameter removed (other query parameters stay), and sets the cookie below.
- * The follow-up GET carries the cookie and renders the page. The token does not stay in the
- * address bar.
+ * Do not send the token in the path. On a write, a valid `token` answers 302 to the
+ * same path with that parameter removed (other query parameters stay), and sets the
+ * cookie below.
  *
  * Cookie name: p6_dash
  * Attributes: HttpOnly; Secure; SameSite=Strict; Path=/p6; Max-Age=2592000 (30 days). No Domain.
@@ -46,7 +49,7 @@ const LEASE_KEY = "p6:lease";
  * The cookie is not the raw token. Rotating DASHBOARD_TOKEN invalidates existing cookies.
  * There is no new environment variable.
  *
- * Precedence when Authorization, the cookie, and `?token=` are all present:
+ * Precedence for a write when Authorization, the cookie, and `?token=` are all present:
  * - `?token=` present and equal to DASHBOARD_TOKEN: redirect and set the cookie.
  *   A disagreeing Bearer or cookie is ignored on that response.
  * - `?token=` present and wrong, empty, or malformed: 401. Bearer and cookie are not consulted.
@@ -172,7 +175,7 @@ export function absoluteDashboardLocation(requestUrl: string, location: string):
   return absolute.toString();
 }
 
-/** Proxy result for /p6. GET is enough. The status does not depend on POST. */
+/** Proxy result for /p6. GET and HEAD are open. Other methods still require the dashboard token. */
 export function applyDashboardProxy(request: Request, dashboardToken: string | undefined): { status: number; body: string | null; headers: Record<string, string> } {
   const url = new URL(request.url);
   const headers: Record<string, string> = {
@@ -181,6 +184,7 @@ export function applyDashboardProxy(request: Request, dashboardToken: string | u
   };
   const path = dashboardPathname(url.pathname);
   if (!path) return { status: 401, body: "unauthorized", headers };
+  if (request.method === "GET" || request.method === "HEAD") return { status: 200, body: null, headers };
   const tokenParam = url.searchParams.has("token") ? (url.searchParams.get("token") ?? "") : null;
   const access = dashboardAccess({
     authorization: request.headers.get("authorization"),

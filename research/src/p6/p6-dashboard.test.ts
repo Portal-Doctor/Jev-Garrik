@@ -4,6 +4,7 @@ import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { absoluteDashboardLocation, applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, dashboardSetCookie, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard } from "./dashboard-read";
 import { cronAuthorized } from "./relay";
+import { handleEngineRequest } from "./vercel-live";
 import { applyForward, paperPnl, replayInjected } from "./engine";
 import { delayBps } from "./legs";
 import { memoryKv } from "./relay";
@@ -15,19 +16,19 @@ test("the cron secret does not authorize the dashboard", () => {
   expect(dashboardAuthorized(null, "view-token")).toBe(false);
 });
 
-test("GET /p6 accepts the bearer, the cookie, or a token query", () => {
+test("a write to /p6 accepts the bearer, the cookie, or a token query", () => {
   const token = "view-token";
   const cookie = `${P6_COOKIE_NAME}=${dashboardCookieValue(token)}`;
   const other = `${P6_COOKIE_NAME}=${dashboardCookieValue("other-token")}`;
-  const header = applyDashboardProxy(new Request("https://example.test/p6", { headers: { authorization: "Bearer view-token" } }), token);
+  const header = applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { authorization: "Bearer view-token" } }), token);
   expect(header.status).toBe(200);
   expect(header.headers["Cache-Control"]).toBe("no-store");
   expect(header.headers["Referrer-Policy"]).toBe("no-referrer");
 
-  const fromCookie = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET", headers: { cookie } }), token);
+  const fromCookie = applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { cookie } }), token);
   expect(fromCookie.status).toBe(200);
 
-  const opened = applyDashboardProxy(new Request("https://example.test/p6?token=view-token&panel=spend", { method: "GET" }), token);
+  const opened = applyDashboardProxy(new Request("https://example.test/p6?token=view-token&panel=spend", { method: "POST" }), token);
   expect(opened.status).toBe(302);
   expect(opened.headers.Location).toBe("/p6?panel=spend");
   expect(opened.body).toBeNull();
@@ -42,26 +43,26 @@ test("GET /p6 accepts the bearer, the cookie, or a token query", () => {
   expect(opened.headers["Cache-Control"]).toBe("no-store");
   expect(opened.headers["Referrer-Policy"]).toBe("no-referrer");
 
-  const wrong = applyDashboardProxy(new Request("https://example.test/p6?token=nope", { method: "GET", headers: { authorization: "Bearer view-token", cookie } }), token);
+  const wrong = applyDashboardProxy(new Request("https://example.test/p6?token=nope", { method: "POST", headers: { authorization: "Bearer view-token", cookie } }), token);
   expect(wrong.status).toBe(401);
   expect(wrong.body).toBe("unauthorized");
-  const empty = applyDashboardProxy(new Request("https://example.test/p6?token=", { method: "GET", headers: { cookie } }), token);
+  const empty = applyDashboardProxy(new Request("https://example.test/p6?token=", { method: "POST", headers: { cookie } }), token);
   expect(empty.status).toBe(401);
-  const malformed = applyDashboardProxy(new Request("https://example.test/p6", { headers: { cookie: `${P6_COOKIE_NAME}=not-a-cookie` } }), token);
+  const malformed = applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { cookie: `${P6_COOKIE_NAME}=not-a-cookie` } }), token);
   expect(malformed.status).toBe(401);
   const tampered = dashboardCookieValue(token).slice(0, -1) + (dashboardCookieValue(token).endsWith("a") ? "b" : "a");
-  expect(applyDashboardProxy(new Request("https://example.test/p6", { headers: { cookie: `${P6_COOKIE_NAME}=${tampered}` } }), token).status).toBe(401);
-  expect(applyDashboardProxy(new Request("https://example.test/p6", { headers: { cookie: other } }), token).status).toBe(401);
+  expect(applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { cookie: `${P6_COOKIE_NAME}=${tampered}` } }), token).status).toBe(401);
+  expect(applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { cookie: other } }), token).status).toBe(401);
 
-  const allValid = applyDashboardProxy(new Request("https://example.test/p6?token=view-token", { method: "GET", headers: { authorization: "Bearer view-token", cookie } }), token);
+  const allValid = applyDashboardProxy(new Request("https://example.test/p6?token=view-token", { method: "POST", headers: { authorization: "Bearer view-token", cookie } }), token);
   expect(allValid.status).toBe(302);
   expect(allValid.headers.Location).toBe("/p6");
-  const bearerWins = applyDashboardProxy(new Request("https://example.test/p6", { headers: { authorization: "Bearer view-token", cookie: other } }), token);
+  const bearerWins = applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { authorization: "Bearer view-token", cookie: other } }), token);
   expect(bearerWins.status).toBe(200);
-  const cookieWins = applyDashboardProxy(new Request("https://example.test/p6", { headers: { authorization: "Bearer nope", cookie } }), token);
+  const cookieWins = applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { authorization: "Bearer nope", cookie } }), token);
   expect(cookieWins.status).toBe(200);
-  expect(applyDashboardProxy(new Request("https://example.test/p6", { headers: { authorization: "Bearer nope", cookie: other } }), token).status).toBe(401);
-  expect(applyDashboardProxy(new Request("https://example.test/p6"), undefined).status).toBe(401);
+  expect(applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { authorization: "Bearer nope", cookie: other } }), token).status).toBe(401);
+  expect(applyDashboardProxy(new Request("https://example.test/p6", { method: "POST" }), undefined).status).toBe(401);
 
   expect(cronAuthorized("Bearer view-token", "cron-secret")).toBe(false);
   expect(cronAuthorized(`Bearer ${token}`, "cron-secret")).toBe(false);
@@ -77,10 +78,10 @@ test("GET /p6 accepts the bearer, the cookie, or a token query", () => {
 
 const nextUrlPath = join(import.meta.dir, "..", "..", "..", "web/node_modules/next/dist/server/web/next-url.js");
 
-test("GET /p6?token= Location is absolute, drops the token, and keeps the cookie", () => {
+test("a write with ?token= Location is absolute, drops the token, and keeps the cookie", () => {
   const token = "view-token";
   const requestUrl = "https://dash.example/p6?token=view-token&panel=spend";
-  const opened = applyDashboardProxy(new Request(requestUrl, { method: "GET" }), token);
+  const opened = applyDashboardProxy(new Request(requestUrl, { method: "POST" }), token);
   expect(opened.status).toBe(302);
   const location = absoluteDashboardLocation(requestUrl, opened.headers.Location ?? "");
   expect(location).toBe("https://dash.example/p6?panel=spend");
@@ -116,7 +117,7 @@ test.skipIf(!existsSync(nextUrlPath))("NextURL accepts the absolute /p6 Location
   const previous = process.env.DASHBOARD_TOKEN;
   process.env.DASHBOARD_TOKEN = "view-token";
   try {
-    const request = new Request("https://dash.example/p6?token=view-token&panel=spend", { method: "GET" });
+    const request = new Request("https://dash.example/p6?token=view-token&panel=spend", { method: "POST" });
     const response = proxy(request);
     expect(response.status).toBe(302);
     const location = response.headers.get("location");
@@ -186,22 +187,66 @@ test("the proxy matcher covers /p6 and every subpath", () => {
   const cookie = `${P6_COOKIE_NAME}=${dashboardCookieValue(token)}`;
   const routes = ["/p6", "/p6/positions", "/p6/trades", "/p6/gates", "/p6/jev", "/p6/health"];
   for (const route of routes) {
-    expect(applyDashboardProxy(new Request(`https://example.test${route}`), token).status, route).toBe(401);
-    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { headers: { authorization: "Bearer view-token" } }), token).status, route).toBe(200);
-    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { headers: { cookie } }), token).status, route).toBe(200);
-    const opened = applyDashboardProxy(new Request(`https://example.test${route}?token=view-token&w=8h`), token);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { method: "GET" }), token).status, route).toBe(200);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { method: "POST" }), token).status, route).toBe(401);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { method: "POST", headers: { authorization: "Bearer view-token" } }), token).status, route).toBe(200);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { method: "POST", headers: { cookie } }), token).status, route).toBe(200);
+    const opened = applyDashboardProxy(new Request(`https://example.test${route}?token=view-token&w=8h`, { method: "POST" }), token);
     expect(opened.status, route).toBe(302);
     expect(opened.headers.Location, route).toBe(`${route}?w=8h`);
     expect(opened.headers.Location?.includes("token="), route).toBe(false);
     expect(opened.headers["Set-Cookie"]?.includes("Path=/p6"), route).toBe(true);
     expect(opened.headers["Set-Cookie"]?.includes("Path=/p6/"), route).toBe(false);
-    expect(applyDashboardProxy(new Request(`https://example.test${route}?token=nope&w=24h`), token).status, route).toBe(401);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}?token=nope&w=24h`, { method: "POST" }), token).status, route).toBe(401);
+  }
+});
+
+test("a GET of /p6 needs no cookie or token", () => {
+  const open = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET" }), "view-token");
+  expect(open.status).toBe(200);
+  expect(open.body).toBeNull();
+  expect(open.headers.Location).toBeUndefined();
+  expect(open.headers["Set-Cookie"]).toBeUndefined();
+  const missing = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET" }), undefined);
+  expect(missing.status).toBe(200);
+  const ignored = applyDashboardProxy(new Request("https://example.test/p6?token=nope", { method: "GET" }), "view-token");
+  expect(ignored.status).toBe(200);
+  expect(ignored.headers["Set-Cookie"]).toBeUndefined();
+});
+
+test("a GET of a /p6 subpath needs no cookie or token", () => {
+  const route = "/p6/positions";
+  const open = applyDashboardProxy(new Request(`https://example.test${route}`, { method: "GET" }), undefined);
+  expect(open.status).toBe(200);
+  expect(open.body).toBeNull();
+  expect(open.headers.Location).toBeUndefined();
+  expect(open.headers["Set-Cookie"]).toBeUndefined();
+  const nested = applyDashboardProxy(new Request("https://example.test/p6/positions/open", { method: "GET" }), undefined);
+  expect(nested.status).toBe(200);
+});
+
+test("POST, PUT, and DELETE on /p6 still refuse a missing cookie", () => {
+  for (const method of ["POST", "PUT", "DELETE"]) {
+    for (const route of ["/p6", "/p6/positions"]) {
+      const response = applyDashboardProxy(new Request(`https://example.test${route}`, { method }), "view-token");
+      expect(response.status, `${method} ${route}`).toBe(401);
+      expect(response.body, `${method} ${route}`).toBe("unauthorized");
+      expect(response.headers["Set-Cookie"], `${method} ${route}`).toBeUndefined();
+    }
+  }
+});
+
+test("the cron route still refuses a request with no authorization", async () => {
+  for (const method of ["GET", "POST"]) {
+    const response = await handleEngineRequest(new Request("https://example.test/api/engine", { method }), { CRON_SECRET: "cron-secret" });
+    expect(response.status, method).toBe(401);
+    expect(await response.text(), method).toBe("unauthorized");
   }
 });
 
 test("a token redirect keeps the path under /p6 and rejects look-alikes", () => {
   const token = "view-token";
-  const kept = applyDashboardProxy(new Request("https://example.test/p6/positions?w=8h&token=view-token&x=1"), token);
+  const kept = applyDashboardProxy(new Request("https://example.test/p6/positions?w=8h&token=view-token&x=1", { method: "POST" }), token);
   expect(kept.status).toBe(302);
   expect(kept.headers.Location).toBe("/p6/positions?w=8h&x=1");
   expect(kept.headers["Set-Cookie"]?.includes("Path=/p6")).toBe(true);
@@ -251,9 +296,11 @@ test("the page does not import the cron secret, auth, or a Redis write", () => {
     }
   }
   const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
-  expect(page.includes("DASHBOARD_TOKEN")).toBe(true);
-  expect(page.includes("dashboardAccess")).toBe(true);
+  expect(page.includes("DASHBOARD_TOKEN")).toBe(false);
+  expect(page.includes("dashboardAccess")).toBe(false);
+  expect(page.includes("Unauthorized.")).toBe(false);
   const proxy = readFileSync(join(root, "web/src/proxy.ts"), "utf8");
+  expect(proxy.includes("process.env.DASHBOARD_TOKEN")).toBe(true);
   expect(proxy.includes("applyDashboardProxy")).toBe(true);
   expect(page.includes("readP6Page")).toBe(true);
   expect(page.includes("last?.completed")).toBe(true);
