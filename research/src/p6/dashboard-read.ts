@@ -21,7 +21,7 @@ import {
   type PnlBlock,
 } from "./pnl-block";
 import { closedNow, fetchRestBids, type MarkNow, type MarkPosition, type MarkQuote } from "./mark-now";
-import { classStress, execCostWord, modelledShare, quoteMissStats, type ClassStress, type ExecWord, type StressGrade, type StressTrade } from "./x1-fill";
+import { classMeanNetR, classStress, execCostWord, modelledShare, quoteMissStats, type ClassStress, type ExecWord, type StressGrade, type StressTrade } from "./x1-fill";
 
 export { type PnlBlock };
 
@@ -597,6 +597,7 @@ function publicFills(rows: DashboardView["fills"]): DashboardView["fills"] {
       stressGrade: (grade as StressGrade | undefined) ?? "insufficient",
       stressNetR: publicNumber(row.stressNetR) ?? null,
       cappedNetR: publicNumber(row.cappedNetR) ?? null,
+      meanNetR: publicNumber(row.meanNetR) ?? null,
       spreadFragile: row.spreadFragile === true,
     };
   });
@@ -677,8 +678,9 @@ function stressLine(row: NonNullable<DashboardView["fills"]>[number]): string {
   if (row.stressGrade === "insufficient" || (row.stressN ?? 0) < 10) return `${id} insufficient n ${row.stressN ?? 0}`.trim();
   const fragile = row.spreadFragile === true ? "spread-fragile" : row.stressGrade ?? "";
   const net = row.stressNetR == null ? "" : `${row.stressNetR.toFixed(2)}R`;
-  const capped = row.cappedNetR == null ? "" : `2x capped, report-only ${row.cappedNetR.toFixed(2)}R`;
-  return [id, fragile, net, capped].filter((part) => part && part.length > 0).join(" ");
+  const capped = row.cappedNetR == null ? "" : `capped, report-only ${row.cappedNetR.toFixed(2)}R`;
+  const mean = row.meanNetR == null ? "" : `mean ${row.meanNetR.toFixed(4)}R`;
+  return [id, fragile, net, capped, mean].filter((part) => part && part.length > 0).join(" ");
 }
 
 export interface DashboardLease {
@@ -743,6 +745,8 @@ export interface DashboardView {
     stressGrade?: StressGrade;
     stressNetR?: number | null;
     cappedNetR?: number | null;
+    /** Per-trade mean of eligible net R. Null below n = 10. */
+    meanNetR?: number | null;
     spreadFragile?: boolean;
   }[];
   /** Parity runs are non-X1 and are excluded from the X1 promotion stats above. */
@@ -807,6 +811,10 @@ export async function readP6Dashboard(kv: Pick<Kv, "mget">): Promise<DashboardVi
       classId,
     );
     const stress: ClassStress = classStress(mine, classId);
+    const mean = classMeanNetR(
+      stressRows.map((row) => ({ classId: row.classId, netR: row.netR ?? 0, fillSrc: row.fillSrc, anchorMissing: row.anchorMissing })),
+      classId,
+    );
     const misses = quoteMissStats(
       mine.flatMap((row) => [
         { classId: row.classId, fillSrc: row.fillSrc },
@@ -828,6 +836,7 @@ export async function readP6Dashboard(kv: Pick<Kv, "mget">): Promise<DashboardVi
       stressGrade: stress.grade,
       stressNetR: stress.netR2xUncapped,
       cappedNetR: stress.netR2xCapped,
+      meanNetR: mean.meanNetR,
       spreadFragile: stress.spreadFragile,
     };
   });
@@ -876,11 +885,17 @@ function stressTrades(closed: DashboardView["closed"]): StressTrade[] {
     return {
       classId: typeof source.classId === "string" ? source.classId : "",
       netUsd: num("netUsd") ?? 0,
+      netR: num("netR") ?? 0,
       riskUsd: num("riskUsd") ?? 0,
       notionalUsd: num("notionalUsd") ?? 0,
       ...(num("exitNotionalUsd") != null ? { exitNotionalUsd: num("exitNotionalUsd")! } : {}),
+      sBtRawBps: num("sBtUncappedBps"),
       sBtUncappedBps: num("sBtUncappedBps"),
       sBtMagnitudeBps: num("sBtMagnitudeBps"),
+      legs: [
+        { liquidity: source.classId === "D" ? "maker" as const : "taker" as const },
+        { liquidity: "taker" as const },
+      ],
       sBtCapped: source.sBtCapped === true,
       fillSrc: typeof source.fillSrc === "string" ? source.fillSrc : null,
       exitFillSrc: typeof source.exitFillSrc === "string" ? source.exitFillSrc : null,

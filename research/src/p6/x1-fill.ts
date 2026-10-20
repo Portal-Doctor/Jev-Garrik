@@ -161,15 +161,27 @@ export function quoteMissStats(rows: readonly { classId?: string; fillSrc?: stri
   return { missCount, missRate: mine.length === 0 ? 0 : missCount / mine.length };
 }
 
+export type LegLiquidity = "maker" | "taker";
+
+/** One round-trip leg. A maker leg adds 0 to the 2× stress. */
+export interface StressLeg {
+  liquidity: LegLiquidity;
+}
+
 export interface StressTrade {
   classId: string;
   netUsd: number;
+  netR?: number;
   riskUsd: number;
   notionalUsd: number;
   exitNotionalUsd?: number;
+  /** Raw spread charge. Each taker leg adds it once. Falls back to sBtUncappedBps. */
+  sBtRawBps?: number | null;
   sBtUncappedBps?: number | null;
   sBtMagnitudeBps?: number | null;
   sBtCapped?: boolean;
+  /** Entry then exit. Omitted means two taker legs. */
+  legs?: readonly StressLeg[];
   fillSrc?: string | null;
   exitFillSrc?: string | null;
   anchorMissing?: boolean;
@@ -183,7 +195,7 @@ export interface ClassStress {
   grade: StressGrade;
   /** Null below n = 10. The label shows n only in that band. */
   netR2xUncapped: number | null;
-  /** Report-only. Null below n = 10. 2 × the capped charge, so at most 30 bps per leg. */
+  /** Report-only. Null below n = 10. Each taker leg adds sBtMagnitudeBps once. */
   netR2xCapped: number | null;
   capHitCount: number;
   spreadFragile: boolean;
@@ -195,14 +207,45 @@ export function stressGrade(n: number): StressGrade {
   return "decision-grade";
 }
 
-/** Round-trip dollars if each leg pays `perLegBps` on its notional, subtracted from the live net. */
-export function stressedNetR(rows: readonly StressTrade[], perLegBps: (row: StressTrade) => number): number | null {
+/** Modelled, stale-quote, missing-anchor, and pre-fix rows stay out of the class mean, the review, and Kelly. */
+export function countsInClassMean(row: { fillSrc?: string | null; anchorMissing?: boolean }): boolean {
+  if (row.anchorMissing === true) return false;
+  return row.fillSrc !== "modelled" && row.fillSrc !== STALE_QUOTE_FILL_SRC && row.fillSrc !== PRE_FIX_FILL_SRC;
+}
+
+/**
+ * Per-trade mean of net R inside one class. Eligible rows only. Null below n = 10.
+ */
+export function classMeanNetR(rows: readonly { classId: string; netR: number; fillSrc?: string | null; anchorMissing?: boolean }[], classId: string): { n: number; meanNetR: number | null } {
+  const mine = rows.filter((row) => row.classId === classId && countsInClassMean(row) && Number.isFinite(row.netR));
+  if (mine.length < 10) return { n: mine.length, meanNetR: null };
+  return { n: mine.length, meanNetR: mine.reduce((sum, row) => sum + row.netR, 0) / mine.length };
+}
+
+function spreadBpsOf(row: StressTrade, which: "raw" | "capped"): number {
+  const stored = which === "raw" ? (row.sBtRawBps != null ? row.sBtRawBps : row.sBtUncappedBps) : row.sBtMagnitudeBps;
+  return stored != null && stored > 0 ? stored : S_BT_FLOOR_BPS;
+}
+
+/** Sum of the spread charge over taker legs. Each maker leg adds 0. */
+export function takerSpreadBps(row: StressTrade, which: "raw" | "capped"): number {
+  const legs = row.legs ?? [{ liquidity: "taker" as const }, { liquidity: "taker" as const }];
+  const bps = spreadBpsOf(row, which);
+  let sum = 0;
+  for (const leg of legs) if (leg.liquidity === "taker") sum += bps;
+  return sum;
+}
+
+/**
+ * netR − (sum of taker-leg bps) × notional / riskUsd.
+ * The bps are divided by 1e4. Maker legs add 0.
+ */
+export function stress2xNetR(rows: readonly StressTrade[], which: "raw" | "capped"): number | null {
   let usd = 0;
   let risk = 0;
   for (const row of rows) {
-    const bps = perLegBps(row);
-    const exitNotional = row.exitNotionalUsd != null && row.exitNotionalUsd > 0 ? row.exitNotionalUsd : row.notionalUsd;
-    const drag = ((row.notionalUsd + exitNotional) * bps) / 10_000;
+    if (!(row.riskUsd > 0)) continue;
+    const drag = (takerSpreadBps(row, which) / 10_000) * row.notionalUsd;
     usd += row.netUsd - drag;
     risk += row.riskUsd;
   }
@@ -211,17 +254,17 @@ export function stressedNetR(rows: readonly StressTrade[], perLegBps: (row: Stre
 }
 
 /**
- * 2 × sBtUncappedBps on class net R. Shown at n ≥ 10.
- * Spread-fragile is a label. It does not add a gate.
+ * Taker-leg spread stress on class net R. Shown at n ≥ 10.
+ * The capped line uses sBtMagnitudeBps the same way. Spread-fragile is a label, not a gate.
  */
 export function classStress(rows: readonly StressTrade[], classId: string): ClassStress {
   const mine = rows.filter((row) => row.classId === classId && row.parity !== true && row.fillSrc !== PRE_FIX_FILL_SRC && row.fillSrc !== ENTRY_STALE_FILL_SRC && row.anchorMissing !== true && row.riskUsd > 0 && row.notionalUsd > 0);
   const n = mine.length;
-  const capHitCount = mine.filter((row) => row.sBtCapped === true || (row.sBtUncappedBps != null && row.sBtUncappedBps > S_BT_CAP_BPS)).length;
+  const capHitCount = mine.filter((row) => row.sBtCapped === true || (row.sBtUncappedBps != null && row.sBtUncappedBps > S_BT_CAP_BPS) || (row.sBtRawBps != null && row.sBtRawBps > S_BT_CAP_BPS)).length;
   const grade = stressGrade(n);
   if (n < 10) return { n, grade, netR2xUncapped: null, netR2xCapped: null, capHitCount, spreadFragile: false };
-  const netR2xUncapped = stressedNetR(mine, (row) => 2 * (row.sBtUncappedBps != null && row.sBtUncappedBps > 0 ? row.sBtUncappedBps : S_BT_FLOOR_BPS));
-  const netR2xCapped = stressedNetR(mine, (row) => 2 * (row.sBtMagnitudeBps != null && row.sBtMagnitudeBps > 0 ? Math.min(S_BT_CAP_BPS, row.sBtMagnitudeBps) : S_BT_FLOOR_BPS));
+  const netR2xUncapped = stress2xNetR(mine, "raw");
+  const netR2xCapped = stress2xNetR(mine, "capped");
   return {
     n,
     grade,

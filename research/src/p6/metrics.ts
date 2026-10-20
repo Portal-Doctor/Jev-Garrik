@@ -256,6 +256,8 @@ export interface ReviewTrade {
   notionalUsd: number;
   entryDate: string;
   breadth: BreadthLabel;
+  fillSrc?: string | null;
+  anchorMissing?: boolean;
 }
 
 export function classPanel(opts: {

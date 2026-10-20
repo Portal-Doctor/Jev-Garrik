@@ -17,8 +17,11 @@ import { BID_BASIS, FALLBACK_BASIS, HOT_REV, MAE15_BASIS, MFE15_BASIS, minuteBuc
 import { HOT_MAX_BYTES, hotBytes, hotSnapshot } from "./hot-store";
 import { clearRestCache, closedNow, MARK_LABEL, positionPnlNow, quoteAgeState, REST_LABEL } from "./mark-now";
 import { installPaperState, startPaperHost, type PaperStateBody } from "./paper-host";
+import { forwardBound } from "./kelly";
+import { forwardReview } from "./review";
 import { memoryKv } from "./relay";
 import {
+  classMeanNetR,
   classStress,
   ENTRY_STALE_FILL_SRC,
   entryQuoteFillSrc,
@@ -106,6 +109,34 @@ test("running bid extremes follow the minute bucket and ignore trade candles", (
   });
   expect(position.mfe15).toBe(130);
   expect(position.mae15).toBe(95);
+  const worse = startSec + 900;
+  applyForward(book, {
+    kind: "bar15",
+    productId: "ETH-USD",
+    startSec: worse,
+    nowSec: worse + 900,
+    open: 100,
+    high: 110,
+    low: 96,
+    close: 100,
+    countJev: false,
+  });
+  expect(position.mfe15).toBe(130);
+  expect(position.mae15).toBe(95);
+  const better = worse + 900;
+  applyForward(book, {
+    kind: "bar15",
+    productId: "ETH-USD",
+    startSec: better,
+    nowSec: better + 900,
+    open: 100,
+    high: 140,
+    low: 90,
+    close: 100,
+    countJev: false,
+  });
+  expect(position.mfe15).toBe(140);
+  expect(position.mae15).toBe(90);
   expect(position.mfe15Basis).toBe(MFE15_BASIS);
   expect(position.mae15Basis).toBe(MAE15_BASIS);
   expect(position.highestClose).toBeNull();
@@ -386,6 +417,31 @@ test("a non-fresh stop is modelled from the lower of the open and the stop", () 
   const through = closeAt("through", { tsMs: decisionMs - 20_000, bid: 99, ask: 101 }, 95);
   expect(through.closed[0]?.gap).toBe(true);
   expect(through.legs.find((leg) => leg.side === "exit")?.fillPrice).toBeLessThanOrEqual(95);
+  const gapped = closeAt("gapped", { tsMs: decisionMs - 2_500, bid: 99, ask: 101 }, 90);
+  const gappedExit = gapped.legs.find((leg) => leg.side === "exit")!;
+  expect(gapped.closed[0]?.gap).toBe(true);
+  expect(gappedExit.fillSrc).toBe("modelled");
+  expect(gapped.staleQuoteMisses).toBe(0);
+  expect(gappedExit.fillPrice).toBeCloseTo(modelledPx(90, 99, 101, "sell"), 8);
+  expect(gappedExit.fillPrice).toBeLessThanOrEqual(90);
+  const timed = live(["ETH-USD"]);
+  applyForward(timed, x1({ id: "time", productId: "ETH-USD", bid: 100, ask: 100, nextOpen: 100, stop: 95 }));
+  const timeStart = Math.floor(OPEN / 1000) + 72 * 3_600;
+  applyForward(timed, {
+    kind: "bar15",
+    productId: "ETH-USD",
+    startSec: timeStart,
+    nowSec: timeStart + 900,
+    open: 100,
+    high: 101,
+    low: 96,
+    close: 100,
+    countJev: false,
+  });
+  const timeExit = timed.legs.find((leg) => leg.side === "exit")!;
+  expect(timed.closed[0]?.exitKind).toBe("time");
+  expect(timeExit.fillPrice).toBeCloseTo(modelledPx(100, 100, 100, "sell"), 8);
+  expect(timeExit.fillPrice).toBeGreaterThan(95);
   const atClose = live(["ETH-USD"]);
   applyForward(atClose, x1({ id: "at-close", productId: "ETH-USD", bid: 100, ask: 100, nextOpen: 100, stop: 95 }));
   applyForward(atClose, { kind: "mid", productId: "ETH-USD", tsMs: (startSec + 900) * 1000, bid: 99, ask: 101 });
@@ -569,6 +625,25 @@ test("a pre-fix B fill keeps the book P/L when live quotes are off, and the shad
   expect(inSlippageStats(shadowed.fillSrc)).toBe(false);
   expect(liveBook.legs.find((leg) => leg.side === "entry")?.fillPrice).toBe(held.fillPrice);
   expect(liveBook.legs.find((leg) => leg.side === "entry")?.fillSrc).toBe(PRE_FIX_FILL_SRC);
+  const spannedLive = freshBook({ members: ["ENA-USD"] });
+  applyForward(spannedLive, x1({ id: "span-live", productId: "ENA-USD", classId: "B", tsMs: cutoff - 60_000, bid: 100, ask: 101, nextOpen: 100, dailyAtr: 0 }));
+  expect(spannedLive.positions[0]?.entryTs).toBeLessThan(cutoff);
+  spannedLive.config.liveQuotes = true;
+  const spanLiveBar = Math.ceil((cutoff / 1000 + 1) / 900) * 900;
+  applyForward(spannedLive, {
+    kind: "bar15",
+    productId: "ENA-USD",
+    startSec: spanLiveBar,
+    nowSec: spanLiveBar + 900,
+    open: 80,
+    high: 86,
+    low: 70,
+    close: 84,
+    countJev: false,
+  });
+  expect(spannedLive.closed[0]?.exitTs).toBeGreaterThan(cutoff);
+  expect(spannedLive.closed[0]?.fillSrc).toBe(PRE_FIX_FILL_SRC);
+  expect(spannedLive.closed[0]?.shadowFillPx).toBeCloseTo(modelledPx(100, 100, 101, "buy"), 8);
 });
 
 test("with live quotes off, netUsd and netR match the dev book, including seven March class-B ENA and NEAR trades", () => {
@@ -965,9 +1040,15 @@ test("a missing fill anchor leaves drift null and is not promotion evidence", ()
   expect(inSlippageStats(leg.fillSrc, leg.anchorMissing)).toBe(false);
   const position = book.positions[0]!;
   expect(position.anchorMissing).toBe(true);
-  expect(position.rawEntry).toBe(position.fillPrice);
-  expect(position.rawEntry).not.toBe(100);
-  expect(position.notionalUsd).toBeGreaterThan(500);
+  const model = modelledPx(100, 100, 101, "buy");
+  expect(position.rawEntry).toBeCloseTo(model, 8);
+  expect(position.rawEntry).not.toBe(position.fillPrice);
+  expect(position.rawEntry).not.toBe(100.5);
+  const stopBps = ((model - 90) / model) * 10_000;
+  const sLive = 0.5 * (1 / 100.5) * 10_000;
+  const cost = 2 * (90 + sLive);
+  expect(position.notionalUsd).toBeCloseTo(Math.min(1500, (20 * 10_000) / (stopBps + cost)), 6);
+  expect(position.notionalUsd).toBeLessThan(400);
 });
 
 test("mark age boundaries, net R, and the walked bid", () => {
@@ -1011,13 +1092,13 @@ test("2x uncapped stress is a class label, and parity runs are non-X1", () => {
   const band = classStress(Array.from({ length: 10 }, (_, index) => row(index, 40)), "B");
   expect(band.grade).toBe("indicative");
   expect(band.capHitCount).toBe(10);
-  expect(band.netR2xUncapped).toBeCloseTo(0.34, 8);
-  expect(band.netR2xCapped).not.toBeNull();
+  expect(band.netR2xUncapped).toBeCloseTo(0.42, 8);
+  expect(band.netR2xCapped).toBeCloseTo(0.47, 8);
   expect(band.netR2xUncapped!).toBeLessThan(band.netR2xCapped!);
   expect(band.spreadFragile).toBe(false);
   const floored = classStress(Array.from({ length: 10 }, (_, index) => row(index, 0)), "B");
-  expect(floored.netR2xUncapped).toBeCloseTo(0.48, 8);
-  const flat = classStress(Array.from({ length: 10 }, (_, index) => ({ ...row(index, 40), netUsd: 3.2 })), "B");
+  expect(floored.netR2xUncapped).toBeCloseTo(0.49, 8);
+  const flat = classStress(Array.from({ length: 10 }, (_, index) => ({ ...row(index, 40), netUsd: 1.6 })), "B");
   expect(flat.netR2xUncapped).toBeCloseTo(0, 8);
   expect(flat.spreadFragile).toBe(true);
   const grade = classStress(Array.from({ length: 30 }, (_, index) => row(index, 5)), "B");
@@ -1034,4 +1115,89 @@ test("2x uncapped stress is a class label, and parity runs are non-X1", () => {
   expect((JSON.parse(hotSnapshot(quotesOff)) as { runLabel: string }).runLabel).toBe("non-X1");
   const quotesOn = startPaperHost(["ETH-USD"], {});
   expect((JSON.parse(hotSnapshot(quotesOn)) as { runLabel: string }).runLabel).toBe("X1");
+});
+
+test("2x stress charges each taker leg once, and the class mean ignores ineligible rows", () => {
+  const copies = (row: { netUsd: number; notionalUsd: number; sBtRawBps: number; sBtMagnitudeBps: number; legs: { liquidity: "maker" | "taker" }[] }) =>
+    Array.from({ length: 10 }, () => ({ classId: "B", riskUsd: 20, fillSrc: "l2", ...row }));
+  const taker = classStress(copies({ netUsd: 10, notionalUsd: 1_000, sBtRawBps: 10, sBtMagnitudeBps: 5, legs: [{ liquidity: "taker" }, { liquidity: "taker" }] }), "B");
+  expect(taker.netR2xUncapped).toBeCloseTo(0.4, 8);
+  const maker = classStress(copies({ netUsd: 5, notionalUsd: 500, sBtRawBps: 10, sBtMagnitudeBps: 5, legs: [{ liquidity: "maker" }, { liquidity: "taker" }] }), "B");
+  expect(maker.netR2xUncapped).toBeCloseTo(0.225, 8);
+  const capped = classStress(copies({ netUsd: 10, notionalUsd: 1_500, sBtRawBps: 10, sBtMagnitudeBps: 5, legs: [{ liquidity: "taker" }, { liquidity: "taker" }] }), "B");
+  expect(capped.netR2xCapped).toBeCloseTo(0.425, 8);
+  const eight = Array.from({ length: 8 }, (_, index) => ({ classId: "A", netR: 0.5 }));
+  const two = [{ classId: "A", netR: -2 / 3 }, { classId: "A", netR: -2 / 3 }];
+  const noise = [
+    { classId: "A", netR: 9, fillSrc: "modelled" },
+    { classId: "A", netR: 9, fillSrc: "stale_quote_modelled" },
+    { classId: "A", netR: 9, anchorMissing: true },
+    { classId: "A", netR: 9, fillSrc: "pre-fix fill model" },
+    { classId: "B", netR: -0.35 },
+  ];
+  const meanA = classMeanNetR([...eight, ...two, ...noise], "A");
+  expect(meanA.n).toBe(10);
+  expect(meanA.meanNetR).toBeCloseTo(0.2667, 4);
+  const meanB = classMeanNetR(Array.from({ length: 10 }, () => ({ classId: "B", netR: -0.35, fillSrc: "l2" })), "B");
+  expect(meanB.n).toBe(10);
+  expect(meanB.meanNetR).toBeCloseTo(-0.35, 4);
+  expect(classMeanNetR(eight, "A").meanNetR).toBeNull();
+  const points = [
+    ...Array.from({ length: 10 }, () => ({ netR: 1, entryDate: "2026-03-02" })),
+    { netR: -50, entryDate: "2026-03-02", fillSrc: "modelled" as const },
+    { netR: -50, entryDate: "2026-03-02", fillSrc: "stale_quote_modelled" as const },
+    { netR: -50, entryDate: "2026-03-02", anchorMissing: true },
+    { netR: -50, entryDate: "2026-03-02", fillSrc: "pre-fix fill model" as const },
+  ];
+  expect(forwardBound(points, 1).mean).toBe(1);
+  const trade = (netR: number, fillSrc?: string, anchorMissing?: boolean) => ({
+    classId: "A" as const,
+    productId: "ETH-USD",
+    netR,
+    netUsd: netR * 20,
+    grossUsd: netR * 20,
+    costUsd: 0,
+    riskUsd: 20,
+    notionalUsd: 100,
+    entryDate: "2026-03-02",
+    breadth: "on" as const,
+    ...(fillSrc ? { fillSrc } : {}),
+    ...(anchorMissing ? { anchorMissing: true } : {}),
+  });
+  const review = forwardReview({
+    classId: "A",
+    trades: [...Array.from({ length: 10 }, () => trade(0.5)), trade(9, "modelled"), trade(9, undefined, true)],
+    weeks: ["2026-03-02"],
+  });
+  expect(review.n).toBe(10);
+  expect(review.meanNetR).toBeCloseTo(0.5, 8);
+});
+
+test("a missing anchor sizes from the model price, and a thin book walks that size", () => {
+  const book = live(["ETH-USD"]);
+  const bid = 99.95;
+  const ask = 100.05;
+  const model = modelledPx(100, bid, ask, "buy");
+  const stop = model * 0.95;
+  applyForward(book, x1({
+    id: "sized",
+    productId: "ETH-USD",
+    bid,
+    ask,
+    nextOpen: 100,
+    stop,
+    fillAnchorOpen: 0,
+    asks: [[ask, 0.01], [130, 100]],
+  }));
+  const position = book.positions[0]!;
+  expect(position.anchorMissing).toBe(true);
+  expect(position.rawEntry).toBeCloseTo(model, 8);
+  expect(position.notionalUsd).toBeCloseTo((20 * 10_000) / 690, 6);
+  expect(position.notionalUsd).toBeLessThan(300);
+  expect(position.fillPrice).toBeGreaterThan(120);
+  const skipped = live(["ETH-USD"]);
+  applyForward(skipped, x1({ id: "above", productId: "ETH-USD", bid: 100, ask: 101, nextOpen: 100, stop: 110, fillAnchorOpen: 0 }));
+  expect(skipped.positions).toHaveLength(0);
+  expect(skipped.rejected.some((row) => row.reason === "anchor_missing")).toBe(true);
+  expect(skipped.incidents.some((row) => row.includes("anchor_missing"))).toBe(true);
 });

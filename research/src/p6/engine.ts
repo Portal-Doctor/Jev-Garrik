@@ -824,11 +824,12 @@ function nextAcctDay(nowMs: number): string {
 
 function reviewKelly(book: Book, tsMs: number): void {
   if (!reviewDue(book, tsMs)) return;
-  const streams = CLASSES.map((id) => ({ id, netR: book.closed.filter((trade) => trade.classId === id).map((trade) => trade.netR) }));
+  const counted = book.closed.filter((trade) => trade.anchorMissing !== true && trade.fillSrc !== "modelled" && trade.fillSrc !== STALE_QUOTE_FILL_SRC && trade.fillSrc !== PRE_FIX_FILL_SRC);
+  const streams = CLASSES.map((id) => ({ id, netR: counted.filter((trade) => trade.classId === id).map((trade) => trade.netR) }));
   for (const classId of CLASSES) {
-    const forward = book.closed
+    const forward = counted
       .filter((trade) => trade.classId === classId)
-      .map((trade) => ({ netR: trade.netR, entryDate: trade.entryDate }));
+      .map((trade) => ({ netR: trade.netR, entryDate: trade.entryDate, fillSrc: trade.fillSrc, anchorMissing: trade.anchorMissing }));
     const seed = BOOTSTRAP_SEEDS[`${classId}:bootstrap`];
     const size = forwardClassRisk({
       classId,
@@ -1042,6 +1043,8 @@ function tryEnter(book: Book, opts: {
   fillSrc?: FillSrc;
   midAtFill?: number;
   fillAnchorOpen?: number;
+  /** X1:6 model price. Used when the registered anchor is missing. Never the fill and never the mid. */
+  modelPx?: number;
   signed?: boolean;
 }): boolean {
   const gated = gateEntry(book, opts);
@@ -1117,7 +1120,7 @@ function tryEnter(book: Book, opts: {
     priorDailyCloses: opts.priorDailyCloses ?? [],
     pendingExit: null,
     pendingExitTs: null,
-    rawEntry: opts.rawEntry ?? opts.fillPrice,
+    rawEntry: opts.rawEntry != null && opts.rawEntry > 0 ? opts.rawEntry : opts.modelPx != null && opts.modelPx > 0 ? opts.modelPx : 0,
     initialStop: opts.stop,
     highestClose: null,
     clusterId: clusterOf(book, opts.productId, opts.tsMs),
@@ -1256,7 +1259,7 @@ function closePosition(
       entryFill: position.fillPrice,
       units: position.units,
       riskUsd: position.riskUsd,
-      anchor: anchor ?? position.rawEntry,
+      anchor: anchor != null && anchor > 0 ? anchor : position.rawEntry,
       bid,
       ask,
     });
@@ -1466,15 +1469,23 @@ export function resolvePendingFills(book: Book, productId: string, quote: FillQu
       }
       if (fillSrc === STALE_QUOTE_FILL_SRC) book.staleQuoteMisses += 1;
       const touch = quote.ask;
-      const anchorOpen = slot.fillAnchorOpen > 0 ? slot.fillAnchorOpen : 0;
-      const rough = paperUnits(book, slot, sLive, touch);
+      const hasAnchor = slot.fillAnchorOpen > 0;
+      const modelPx = modelledPx(slot.modelOpen, quote.bid, quote.ask, "buy");
+      const distanceRef = hasAnchor ? slot.fillAnchorOpen : modelPx;
+      const stopBps = distanceRef > slot.stop && distanceRef > 0 ? ((distanceRef - slot.stop) / distanceRef) * 10_000 : 0;
+      if (!(stopBps > 0)) {
+        book.rejected.push({ id: slot.id, reason: hasAnchor ? "stop" : "anchor_missing" });
+        if (!hasAnchor) book.incidents.push(`anchor_missing ${slot.id}`);
+        continue;
+      }
+      const rough = paperUnits(book, slot, sLive, touch, quote.bid, quote.ask);
       const fill = action === "l2" ? vwapFill("buy", touch, quote.asks, rough) : modelledPx(slot.modelOpen, quote.bid, quote.ask, "buy");
       tryEnter(book, {
         id: slot.id,
         classId: slot.classId,
         productId: slot.productId,
         tsMs: slot.tsMs,
-        stopBps: anchorOpen > 0 ? ((anchorOpen - slot.stop) / anchorOpen) * 10_000 : 0,
+        stopBps,
         sLive,
         bid: quote.bid,
         ask: quote.ask,
@@ -1490,7 +1501,7 @@ export function resolvePendingFills(book: Book, productId: string, quote: FillQu
         dailyAtr: slot.dailyAtr,
         priorDailyCloses: slot.priorDailyCloses,
         tick: slot.tick,
-        ...(anchorOpen > 0 ? { rawEntry: anchorOpen } : {}),
+        ...(hasAnchor ? { rawEntry: slot.fillAnchorOpen } : { modelPx }),
         aConfig: slot.aConfig,
         quoteFallback: quote.src === "rest_snapshot",
         decisionTs: slot.decisionTs,
@@ -1525,9 +1536,9 @@ export function resolvePendingFills(book: Book, productId: string, quote: FillQu
   book.pendingFills = keep;
 }
 
-function paperUnits(book: Book, slot: PendingFill, sLive: number, touch: number): number {
-  const anchorOpen = slot.fillAnchorOpen > 0 ? slot.fillAnchorOpen : 0;
-  const stopBps = anchorOpen > 0 ? ((anchorOpen - slot.stop) / anchorOpen) * 10_000 : 0;
+function paperUnits(book: Book, slot: PendingFill, sLive: number, touch: number, bid: number, ask: number): number {
+  const distanceRef = slot.fillAnchorOpen > 0 ? slot.fillAnchorOpen : modelledPx(slot.modelOpen, bid, ask, "buy");
+  const stopBps = distanceRef > slot.stop && distanceRef > 0 ? ((distanceRef - slot.stop) / distanceRef) * 10_000 : 0;
   if (!(stopBps > 0) || !(touch > 0)) return 0;
   const decision = paperDecision({
     classId: slot.classId,
@@ -1731,9 +1742,19 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
     }
     let stop = event.stop;
     if (event.classId === "B" && (event.dailyAtr ?? 0) > 0) stop = Math.max(stop, classBDisasterStop(event.nextOpen, event.dailyAtr ?? 0));
-    const stopBps = ((event.nextOpen - stop) / event.nextOpen) * 10_000;
+    const hasAnchor = event.fillAnchorOpen != null && event.fillAnchorOpen > 0;
+    const liveMissing = !hasAnchor && x1TakerOn(book.config);
+    const distanceRef = hasAnchor
+      ? event.fillAnchorOpen!
+      : liveMissing
+        ? modelledPx(event.nextOpen, event.bid, event.ask, "buy")
+        : event.nextOpen;
+    const stopBps = distanceRef > stop && distanceRef > 0 ? ((distanceRef - stop) / distanceRef) * 10_000 : 0;
     if (!(stopBps > 0)) {
-      book.rejected.push({ id: event.id, reason: "stop" });
+      if (liveMissing) {
+        book.rejected.push({ id: event.id, reason: "anchor_missing" });
+        book.incidents.push(`anchor_missing ${event.id}`);
+      } else book.rejected.push({ id: event.id, reason: "stop" });
       return book;
     }
     const arrivalMid = (event.bid + event.ask) / 2;
