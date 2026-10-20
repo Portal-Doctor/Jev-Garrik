@@ -207,10 +207,10 @@ export function stressGrade(n: number): StressGrade {
   return "decision-grade";
 }
 
-/** Modelled, stale-quote, missing-anchor, and pre-fix rows stay out of the class mean, the review, and Kelly. */
+/** Modelled, stale-quote, entry-stale, missing-anchor, and pre-fix rows stay out of the class mean, the review, and Kelly. */
 export function countsInClassMean(row: { fillSrc?: string | null; anchorMissing?: boolean }): boolean {
   if (row.anchorMissing === true) return false;
-  return row.fillSrc !== "modelled" && row.fillSrc !== STALE_QUOTE_FILL_SRC && row.fillSrc !== PRE_FIX_FILL_SRC;
+  return row.fillSrc !== "modelled" && row.fillSrc !== STALE_QUOTE_FILL_SRC && row.fillSrc !== ENTRY_STALE_FILL_SRC && row.fillSrc !== PRE_FIX_FILL_SRC;
 }
 
 /**
@@ -237,20 +237,19 @@ export function takerSpreadBps(row: StressTrade, which: "raw" | "capped"): numbe
 }
 
 /**
- * netR − (sum of taker-leg bps) × notional / riskUsd.
- * The bps are divided by 1e4. Maker legs add 0.
+ * Per-trade mean of stressed net R.
+ * Each trade is netR − (sum of taker-leg bps) × notional / riskUsd.
+ * The bps are divided by 1e4. Maker legs add 0. Trades are not weighted by risk.
  */
 export function stress2xNetR(rows: readonly StressTrade[], which: "raw" | "capped"): number | null {
-  let usd = 0;
-  let risk = 0;
+  const values: number[] = [];
   for (const row of rows) {
     if (!(row.riskUsd > 0)) continue;
     const drag = (takerSpreadBps(row, which) / 10_000) * row.notionalUsd;
-    usd += row.netUsd - drag;
-    risk += row.riskUsd;
+    values.push((row.netUsd - drag) / row.riskUsd);
   }
-  if (!(risk > 0)) return null;
-  return usd / risk;
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 /**
@@ -258,7 +257,7 @@ export function stress2xNetR(rows: readonly StressTrade[], which: "raw" | "cappe
  * The capped line uses sBtMagnitudeBps the same way. Spread-fragile is a label, not a gate.
  */
 export function classStress(rows: readonly StressTrade[], classId: string): ClassStress {
-  const mine = rows.filter((row) => row.classId === classId && row.parity !== true && row.fillSrc !== PRE_FIX_FILL_SRC && row.fillSrc !== ENTRY_STALE_FILL_SRC && row.anchorMissing !== true && row.riskUsd > 0 && row.notionalUsd > 0);
+  const mine = rows.filter((row) => row.classId === classId && row.parity !== true && countsInClassMean(row) && row.riskUsd > 0 && row.notionalUsd > 0);
   const n = mine.length;
   const capHitCount = mine.filter((row) => row.sBtCapped === true || (row.sBtUncappedBps != null && row.sBtUncappedBps > S_BT_CAP_BPS) || (row.sBtRawBps != null && row.sBtRawBps > S_BT_CAP_BPS)).length;
   const grade = stressGrade(n);

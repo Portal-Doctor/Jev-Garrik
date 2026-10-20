@@ -9,6 +9,7 @@ import {
   markedPnl,
   replayInjected,
   type Book,
+  type ClosedTrade,
   type ForwardEvent,
 } from "./engine";
 import { BID_BASIS, FALLBACK_BASIS, HOT_REV, MAE15_BASIS, MFE15_BASIS, minuteBucket, noteBar15Extreme, noteBidExtreme } from "./extremes";
@@ -21,6 +22,7 @@ import { memoryKv } from "./relay";
 import {
   classMeanNetR,
   classStress,
+  stress2xNetR,
   ENTRY_STALE_FILL_SRC,
   entryQuoteFillSrc,
   execCostBps,
@@ -1124,11 +1126,39 @@ test("2x stress charges each taker leg once, and the class mean ignores ineligib
   expect(maker.netR2xUncapped).toBeCloseTo(0.225, 8);
   const capped = classStress(copies({ netUsd: 10, notionalUsd: 1_500, sBtRawBps: 10, sBtMagnitudeBps: 5, legs: [{ liquidity: "taker" }, { liquidity: "taker" }] }), "B");
   expect(capped.netR2xCapped).toBeCloseTo(0.425, 8);
-  const eight = Array.from({ length: 8 }, (_, index) => ({ classId: "A", netR: 0.5 }));
+  const takerRow = { classId: "B", netUsd: 10, riskUsd: 20, notionalUsd: 1_000, sBtRawBps: 10, fillSrc: "l2", legs: [{ liquidity: "taker" as const }, { liquidity: "taker" as const }] };
+  const makerRow = { classId: "B", netUsd: 9.5, riskUsd: 40, notionalUsd: 500, sBtRawBps: 10, fillSrc: "l2", legs: [{ liquidity: "maker" as const }, { liquidity: "taker" as const }] };
+  const mixed = stress2xNetR([takerRow, makerRow], "raw");
+  expect(mixed).toBeCloseTo(0.3125, 8);
+  expect(mixed).not.toBeCloseTo(0.2833, 4);
+  const mixedClass = classStress([...Array.from({ length: 5 }, () => takerRow), ...Array.from({ length: 5 }, () => makerRow)], "B");
+  expect(mixedClass.n).toBe(10);
+  expect(mixedClass.netR2xUncapped).toBeCloseTo(0.3125, 8);
+  const eligibleA = [
+    ...Array.from({ length: 8 }, () => ({ classId: "A", netUsd: 10, riskUsd: 20, notionalUsd: 1_000, sBtRawBps: 10, fillSrc: "l2", legs: [{ liquidity: "maker" as const }, { liquidity: "maker" as const }] })),
+    ...Array.from({ length: 2 }, () => ({ classId: "A", netUsd: (-2 / 3) * 20, riskUsd: 20, notionalUsd: 1_000, sBtRawBps: 10, fillSrc: "l2", legs: [{ liquidity: "maker" as const }, { liquidity: "maker" as const }] })),
+  ];
+  const stressA = classStress(
+    [
+      ...eligibleA,
+      { classId: "A", netUsd: 180, riskUsd: 20, notionalUsd: 1_000, sBtRawBps: 10, fillSrc: "modelled", legs: [{ liquidity: "maker" as const }, { liquidity: "maker" as const }] },
+      { classId: "A", netUsd: 180, riskUsd: 20, notionalUsd: 1_000, sBtRawBps: 10, fillSrc: "stale_quote_modelled", legs: [{ liquidity: "maker" as const }, { liquidity: "maker" as const }] },
+    ],
+    "A",
+  );
+  expect(stressA.n).toBe(10);
+  expect(stressA.netR2xUncapped).toBeCloseTo(0.2667, 4);
+  const eight = Array.from({ length: 8 }, () => ({ classId: "A", netR: 0.5 }));
+  const nine = Array.from({ length: 9 }, () => ({ classId: "A", netR: 0.5 }));
+  const ten = Array.from({ length: 10 }, () => ({ classId: "A", netR: 0.5 }));
+  expect(classMeanNetR(nine, "A")).toEqual({ n: 9, meanNetR: null });
+  expect(classMeanNetR(ten, "A").n).toBe(10);
+  expect(classMeanNetR(ten, "A").meanNetR).toBeCloseTo(0.5, 8);
   const two = [{ classId: "A", netR: -2 / 3 }, { classId: "A", netR: -2 / 3 }];
   const noise = [
     { classId: "A", netR: 9, fillSrc: "modelled" },
     { classId: "A", netR: 9, fillSrc: "stale_quote_modelled" },
+    { classId: "A", netR: 9, fillSrc: "entry_stale_quote" },
     { classId: "A", netR: 9, anchorMissing: true },
     { classId: "A", netR: 9, fillSrc: "pre-fix fill model" },
     { classId: "B", netR: -0.35 },
@@ -1144,6 +1174,7 @@ test("2x stress charges each taker leg once, and the class mean ignores ineligib
     ...Array.from({ length: 10 }, () => ({ netR: 1, entryDate: "2026-03-02" })),
     { netR: -50, entryDate: "2026-03-02", fillSrc: "modelled" as const },
     { netR: -50, entryDate: "2026-03-02", fillSrc: "stale_quote_modelled" as const },
+    { netR: -50, entryDate: "2026-03-02", fillSrc: "entry_stale_quote" as const },
     { netR: -50, entryDate: "2026-03-02", anchorMissing: true },
     { netR: -50, entryDate: "2026-03-02", fillSrc: "pre-fix fill model" as const },
   ];
@@ -1164,7 +1195,7 @@ test("2x stress charges each taker leg once, and the class mean ignores ineligib
   });
   const review = forwardReview({
     classId: "A",
-    trades: [...Array.from({ length: 10 }, () => trade(0.5)), trade(9, "modelled"), trade(9, undefined, true)],
+    trades: [...Array.from({ length: 10 }, () => trade(0.5)), trade(9, "modelled"), trade(9, "entry_stale_quote"), trade(9, undefined, true)],
     weeks: ["2026-03-02"],
   });
   expect(review.n).toBe(10);
@@ -1198,4 +1229,72 @@ test("a missing anchor sizes from the model price, and a thin book walks that si
   expect(skipped.positions).toHaveLength(0);
   expect(skipped.rejected.some((row) => row.reason === "anchor_missing")).toBe(true);
   expect(skipped.incidents.some((row) => row.includes("anchor_missing"))).toBe(true);
+});
+
+test("a missing anchor walks the model-price size, not the bar-open size", () => {
+  const book = live(["ETH-USD"]);
+  const bid = 99.95;
+  const ask = 100.05;
+  applyForward(book, x1({
+    id: "walk-model",
+    productId: "ETH-USD",
+    bid,
+    ask,
+    nextOpen: 100,
+    stop: modelledPx(100, bid, ask, "buy") * 0.95,
+    fillAnchorOpen: 0,
+    asks: [[ask, 2.92], [130, 100]],
+  }));
+  const position = book.positions[0]!;
+  expect(position.fillPrice).toBeCloseTo(ask, 4);
+  expect(position.notionalUsd).toBeCloseTo((20 * 10_000) / 690, 6);
+});
+
+test("a missing anchor gates on the model price when the bar open is through the stop", () => {
+  const book = live(["ETH-USD"]);
+  const model = modelledPx(100, 100, 101, "buy");
+  applyForward(book, x1({
+    id: "between",
+    productId: "ETH-USD",
+    bid: 100,
+    ask: 101,
+    nextOpen: 100,
+    stop: 100.3,
+    fillAnchorOpen: 0,
+  }));
+  expect(book.positions).toHaveLength(1);
+  expect(book.rejected).toHaveLength(0);
+  expect(book.positions[0]?.rawEntry).toBeCloseTo(model, 8);
+  expect(book.positions[0]?.rawEntry).toBeGreaterThan(100.3);
+});
+
+test("the Monday Kelly review drops ineligible rows from the class sample and the Holm streams", () => {
+  const monday = Date.parse("2026-03-02T00:00:00.000Z");
+  const book = freshBook({ members: ["ETH-USD"] });
+  book.acctFromDay = "2025-12-02";
+  const closed = (id: string, netR: number, fillSrc?: FillSrc, anchorMissing?: boolean): ClosedTrade => ({
+    id,
+    classId: "A",
+    productId: "ETH-USD",
+    netR,
+    netUsd: netR * 20,
+    grossUsd: netR * 20,
+    costUsd: 0,
+    riskUsd: 20,
+    notionalUsd: 100,
+    entryDate: "2025-12-02",
+    exitTs: monday,
+    exitKind: "time",
+    ...(fillSrc ? { fillSrc } : {}),
+    ...(anchorMissing ? { anchorMissing: true } : {}),
+  });
+  for (let index = 0; index < 30; index += 1) book.closed.push(closed(`good-${index}`, index % 2 === 0 ? 0.8 : 1.2));
+  book.closed.push(closed("modelled", -50, "modelled"));
+  book.closed.push(closed("stale", -50, "stale_quote_modelled"));
+  book.closed.push(closed("entry-stale", -50, "entry_stale_quote"));
+  book.closed.push(closed("pre-fix", -50, "pre-fix fill model"));
+  book.closed.push(closed("anchor", -50, undefined, true));
+  applyForward(book, { kind: "clock", tsMs: monday });
+  expect(book.kelly.A?.promoted).toBe(true);
+  expect(book.kelly.A?.riskUsd).toBeCloseTo(60, 6);
 });

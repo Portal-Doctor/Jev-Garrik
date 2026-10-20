@@ -49,6 +49,7 @@ import {
   isPreFixB,
   liveCostBps,
   l2Fresh,
+  countsInClassMean,
   modelledPx,
   PRE_FIX_FILL_SRC,
   S_BT_CAP_BPS,
@@ -824,7 +825,7 @@ function nextAcctDay(nowMs: number): string {
 
 function reviewKelly(book: Book, tsMs: number): void {
   if (!reviewDue(book, tsMs)) return;
-  const counted = book.closed.filter((trade) => trade.anchorMissing !== true && trade.fillSrc !== "modelled" && trade.fillSrc !== STALE_QUOTE_FILL_SRC && trade.fillSrc !== PRE_FIX_FILL_SRC);
+  const counted = book.closed.filter((trade) => countsInClassMean(trade));
   const streams = CLASSES.map((id) => ({ id, netR: counted.filter((trade) => trade.classId === id).map((trade) => trade.netR) }));
   for (const classId of CLASSES) {
     const forward = counted
