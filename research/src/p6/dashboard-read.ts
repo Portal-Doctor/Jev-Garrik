@@ -143,7 +143,7 @@ export function dashboardAccess(input: {
     const path = dashboardPathname(input.pathname ?? "/p6");
     if (!path) return { action: "deny" };
     const params = new URLSearchParams(input.searchParams ?? undefined);
-    params.delete("token");
+    stripTokenQuery(params);
     const query = params.toString();
     const location = query ? `${path}?${query}` : path;
     if (location.includes("\n") || location.includes("\r")) return { action: "deny" };
@@ -187,7 +187,7 @@ export function applyDashboardProxy(request: Request, dashboardToken: string | u
   };
   const path = dashboardPathname(url.pathname);
   if (!path) return { status: 401, body: "unauthorized", headers };
-  const tokenParam = url.searchParams.has("token") ? (url.searchParams.get("token") ?? "") : null;
+  const tokenParam = tokenQueryValue(url.searchParams);
   const isRead = request.method === "GET" || request.method === "HEAD";
   if (isRead && tokenParam === null) {
     return { status: 200, body: null, headers: { ...headers, "X-Robots-Tag": "noindex" } };
@@ -211,10 +211,24 @@ function stripUrls(line: string): string {
   return line.replace(/https?:\/\/\S+/g, "[url]");
 }
 
-const PRODUCT = "[A-Z0-9]{2,12}(?:-[A-Z0-9]{2,12})+";
-const DECISION = "[A-E]-[A-Z0-9]+(?:-[A-Z0-9]+)*-\\d{9,16}(?::[a-z0-9]+)*";
+/** One Coinbase product id, such as BTC-USD or 1INCH-USDC. Anchored so a suffix cannot bless a host. */
+const PRODUCT = "[A-Z0-9]{2,10}-[A-Z]{2,5}";
+const DECISION = `[A-E]-${PRODUCT}-\\d{9,16}(?::[a-z0-9]+)*`;
 const PRODUCT_RE = new RegExp(`^${PRODUCT}$`);
 const DECISION_RE = new RegExp(`^${DECISION}$`);
+
+function tokenQueryValue(params: URLSearchParams): string | null {
+  for (const [key, value] of params.entries()) {
+    if (key.toLowerCase() === "token") return value;
+  }
+  return null;
+}
+
+function stripTokenQuery(params: URLSearchParams): void {
+  for (const key of [...params.keys()]) {
+    if (key.toLowerCase() === "token") params.delete(key);
+  }
+}
 
 const OUTCOMES = new Set([
   "handover",
@@ -251,6 +265,11 @@ const EXACT_INCIDENTS = new Set([
   "save failed",
   "lease lost",
   "kv set lease lost",
+  "kv set p6:hot failed",
+  "kv set p6:warmup failed",
+  "kv set p6:lease-meta failed",
+  "redis timeout",
+  "redis closed",
   "registration flags unavailable",
   "daily warmup unavailable",
   "seq invalid",
@@ -293,7 +312,7 @@ const INCIDENT_PATTERNS: RegExp[] = [
   new RegExp(`^gap fill ${DECISION}$`),
   new RegExp(`^generator ${PRODUCT} failed$`),
   new RegExp(`^rest ${PRODUCT} \\d{1,16} failed$`),
-  /^saved A pick [A-Za-z0-9-]{1,40} ignored$/,
+  new RegExp(`^saved A pick ${PRODUCT} ignored$`),
 ];
 
 /** Jev caller failures, including the `jev-call failed` variant. Known `jev <reason>` lines are matched earlier. */
@@ -416,7 +435,8 @@ function publicLastRun(raw: Record<string, unknown> | null): Record<string, unkn
 
 /**
  * Public /p6 view. Drops lease.holder and any lastRun field outside the page allowlist.
- * Incident text, outcome codes, gap causes, and decision ids are allowlisted.
+ * Incident text, outcome codes, gap causes, decision ids, product ids, and class ids are allowlisted.
+ * Closed trades and positions keep only those fields plus finite numbers.
  * Anything else becomes `redacted`, and a Jev-caller error becomes `call_error`.
  */
 export function redactP6View(view: DashboardView): DashboardView {
@@ -430,11 +450,40 @@ export function redactP6View(view: DashboardView): DashboardView {
       ...(typeof gap.cause === "string" ? { cause: publicCause(gap.cause) } : {}),
     })),
     emitted: view.emitted.map(publicEmitted),
+    closed: view.closed.map(publicClosed),
+    positions: view.positions.map(publicPosition),
   };
 }
 
-/** The incident, decision, outcome, and gap-cause strings the /p6 page interpolates. */
-export function formatP6Public(view: DashboardView): { incidents: string; decisions: string; outcome: string; causes: string } {
+function publicClosed(row: DashboardView["closed"][number]): { productId?: string; classId?: string; netUsd?: number } {
+  const productId = typeof row.productId === "string" ? publicScalar(row.productId, "productId") : undefined;
+  const classId = typeof row.classId === "string" ? publicScalar(row.classId, "classId") : undefined;
+  const netUsd = typeof row.netUsd === "number" && Number.isFinite(row.netUsd) ? row.netUsd : undefined;
+  return {
+    ...(productId ? { productId } : {}),
+    ...(classId ? { classId } : {}),
+    ...(netUsd !== undefined ? { netUsd } : {}),
+  };
+}
+
+function publicPosition(row: DashboardView["positions"][number]): { productId?: string; id?: string } {
+  const productId = typeof row.productId === "string" ? publicScalar(row.productId, "productId") : undefined;
+  const id = typeof row.id === "string" ? publicScalar(row.id, "id") : undefined;
+  return {
+    ...(productId ? { productId } : {}),
+    ...(id ? { id } : {}),
+  };
+}
+
+/** The strings the /p6 page interpolates into HTML. */
+export function formatP6Public(view: DashboardView): {
+  incidents: string;
+  decisions: string;
+  outcome: string;
+  causes: string;
+  trades: { label: string; netUsd: number | null }[];
+  positions: string;
+} {
   const safe = redactP6View(view);
   const outcome = safe.lastRun && typeof safe.lastRun.outcome === "string" ? safe.lastRun.outcome : "no run";
   return {
@@ -442,6 +491,11 @@ export function formatP6Public(view: DashboardView): { incidents: string; decisi
     decisions: safe.emitted.slice(-20).join(", ") || "—",
     outcome,
     causes: safe.gaps.map((gap) => (typeof gap.cause === "string" ? gap.cause : "")).filter((cause) => cause.length > 0).join(" · "),
+    trades: safe.closed.slice(-20).map((row) => ({
+      label: `${row.productId ?? ""} · ${row.classId ?? ""}`,
+      netUsd: typeof row.netUsd === "number" ? row.netUsd : null,
+    })),
+    positions: safe.positions.map((row) => [row.productId, row.id].filter((part) => part && part.length > 0).join(" ")).join(" | "),
   };
 }
 

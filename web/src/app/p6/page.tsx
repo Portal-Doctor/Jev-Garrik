@@ -616,12 +616,12 @@ export default async function P6DashboardPage({
         </dl>
       </Fold>
 
-      <Fold id="trades" title="Recent trades and decisions" note={`Last ${Math.min(20, view.closed.length)} closed trades`}>
+      <Fold id="trades" title="Recent trades and decisions" note={`Last ${Math.min(20, shown.trades.length)} closed trades`}>
         <dl className={styles.kvs}>
           <Kv label="Decisions">{shown.decisions}</Kv>
-          {view.closed.slice(-20).map((row, index) => (
-            <Kv key={`${row.productId ?? "trade"}-${index}`} label={`${row.productId ?? ""} · ${row.classId ?? ""}`}>
-              {moneyOrDash(finite(row.netUsd), true)}
+          {shown.trades.map((row, index) => (
+            <Kv key={`closed-${index}`} label={row.label}>
+              {moneyOrDash(row.netUsd, true)}
             </Kv>
           ))}
         </dl>

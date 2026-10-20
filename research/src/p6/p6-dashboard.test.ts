@@ -362,6 +362,101 @@ test("jev counts stay on the public last run", () => {
   expect(formatP6Public(shown).outcome).toBe("handover");
 });
 
+test("a planted host in closed trades and positions is not rendered", () => {
+  const host = "x.upstash.io";
+  const shown = redactP6View(publicView({
+    closed: [
+      { productId: "BTC-USD", classId: "A", netUsd: 12 },
+      { productId: host, classId: host, netUsd: host as never },
+    ],
+    positions: [
+      { productId: "ETH-USD", id: "A-ETH-USD-1710000000000" },
+      { productId: host, id: host },
+    ],
+    lastRun: {
+      outcome: "handover",
+      positions: [{ p: host, c: host, id: host, productId: host }],
+      pnl: { pairs: [{ productId: host, classId: host, side: host }] },
+    },
+  }));
+  const rendered = formatP6Public(shown);
+  expect(rendered.trades.map((row) => row.label)).toEqual(["BTC-USD · A", "redacted · redacted"]);
+  expect(rendered.trades[1]?.netUsd).toBeNull();
+  expect(rendered.positions).toBe("ETH-USD A-ETH-USD-1710000000000 | redacted redacted");
+  expect(shown.closed[0]).toEqual({ productId: "BTC-USD", classId: "A", netUsd: 12 });
+  expect(shown.positions[0]).toEqual({ productId: "ETH-USD", id: "A-ETH-USD-1710000000000" });
+  const output = `${JSON.stringify(rendered)}\n${JSON.stringify(shown)}`;
+  expect(output.includes(host)).toBe(false);
+  expect(output.includes("upstash")).toBe(false);
+});
+
+test("the generic string fallback does not return raw text", () => {
+  const host = "x.upstash.io";
+  const shown = redactP6View(publicView({ lastRun: { outcome: "handover", pnl: { footnote: host } } }));
+  expect((shown.lastRun?.pnl as { footnote?: string }).footnote).toBe("redacted");
+  expect(JSON.stringify(shown).includes(host)).toBe(false);
+});
+
+test("a product id must be the whole value", () => {
+  const dirty = "host.upstash.io BTC-USD";
+  const shown = redactP6View(publicView({
+    closed: [{ productId: dirty, classId: "B", netUsd: 1 }],
+    positions: [{ productId: "BTC-USD" }],
+  }));
+  const rendered = formatP6Public(shown);
+  expect(shown.closed[0]?.productId).toBe("redacted");
+  expect(shown.positions[0]?.productId).toBe("BTC-USD");
+  expect(rendered.trades[0]?.label).toBe("redacted · B");
+  expect(`${rendered.trades[0]?.label}\n${JSON.stringify(shown)}`.includes("upstash")).toBe(false);
+});
+
+test("a reconnect line keeps only real product ids", () => {
+  const shown = redactP6View(publicView({
+    incidents: [
+      "socket reconnect 1 closed: BTC-USD,ETH-USD",
+      "socket reconnect 3 heartbeat: FOX-UPSTASH-IO",
+    ],
+  }));
+  const rendered = formatP6Public(shown);
+  expect(shown.incidents[0]).toBe("socket reconnect 1 closed: BTC-USD,ETH-USD");
+  expect(shown.incidents[1]).toBe("redacted");
+  expect(rendered.incidents.includes("UPSTASH")).toBe(false);
+  expect(rendered.incidents.includes("FOX")).toBe(false);
+});
+
+test("fixed kv and redis incidents stay verbatim", () => {
+  const lines = [
+    "kv set p6:hot failed",
+    "kv set p6:warmup failed",
+    "kv set p6:lease-meta failed",
+    "kv set lease lost",
+    "redis timeout",
+    "redis closed",
+  ];
+  const shown = redactP6View(publicView({ incidents: lines }));
+  expect(shown.incidents).toEqual(lines);
+  expect(formatP6Public(shown).incidents).toBe(lines.join(" · "));
+});
+
+test("rest book and saved A pick only keep a real product id", () => {
+  const shown = redactP6View(publicView({
+    incidents: [
+      "rest book BTC-USD failed",
+      "rest book FOX-UPSTASH-IO failed",
+      "saved A pick BTC-USD ignored",
+      "saved A pick host.upstash.io ignored",
+    ],
+  }));
+  expect(shown.incidents).toEqual([
+    "rest book BTC-USD failed",
+    "redacted",
+    "saved A pick BTC-USD ignored",
+    "redacted",
+  ]);
+  expect(formatP6Public(shown).incidents.includes("UPSTASH")).toBe(false);
+  expect(formatP6Public(shown).incidents.includes("upstash")).toBe(false);
+});
+
 test("a GET with ?token= redirects and the token is not rendered", () => {
   const token = "view-token";
   const opened = applyDashboardProxy(new Request("https://example.test/p6?token=view-token&w=8h", { method: "GET" }), token);
@@ -383,6 +478,28 @@ test("a GET with ?token= redirects and the token is not rendered", () => {
   const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
   expect(page.includes("query.token")).toBe(false);
   expect(page.includes("searchParams.token")).toBe(false);
+  expect(page.includes("shown.trades")).toBe(true);
+  expect(page.includes("view.closed")).toBe(false);
+  expect(page.includes("loaded.view.closed")).toBe(false);
+});
+
+test("a token query is stripped regardless of key case", () => {
+  const token = "view-token";
+  const upper = applyDashboardProxy(new Request("https://example.test/p6?TOKEN=view-token&w=8h", { method: "GET" }), token);
+  expect(upper.status).toBe(302);
+  expect(upper.body).toBeNull();
+  expect(upper.headers.Location).toBe("/p6?w=8h");
+  expect(upper.headers.Location?.toLowerCase().includes("token=")).toBe(false);
+  expect(upper.headers.Location?.includes(token)).toBe(false);
+  const mixed = applyDashboardProxy(new Request("https://example.test/p6/positions?Token=view-token", { method: "HEAD" }), token);
+  expect(mixed.status).toBe(302);
+  expect(mixed.headers.Location).toBe("/p6/positions");
+  expect(mixed.body).toBeNull();
+  const wrongToken = "not-the-dashboard-token";
+  const wrong = applyDashboardProxy(new Request(`https://example.test/p6?TOKEN=${wrongToken}`, { method: "GET" }), token);
+  expect(wrong.status).toBe(401);
+  expect(wrong.body).toBe("unauthorized");
+  expect(wrong.body?.includes(wrongToken)).toBe(false);
 });
 
 test("the /p6 page sends a noindex meta tag and an X-Robots-Tag header", () => {
