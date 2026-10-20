@@ -15,3 +15,7 @@ cb_run.err
 
 # database backups created during maintenance (see docs/DEPLOY.md)
 *.dump
+.env.*
+!.env.example
+*.pem
+.vercel

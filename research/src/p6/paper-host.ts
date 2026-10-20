@@ -270,8 +270,29 @@ export interface PaperHost {
   saveCommands: number;
   /** Payload bytes of those commands. */
   saveBytes: number;
-  /** Payload bytes read back from Redis by the history load and the reload. */
+  /** Payload bytes read back from Redis by the history load and the reload. Counts the JSON after a gz1: value is gunzipped. */
   readBytes: number;
+  /** Stored byte lengths of those reads. Not a second gzip. */
+  wireReadBytes: number;
+  /** Stored lengths of the writes counted in saveBytes. A flush counts the EVAL argument once. */
+  wireSaveBytes: number;
+  /** Entries are paused in memory. Not stored. A bad p6:hot sets this. */
+  entriesHeld: boolean;
+  /** Standby warm saw an unreadable hot and will read it again after the lease. */
+  hotReread: boolean;
+  /** Manual resume matched. The next flush may overwrite p6:hot. Entries stay paused. */
+  hotRewrite: boolean;
+  /** A validated hot was installed by the restore hook. The hold-lift hook requires this. */
+  hotRestored: boolean;
+  /** p6:lastRun was present but not readable. This is not a first run. */
+  lastRunUnreadable: boolean;
+  /** p6:acct was present but not readable. It is not repaired. */
+  acctUnreadable: boolean;
+  /** p6:eq:first was present but not readable. It is not rewritten. */
+  eqFirstUnreadable: boolean;
+  /** Injected pause between unreadable hot retries. Tests pass a resolved promise. */
+  holdSleep: ((ms: number) => Promise<void>) | null;
+  hotHold: { incidentId: string; raw: string; bytes: number; header: "gz1:" | "{" | "other"; attempts: number } | null;
   /** Appends sent for a row that was already stored. The target is 0. */
   duplicateAppends: number;
   /**
@@ -291,7 +312,7 @@ export interface PaperHost {
   redisPoison: boolean;
   /** The next published sequence starts a new era and an empty key map. */
   redisFreshEra: boolean;
-  /** Last hot string this process wrote or loaded. A grouped flush strips this instead of reading Redis. */
+  /** Last hot JSON this process wrote or loaded. Not the gz1: Redis bytes. A grouped flush strips this instead of reading Redis. */
   redisHotRaw: string | null;
   /** Times a poisoned sequence was refused. Printed on the redis log line. Not a gate. */
   seqInvalid: number;
@@ -681,6 +702,17 @@ export function startPaperHost(products: readonly string[], env: Record<string, 
     saveCommands: 0,
     saveBytes: 0,
     readBytes: 0,
+    wireReadBytes: 0,
+    wireSaveBytes: 0,
+    entriesHeld: false,
+    hotReread: false,
+    hotRewrite: false,
+    hotRestored: false,
+    lastRunUnreadable: false,
+    acctUnreadable: false,
+    eqFirstUnreadable: false,
+    holdSleep: null,
+    hotHold: null,
     redisSeq: null,
     redisSeenEra: null,
     redisEra: null,
@@ -1490,6 +1522,7 @@ export function flushEntries(host: PaperHost, nowMs: number, opts?: { keepUntrie
 }
 
 function queueEntries(host: PaperHost, entries: readonly GeneratedEntry[], nowMs: number): void {
+  if (host.entriesHeld) return;
   for (const entry of entries) {
     const id = entryId(entry);
     if (host.emitted.has(id) || host.queued.has(id)) continue;

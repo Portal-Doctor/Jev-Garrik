@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { expect, test } from "bun:test";
 import { TAKER_FEE_BPS } from "../../vendor/87b35d0/config.ts";
 import { x1FillPrice } from "../p3/design-rules";
@@ -153,9 +151,9 @@ test("extremes survive a JSON hot round trip, a restart keeps them, and 24 posit
   expect(tripped.positions[0]?.mfeBid1m).toBe(112);
   expect(tripped.positions[0]?.maeBid1m).toBe(97);
   expect(tripped.positions[0]?.mfeReconstructed).toBeUndefined();
-  const hotSrc = readFileSync(fileURLToPath(new URL("./hot-store.ts", import.meta.url)), "utf8");
-  expect(hotSrc.includes("gz1")).toBe(false);
   const raw = hotSnapshot(host);
+  expect(raw.startsWith("{")).toBe(true);
+  expect(raw.startsWith("gz1:")).toBe(false);
   const body = JSON.parse(raw) as PaperStateBody;
   expect(body.hotRev).toBe(HOT_REV);
   expect(body.positions[0]?.mfeBid1m).toBe(112);

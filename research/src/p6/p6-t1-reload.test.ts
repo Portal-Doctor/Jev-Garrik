@@ -39,6 +39,7 @@ import {
   decodeLease,
   LEASE_KEY,
   memoryKv,
+  peekStored,
   releaseLease,
   runInvocation,
   tryAcquire,
@@ -184,12 +185,14 @@ test("readBytes counts redis payload bytes on the history load", async () => {
   const host = startPaperHost(["BTC-USD"], {});
   host.clock = clock;
   await loadSplit(kv, host);
-  expect(host.readBytes).toBe(Buffer.byteLength(hot) + Buffer.byteLength(four));
+  const logicalRead = Buffer.byteLength(hot) + Buffer.byteLength(four);
+  const wireRead = Buffer.byteLength(peekStored(kv, HOT_KEY) ?? "") + Buffer.byteLength(peekStored(kv, bar4hKey("BTC-USD")) ?? "");
+  expect(host.readBytes).toBe(logicalRead);
   host.saveCommands = 4;
   host.saveBytes = 9;
   host.duplicateAppends = 1;
   expect(redisLogLine(host)).toBe(
-    `redis cmds=4, bytes=9, readBytes=${Buffer.byteLength(hot) + Buffer.byteLength(four)}, duplicates=1, seqInvalid=0, seqOverflow=0`,
+    `redis cmds=4, bytes=9, readBytes=${logicalRead}, wireSaveBytes=0, wireReadBytes=${wireRead}, duplicates=1, seqInvalid=0, seqOverflow=0`,
   );
 });
 
@@ -205,8 +208,8 @@ test("a snapshot with no sequence reloads every bar key", async () => {
   const holder = hostHolder(host, kv, [], "standby");
   await holder.warm();
   const seen: string[] = [];
-  const base = kv.mget.bind(kv);
-  kv.mget = async (keys) => {
+  const base = kv.readMany.bind(kv);
+  kv.readMany = async (keys) => {
     seen.push(...keys);
     return base(keys);
   };
@@ -220,7 +223,7 @@ test("a snapshot with no sequence reloads every bar key", async () => {
   } finally {
     console.log = log;
   }
-  kv.mget = base;
+  kv.readMany = base;
   for (const productId of PRODUCTS) expect(seen).toContain(bar4hKey(productId));
   expect(lines).toContain("redis keySeq missing");
 });
@@ -255,13 +258,13 @@ test("overlap reload keeps the bar the holder saved after warm and does not appl
     editor.fifteen.push({ ...LATE });
   });
   const seen: string[] = [];
-  const base = kv.mget.bind(kv);
-  kv.mget = async (keys) => {
+  const base = kv.readMany.bind(kv);
+  kv.readMany = async (keys) => {
     seen.push(...keys);
     return base(keys);
   };
   await holder.reload();
-  kv.mget = base;
+  kv.readMany = base;
   const applied = await holder.applyDueBars();
   const twin = startPaperHost(PRODUCTS, {});
   twin.clock = clock;
@@ -288,13 +291,13 @@ test("a standby reloads when the holder saved after warm", async () => {
     editor.book.realizedUsd = 19;
   });
   const seen: string[] = [];
-  const base = kv.mget.bind(kv);
-  kv.mget = async (keys) => {
+  const base = kv.readMany.bind(kv);
+  kv.readMany = async (keys) => {
     seen.push(...keys);
     return base(keys);
   };
   await holder.reload();
-  kv.mget = base;
+  kv.readMany = base;
   const twin = startPaperHost(PRODUCTS, {});
   twin.clock = clock;
   await oldReload(twin, kv, "standby");
@@ -323,8 +326,8 @@ test("a sequence change between the token and the data reloads instead of mixing
   await holder.warm();
   const added = TODAY - 500 * 14_400;
   let torn = false;
-  const base = kv.mget.bind(kv);
-  kv.mget = async (keys) => {
+  const base = kv.readMany.bind(kv);
+  kv.readMany = async (keys) => {
     if (!torn) {
       torn = true;
       const hot = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as {
@@ -344,7 +347,7 @@ test("a sequence change between the token and the data reloads instead of mixing
     return base(keys);
   };
   await holder.reload();
-  kv.mget = base;
+  kv.readMany = base;
   const twin = startPaperHost(PRODUCTS, {});
   twin.clock = clock;
   await oldReload(twin, kv, "standby");
@@ -705,15 +708,21 @@ async function crashTakeover(mode: "new" | "old"): Promise<{ snap: ReturnType<ty
 function watchMget(kv: Kv): { calls: string[][]; full: () => number; restore: () => void } {
   const calls: string[][] = [];
   const base = kv.mget.bind(kv);
+  const baseMany = kv.readMany.bind(kv);
   kv.mget = async (keys) => {
     calls.push([...keys]);
     return base(keys);
+  };
+  kv.readMany = async (keys) => {
+    calls.push([...keys]);
+    return baseMany(keys);
   };
   return {
     calls,
     full: () => calls.filter((keys) => keys.includes(HOT_KEY)).length,
     restore() {
       kv.mget = base;
+      kv.readMany = baseMany;
     },
   };
 }
@@ -1688,25 +1697,25 @@ test("a hot rewrite with the same sequence between the token and the confirm rel
   const kv = memoryKv(clock);
   await seedBook(kv);
   const { standby, holder } = await warmStandby(kv);
-  const rawGet = kv.get.bind(kv);
+  const rawRead = kv.read.bind(kv);
   const rawSet = kv.set.bind(kv);
   let flipped = false;
-  kv.get = async (key) => {
-    const value = await rawGet(key);
-    if (key !== HOT_KEY || flipped || value == null) return value;
+  kv.read = async (key) => {
+    const row = await rawRead(key);
+    if (key !== HOT_KEY || flipped || row.tag !== "value") return row;
     flipped = true;
-    const hot = JSON.parse(value) as { realizedUsd?: number; seq?: number };
+    const hot = JSON.parse(row.value) as { realizedUsd?: number; seq?: number };
     const seq = hot.seq;
     hot.realizedUsd = 4242;
     await rawSet(HOT_KEY, JSON.stringify(hot));
-    const stored = JSON.parse((await rawGet(HOT_KEY)) ?? "{}") as { seq?: number };
+    const stored = JSON.parse((await kv.get(HOT_KEY)) ?? "{}") as { seq?: number };
     if (stored.seq !== seq) throw new Error("seq changed");
-    return value;
+    return row;
   };
   const watch = watchMget(kv);
   await holder.reload();
   watch.restore();
-  kv.get = rawGet;
+  kv.read = rawRead;
   expect(flipped).toBe(true);
   expect(watch.full()).toBeGreaterThan(0);
   expect(standby.book.realizedUsd).toBe(4242);

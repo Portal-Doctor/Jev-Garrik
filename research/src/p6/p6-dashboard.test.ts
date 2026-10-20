@@ -3,11 +3,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { absoluteDashboardLocation, applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, dashboardSetCookie, formatP6Public, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard, redactP6View } from "./dashboard-read";
-import { cronAuthorized } from "./relay";
+import { cronAuthorized, memoryKv, plantStored } from "./relay";
 import { handleEngineRequest } from "./vercel-live";
 import { applyForward, paperPnl, replayInjected } from "./engine";
 import { delayBps } from "./legs";
-import { memoryKv } from "./relay";
+import { encodeStored, GZIP_PREFIX } from "./redis-gzip";
 
 test("the cron secret does not authorize the dashboard", () => {
   expect(dashboardAuthorized("Bearer cron-secret", "view-token")).toBe(false);
@@ -149,8 +149,90 @@ test("the page path only reads Redis", async () => {
   expect(view.lease).toEqual({ holder: "cron-1", untilMs: 10 });
   expect(JSON.stringify(view)).not.toContain("secret-token");
   expect(view.incidents[0]).toBe("see [url]");
+  expect(view.unreadable).toBe(false);
   expect((view.lastRun?.pnl as { equityUsd: number }).equityUsd).toBe(8000);
   await expect(openDashboardKv("redis://:pw@127.0.0.1:1").set("p6:hot", "{}")).rejects.toThrow(/read-only/);
+});
+
+test("a corrupt hot is flagged unreadable and a missing hot is not", async () => {
+  const missing = memoryKv();
+  const missingView = await readP6Dashboard(missing);
+  expect(missingView.unreadable).toBe(false);
+  expect(missingView.positions).toEqual([]);
+  expect(missingView.killSwitch).toBe(false);
+
+  const corrupt = memoryKv();
+  plantStored(corrupt, "p6:hot", `${GZIP_PREFIX}!!!!`);
+  const bad = await readP6Dashboard(corrupt);
+  expect(bad.unreadable).toBe(true);
+  expect(bad.positions).toEqual([]);
+  expect(bad.incidents).toEqual([]);
+  expect(bad.killSwitch).toBe(false);
+  expect(bad.lastUnreadable).toBe(false);
+
+  const gzipped = memoryKv();
+  const hot = JSON.stringify({ positions: [{ productId: "BTC-USD", id: "p1" }], killSwitch: false, incidents: [] });
+  plantStored(gzipped, "p6:hot", encodeStored("p6:hot", hot));
+  const good = await readP6Dashboard(gzipped);
+  expect(good.unreadable).toBe(false);
+  expect(good.lastUnreadable).toBe(false);
+  expect(good.positions).toEqual([{ productId: "BTC-USD", id: "p1" }]);
+
+  const lastOnly = memoryKv();
+  plantStored(lastOnly, "p6:hot", JSON.stringify({ positions: [{ productId: "ETH-USD", id: "e1" }] }));
+  plantStored(lastOnly, "p6:lastRun", `${GZIP_PREFIX}!!!!`);
+  const flagged = await readP6Dashboard(lastOnly);
+  expect(flagged.unreadable).toBe(false);
+  expect(flagged.lastUnreadable).toBe(true);
+  expect(flagged.lastRun).toBeNull();
+  expect(flagged.positions).toEqual([{ productId: "ETH-USD", id: "e1" }]);
+  expect(missingView.lastUnreadable).toBe(false);
+});
+
+test("the dashboard socket keeps a plain bulk string and classifies gzip", async () => {
+  const serve = async (payload: string) => {
+    const server = createServer((socket) => {
+      socket.write(payload);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    const sockets: Socket[] = [];
+    server.on("connection", (socket) => sockets.push(socket));
+    const kv = openDashboardKv(`redis://:pw@127.0.0.1:${port}`);
+    return {
+      kv,
+      async close() {
+        for (const socket of sockets) socket.destroy();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      },
+    };
+  };
+  const plain = await serve(`+OK\r\n*1\r\n$8\r\nnot-json\r\n`);
+  try {
+    expect(await plain.kv.get("p6:lastRun")).toBe("not-json");
+  } finally {
+    await plain.close();
+  }
+  const logical = JSON.stringify({ ok: 1 });
+  const stored = encodeStored("p6:hot", logical);
+  const body = `+OK\r\n*1\r\n$${Buffer.byteLength(stored)}\r\n${stored}\r\n`;
+  const gzip = await serve(body);
+  try {
+    expect(await gzip.kv.get("p6:hot")).toBe(logical);
+  } finally {
+    await gzip.close();
+  }
+  const torn = `${GZIP_PREFIX}!!!!`;
+  const badBody = `+OK\r\n*1\r\n$${Buffer.byteLength(torn)}\r\n${torn}\r\n`;
+  const corrupt = await serve(badBody);
+  try {
+    const row = await corrupt.kv.readMany(["p6:hot"]);
+    expect(row[0]?.tag).toBe("unreadable");
+    expect(await corrupt.kv.get("p6:hot")).toBeNull();
+  } finally {
+    await corrupt.close();
+  }
 });
 
 test("a large mget split across packets is still the snapshot", async () => {
@@ -222,7 +304,11 @@ test("a no-cookie GET /p6 returns 200 and the public output is redacted", () => 
     positions: [],
     closed: [],
     emitted: [],
+    unreadable: true,
+    lastUnreadable: true,
   });
+  expect(shown.unreadable).toBe(true);
+  expect(shown.lastUnreadable).toBe(true);
   const output = JSON.stringify(shown);
   expect(output).not.toContain(holder);
   expect(output).not.toContain(rawMarker);
@@ -263,6 +349,8 @@ function publicView(over: Partial<ReturnType<typeof redactP6View>> = {}) {
     positions: [],
     closed: [],
     emitted: [] as string[],
+    unreadable: false,
+    lastUnreadable: false,
     ...over,
   };
 }
@@ -615,6 +703,10 @@ test("the page does not import the cron secret, auth, or a Redis write", () => {
   expect(proxy.includes("process.env.DASHBOARD_TOKEN")).toBe(true);
   expect(proxy.includes("applyDashboardProxy")).toBe(true);
   expect(page.includes("readP6Page")).toBe(true);
+  expect(page.includes("view.unreadable")).toBe(true);
+  expect(page.includes("Hot unreadable.")).toBe(true);
+  expect(page.includes("view.lastUnreadable")).toBe(true);
+  expect(page.includes("Last run unreadable.")).toBe(true);
   expect(page.includes("last?.completed")).toBe(true);
   expect(page.includes("kill R")).toBe(true);
   expect(page.includes("Arrival delay bps")).toBe(true);
