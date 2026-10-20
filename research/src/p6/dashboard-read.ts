@@ -6,6 +6,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { connect as connectNet, isIP } from "node:net";
 import { connect as connectTls } from "node:tls";
+import { classifyStored, GZIP_PREFIX, readText } from "./redis-gzip";
 import type { Kv } from "./relay";
 import { commandBudget, healthStale, monthCommands, nextCronMs, projectionTone } from "./dashboard-format";
 import {
@@ -442,6 +443,8 @@ function publicLastRun(raw: Record<string, unknown> | null): Record<string, unkn
 export function redactP6View(view: DashboardView): DashboardView {
   return {
     ...view,
+    unreadable: view.unreadable,
+    lastUnreadable: view.lastUnreadable,
     lease: view.lease ? { holder: "", untilMs: view.lease.untilMs } : null,
     lastRun: publicLastRun(view.lastRun),
     incidents: view.incidents.map(publicIncident),
@@ -513,6 +516,10 @@ export interface DashboardView {
   positions: { productId?: string; id?: string }[];
   closed: { productId?: string; classId?: string; netUsd?: number }[];
   emitted: string[];
+  /** True when p6:hot was present and could not be decoded. Missing hot stays false. */
+  unreadable: boolean;
+  /** True when p6:lastRun was present and could not be decoded. Missing lastRun stays false. */
+  lastUnreadable: boolean;
 }
 
 function leaseOf(raw: string | null): DashboardLease | null {
@@ -526,12 +533,17 @@ function leaseOf(raw: string | null): DashboardLease | null {
   }
 }
 
-/** One mget of lastRun, hot, and the lease. No INFO and no writes. */
-export async function readP6Dashboard(kv: Pick<Kv, "mget">): Promise<DashboardView> {
-  const values = await kv.mget([LAST_RUN_KEY, HOT_KEY, LEASE_KEY]);
-  const lastRaw = values[0] ?? null;
-  const hotRaw = values[1] ?? null;
-  const leaseRaw = values[2] ?? null;
+/** One read of lastRun, hot, and the lease. No INFO and no writes. */
+export async function readP6Dashboard(kv: Pick<Kv, "readMany">): Promise<DashboardView> {
+  const tagged = await kv.readMany([LAST_RUN_KEY, HOT_KEY, LEASE_KEY]);
+  // Plain JSON and gz1: both decode. A corrupt hot is flagged, not shown as an empty book.
+  const lastRead = tagged[0] ?? { tag: "missing" as const };
+  const hotRead = tagged[1] ?? { tag: "missing" as const };
+  const lastRaw = readText(lastRead);
+  const hotRaw = readText(hotRead);
+  const leaseRaw = readText(tagged[2] ?? { tag: "missing" });
+  const unreadable = hotRead.tag === "unreadable";
+  const lastUnreadable = lastRead.tag === "unreadable";
   const hot = hotRaw ? (JSON.parse(hotRaw) as Record<string, unknown>) : {};
   const incidents = Array.isArray(hot.incidents) ? hot.incidents.filter((row): row is string => typeof row === "string").map(stripUrls) : [];
   const gaps = Array.isArray(hot.gaps) ? (hot.gaps as DashboardView["gaps"]) : [];
@@ -552,6 +564,8 @@ export async function readP6Dashboard(kv: Pick<Kv, "mget">): Promise<DashboardVi
     positions,
     closed,
     emitted,
+    unreadable,
+    lastUnreadable,
   };
 }
 
@@ -757,7 +771,7 @@ export function summaryFreshness(input: { hasLastRun: boolean; flushMs: number |
 }
 
 /** Dashboard mget plus the equity mget. Both are reads. */
-export async function readP6Page(kv: Pick<Kv, "mget">, nowMs: number): Promise<{ view: DashboardView; block: PnlBlock }> {
+export async function readP6Page(kv: Pick<Kv, "mget" | "readMany">, nowMs: number): Promise<{ view: DashboardView; block: PnlBlock }> {
   const [view, equity] = await Promise.all([readP6Dashboard(kv), readPnlWindows(kv, nowMs)]);
   const last = view.lastRun;
   const pnl = last && typeof last.pnl === "object" && last.pnl != null ? (last.pnl as Record<string, unknown>) : null;
@@ -777,11 +791,38 @@ export async function readP6Page(kv: Pick<Kv, "mget">, nowMs: number): Promise<{
   return { view, block };
 }
 
+/**
+ * Bytes the socket assembled. A plain bulk string is returned as stored, including
+ * one that is not JSON. A gz1: value is decoded. A gzip that does not decode is null.
+ * JSON shape is decided by the view, not by this packet reader.
+ */
+function dashboardValue(key: string, raw: string | null): string | null {
+  if (raw == null) return null;
+  if (!raw.startsWith(GZIP_PREFIX)) return raw;
+  return readText(classifyStored(key, raw));
+}
+
 /** A Kv that can only MGET. Every write throws before a socket opens. */
 export function openDashboardKv(url: string): Kv {
+  const readMany = async (keys: string[]) => {
+    const raw = await mgetRaw(url, keys);
+    return keys.map((key, index) => classifyStored(key, raw[index] ?? null));
+  };
   return {
-    get: async (key) => (await mgetRaw(url, [key]))[0] ?? null,
-    mget: (keys) => mgetRaw(url, keys),
+    async read(key) {
+      return (await readMany([key]))[0]!;
+    },
+    async readMany(keys) {
+      return readMany(keys);
+    },
+    async get(key) {
+      const raw = (await mgetRaw(url, [key]))[0] ?? null;
+      return dashboardValue(key, raw);
+    },
+    async mget(keys) {
+      const raw = await mgetRaw(url, keys);
+      return keys.map((key, index) => dashboardValue(key, raw[index] ?? null));
+    },
     set: async () => refuse(),
     del: async () => refuse(),
     cas: async () => refuse(),

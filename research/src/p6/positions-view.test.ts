@@ -306,6 +306,10 @@ test("sixteen position rows stay under 3 KB and lastRun is the only new home", a
       reads += 1;
       return kv.mget(keys);
     },
+    readMany: async (keys: string[]) => {
+      reads += 1;
+      return kv.readMany(keys);
+    },
   };
   await readP6Page(reader, SAT);
   expect(reads).toBe(2);

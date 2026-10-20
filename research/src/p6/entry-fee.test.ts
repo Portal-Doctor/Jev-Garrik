@@ -11,7 +11,7 @@ import { applyForward, freshBook, paperPnl, replayInjected, type Book, type Forw
 import { ACCT_KEY, acctFromDay, captureHot, loadSplit, parseAcctMarker, persistSplit } from "./hot-store";
 import { forwardClassRisk, forwardDays } from "./kelly";
 import { installPaperState, startPaperHost } from "./paper-host";
-import { LEASE_KEY, decodeLease, memoryKv, tryAcquire } from "./relay";
+import { LEASE_KEY, decodeLease, memoryKv, peekStored, tryAcquire } from "./relay";
 import { classDollarBackstop } from "./session";
 
 const SAT = Date.parse("2026-10-17T12:00:00.000Z");
@@ -511,8 +511,14 @@ test("p6:acct rejects a non-object or impossible day, and a bad body is repaired
     expect(body).not.toBeNull();
     installPaperState(loaded, body!);
     expect(loaded.book.acctFromDay).toBeNull();
-    expect(loaded.acctRepair).toBe(true);
+    if (raw === "not-json") {
+      expect(loaded.acctRepair).toBe(false);
+      expect(peekStored(kv, ACCT_KEY)).toBe("not-json");
+    } else {
+      expect(loaded.acctRepair).toBe(true);
+    }
   }
+  await kv.set(ACCT_KEY, bad[bad.length - 1]!);
 
   const repair = startPaperHost(["BTC-USD"], {});
   repair.clock = () => now;
