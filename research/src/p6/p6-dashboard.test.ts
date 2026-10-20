@@ -2,8 +2,9 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
-import { absoluteDashboardLocation, applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, dashboardSetCookie, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard } from "./dashboard-read";
+import { absoluteDashboardLocation, applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, dashboardSetCookie, formatP6Public, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard, redactP6View } from "./dashboard-read";
 import { cronAuthorized } from "./relay";
+import { handleEngineRequest } from "./vercel-live";
 import { applyForward, paperPnl, replayInjected } from "./engine";
 import { delayBps } from "./legs";
 import { memoryKv } from "./relay";
@@ -15,19 +16,19 @@ test("the cron secret does not authorize the dashboard", () => {
   expect(dashboardAuthorized(null, "view-token")).toBe(false);
 });
 
-test("GET /p6 accepts the bearer, the cookie, or a token query", () => {
+test("a write to /p6 accepts the bearer, the cookie, or a token query", () => {
   const token = "view-token";
   const cookie = `${P6_COOKIE_NAME}=${dashboardCookieValue(token)}`;
   const other = `${P6_COOKIE_NAME}=${dashboardCookieValue("other-token")}`;
-  const header = applyDashboardProxy(new Request("https://example.test/p6", { headers: { authorization: "Bearer view-token" } }), token);
+  const header = applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { authorization: "Bearer view-token" } }), token);
   expect(header.status).toBe(200);
   expect(header.headers["Cache-Control"]).toBe("no-store");
   expect(header.headers["Referrer-Policy"]).toBe("no-referrer");
 
-  const fromCookie = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET", headers: { cookie } }), token);
+  const fromCookie = applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { cookie } }), token);
   expect(fromCookie.status).toBe(200);
 
-  const opened = applyDashboardProxy(new Request("https://example.test/p6?token=view-token&panel=spend", { method: "GET" }), token);
+  const opened = applyDashboardProxy(new Request("https://example.test/p6?token=view-token&panel=spend", { method: "POST" }), token);
   expect(opened.status).toBe(302);
   expect(opened.headers.Location).toBe("/p6?panel=spend");
   expect(opened.body).toBeNull();
@@ -42,26 +43,26 @@ test("GET /p6 accepts the bearer, the cookie, or a token query", () => {
   expect(opened.headers["Cache-Control"]).toBe("no-store");
   expect(opened.headers["Referrer-Policy"]).toBe("no-referrer");
 
-  const wrong = applyDashboardProxy(new Request("https://example.test/p6?token=nope", { method: "GET", headers: { authorization: "Bearer view-token", cookie } }), token);
+  const wrong = applyDashboardProxy(new Request("https://example.test/p6?token=nope", { method: "POST", headers: { authorization: "Bearer view-token", cookie } }), token);
   expect(wrong.status).toBe(401);
   expect(wrong.body).toBe("unauthorized");
-  const empty = applyDashboardProxy(new Request("https://example.test/p6?token=", { method: "GET", headers: { cookie } }), token);
+  const empty = applyDashboardProxy(new Request("https://example.test/p6?token=", { method: "POST", headers: { cookie } }), token);
   expect(empty.status).toBe(401);
-  const malformed = applyDashboardProxy(new Request("https://example.test/p6", { headers: { cookie: `${P6_COOKIE_NAME}=not-a-cookie` } }), token);
+  const malformed = applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { cookie: `${P6_COOKIE_NAME}=not-a-cookie` } }), token);
   expect(malformed.status).toBe(401);
   const tampered = dashboardCookieValue(token).slice(0, -1) + (dashboardCookieValue(token).endsWith("a") ? "b" : "a");
-  expect(applyDashboardProxy(new Request("https://example.test/p6", { headers: { cookie: `${P6_COOKIE_NAME}=${tampered}` } }), token).status).toBe(401);
-  expect(applyDashboardProxy(new Request("https://example.test/p6", { headers: { cookie: other } }), token).status).toBe(401);
+  expect(applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { cookie: `${P6_COOKIE_NAME}=${tampered}` } }), token).status).toBe(401);
+  expect(applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { cookie: other } }), token).status).toBe(401);
 
-  const allValid = applyDashboardProxy(new Request("https://example.test/p6?token=view-token", { method: "GET", headers: { authorization: "Bearer view-token", cookie } }), token);
+  const allValid = applyDashboardProxy(new Request("https://example.test/p6?token=view-token", { method: "POST", headers: { authorization: "Bearer view-token", cookie } }), token);
   expect(allValid.status).toBe(302);
   expect(allValid.headers.Location).toBe("/p6");
-  const bearerWins = applyDashboardProxy(new Request("https://example.test/p6", { headers: { authorization: "Bearer view-token", cookie: other } }), token);
+  const bearerWins = applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { authorization: "Bearer view-token", cookie: other } }), token);
   expect(bearerWins.status).toBe(200);
-  const cookieWins = applyDashboardProxy(new Request("https://example.test/p6", { headers: { authorization: "Bearer nope", cookie } }), token);
+  const cookieWins = applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { authorization: "Bearer nope", cookie } }), token);
   expect(cookieWins.status).toBe(200);
-  expect(applyDashboardProxy(new Request("https://example.test/p6", { headers: { authorization: "Bearer nope", cookie: other } }), token).status).toBe(401);
-  expect(applyDashboardProxy(new Request("https://example.test/p6"), undefined).status).toBe(401);
+  expect(applyDashboardProxy(new Request("https://example.test/p6", { method: "POST", headers: { authorization: "Bearer nope", cookie: other } }), token).status).toBe(401);
+  expect(applyDashboardProxy(new Request("https://example.test/p6", { method: "POST" }), undefined).status).toBe(401);
 
   expect(cronAuthorized("Bearer view-token", "cron-secret")).toBe(false);
   expect(cronAuthorized(`Bearer ${token}`, "cron-secret")).toBe(false);
@@ -77,10 +78,10 @@ test("GET /p6 accepts the bearer, the cookie, or a token query", () => {
 
 const nextUrlPath = join(import.meta.dir, "..", "..", "..", "web/node_modules/next/dist/server/web/next-url.js");
 
-test("GET /p6?token= Location is absolute, drops the token, and keeps the cookie", () => {
+test("a write with ?token= Location is absolute, drops the token, and keeps the cookie", () => {
   const token = "view-token";
   const requestUrl = "https://dash.example/p6?token=view-token&panel=spend";
-  const opened = applyDashboardProxy(new Request(requestUrl, { method: "GET" }), token);
+  const opened = applyDashboardProxy(new Request(requestUrl, { method: "POST" }), token);
   expect(opened.status).toBe(302);
   const location = absoluteDashboardLocation(requestUrl, opened.headers.Location ?? "");
   expect(location).toBe("https://dash.example/p6?panel=spend");
@@ -116,7 +117,7 @@ test.skipIf(!existsSync(nextUrlPath))("NextURL accepts the absolute /p6 Location
   const previous = process.env.DASHBOARD_TOKEN;
   process.env.DASHBOARD_TOKEN = "view-token";
   try {
-    const request = new Request("https://dash.example/p6?token=view-token&panel=spend", { method: "GET" });
+    const request = new Request("https://dash.example/p6?token=view-token&panel=spend", { method: "POST" });
     const response = proxy(request);
     expect(response.status).toBe(302);
     const location = response.headers.get("location");
@@ -186,22 +187,378 @@ test("the proxy matcher covers /p6 and every subpath", () => {
   const cookie = `${P6_COOKIE_NAME}=${dashboardCookieValue(token)}`;
   const routes = ["/p6", "/p6/positions", "/p6/trades", "/p6/gates", "/p6/jev", "/p6/health"];
   for (const route of routes) {
-    expect(applyDashboardProxy(new Request(`https://example.test${route}`), token).status, route).toBe(401);
-    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { headers: { authorization: "Bearer view-token" } }), token).status, route).toBe(200);
-    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { headers: { cookie } }), token).status, route).toBe(200);
-    const opened = applyDashboardProxy(new Request(`https://example.test${route}?token=view-token&w=8h`), token);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { method: "GET" }), token).status, route).toBe(200);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { method: "POST" }), token).status, route).toBe(401);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { method: "POST", headers: { authorization: "Bearer view-token" } }), token).status, route).toBe(200);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}`, { method: "POST", headers: { cookie } }), token).status, route).toBe(200);
+    const opened = applyDashboardProxy(new Request(`https://example.test${route}?token=view-token&w=8h`, { method: "POST" }), token);
     expect(opened.status, route).toBe(302);
     expect(opened.headers.Location, route).toBe(`${route}?w=8h`);
     expect(opened.headers.Location?.includes("token="), route).toBe(false);
     expect(opened.headers["Set-Cookie"]?.includes("Path=/p6"), route).toBe(true);
     expect(opened.headers["Set-Cookie"]?.includes("Path=/p6/"), route).toBe(false);
-    expect(applyDashboardProxy(new Request(`https://example.test${route}?token=nope&w=24h`), token).status, route).toBe(401);
+    expect(applyDashboardProxy(new Request(`https://example.test${route}?token=nope&w=24h`, { method: "POST" }), token).status, route).toBe(401);
+  }
+});
+
+test("a no-cookie GET /p6 returns 200 and the public output is redacted", () => {
+  const open = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET" }), undefined);
+  expect(open.status).toBe(200);
+  const holder = "lease-holder-cron-9";
+  const rawMarker = "raw-last-run-object";
+  const jevError = "Jev caller Error: invalid api key sk-live-jev-secret";
+  const shown = redactP6View({
+    lease: { holder, untilMs: 10 },
+    lastRun: {
+      outcome: "handover",
+      warm: 1,
+      secretBlob: rawMarker,
+      jev: { holder, totalUsd: 1, error: jevError },
+      redis: { cmds: 3, host: "redis.internal:6379" },
+    },
+    killSwitch: false,
+    incidents: [`kv set redis://default:pw@redis.internal:6379 down`, jevError, "connect ECONNREFUSED 10.1.2.3:6379"],
+    gaps: [],
+    positions: [],
+    closed: [],
+    emitted: [],
+  });
+  const output = JSON.stringify(shown);
+  expect(output).not.toContain(holder);
+  expect(output).not.toContain(rawMarker);
+  expect(output).not.toContain("redis.internal");
+  expect(output).not.toContain("redis://");
+  expect(output).not.toContain("10.1.2.3");
+  expect(output).not.toContain("sk-live-jev-secret");
+  expect(output).toContain("handover");
+  expect(shown.lease?.holder).toBe("");
+  expect(shown.lease?.untilMs).toBe(10);
+  expect(shown.incidents[0]).toBe("redacted");
+  expect(shown.incidents[1]).toBe("call_error");
+  expect(shown.incidents[2]).toBe("redacted");
+  const rendered = formatP6Public(shown);
+  expect(rendered.incidents).toBe("redacted · call_error · redacted");
+  expect(rendered.outcome).toBe("handover");
+  const root = join(import.meta.dir, "..", "..", "..");
+  const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
+  expect(page.includes("redactP6View(")).toBe(true);
+  expect(page.includes("formatP6Public(view)")).toBe(true);
+  expect(page.includes("shown.incidents")).toBe(true);
+  expect(page.includes("shown.decisions")).toBe(true);
+  expect(page.includes("lease?.holder")).toBe(false);
+  expect(page.includes("lease.holder")).toBe(false);
+  expect(page.includes("loaded.view.emitted")).toBe(false);
+  expect(page.includes("loaded.view.incidents")).toBe(false);
+  expect(page.includes("JSON.stringify(last)")).toBe(false);
+  expect(page.includes("JSON.stringify(view.lastRun)")).toBe(false);
+});
+
+function publicView(over: Partial<ReturnType<typeof redactP6View>> = {}) {
+  return {
+    lease: null,
+    lastRun: null,
+    killSwitch: false,
+    incidents: [] as string[],
+    gaps: [] as { startMs: number; endMs: number; cause?: string }[],
+    positions: [],
+    closed: [],
+    emitted: [] as string[],
+    ...over,
+  };
+}
+
+test("unknown incident text renders as a generic code", () => {
+  const leaks = [
+    "getaddrinfo ENOTFOUND x.upstash.io",
+    "[::1]:6379",
+    "::1",
+    "[2001:db8::7]:6380",
+    "user:PASSWORD@host:6379",
+    "rediss%3A%2F%2Fdefault%3Apw%40x.upstash.io%3A6379",
+    '{"host":"x.upstash.io","port":6379}',
+    "x.upstash.\nio",
+    "h.example.com:6",
+    "x.upstash.io.",
+  ];
+  const shown = redactP6View(publicView({ incidents: ["lease lost", ...leaks], lastRun: { outcome: "handover" } }));
+  const rendered = formatP6Public(shown);
+  expect(shown.incidents[0]).toBe("lease lost");
+  expect(shown.incidents.slice(1)).toEqual(leaks.map(() => "redacted"));
+  expect(rendered.incidents.startsWith("lease lost · redacted")).toBe(true);
+  const output = `${rendered.incidents}\n${JSON.stringify(shown)}`;
+  for (const secret of ["upstash", "PASSWORD", "::1", "2001:db8", "example.com", "rediss%3A", "getaddrinfo", "host"]) {
+    expect(output.includes(secret), secret).toBe(false);
+  }
+});
+
+test("a gap cause outside the allowlist renders as redacted", () => {
+  const shown = redactP6View(publicView({
+    gaps: [
+      { startMs: 1, endMs: 2, cause: "uncovered" },
+      { startMs: 3, endMs: 4, cause: "uncovered BTC-USD" },
+      { startMs: 5, endMs: 6, cause: "getaddrinfo ENOTFOUND x.upstash.io" },
+    ],
+  }));
+  const rendered = formatP6Public(shown);
+  expect(shown.gaps.map((gap) => gap.cause)).toEqual(["uncovered", "uncovered BTC-USD", "redacted"]);
+  expect(rendered.causes).toBe("uncovered · uncovered BTC-USD · redacted");
+  expect(rendered.causes.includes("upstash")).toBe(false);
+});
+
+test("decision ids outside the allowlist are not rendered", () => {
+  const kept = "A-BTC-USD-1710000000000";
+  const shown = redactP6View(publicView({ emitted: [kept, "user:PASSWORD@host:6379", "x.upstash.io"] }));
+  const rendered = formatP6Public(shown);
+  expect(shown.emitted).toEqual([kept, "redacted", "redacted"]);
+  expect(rendered.decisions).toBe(`${kept}, redacted, redacted`);
+  expect(rendered.decisions.includes("PASSWORD")).toBe(false);
+  expect(rendered.decisions.includes("upstash")).toBe(false);
+});
+
+test("a jev-call failed string renders as call_error", () => {
+  const line = "jev-call failed: connect ECONNREFUSED x.upstash.io";
+  const shown = redactP6View(publicView({ incidents: [line], lastRun: { outcome: "handover", jev: { error: line, calls: 2 } } }));
+  const rendered = formatP6Public(shown);
+  expect(shown.incidents).toEqual(["call_error"]);
+  expect(rendered.incidents).toBe("call_error");
+  expect(JSON.stringify(shown).includes("jev-call failed")).toBe(false);
+  expect(JSON.stringify(shown).includes("upstash")).toBe(false);
+  expect((shown.lastRun?.jev as { error?: string; calls?: number }).error).toBe("call_error");
+  expect((shown.lastRun?.jev as { calls?: number }).calls).toBe(2);
+});
+
+test("benign stack text maps to redacted and is not rewritten as a host", () => {
+  const shown = redactP6View(publicView({ incidents: ["at net.js:12"] }));
+  const rendered = formatP6Public(shown);
+  expect(shown.incidents).toEqual(["redacted"]);
+  expect(rendered.incidents).toBe("redacted");
+  expect(rendered.incidents.includes("[redis]")).toBe(false);
+  expect(rendered.incidents.includes("net.js")).toBe(false);
+});
+
+test("a HEAD of /p6 with no cookie returns 200", () => {
+  const head = applyDashboardProxy(new Request("https://example.test/p6", { method: "HEAD" }), undefined);
+  expect(head.status).toBe(200);
+  expect(head.body).toBeNull();
+  expect(head.headers["X-Robots-Tag"]).toBe("noindex");
+  const sub = applyDashboardProxy(new Request("https://example.test/p6/positions", { method: "HEAD" }), undefined);
+  expect(sub.status).toBe(200);
+  expect(sub.headers["X-Robots-Tag"]).toBe("noindex");
+});
+
+test("jev counts stay on the public last run", () => {
+  const shown = redactP6View(publicView({
+    lastRun: {
+      outcome: "handover",
+      jev: { calls: 4, totalUsd: 0.5, byReason: { call_error: 2, timeout: 1 }, holder: "lease-holder-cron-9", error: "jev caller secret" },
+    },
+  }));
+  const jev = shown.lastRun?.jev as { calls?: number; byReason?: { call_error?: number }; holder?: string; error?: string };
+  expect(jev.calls).toBe(4);
+  expect(jev.byReason?.call_error).toBe(2);
+  expect(jev.holder).toBeUndefined();
+  expect(jev.error).toBe("call_error");
+  expect(JSON.stringify(shown).includes("lease-holder-cron-9")).toBe(false);
+  expect(formatP6Public(shown).outcome).toBe("handover");
+});
+
+test("a planted host in closed trades and positions is not rendered", () => {
+  const host = "x.upstash.io";
+  const shown = redactP6View(publicView({
+    closed: [
+      { productId: "BTC-USD", classId: "A", netUsd: 12 },
+      { productId: host, classId: host, netUsd: host as never },
+    ],
+    positions: [
+      { productId: "ETH-USD", id: "A-ETH-USD-1710000000000" },
+      { productId: host, id: host },
+    ],
+    lastRun: {
+      outcome: "handover",
+      positions: [{ p: host, c: host, id: host, productId: host }],
+      pnl: { pairs: [{ productId: host, classId: host, side: host }] },
+    },
+  }));
+  const rendered = formatP6Public(shown);
+  expect(rendered.trades.map((row) => row.label)).toEqual(["BTC-USD · A", "redacted · redacted"]);
+  expect(rendered.trades[1]?.netUsd).toBeNull();
+  expect(rendered.positions).toBe("ETH-USD A-ETH-USD-1710000000000 | redacted redacted");
+  expect(shown.closed[0]).toEqual({ productId: "BTC-USD", classId: "A", netUsd: 12 });
+  expect(shown.positions[0]).toEqual({ productId: "ETH-USD", id: "A-ETH-USD-1710000000000" });
+  const output = `${JSON.stringify(rendered)}\n${JSON.stringify(shown)}`;
+  expect(output.includes(host)).toBe(false);
+  expect(output.includes("upstash")).toBe(false);
+});
+
+test("the generic string fallback does not return raw text", () => {
+  const host = "x.upstash.io";
+  const shown = redactP6View(publicView({ lastRun: { outcome: "handover", pnl: { footnote: host } } }));
+  expect((shown.lastRun?.pnl as { footnote?: string }).footnote).toBe("redacted");
+  expect(JSON.stringify(shown).includes(host)).toBe(false);
+});
+
+test("a product id must be the whole value", () => {
+  const dirty = "host.upstash.io BTC-USD";
+  const shown = redactP6View(publicView({
+    closed: [{ productId: dirty, classId: "B", netUsd: 1 }],
+    positions: [{ productId: "BTC-USD" }],
+  }));
+  const rendered = formatP6Public(shown);
+  expect(shown.closed[0]?.productId).toBe("redacted");
+  expect(shown.positions[0]?.productId).toBe("BTC-USD");
+  expect(rendered.trades[0]?.label).toBe("redacted · B");
+  expect(`${rendered.trades[0]?.label}\n${JSON.stringify(shown)}`.includes("upstash")).toBe(false);
+});
+
+test("a reconnect line keeps only real product ids", () => {
+  const shown = redactP6View(publicView({
+    incidents: [
+      "socket reconnect 1 closed: BTC-USD,ETH-USD",
+      "socket reconnect 3 heartbeat: FOX-UPSTASH-IO",
+    ],
+  }));
+  const rendered = formatP6Public(shown);
+  expect(shown.incidents[0]).toBe("socket reconnect 1 closed: BTC-USD,ETH-USD");
+  expect(shown.incidents[1]).toBe("redacted");
+  expect(rendered.incidents.includes("UPSTASH")).toBe(false);
+  expect(rendered.incidents.includes("FOX")).toBe(false);
+});
+
+test("fixed kv and redis incidents stay verbatim", () => {
+  const lines = [
+    "kv set p6:hot failed",
+    "kv set p6:warmup failed",
+    "kv set p6:lease-meta failed",
+    "kv set lease lost",
+    "redis timeout",
+    "redis closed",
+  ];
+  const shown = redactP6View(publicView({ incidents: lines }));
+  expect(shown.incidents).toEqual(lines);
+  expect(formatP6Public(shown).incidents).toBe(lines.join(" · "));
+});
+
+test("rest book and saved A pick only keep a real product id", () => {
+  const shown = redactP6View(publicView({
+    incidents: [
+      "rest book BTC-USD failed",
+      "rest book FOX-UPSTASH-IO failed",
+      "saved A pick BTC-USD ignored",
+      "saved A pick host.upstash.io ignored",
+    ],
+  }));
+  expect(shown.incidents).toEqual([
+    "rest book BTC-USD failed",
+    "redacted",
+    "saved A pick BTC-USD ignored",
+    "redacted",
+  ]);
+  expect(formatP6Public(shown).incidents.includes("UPSTASH")).toBe(false);
+  expect(formatP6Public(shown).incidents.includes("upstash")).toBe(false);
+});
+
+test("a GET with ?token= redirects and the token is not rendered", () => {
+  const token = "view-token";
+  const opened = applyDashboardProxy(new Request("https://example.test/p6?token=view-token&w=8h", { method: "GET" }), token);
+  expect(opened.status).toBe(302);
+  expect(opened.body).toBeNull();
+  expect(opened.headers.Location).toBe("/p6?w=8h");
+  expect(opened.headers.Location?.includes("token=")).toBe(false);
+  expect(opened.headers["Set-Cookie"]?.includes(token)).toBe(false);
+  const head = applyDashboardProxy(new Request("https://example.test/p6/positions?token=view-token", { method: "HEAD" }), token);
+  expect(head.status).toBe(302);
+  expect(head.headers.Location).toBe("/p6/positions");
+  expect(head.body).toBeNull();
+  const wrongToken = "not-the-dashboard-token";
+  const wrong = applyDashboardProxy(new Request(`https://example.test/p6?token=${wrongToken}`, { method: "GET" }), token);
+  expect(wrong.status).toBe(401);
+  expect(wrong.body).toBe("unauthorized");
+  expect(wrong.body?.includes(wrongToken)).toBe(false);
+  const root = join(import.meta.dir, "..", "..", "..");
+  const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
+  expect(page.includes("query.token")).toBe(false);
+  expect(page.includes("searchParams.token")).toBe(false);
+  expect(page.includes("shown.trades")).toBe(true);
+  expect(page.includes("view.closed")).toBe(false);
+  expect(page.includes("loaded.view.closed")).toBe(false);
+});
+
+test("a token query is stripped regardless of key case", () => {
+  const token = "view-token";
+  const upper = applyDashboardProxy(new Request("https://example.test/p6?TOKEN=view-token&w=8h", { method: "GET" }), token);
+  expect(upper.status).toBe(302);
+  expect(upper.body).toBeNull();
+  expect(upper.headers.Location).toBe("/p6?w=8h");
+  expect(upper.headers.Location?.toLowerCase().includes("token=")).toBe(false);
+  expect(upper.headers.Location?.includes(token)).toBe(false);
+  const mixed = applyDashboardProxy(new Request("https://example.test/p6/positions?Token=view-token", { method: "HEAD" }), token);
+  expect(mixed.status).toBe(302);
+  expect(mixed.headers.Location).toBe("/p6/positions");
+  expect(mixed.body).toBeNull();
+  const wrongToken = "not-the-dashboard-token";
+  const wrong = applyDashboardProxy(new Request(`https://example.test/p6?TOKEN=${wrongToken}`, { method: "GET" }), token);
+  expect(wrong.status).toBe(401);
+  expect(wrong.body).toBe("unauthorized");
+  expect(wrong.body?.includes(wrongToken)).toBe(false);
+});
+
+test("the /p6 page sends a noindex meta tag and an X-Robots-Tag header", () => {
+  const root = join(import.meta.dir, "..", "..", "..");
+  const open = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET" }), undefined);
+  expect(open.status).toBe(200);
+  expect(open.headers["X-Robots-Tag"]).toBe("noindex");
+  const sub = applyDashboardProxy(new Request("https://example.test/p6/positions", { method: "GET" }), undefined);
+  expect(sub.headers["X-Robots-Tag"]).toBe("noindex");
+  const layout = readFileSync(join(root, "web/src/app/p6/layout.tsx"), "utf8");
+  expect(layout.includes('robots: "noindex"')).toBe(true);
+});
+
+test("a GET of /p6 needs no cookie or token", () => {
+  const open = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET" }), "view-token");
+  expect(open.status).toBe(200);
+  expect(open.body).toBeNull();
+  expect(open.headers.Location).toBeUndefined();
+  expect(open.headers["Set-Cookie"]).toBeUndefined();
+  const missing = applyDashboardProxy(new Request("https://example.test/p6", { method: "GET" }), undefined);
+  expect(missing.status).toBe(200);
+});
+
+test("a GET of a /p6 subpath needs no cookie or token", () => {
+  const route = "/p6/positions";
+  const open = applyDashboardProxy(new Request(`https://example.test${route}`, { method: "GET" }), undefined);
+  expect(open.status).toBe(200);
+  expect(open.body).toBeNull();
+  expect(open.headers.Location).toBeUndefined();
+  expect(open.headers["Set-Cookie"]).toBeUndefined();
+  const nested = applyDashboardProxy(new Request("https://example.test/p6/positions/open", { method: "GET" }), undefined);
+  expect(nested.status).toBe(200);
+});
+
+test("POST, PUT, and DELETE on /p6 still refuse a missing cookie", () => {
+  for (const method of ["POST", "PUT", "DELETE"]) {
+    for (const route of ["/p6", "/p6/positions"]) {
+      const response = applyDashboardProxy(new Request(`https://example.test${route}`, { method }), "view-token");
+      expect(response.status, `${method} ${route}`).toBe(401);
+      expect(response.body, `${method} ${route}`).toBe("unauthorized");
+      expect(response.headers["Set-Cookie"], `${method} ${route}`).toBeUndefined();
+    }
+  }
+});
+
+test("the cron route still refuses a request with no authorization", async () => {
+  const urls = ["https://example.test/api/engine", "https://example.test/api/engine?read=1"];
+  for (const method of ["GET", "POST"]) {
+    for (const url of urls) {
+      const response = await handleEngineRequest(new Request(url, { method }), { CRON_SECRET: "cron-secret" });
+      expect(response.status, `${method} ${url}`).toBe(401);
+      expect(await response.text(), `${method} ${url}`).toBe("unauthorized");
+    }
   }
 });
 
 test("a token redirect keeps the path under /p6 and rejects look-alikes", () => {
   const token = "view-token";
-  const kept = applyDashboardProxy(new Request("https://example.test/p6/positions?w=8h&token=view-token&x=1"), token);
+  const kept = applyDashboardProxy(new Request("https://example.test/p6/positions?w=8h&token=view-token&x=1", { method: "POST" }), token);
   expect(kept.status).toBe(302);
   expect(kept.headers.Location).toBe("/p6/positions?w=8h&x=1");
   expect(kept.headers["Set-Cookie"]?.includes("Path=/p6")).toBe(true);
@@ -251,9 +608,11 @@ test("the page does not import the cron secret, auth, or a Redis write", () => {
     }
   }
   const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
-  expect(page.includes("DASHBOARD_TOKEN")).toBe(true);
-  expect(page.includes("dashboardAccess")).toBe(true);
+  expect(page.includes("DASHBOARD_TOKEN")).toBe(false);
+  expect(page.includes("dashboardAccess")).toBe(false);
+  expect(page.includes("Unauthorized.")).toBe(false);
   const proxy = readFileSync(join(root, "web/src/proxy.ts"), "utf8");
+  expect(proxy.includes("process.env.DASHBOARD_TOKEN")).toBe(true);
   expect(proxy.includes("applyDashboardProxy")).toBe(true);
   expect(page.includes("readP6Page")).toBe(true);
   expect(page.includes("last?.completed")).toBe(true);

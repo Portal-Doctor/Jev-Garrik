@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { absoluteDashboardLocation, applyDashboardProxy } from "../../research/src/p6/dashboard-read";
 
-/** View-only. The cron secret does not open this page. GET /p6 is enough; see dashboardAccess. */
+/** GET and HEAD are open. Writes still pass process.env.DASHBOARD_TOKEN. The cron secret does not authorize a write. */
 export function proxy(request: Request) {
   const result = applyDashboardProxy(request, process.env.DASHBOARD_TOKEN);
   if (result.status === 200) {
