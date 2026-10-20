@@ -49,14 +49,20 @@ function ohlc(ts: number) {
 function watchMget(kv: Kv): { full: () => number; restore: () => void } {
   const calls: string[][] = [];
   const base = kv.mget.bind(kv);
+  const baseMany = kv.readMany.bind(kv);
   kv.mget = async (keys) => {
     calls.push([...keys]);
     return base(keys);
+  };
+  kv.readMany = async (keys) => {
+    calls.push([...keys]);
+    return baseMany(keys);
   };
   return {
     full: () => calls.filter((keys) => keys.includes(HOT_KEY)).length,
     restore() {
       kv.mget = base;
+      kv.readMany = baseMany;
     },
   };
 }
