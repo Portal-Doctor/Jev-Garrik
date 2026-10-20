@@ -169,7 +169,7 @@ test("a large mget split across packets is still the snapshot", async () => {
   const sockets: Socket[] = [];
   server.on("connection", (socket) => sockets.push(socket));
   try {
-    const got = await openDashboardKv(`redis://:pw@127.0.0.1:${port}`).get("p6:packet-probe");
+    const got = await openDashboardKv(`redis://:pw@127.0.0.1:${port}`).get("p6:lastRun");
     expect(chunks).toBe(1);
     expect(got).toBe(body);
   } finally {

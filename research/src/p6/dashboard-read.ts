@@ -6,7 +6,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { connect as connectNet, isIP } from "node:net";
 import { connect as connectTls } from "node:tls";
-import { classifyStored, readText } from "./redis-gzip";
+import { classifyStored, GZIP_PREFIX, readText } from "./redis-gzip";
 import type { Kv } from "./relay";
 import { commandBudget, healthStale, monthCommands, nextCronMs, projectionTone } from "./dashboard-format";
 import {
@@ -483,6 +483,17 @@ export async function readP6Page(kv: Pick<Kv, "mget">, nowMs: number): Promise<{
   return { view, block };
 }
 
+/**
+ * Bytes the socket assembled. A plain bulk string is returned as stored, including
+ * one that is not JSON. A gz1: value is decoded. A gzip that does not decode is null.
+ * JSON shape is decided by the view, not by this packet reader.
+ */
+function dashboardValue(key: string, raw: string | null): string | null {
+  if (raw == null) return null;
+  if (!raw.startsWith(GZIP_PREFIX)) return raw;
+  return readText(classifyStored(key, raw));
+}
+
 /** A Kv that can only MGET. Every write throws before a socket opens. */
 export function openDashboardKv(url: string): Kv {
   const readMany = async (keys: string[]) => {
@@ -497,10 +508,12 @@ export function openDashboardKv(url: string): Kv {
       return readMany(keys);
     },
     async get(key) {
-      return readText((await readMany([key]))[0]!);
+      const raw = (await mgetRaw(url, [key]))[0] ?? null;
+      return dashboardValue(key, raw);
     },
     async mget(keys) {
-      return (await readMany(keys)).map((row) => readText(row));
+      const raw = await mgetRaw(url, keys);
+      return keys.map((key, index) => dashboardValue(key, raw[index] ?? null));
     },
     set: async () => refuse(),
     del: async () => refuse(),
