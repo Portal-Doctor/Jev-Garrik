@@ -216,6 +216,8 @@ export interface DashboardView {
   positions: { productId?: string; id?: string }[];
   closed: { productId?: string; classId?: string; netUsd?: number }[];
   emitted: string[];
+  /** True when p6:hot was present and could not be decoded. Missing hot stays false. */
+  unreadable: boolean;
 }
 
 function leaseOf(raw: string | null): DashboardLease | null {
@@ -229,15 +231,16 @@ function leaseOf(raw: string | null): DashboardLease | null {
   }
 }
 
-/** One mget of lastRun, hot, and the lease. No INFO and no writes. */
-export async function readP6Dashboard(kv: Pick<Kv, "mget">): Promise<DashboardView> {
-  const values = await kv.mget([LAST_RUN_KEY, HOT_KEY, LEASE_KEY]);
-  // Plain JSON and gz1: both decode. Unreadable is an empty view, not a throw.
-  const lastRead = classifyStored(LAST_RUN_KEY, values[0] ?? null);
-  const hotRead = classifyStored(HOT_KEY, values[1] ?? null);
+/** One read of lastRun, hot, and the lease. No INFO and no writes. */
+export async function readP6Dashboard(kv: Pick<Kv, "readMany">): Promise<DashboardView> {
+  const tagged = await kv.readMany([LAST_RUN_KEY, HOT_KEY, LEASE_KEY]);
+  // Plain JSON and gz1: both decode. A corrupt hot is flagged, not shown as an empty book.
+  const lastRead = tagged[0] ?? { tag: "missing" as const };
+  const hotRead = tagged[1] ?? { tag: "missing" as const };
   const lastRaw = readText(lastRead);
   const hotRaw = readText(hotRead);
-  const leaseRaw = values[2] ?? null;
+  const leaseRaw = readText(tagged[2] ?? { tag: "missing" });
+  const unreadable = hotRead.tag === "unreadable";
   const hot = hotRaw ? (JSON.parse(hotRaw) as Record<string, unknown>) : {};
   const incidents = Array.isArray(hot.incidents) ? hot.incidents.filter((row): row is string => typeof row === "string").map(stripUrls) : [];
   const gaps = Array.isArray(hot.gaps) ? (hot.gaps as DashboardView["gaps"]) : [];
@@ -258,6 +261,7 @@ export async function readP6Dashboard(kv: Pick<Kv, "mget">): Promise<DashboardVi
     positions,
     closed,
     emitted,
+    unreadable,
   };
 }
 
@@ -463,7 +467,7 @@ export function summaryFreshness(input: { hasLastRun: boolean; flushMs: number |
 }
 
 /** Dashboard mget plus the equity mget. Both are reads. */
-export async function readP6Page(kv: Pick<Kv, "mget">, nowMs: number): Promise<{ view: DashboardView; block: PnlBlock }> {
+export async function readP6Page(kv: Pick<Kv, "mget" | "readMany">, nowMs: number): Promise<{ view: DashboardView; block: PnlBlock }> {
   const [view, equity] = await Promise.all([readP6Dashboard(kv), readPnlWindows(kv, nowMs)]);
   const last = view.lastRun;
   const pnl = last && typeof last.pnl === "object" && last.pnl != null ? (last.pnl as Record<string, unknown>) : null;

@@ -776,6 +776,9 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
   const completed = finished
     ? { end: host.clock(), cmds: host.saveCommands + 1, outcome: host.runOutcome }
     : host.completedRun;
+  // Remember the record just written. An unreadable lastRun cannot be parsed, so the
+  // next flush would otherwise store completed:null and drop this one.
+  if (completed) host.completedRun = completed;
   const positionReport = positionSnapBuild(host.book);
   const last = {
     start: host.runStartedMs,
@@ -1678,6 +1681,7 @@ function assembleSplit(host: PaperHost, byKey: Map<string, string | null>, rings
         host.completedRun = prev.completed ?? { end: prev.end ?? 0, cmds: prev.redis?.cmds ?? 0, outcome: prev.outcome };
       } else if (prev.completed) host.completedRun = prev.completed;
     }
+    // Unreadable lastRun: leave completedRun as the record this process already stored.
     host.seedChecked = true;
   }
   const rawAcct = byKey.get(ACCT_KEY) ?? null;
@@ -1786,8 +1790,18 @@ async function declareHotUnreadable(kv: Kv, host: PaperHost, row: Extract<KvRead
   await appendIncident(kv, detail);
 }
 
+/** A standby hold has no incident. A clean read clears it. A declared hold stays until liftHold. */
+function clearStandbyHold(host: PaperHost): void {
+  if (host.hotHold) return;
+  host.entriesHeld = false;
+  host.hotReread = false;
+}
+
 async function readHotForLoad(kv: Kv, host: PaperHost, first: KvRead): Promise<KvRead> {
-  if (first.tag !== "unreadable") return first;
+  if (first.tag !== "unreadable") {
+    clearStandbyHold(host);
+    return first;
+  }
   if (!host.leaseToken) {
     host.hotReread = true;
     host.entriesHeld = true;
@@ -1801,7 +1815,10 @@ async function readHotForLoad(kv: Kv, host: PaperHost, first: KvRead): Promise<K
     attempts += 1;
     const again = await kv.read(HOT_KEY);
     noteKvRead(host, again);
-    if (again.tag !== "unreadable") return again;
+    if (again.tag !== "unreadable") {
+      clearStandbyHold(host);
+      return again;
+    }
     row = again;
   }
   await declareHotUnreadable(kv, host, row, attempts);

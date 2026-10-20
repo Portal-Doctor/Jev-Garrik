@@ -39,6 +39,7 @@ import {
   decodeLease,
   LEASE_KEY,
   memoryKv,
+  peekStored,
   releaseLease,
   runInvocation,
   tryAcquire,
@@ -184,12 +185,14 @@ test("readBytes counts redis payload bytes on the history load", async () => {
   const host = startPaperHost(["BTC-USD"], {});
   host.clock = clock;
   await loadSplit(kv, host);
-  expect(host.readBytes).toBe(Buffer.byteLength(hot) + Buffer.byteLength(four));
+  const logicalRead = Buffer.byteLength(hot) + Buffer.byteLength(four);
+  const wireRead = Buffer.byteLength(peekStored(kv, HOT_KEY) ?? "") + Buffer.byteLength(peekStored(kv, bar4hKey("BTC-USD")) ?? "");
+  expect(host.readBytes).toBe(logicalRead);
   host.saveCommands = 4;
   host.saveBytes = 9;
   host.duplicateAppends = 1;
   expect(redisLogLine(host)).toBe(
-    `redis cmds=4, bytes=9, readBytes=${Buffer.byteLength(hot) + Buffer.byteLength(four)}, wireSaveBytes=0, wireReadBytes=${Buffer.byteLength(hot) + Buffer.byteLength(four)}, duplicates=1, seqInvalid=0, seqOverflow=0`,
+    `redis cmds=4, bytes=9, readBytes=${logicalRead}, wireSaveBytes=0, wireReadBytes=${wireRead}, duplicates=1, seqInvalid=0, seqOverflow=0`,
   );
 });
 

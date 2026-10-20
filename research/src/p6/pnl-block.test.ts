@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "bun:test";
 import { readP6Page } from "./dashboard-read";
+import { classifyStored } from "./redis-gzip";
 import { captureHot, hotBytes, persistSplit } from "./hot-store";
 import {
   ANCHOR_GREY_MS,
@@ -520,7 +521,7 @@ test("largest close is by net, the cap is 501, and the hour start is included", 
   expect(boundary).toEqual({ n: 1, wins: 1, losses: 0, flat: 0, largestNet: 4, realizedSum: 4 });
 });
 
-test("the page read is two mgets and does not touch fills or the ledger", async () => {
+test("the page read is two reads and does not touch fills or the ledger", async () => {
   const now = Date.UTC(2026, 9, 16, 18, 0, 0);
   const first = pointAt(now - HOUR, 8000, 0, 0, 1, 1);
   const latest = pointAt(now, 8020, 8, 12, 2, 3);
@@ -534,6 +535,10 @@ test("the page read is two mgets and does not touch fills or the ledger", async 
     [eqTradeKey(latest.hourStartSec), encodeHourAgg([{ exitTs: now - 1_000, netUsd: 8 }], latest.hourStartSec)],
   ]);
   const kv = {
+    async readMany(keys: string[]) {
+      cmds.push("readMany");
+      return keys.map((key) => classifyStored(key, stored.get(key) ?? null));
+    },
     async mget(keys: string[]) {
       cmds.push("mget");
       return keys.map((key) => stored.get(key) ?? null);
@@ -572,7 +577,7 @@ test("the page read is two mgets and does not touch fills or the ledger", async 
     },
   };
   const { block } = await readP6Page(kv, now);
-  expect(cmds).toEqual(["mget", "mget"]);
+  expect(cmds).toEqual(["readMany", "mget"]);
   const keys = pnlMgetKeys(now);
   expect(keys.includes("p6:fills") || keys.includes("p6:ledger")).toBe(false);
   expect(keys.includes(EQ_FIRST_KEY)).toBe(true);

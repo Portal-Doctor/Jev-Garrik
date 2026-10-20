@@ -3,10 +3,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { absoluteDashboardLocation, applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, dashboardSetCookie, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard } from "./dashboard-read";
-import { cronAuthorized } from "./relay";
+import { cronAuthorized, memoryKv, plantStored } from "./relay";
 import { applyForward, paperPnl, replayInjected } from "./engine";
 import { delayBps } from "./legs";
-import { memoryKv } from "./relay";
+import { encodeStored, GZIP_PREFIX } from "./redis-gzip";
 
 test("the cron secret does not authorize the dashboard", () => {
   expect(dashboardAuthorized("Bearer cron-secret", "view-token")).toBe(false);
@@ -148,8 +148,32 @@ test("the page path only reads Redis", async () => {
   expect(view.lease).toEqual({ holder: "cron-1", untilMs: 10 });
   expect(JSON.stringify(view)).not.toContain("secret-token");
   expect(view.incidents[0]).toBe("see [url]");
+  expect(view.unreadable).toBe(false);
   expect((view.lastRun?.pnl as { equityUsd: number }).equityUsd).toBe(8000);
   await expect(openDashboardKv("redis://:pw@127.0.0.1:1").set("p6:hot", "{}")).rejects.toThrow(/read-only/);
+});
+
+test("a corrupt hot is flagged unreadable and a missing hot is not", async () => {
+  const missing = memoryKv();
+  const missingView = await readP6Dashboard(missing);
+  expect(missingView.unreadable).toBe(false);
+  expect(missingView.positions).toEqual([]);
+  expect(missingView.killSwitch).toBe(false);
+
+  const corrupt = memoryKv();
+  plantStored(corrupt, "p6:hot", `${GZIP_PREFIX}!!!!`);
+  const bad = await readP6Dashboard(corrupt);
+  expect(bad.unreadable).toBe(true);
+  expect(bad.positions).toEqual([]);
+  expect(bad.incidents).toEqual([]);
+  expect(bad.killSwitch).toBe(false);
+
+  const gzipped = memoryKv();
+  const hot = JSON.stringify({ positions: [{ productId: "BTC-USD", id: "p1" }], killSwitch: false, incidents: [] });
+  plantStored(gzipped, "p6:hot", encodeStored("p6:hot", hot));
+  const good = await readP6Dashboard(gzipped);
+  expect(good.unreadable).toBe(false);
+  expect(good.positions).toEqual([{ productId: "BTC-USD", id: "p1" }]);
 });
 
 test("a large mget split across packets is still the snapshot", async () => {
@@ -256,6 +280,8 @@ test("the page does not import the cron secret, auth, or a Redis write", () => {
   const proxy = readFileSync(join(root, "web/src/proxy.ts"), "utf8");
   expect(proxy.includes("applyDashboardProxy")).toBe(true);
   expect(page.includes("readP6Page")).toBe(true);
+  expect(page.includes("view.unreadable")).toBe(true);
+  expect(page.includes("Hot unreadable.")).toBe(true);
   expect(page.includes("last?.completed")).toBe(true);
   expect(page.includes("kill R")).toBe(true);
   expect(page.includes("Arrival delay bps")).toBe(true);

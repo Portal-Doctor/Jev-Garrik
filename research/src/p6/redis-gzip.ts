@@ -20,6 +20,12 @@ import { gzipSync, gunzipSync, type ZlibOptions } from "node:zlib";
 /** ASCII marker. Versioned so a later layout can use a different prefix. */
 export const GZIP_PREFIX = "gz1:";
 
+/**
+ * Largest gunzip output accepted. Matches the 1 MB Redis value cap.
+ * A larger expansion is unreadable. This does not change the 256 KB hot cap.
+ */
+export const GUNZIP_MAX_BYTES = 1_048_576;
+
 const GZIP_KEYS: ReadonlySet<string> = new Set(["p6:hot", "p6:lastRun"]);
 
 export function storesGzip(key: string): boolean {
@@ -85,7 +91,7 @@ function parsesJson(raw: string): boolean {
 
 function gunzipJson(raw: string): string | null {
   try {
-    const json = gunzipSync(Buffer.from(raw.slice(GZIP_PREFIX.length), "base64")).toString("utf8");
+    const json = gunzipSync(Buffer.from(raw.slice(GZIP_PREFIX.length), "base64"), { maxOutputLength: GUNZIP_MAX_BYTES }).toString("utf8");
     const head = json[0];
     if (head !== "{" && head !== "[") return null;
     JSON.parse(json);
@@ -142,7 +148,7 @@ export function decodeStored(key: string, value: string | null): string | null {
   if (value == null) return null;
   if (!storesGzip(key) || !value.startsWith(GZIP_PREFIX)) return value;
   try {
-    const json = gunzipSync(Buffer.from(value.slice(GZIP_PREFIX.length), "base64")).toString("utf8");
+    const json = gunzipSync(Buffer.from(value.slice(GZIP_PREFIX.length), "base64"), { maxOutputLength: GUNZIP_MAX_BYTES }).toString("utf8");
     const head = json[0];
     if (head !== "{" && head !== "[") return null;
     return json;

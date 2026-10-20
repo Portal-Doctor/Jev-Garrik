@@ -22,7 +22,8 @@ import {
   VALUE_MAX_BYTES,
   type Kv,
 } from "./relay";
-import { decodeStored, encodeStored, GZIP_PREFIX, gzipFlushPayload, installStoredEncoder, redisFlushPayload, storesGzip, takeGzipMismatches } from "./redis-gzip";
+import { gzipSync, type ZlibOptions } from "node:zlib";
+import { classifyStored, decodeStored, encodeStored, GUNZIP_MAX_BYTES, GZIP_PREFIX, gzipFlushPayload, installStoredEncoder, redisFlushPayload, storesGzip, takeGzipMismatches } from "./redis-gzip";
 
 const previousGzipWrites = process.env.P6_GZIP_WRITES;
 process.env.P6_GZIP_WRITES = "1";
@@ -66,6 +67,18 @@ function watchMget(kv: Kv): { full: () => number; restore: () => void } {
     },
   };
 }
+
+test("a gzip that expands past the value cap is unreadable", () => {
+  const over = JSON.stringify({ a: "x".repeat(GUNZIP_MAX_BYTES) });
+  const stored = GZIP_PREFIX + gzipSync(Buffer.from(over), { mtime: 0 } as ZlibOptions).toString("base64");
+  expect(classifyStored(HOT_KEY, stored).tag).toBe("unreadable");
+  expect(decodeStored(HOT_KEY, stored)).toBeNull();
+  expect(decodeStored(LAST_RUN_KEY, stored)).toBeNull();
+  const small = JSON.stringify({ ok: 1 });
+  const encoded = encodeStored(HOT_KEY, small);
+  expect(classifyStored(HOT_KEY, encoded)).toEqual({ tag: "value", value: small, wireBytes: Buffer.byteLength(encoded) });
+  expect(decodeStored(HOT_KEY, encoded)).toBe(small);
+});
 
 test("gzip round trip restores hot and lastRun and leaves other keys plain", async () => {
   const json = JSON.stringify({ seq: 3, era: "0123456789abcdef", base: 3, keySeq: { "p6:acct": 3 }, realizedUsd: 4 });
