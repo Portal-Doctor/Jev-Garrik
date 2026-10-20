@@ -43,6 +43,7 @@ import { applyMidSample, freshMidBook, halfSpreadBps, heartbeatMustReconnect, ta
 import {
   classifyUpdate,
   driftBps,
+  entryQuoteFillSrc,
   execCostBps,
   infoDelayBps,
   isPreFixB,
@@ -185,11 +186,11 @@ export interface ClosedTrade {
   maeBasis?: BidExtremes["maeBasis"];
   fillSrc?: FillSrc;
   exitFillSrc?: FillSrc;
-  /** Actual round-trip dollars when the risk series counts the shadow fill. */
-  fillNetUsd?: number;
-  shadowFill?: number;
+  /** Modelled entry beside the book P/L. netUsd and netR stay the actual round trip. */
+  shadowFillPx?: number;
   shadowNetUsd?: number;
   shadowNetR?: number;
+  shadowFillKind?: "modelled";
   execCostBps?: number | null;
   driftBps?: number | null;
   anchorMissing?: boolean;
@@ -1249,7 +1250,7 @@ function closePosition(
     ...spreadLog,
     ...(exec != null ? { execCostBps: exec, driftBps: drift } : {}),
   };
-  if (!book.config.parity && isPreFixB({ classId: position.classId, productId: position.productId, entryTs: position.entryTs, fillSrc: position.entryFillSrc })) {
+  if (x1TakerOn(book.config) && isPreFixB({ classId: position.classId, productId: position.productId, entryTs: position.entryTs, fillSrc: position.entryFillSrc })) {
     const shadow = shadowAtModelled({
       netUsd,
       entryFill: position.fillPrice,
@@ -1264,12 +1265,10 @@ function closePosition(
     closed = {
       ...closed,
       fillSrc: PRE_FIX_FILL_SRC,
-      fillNetUsd: netUsd,
-      shadowFill: shadow.shadowFill,
+      shadowFillPx: shadow.shadowFillPx,
       shadowNetUsd: shadow.shadowNetUsd,
       shadowNetR: shadow.shadowNetR,
-      netUsd: shadow.shadowNetUsd,
-      netR: shadow.shadowNetR,
+      shadowFillKind: shadow.shadowFillKind,
     };
   }
   pushClosed(book, closed);
@@ -1437,7 +1436,7 @@ function armExit(book: Book, position: Position, opts: { tsMs: number; kind: str
   });
 }
 
-/** First fresh L2 at or after the open fills the slot. Anything else at that time is modelled. */
+/** First quote at or after the open fills the slot. An entry older than 2s does not wait for a fresher book. */
 export function resolvePendingFills(book: Book, productId: string, quote: FillQuote): void {
   if (!x1TakerOn(book.config)) return;
   const keep: PendingFill[] = [];
@@ -1452,7 +1451,13 @@ export function resolvePendingFills(book: Book, productId: string, quote: FillQu
       continue;
     }
     const mid = quote.bid > 0 && quote.ask > 0 ? (quote.bid + quote.ask) / 2 : quote.bid > 0 ? quote.bid : quote.ask;
-    const fillSrc: FillSrc = action === "l2" ? "l2" : quote.ageMs > STALE_QUOTE_MS ? STALE_QUOTE_FILL_SRC : "modelled";
+    const fillSrc: FillSrc = slot.role === "entry"
+      ? entryQuoteFillSrc(quote.ageMs, action === "l2")
+      : action === "l2"
+        ? "l2"
+        : quote.ageMs > STALE_QUOTE_MS
+          ? STALE_QUOTE_FILL_SRC
+          : "modelled";
     if (slot.role === "entry") {
       const sLive = spreadBps(book, quote.bid, quote.ask);
       if (sLive == null) {

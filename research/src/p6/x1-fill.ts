@@ -7,6 +7,7 @@
  */
 
 import { corwinSchultzBps } from "../p2/liquidity";
+import { STALE_QUOTE_MS } from "./legs";
 import { PairBook } from "./mid-feed";
 
 export const FRESH_L2_MS = 2_000;
@@ -17,11 +18,15 @@ export const S_BT_FLOOR_BPS = 5;
 export const S_BT_CAP_BPS = 15;
 export const PRE_FIX_FILL_SRC = "pre-fix fill model" as const;
 export const STALE_QUOTE_FILL_SRC = "stale_quote_modelled" as const;
+/** First quote at or after the open was older than 2s and no older than 15s. Modelled at the registered price. */
+export const ENTRY_STALE_FILL_SRC = "entry_stale_quote" as const;
+/** The shadow price is the modelled entry. It is not the book fill. */
+export const SHADOW_FILL_KIND = "modelled" as const;
 export const PRE_FIX_PRODUCTS = ["AERO-USD", "ENA-USD", "NEAR-USD", "SUI-USD"] as const;
 /** Brian approved the shadow count at 7:07 AM CT on Oct 20 2026 (CDT, UTC−5). Frozen X1 2dd80f673396210f2c175e77d4abc102627bf485bcd63b60d989df16c8c966fc, Erratum 1 d01c3e0bec84e7fc3f651a57656ea7b25139c2b693fb4648dec90089a2b0f732, Erratum 2 e0e82d3617d7d9531ec98635c09c1cbe56505d849b5fafd0dc68426f29469d76. */
 export const PRE_FIX_BEFORE_MS = Date.parse("2026-10-20T12:07:00.000Z");
 
-export type FillSrc = "l2" | "modelled" | typeof STALE_QUOTE_FILL_SRC | typeof PRE_FIX_FILL_SRC;
+export type FillSrc = "l2" | "modelled" | typeof STALE_QUOTE_FILL_SRC | typeof PRE_FIX_FILL_SRC | typeof ENTRY_STALE_FILL_SRC;
 export type ExecWord = "ok" | "yellow" | "red";
 export type StressGrade = "insufficient" | "indicative" | "decision-grade";
 export type L2Src = "ws" | "rest_snapshot";
@@ -46,10 +51,22 @@ export function l2Fresh(ageMs: number, src: L2Src | undefined): boolean {
   return ageMs >= 0 && ageMs <= FRESH_L2_MS && src !== "rest_snapshot";
 }
 
-/** Ignore a book from before the open. A stale or REST book at/after it is modelled. */
+/** A quote from before the open stays pending. The first update at or after it is taken, even when it is stale. */
 export function classifyUpdate(input: { notBeforeMs: number; quoteTs: number; ageMs: number; src?: L2Src }): "ignore" | "l2" | "modelled" {
   if (!(input.quoteTs >= input.notBeforeMs)) return "ignore";
   return l2Fresh(input.ageMs, input.src) ? "l2" : "modelled";
+}
+
+/**
+ * Entry tag for that first update. ≤2s and not a REST snapshot is a taker walk.
+ * Older than 2s and no older than 15s is entry_stale_quote. Older than 15s is the stale-quote miss.
+ * A REST snapshot that is still ≤2s stays modelled. It is not a walked book.
+ */
+export function entryQuoteFillSrc(ageMs: number, fresh: boolean): FillSrc {
+  if (fresh) return "l2";
+  if (ageMs > STALE_QUOTE_MS) return STALE_QUOTE_FILL_SRC;
+  if (ageMs > FRESH_L2_MS) return ENTRY_STALE_FILL_SRC;
+  return "modelled";
 }
 
 /** Walk when the order is larger than the touch. A one-level book returns the touch. */
@@ -109,7 +126,7 @@ export function liveCostBps(execCost: number, drift: number): number {
 export function isPreFixB(row: { classId: string; productId: string; entryTs?: number; fillSrc?: string | null }): boolean {
   if (row.classId !== "B") return false;
   if (!(PRE_FIX_PRODUCTS as readonly string[]).includes(row.productId)) return false;
-  if (row.fillSrc === "l2" || row.fillSrc === "modelled" || row.fillSrc === STALE_QUOTE_FILL_SRC) return false;
+  if (row.fillSrc === "l2" || row.fillSrc === "modelled" || row.fillSrc === STALE_QUOTE_FILL_SRC || row.fillSrc === ENTRY_STALE_FILL_SRC) return false;
   if (row.fillSrc === PRE_FIX_FILL_SRC) return true;
   if (row.entryTs == null || row.entryTs >= PRE_FIX_BEFORE_MS) return false;
   return true;
@@ -117,14 +134,14 @@ export function isPreFixB(row: { classId: string; productId: string; entryTs?: n
 
 export function inSlippageStats(fillSrc: string | null | undefined, anchorMissing?: boolean): boolean {
   if (anchorMissing === true) return false;
-  return fillSrc !== PRE_FIX_FILL_SRC;
+  return fillSrc !== PRE_FIX_FILL_SRC && fillSrc !== ENTRY_STALE_FILL_SRC;
 }
 
 export function countsAsModelled(row: { fillSrc?: string | null; anchorMissing?: boolean }): boolean {
-  return row.fillSrc === "modelled" || row.fillSrc === STALE_QUOTE_FILL_SRC || row.anchorMissing === true;
+  return row.fillSrc === "modelled" || row.fillSrc === STALE_QUOTE_FILL_SRC || row.fillSrc === ENTRY_STALE_FILL_SRC || row.anchorMissing === true;
 }
 
-/** Share of entry legs that are modelled, stale-quote modelled, or missing an anchor. Pre-fix legs are not in the denominator. */
+/** Share of entry legs that are modelled, entry-stale, stale-quote modelled, or missing an anchor. Pre-fix legs are not in the denominator. */
 export function modelledShare(rows: readonly { classId: string; side?: string; fillSrc?: string | null; anchorMissing?: boolean }[], classId: string): number {
   const mine = rows.filter((row) => row.classId === classId && (row.side == null || row.side === "entry") && row.fillSrc != null && row.fillSrc !== PRE_FIX_FILL_SRC);
   if (mine.length === 0) return 0;
@@ -198,7 +215,7 @@ export function stressedNetR(rows: readonly StressTrade[], perLegBps: (row: Stre
  * Spread-fragile is a label. It does not add a gate.
  */
 export function classStress(rows: readonly StressTrade[], classId: string): ClassStress {
-  const mine = rows.filter((row) => row.classId === classId && row.parity !== true && row.fillSrc !== PRE_FIX_FILL_SRC && row.anchorMissing !== true && row.riskUsd > 0 && row.notionalUsd > 0);
+  const mine = rows.filter((row) => row.classId === classId && row.parity !== true && row.fillSrc !== PRE_FIX_FILL_SRC && row.fillSrc !== ENTRY_STALE_FILL_SRC && row.anchorMissing !== true && row.riskUsd > 0 && row.notionalUsd > 0);
   const n = mine.length;
   const capHitCount = mine.filter((row) => row.sBtCapped === true || (row.sBtUncappedBps != null && row.sBtUncappedBps > S_BT_CAP_BPS)).length;
   const grade = stressGrade(n);
@@ -216,8 +233,8 @@ export function classStress(rows: readonly StressTrade[], classId: string): Clas
 }
 
 /**
- * Shadow P/L if the entry had been the modelled fill. The stored fill price stays.
- * netUsd is the actual round trip. The shadow replaces the entry fill only.
+ * Shadow P/L if the entry had been the modelled fill. The stored fill and netUsd stay.
+ * The shadow is recorded beside the book. It does not replace the round trip.
  */
 export function shadowAtModelled(input: {
   netUsd: number;
@@ -227,9 +244,9 @@ export function shadowAtModelled(input: {
   anchor: number;
   bid: number;
   ask: number;
-}): { shadowFill: number; shadowNetUsd: number; shadowNetR: number } {
-  const shadowFill = modelledPx(input.anchor, input.bid, input.ask, "buy");
-  const shadowNetUsd = input.netUsd + (input.entryFill - shadowFill) * input.units;
+}): { shadowFillPx: number; shadowNetUsd: number; shadowNetR: number; shadowFillKind: typeof SHADOW_FILL_KIND } {
+  const shadowFillPx = modelledPx(input.anchor, input.bid, input.ask, "buy");
+  const shadowNetUsd = input.netUsd + (input.entryFill - shadowFillPx) * input.units;
   const shadowNetR = input.riskUsd > 0 ? shadowNetUsd / input.riskUsd : 0;
-  return { shadowFill, shadowNetUsd, shadowNetR };
+  return { shadowFillPx, shadowNetUsd, shadowNetR, shadowFillKind: SHADOW_FILL_KIND };
 }

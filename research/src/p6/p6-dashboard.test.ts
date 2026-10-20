@@ -759,8 +759,9 @@ test("a planted host in the new public fields is absent from the HTML and the RS
       },
     ],
     closed: [
-      { productId: "ETH-USD", classId: "B", netUsd: 1, mfeR: 0.4, maeR: -0.2, fillSrc: "modelled", execCostBps: 3.5, driftBps: 1.2, delayBps: -0.4, shadowNetUsd: 2, shadowNetR: 0.1, mfeBasis: "bid1m" },
-      { productId: host, classId: host, netUsd: host as never, fillSrc: host, execCostBps: Number.NaN, driftBps: Number.POSITIVE_INFINITY, mfeR: host as never, shadowNetUsd: host as never },
+      { productId: "ETH-USD", classId: "B", netUsd: 1, mfeR: 0.4, maeR: -0.2, fillSrc: "modelled", execCostBps: 3.5, driftBps: 1.2, delayBps: -0.4, shadowNetUsd: 2, shadowNetR: 0.1, shadowFillPx: 100.2, shadowFillKind: "modelled", mfeBasis: "bid1m" },
+      { productId: "SOL-USD", classId: "C", netUsd: 3, fillSrc: "entry_stale_quote", shadowFillPx: 1, shadowFillKind: "not-a-kind" },
+      { productId: host, classId: host, netUsd: host as never, fillSrc: host, execCostBps: Number.NaN, driftBps: Number.POSITIVE_INFINITY, mfeR: host as never, shadowNetUsd: host as never, shadowFillPx: host as never, shadowFillKind: host },
     ],
     mark: {
       pnlNow: -21.4,
@@ -804,7 +805,14 @@ test("a planted host in the new public fields is absent from the HTML and the RS
   expect(shown.positions[1]?.mfeBasis).toBeUndefined();
   expect(shown.positions[1]?.mfeBid1m).toBeUndefined();
   expect(shown.closed[0]?.fillSrc).toBe("modelled");
-  expect(shown.closed[1]?.fillSrc).toBeUndefined();
+  expect(shown.closed[0]?.shadowFillPx).toBe(100.2);
+  expect(shown.closed[0]?.shadowFillKind).toBe("modelled");
+  expect(shown.closed[1]?.fillSrc).toBe("entry_stale_quote");
+  expect(shown.closed[1]?.shadowFillPx).toBe(1);
+  expect(shown.closed[1]?.shadowFillKind).toBeUndefined();
+  expect(shown.closed[2]?.fillSrc).toBeUndefined();
+  expect(shown.closed[2]?.shadowFillPx).toBeUndefined();
+  expect(shown.closed[2]?.shadowFillKind).toBeUndefined();
   expect(shown.mark?.state).toBe("na");
   expect(shown.mark?.label).toBe("marked to bid, taker 0.90% exit");
   expect(shown.mark?.staleText).toBeUndefined();

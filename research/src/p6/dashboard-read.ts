@@ -463,7 +463,8 @@ export function redactP6View(view: DashboardView): DashboardView {
 }
 
 const BASIS = new Set(["bid1m", "mid-half-spread", "bar15-high", "bar15-low"]);
-const FILL_SRC = new Set(["l2", "modelled", "stale_quote_modelled", "pre-fix fill model"]);
+const FILL_SRC = new Set(["l2", "modelled", "stale_quote_modelled", "pre-fix fill model", "entry_stale_quote"]);
+const SHADOW_KIND = new Set(["modelled"]);
 const MARK_STATE = new Set(["live", "stale", "rest", "na"]);
 const EXEC_WORD = new Set(["ok", "yellow", "red"]);
 const STRESS_GRADE = new Set(["insufficient", "indicative", "decision-grade"]);
@@ -491,6 +492,8 @@ function publicClosed(row: DashboardView["closed"][number]): DashboardView["clos
   const delayBps = publicNumber(row.delayBps);
   const shadowNetUsd = publicNumber(row.shadowNetUsd);
   const shadowNetR = publicNumber(row.shadowNetR);
+  const shadowFillPx = publicNumber(row.shadowFillPx);
+  const shadowFillKind = publicEnum(row.shadowFillKind, SHADOW_KIND);
   const mfeBasis = publicEnum(row.mfeBasis, BASIS);
   const maeBasis = publicEnum(row.maeBasis, BASIS);
   return {
@@ -505,6 +508,8 @@ function publicClosed(row: DashboardView["closed"][number]): DashboardView["clos
     ...(delayBps !== undefined ? { delayBps } : {}),
     ...(shadowNetUsd !== undefined ? { shadowNetUsd } : {}),
     ...(shadowNetR !== undefined ? { shadowNetR } : {}),
+    ...(shadowFillPx !== undefined ? { shadowFillPx } : {}),
+    ...(shadowFillKind ? { shadowFillKind } : {}),
     ...(mfeBasis ? { mfeBasis } : {}),
     ...(maeBasis ? { maeBasis } : {}),
   };
@@ -712,6 +717,8 @@ export interface DashboardClosed {
   delayBps?: number;
   shadowNetUsd?: number;
   shadowNetR?: number;
+  shadowFillPx?: number;
+  shadowFillKind?: string;
 }
 
 export interface DashboardView {

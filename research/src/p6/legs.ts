@@ -48,7 +48,7 @@ export interface LegLog {
   midAtDecision?: number;
   /** Registered entry open for the class. Drift is against this, not the decision. */
   fillAnchorOpen?: number;
-  fillSrc?: "l2" | "modelled" | "stale_quote_modelled" | "pre-fix fill model";
+  fillSrc?: "l2" | "modelled" | "stale_quote_modelled" | "pre-fix fill model" | "entry_stale_quote";
   /** The registered entry open was missing. Drift is null. Not promotion evidence. */
   anchorMissing?: boolean;
   /** Positive is a cost. Sells are mirrored. No absolute value. */
