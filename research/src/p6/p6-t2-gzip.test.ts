@@ -403,15 +403,17 @@ function watchFlush(kv: Kv): { logical: number; wire: number; hot: SizePair; las
   };
   // Bar SETs and the unsequenced hot strip sit outside the EVAL. The hot SET inside ownedFlush is not a second Redis write.
   kv.ownedSet = async (leaseKey, token, key, value, opts) => {
-    if (!inFlush) {
+    const wrote = await ownedSet(leaseKey, token, key, value, opts);
+    if (!inFlush && wrote) {
       stats.logical += Buffer.byteLength(value);
-      stats.wire += Buffer.byteLength(encodeStored(key, value));
+      const stored = peekStored(kv, key) ?? value;
+      stats.wire += Buffer.byteLength(stored);
       if (key === HOT_KEY) {
         stats.hot.logical += Buffer.byteLength(value);
-        stats.hot.gzip += Buffer.byteLength(encodeStored(key, value));
+        stats.hot.gzip += Buffer.byteLength(stored);
       }
     }
-    return ownedSet(leaseKey, token, key, value, opts);
+    return wrote;
   };
   return {
     get logical() {
