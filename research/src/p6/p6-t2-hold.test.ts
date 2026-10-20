@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
-import { ACCT_KEY, corruptHotKey, CORRUPT_HOT_TTL_MS, hotResumeToken, LAST_RUN_KEY, liftHold, loadSplit, markHotRestored, persistSplit, reloadSplit, tryResumeEntries } from "./hot-store";
+import { ACCT_KEY, corruptHotKey, CORRUPT_HOT_TTL_MS, FILLS_KEY, hotResumeToken, LAST_RUN_KEY, liftHold, loadSplit, markHotRestored, noteKvRead, persistSplit, reloadSplit, tryResumeEntries, writeThroughBook } from "./hot-store";
 import { EQ_FIRST_KEY } from "./pnl-block";
-import { installPaperState, startPaperHost } from "./paper-host";
-import { HOT_KEY, memoryKv, peekStored, plantStored } from "./relay";
+import { acceptRestBar, installPaperState, startPaperHost } from "./paper-host";
+import { beginWireAccount, decodeLease, endWireAccount, HOT_KEY, memoryKv, peekStored, plantStored, takeListWire, tryAcquire } from "./relay";
+import { hostHolder } from "./vercel-live";
 import { classifyStored, encodeStored, GZIP_PREFIX } from "./redis-gzip";
 
 const NOW = Date.parse("2026-10-12T17:01:00Z");
@@ -382,4 +383,170 @@ test("a bad gzip is unreadable and get does not return the stored bytes", async 
   expect(await kv.get(HOT_KEY)).toBeNull();
   expect((await kv.read(HOT_KEY)).tag).toBe("unreadable");
   expect(await tryResumeEntries(kv, startPaperHost(["BTC-USD"], {}), "a:1:b")).toBe("absent");
+});
+
+test("a fresh process does not overwrite an unreadable lastRun with completed null", async () => {
+  const { kv, host } = hostOf();
+  host.runOutcome = "deadline";
+  await persistSplit(kv, host);
+  const logical = JSON.parse((await kv.get(LAST_RUN_KEY)) ?? "null") as { completed?: { outcome?: string } | null };
+  expect(logical.completed?.outcome).toBe("deadline");
+  const torn = `${GZIP_PREFIX}!!!!`;
+  plantStored(kv, LAST_RUN_KEY, torn);
+  const reader = startPaperHost(["BTC-USD"], {});
+  reader.clock = clock;
+  reader.leaseToken = "holder";
+  reader.holdSleep = async () => {};
+  const body = await loadSplit(kv, reader);
+  if (!body) throw new Error("load");
+  installPaperState(reader, body);
+  expect(reader.lastRunUnreadable).toBe(true);
+  expect(reader.completedRun).toBeNull();
+  reader.leaseToken = null;
+  await persistSplit(kv, reader);
+  expect(peekStored(kv, LAST_RUN_KEY)).toBe(torn);
+  expect(await kv.get(LAST_RUN_KEY)).toBeNull();
+});
+
+test("a held book does not queue entries", () => {
+  const startSec = Math.floor(NOW / 1000) - 960;
+  const nowSec = startSec + 900;
+  const nowMs = nowSec * 1000 + 5_000;
+  const host = startPaperHost(["BTC-USD"], {});
+  host.clock = () => nowMs;
+  host.entriesHeld = true;
+  host.generatedSec = nowSec;
+  host.generated = {
+    entries: [
+      {
+        kind: "x1",
+        classId: "A",
+        productId: "BTC-USD",
+        tsMs: nowMs,
+        nextOpen: 1,
+        stop: 1,
+        target: null,
+        dailyAtr: 1,
+        priorDailyCloses: [],
+        signalDate: "2026-10-12",
+      },
+    ],
+    weeks: [],
+    atrByProduct: new Map(),
+  };
+  acceptRestBar(host, { productId: "BTC-USD", startSec, open: 1, high: 1, low: 1, close: 1, volume: 1 });
+  expect(host.queued.size).toBe(0);
+});
+
+test("a held book does not cold-reset or apply due bars", async () => {
+  const previous = process.env.P6_RESET_COLD;
+  process.env.P6_RESET_COLD = "1";
+  try {
+    const kv = memoryKv(clock);
+    expect(await tryAcquire(kv, "K", NOW + 3_600_000, NOW)).toBe(true);
+    const host = startPaperHost(["BTC-USD"], {});
+    host.clock = clock;
+    host.leaseToken = decodeLease(await kv.get("p6:lease"))?.token ?? null;
+    host.seedMarks.set("BTC-USD", { oldestTs: 1, newestTs: 2, status: "cold", reason: "short" });
+    host.entriesHeld = true;
+    const holder = hostHolder(host, kv, [], "K");
+    await holder.resetCold();
+    expect(host.seedMarks.get("BTC-USD")?.status).toBe("cold");
+    const startSec = Math.floor(NOW / 1000) - 1_800;
+    const due = hostHolder(host, kv, [{ productId: "BTC-USD", startSec, open: 1, high: 1, low: 1, close: 2, volume: 1 }], "K");
+    expect(await due.applyDueBars()).toEqual([]);
+    expect(host.fifteen.some((bar) => bar.startSec === startSec)).toBe(false);
+  } finally {
+    if (previous === undefined) delete process.env.P6_RESET_COLD;
+    else process.env.P6_RESET_COLD = previous;
+  }
+});
+
+test("a held book does not write fills through", async () => {
+  const kv = memoryKv(clock);
+  expect(await tryAcquire(kv, "K", NOW + 3_600_000, NOW)).toBe(true);
+  const host = startPaperHost(["BTC-USD"], {});
+  host.clock = clock;
+  host.kv = kv;
+  host.leaseToken = decodeLease(await kv.get("p6:lease"))?.token ?? null;
+  host.entriesHeld = true;
+  host.book.legs.push({
+    id: "f1",
+    productId: "BTC-USD",
+    classId: "A",
+    side: "entry",
+    arrivalMid: 1,
+    arrivalBid: 1,
+    arrivalAsk: 1,
+    arrivalSnapshotTs: NOW,
+    orderSendTs: NOW,
+    decisionMid: 1,
+    activeStop: null,
+    triggerBarTs: null,
+    fillPrice: 1,
+    units: 1,
+    feesUsd: 0,
+  });
+  await writeThroughBook(kv, host);
+  expect(peekStored(kv, FILLS_KEY)).toBeNull();
+  expect(host.fillStored).toBe(0);
+});
+
+test("an unreadable hot returns before ring and lastRun reads", async () => {
+  const { kv } = await storedHot();
+  plantStored(kv, HOT_KEY, `${GZIP_PREFIX}!!!!`);
+  plantStored(kv, LAST_RUN_KEY, `${GZIP_PREFIX}!!!!`);
+  const reader = startPaperHost(["BTC-USD"], {});
+  reader.clock = clock;
+  reader.leaseToken = "holder";
+  reader.holdSleep = async () => {};
+  let lists = 0;
+  const orig = kv.readLists.bind(kv);
+  kv.readLists = async (keys) => {
+    lists += 1;
+    return orig(keys);
+  };
+  expect(await loadSplit(kv, reader)).toBeNull();
+  expect(lists).toBe(0);
+  expect(reader.lastRunUnreadable).toBe(false);
+});
+
+test("a clean retry clears a standby hold that was already set", async () => {
+  const { kv, raw } = await storedHot();
+  plantStored(kv, HOT_KEY, `${GZIP_PREFIX}!!!!`);
+  const reader = startPaperHost(["BTC-USD"], {});
+  reader.clock = clock;
+  reader.leaseToken = "holder";
+  reader.entriesHeld = true;
+  reader.hotReread = true;
+  let slept = 0;
+  reader.holdSleep = async () => {
+    slept += 1;
+    if (slept === 1) plantStored(kv, HOT_KEY, raw);
+  };
+  const body = await loadSplit(kv, reader);
+  expect(body?.realizedUsd).toBe(4);
+  expect(slept).toBe(1);
+  expect(reader.entriesHeld).toBe(false);
+  expect(reader.hotReread).toBe(false);
+  expect(reader.hotHold).toBeNull();
+});
+
+test("wire accounting skips incident keys and counts an unreadable read and a list", async () => {
+  const kv = memoryKv(clock);
+  beginWireAccount(kv);
+  await kv.set("p6:bar15:BTC-USD:2026-10-12", "[]");
+  await kv.set("p6:incidents", "[1]");
+  await kv.set("p6:hot:corrupt:abc", "raw");
+  expect(endWireAccount(kv)).toBe(Buffer.byteLength("[]"));
+  await kv.set("p6:ring:BTC-USD", JSON.stringify(["abcd"]));
+  await kv.readLists(["p6:ring:BTC-USD"]);
+  expect(takeListWire(kv)).toBe(Buffer.byteLength(JSON.stringify(["abcd"])));
+  plantStored(kv, HOT_KEY, `${GZIP_PREFIX}!!!!`);
+  const host = startPaperHost(["BTC-USD"], {});
+  const row = await kv.read(HOT_KEY);
+  noteKvRead(host, row);
+  expect(row.tag).toBe("unreadable");
+  expect(host.wireReadBytes).toBe(Buffer.byteLength(`${GZIP_PREFIX}!!!!`));
+  expect(await kv.mget([HOT_KEY])).toEqual([null]);
 });

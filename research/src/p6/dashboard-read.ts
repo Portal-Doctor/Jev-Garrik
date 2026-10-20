@@ -218,6 +218,8 @@ export interface DashboardView {
   emitted: string[];
   /** True when p6:hot was present and could not be decoded. Missing hot stays false. */
   unreadable: boolean;
+  /** True when p6:lastRun was present and could not be decoded. Missing lastRun stays false. */
+  lastUnreadable: boolean;
 }
 
 function leaseOf(raw: string | null): DashboardLease | null {
@@ -241,6 +243,7 @@ export async function readP6Dashboard(kv: Pick<Kv, "readMany">): Promise<Dashboa
   const hotRaw = readText(hotRead);
   const leaseRaw = readText(tagged[2] ?? { tag: "missing" });
   const unreadable = hotRead.tag === "unreadable";
+  const lastUnreadable = lastRead.tag === "unreadable";
   const hot = hotRaw ? (JSON.parse(hotRaw) as Record<string, unknown>) : {};
   const incidents = Array.isArray(hot.incidents) ? hot.incidents.filter((row): row is string => typeof row === "string").map(stripUrls) : [];
   const gaps = Array.isArray(hot.gaps) ? (hot.gaps as DashboardView["gaps"]) : [];
@@ -262,6 +265,7 @@ export async function readP6Dashboard(kv: Pick<Kv, "readMany">): Promise<Dashboa
     closed,
     emitted,
     unreadable,
+    lastUnreadable,
   };
 }
 

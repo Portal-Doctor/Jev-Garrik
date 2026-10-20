@@ -167,13 +167,71 @@ test("a corrupt hot is flagged unreadable and a missing hot is not", async () =>
   expect(bad.positions).toEqual([]);
   expect(bad.incidents).toEqual([]);
   expect(bad.killSwitch).toBe(false);
+  expect(bad.lastUnreadable).toBe(false);
 
   const gzipped = memoryKv();
   const hot = JSON.stringify({ positions: [{ productId: "BTC-USD", id: "p1" }], killSwitch: false, incidents: [] });
   plantStored(gzipped, "p6:hot", encodeStored("p6:hot", hot));
   const good = await readP6Dashboard(gzipped);
   expect(good.unreadable).toBe(false);
+  expect(good.lastUnreadable).toBe(false);
   expect(good.positions).toEqual([{ productId: "BTC-USD", id: "p1" }]);
+
+  const lastOnly = memoryKv();
+  plantStored(lastOnly, "p6:hot", JSON.stringify({ positions: [{ productId: "ETH-USD", id: "e1" }] }));
+  plantStored(lastOnly, "p6:lastRun", `${GZIP_PREFIX}!!!!`);
+  const flagged = await readP6Dashboard(lastOnly);
+  expect(flagged.unreadable).toBe(false);
+  expect(flagged.lastUnreadable).toBe(true);
+  expect(flagged.lastRun).toBeNull();
+  expect(flagged.positions).toEqual([{ productId: "ETH-USD", id: "e1" }]);
+  expect(missingView.lastUnreadable).toBe(false);
+});
+
+test("the dashboard socket keeps a plain bulk string and classifies gzip", async () => {
+  const serve = async (payload: string) => {
+    const server = createServer((socket) => {
+      socket.write(payload);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    const sockets: Socket[] = [];
+    server.on("connection", (socket) => sockets.push(socket));
+    const kv = openDashboardKv(`redis://:pw@127.0.0.1:${port}`);
+    return {
+      kv,
+      async close() {
+        for (const socket of sockets) socket.destroy();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      },
+    };
+  };
+  const plain = await serve(`+OK\r\n*1\r\n$8\r\nnot-json\r\n`);
+  try {
+    expect(await plain.kv.get("p6:lastRun")).toBe("not-json");
+  } finally {
+    await plain.close();
+  }
+  const logical = JSON.stringify({ ok: 1 });
+  const stored = encodeStored("p6:hot", logical);
+  const body = `+OK\r\n*1\r\n$${Buffer.byteLength(stored)}\r\n${stored}\r\n`;
+  const gzip = await serve(body);
+  try {
+    expect(await gzip.kv.get("p6:hot")).toBe(logical);
+  } finally {
+    await gzip.close();
+  }
+  const torn = `${GZIP_PREFIX}!!!!`;
+  const badBody = `+OK\r\n*1\r\n$${Buffer.byteLength(torn)}\r\n${torn}\r\n`;
+  const corrupt = await serve(badBody);
+  try {
+    const row = await corrupt.kv.readMany(["p6:hot"]);
+    expect(row[0]?.tag).toBe("unreadable");
+    expect(await corrupt.kv.get("p6:hot")).toBeNull();
+  } finally {
+    await corrupt.close();
+  }
 });
 
 test("a large mget split across packets is still the snapshot", async () => {
@@ -282,6 +340,8 @@ test("the page does not import the cron secret, auth, or a Redis write", () => {
   expect(page.includes("readP6Page")).toBe(true);
   expect(page.includes("view.unreadable")).toBe(true);
   expect(page.includes("Hot unreadable.")).toBe(true);
+  expect(page.includes("view.lastUnreadable")).toBe(true);
+  expect(page.includes("Last run unreadable.")).toBe(true);
   expect(page.includes("last?.completed")).toBe(true);
   expect(page.includes("kill R")).toBe(true);
   expect(page.includes("Arrival delay bps")).toBe(true);

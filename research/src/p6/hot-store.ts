@@ -832,10 +832,13 @@ function flushExtra(host: PaperHost, hot: string, barKeys: ReadonlySet<string>):
     last.redis.maxValueBytes = lastBytes;
     encoded = JSON.stringify(last);
   }
+  // A fresh process has no completed record in memory. Leave the stored lastRun
+  // in place instead of replacing it with completed:null.
+  const rewriteLast = !(host.lastRunUnreadable && completed == null);
   const extra: { key: string; value: string; px?: number; nx?: boolean }[] = [
     { key: SEED_CURSOR_KEY, value: JSON.stringify(host.seedCursor) },
     ...storedMarks.map(([id, mark]) => ({ key: seedMarkKey(id), value: JSON.stringify(mark) })),
-    { key: LAST_RUN_KEY, value: encoded },
+    ...(rewriteLast ? [{ key: LAST_RUN_KEY, value: encoded }] : []),
   ];
   // Hourly equity points ride in this same EVAL. A book reset must delete p6:eq:* (deferred; not built).
   host.eqPlanHour = hourStartSec(host.clock());

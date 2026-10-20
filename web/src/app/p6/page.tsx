@@ -307,6 +307,12 @@ export default async function P6DashboardPage({
           <span>The snapshot could not be read. This is not an empty book.</span>
         </div>
       ) : null}
+      {view.lastUnreadable ? (
+        <div className={styles.alert} role="alert">
+          <strong>Last run unreadable.</strong>
+          <span>The last run could not be read. This is not an empty run.</span>
+        </div>
+      ) : null}
       {gateLines.length > 0 ? (
         <div className={styles.alert} role="alert">
           <strong>Gate tripped:</strong>
@@ -619,6 +625,7 @@ export default async function P6DashboardPage({
       >
         <dl className={styles.kvs}>
           <Kv label="Hot">{view.unreadable ? "unreadable" : "ok"}</Kv>
+          <Kv label="Last run">{view.lastUnreadable ? "unreadable" : "ok"}</Kv>
           <Kv label="Holder">
             {view.lease?.holder ?? "none"}
             {view.lease ? ` until ${new Date(view.lease.untilMs).toISOString()}` : ""}
