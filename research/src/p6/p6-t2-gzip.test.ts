@@ -10,6 +10,7 @@ import {
   reloadSplit,
 } from "./hot-store";
 import { FOUR_KEEP, HOUR_KEEP, installPaperState, startPaperHost, type PaperHost } from "./paper-host";
+import { redisLogLine } from "./vercel-live";
 import {
   decodeLease,
   HOT_KEY,
@@ -306,6 +307,43 @@ test("a corrupting encoder stores plain JSON and logs the mismatch", async () =>
   expect(host.book.incidents.some((row) => row === "gzip mismatch p6:hot")).toBe(true);
 });
 
+test("wire counters use the stored lengths", async () => {
+  const { kv, host } = await leasedHost(["BTC-USD"], clock, clock);
+  host.book.realizedUsd = 3;
+  await persistSplit(kv, host);
+  expect(host.saveBytes).toBeGreaterThan(0);
+  expect(host.wireSaveBytes).toBeGreaterThan(0);
+  expect(host.wireSaveBytes).toBeLessThan(host.saveBytes);
+  expect(peekStored(kv, HOT_KEY)?.startsWith(GZIP_PREFIX)).toBe(true);
+  const line = redisLogLine(host);
+  expect(line).toContain(`bytes=${host.saveBytes}`);
+  expect(line).toContain(`readBytes=${host.readBytes}`);
+  expect(line).toContain(`wireSaveBytes=${host.wireSaveBytes}`);
+  expect(line).toContain(`wireReadBytes=${host.wireReadBytes}`);
+  const reader = startPaperHost(["BTC-USD"], {});
+  reader.clock = clock;
+  expect(await loadSplit(kv, reader)).not.toBeNull();
+  expect(reader.wireReadBytes).toBeGreaterThan(0);
+  expect(reader.wireReadBytes).toBeLessThan(reader.readBytes);
+});
+
+test("wire save matches the logical payload when gzip writes are off", async () => {
+  process.env.P6_GZIP_WRITES = "0";
+  try {
+    const { kv, host } = await leasedHost(["BTC-USD"], clock, clock);
+    host.book.realizedUsd = 4;
+    await persistSplit(kv, host);
+    expect(peekStored(kv, HOT_KEY)?.startsWith("{")).toBe(true);
+    expect(host.wireSaveBytes).toBe(host.saveBytes);
+    const reader = startPaperHost(["BTC-USD"], {});
+    reader.clock = clock;
+    expect(await loadSplit(kv, reader)).not.toBeNull();
+    expect(reader.wireReadBytes).toBe(reader.readBytes);
+  } finally {
+    process.env.P6_GZIP_WRITES = "1";
+  }
+});
+
 function universeNames(padTo = 0): string[] {
   const path = fileURLToPath(new URL("../../data/reports/universe-membership.json", import.meta.url));
   const membership = JSON.parse(readFileSync(path, "utf8")) as { members: { date: string; names: string[] }[] };
@@ -396,24 +434,32 @@ function watchRead(kv: Kv): { wire: number; reset: () => void; restore: () => vo
   let wire = 0;
   const get = kv.get.bind(kv);
   const mget = kv.mget.bind(kv);
+  const read = kv.read.bind(kv);
+  const readMany = kv.readMany.bind(kv);
   const lists = kv.readLists.bind(kv);
-  kv.get = async (key) => {
+  const add = (key: string) => {
     const raw = peekStored(kv, key);
     if (raw) wire += Buffer.byteLength(raw);
+  };
+  kv.get = async (key) => {
+    add(key);
     return get(key);
   };
   kv.mget = async (keys) => {
-    const values = await mget(keys);
-    for (const key of keys) {
-      const raw = peekStored(kv, key);
-      if (raw) wire += Buffer.byteLength(raw);
-    }
-    return values;
+    for (const key of keys) add(key);
+    return mget(keys);
+  };
+  kv.read = async (key) => {
+    add(key);
+    return read(key);
+  };
+  kv.readMany = async (keys) => {
+    for (const key of keys) add(key);
+    return readMany(keys);
   };
   kv.readLists = async (keys) => {
-    const rows = await lists(keys);
-    for (const list of rows) for (const row of list) wire += Buffer.byteLength(row);
-    return rows;
+    for (const key of keys) add(key);
+    return lists(keys);
   };
   return {
     get wire() {
@@ -425,6 +471,8 @@ function watchRead(kv: Kv): { wire: number; reset: () => void; restore: () => vo
     restore() {
       kv.get = get;
       kv.mget = mget;
+      kv.read = read;
+      kv.readMany = readMany;
       kv.readLists = lists;
     },
   };

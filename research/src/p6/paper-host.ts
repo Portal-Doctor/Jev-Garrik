@@ -273,7 +273,7 @@ export interface PaperHost {
   readBytes: number;
   /** Stored byte lengths of those reads. Not a second gzip. */
   wireReadBytes: number;
-  /** Stored byte lengths of the writes counted in saveBytes. */
+  /** Stored lengths of the writes counted in saveBytes. A flush counts the EVAL argument once. */
   wireSaveBytes: number;
   /** Entries are paused in memory. Not stored. A bad p6:hot sets this. */
   entriesHeld: boolean;

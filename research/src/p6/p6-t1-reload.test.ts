@@ -189,7 +189,7 @@ test("readBytes counts redis payload bytes on the history load", async () => {
   host.saveBytes = 9;
   host.duplicateAppends = 1;
   expect(redisLogLine(host)).toBe(
-    `redis cmds=4, bytes=9, readBytes=${Buffer.byteLength(hot) + Buffer.byteLength(four)}, duplicates=1, seqInvalid=0, seqOverflow=0`,
+    `redis cmds=4, bytes=9, readBytes=${Buffer.byteLength(hot) + Buffer.byteLength(four)}, wireSaveBytes=0, wireReadBytes=${Buffer.byteLength(hot) + Buffer.byteLength(four)}, duplicates=1, seqInvalid=0, seqOverflow=0`,
   );
 });
 

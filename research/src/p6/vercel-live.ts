@@ -4,7 +4,7 @@
  */
 
 import type { SourceDay } from "../p3/bar-access";
-import { loadSplit, noteReadBytes, persistSplit, reloadSplit, warmReadyCount, warmupKey } from "./hot-store";
+import { loadSplit, noteKvRead, persistSplit, reloadSplit, warmReadyCount, warmupKey } from "./hot-store";
 import { decodeStored } from "./redis-gzip";
 import { acceptRestBar, applyRestCold, attachMemberCloses, attachRestLease, backfillTapeIfNeeded, catchUpHistory, coldResetEnabled, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, seedRetryList, stageColdReset, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
 import { createRestRun, restLogLine } from "./rest-limit";
@@ -249,24 +249,25 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
 
 /** Save counters and the bytes this invocation read back from Redis. */
 export function redisLogLine(host: PaperHost): string {
-  return `redis cmds=${host.saveCommands}, bytes=${host.saveBytes}, readBytes=${host.readBytes}, duplicates=${host.duplicateAppends}, seqInvalid=${host.seqInvalid}, seqOverflow=${host.seqOverflow}`;
+  return `redis cmds=${host.saveCommands}, bytes=${host.saveBytes}, readBytes=${host.readBytes}, wireSaveBytes=${host.wireSaveBytes}, wireReadBytes=${host.wireReadBytes}, duplicates=${host.duplicateAppends}, seqInvalid=${host.seqInvalid}, seqOverflow=${host.seqOverflow}`;
 }
 
 async function loadWarmup(kv: Kv, host: PaperHost): Promise<void> {
   const missing = [...new Set([...host.products, "BTC-USD"])].filter((id) => (host.warmup.get(id)?.length ?? 0) === 0);
   if (missing.length === 0) return;
-  const values = await kv.mget(missing.map((id) => warmupKey(id)));
-  for (const raw of values) noteReadBytes(host, raw);
+  const values = await kv.readMany(missing.map((id) => warmupKey(id)));
+  for (const row of values) noteKvRead(host, row);
   missing.forEach((id, index) => {
-    const raw = values[index];
+    const raw = values[index]?.tag === "value" ? values[index].value : null;
     if (!raw) return;
     const days = JSON.parse(raw) as SourceDay[];
     if (days.length > 0) host.warmup.set(id, days);
   });
   const still = missing.filter((id) => (host.warmup.get(id)?.length ?? 0) === 0);
   if (still.length > 0) {
-    const legacy = await kv.get(WARMUP_KEY);
-    noteReadBytes(host, legacy);
+    const legacyRow = await kv.read(WARMUP_KEY);
+    noteKvRead(host, legacyRow);
+    const legacy = legacyRow.tag === "value" ? legacyRow.value : null;
     if (legacy) {
       const rows = JSON.parse(legacy) as [string, SourceDay[]][];
       for (const [id, days] of rows) {

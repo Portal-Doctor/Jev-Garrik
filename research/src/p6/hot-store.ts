@@ -24,7 +24,7 @@ import {
   retainDailyCloses,
 } from "./paper-host";
 import { decodeStored, takeGzipMismatches, type KvRead } from "./redis-gzip";
-import { barMarker, HOT_KEY, LEASE_KEY, peekStored, VALUE_MAX_BYTES, type Kv } from "./relay";
+import { barMarker, beginWireAccount, endWireAccount, HOT_KEY, LEASE_KEY, peekStored, takeListWire, VALUE_MAX_BYTES, type Kv } from "./relay";
 
 /** One record per flush. The dashboard reads this and does not recompute P/L. */
 export const LAST_RUN_KEY = "p6:lastRun";
@@ -543,6 +543,15 @@ function queueFlush(host: PaperHost, fn: () => Promise<void>): Promise<void> {
 /** Fills and the ledger are written before the next event, not on the 60s flush. */
 export async function writeThroughBook(kv: Kv, host: PaperHost): Promise<void> {
   if (host.entriesHeld) return;
+  beginWireAccount(kv);
+  try {
+    await writeThroughBody(kv, host);
+  } finally {
+    host.wireSaveBytes += endWireAccount(kv);
+  }
+}
+
+async function writeThroughBody(kv: Kv, host: PaperHost): Promise<void> {
   while (host.fillStored < host.book.legs.length) {
     const leg = host.book.legs[host.fillStored]!;
     const result = await appendOwned(kv, host, FILLS_KEY, leg, "id", leg.id, 0);
@@ -1333,8 +1342,9 @@ async function publishUnsequencedHot(kv: Kv, host: PaperHost): Promise<void> {
   // The holder still holds the lease. Strip the hot it just wrote when that copy is in memory, and skip the GET.
   let raw = host.redisHotRaw;
   if (!raw) {
-    raw = await kv.get(HOT_KEY);
-    noteReadBytes(host, raw);
+    const row = await kv.read(HOT_KEY);
+    noteKvRead(host, row);
+    raw = row.tag === "value" ? row.value : null;
   }
   const text = decodeStored(HOT_KEY, raw);
   if (!text) return;
@@ -1465,10 +1475,12 @@ function noteGzipMismatch(host: PaperHost): void {
 
 export function persistSplit(kv: Kv, host: PaperHost): Promise<void> {
   return queueFlush(host, async () => {
+    beginWireAccount(kv);
     try {
       await persistSplitBody(kv, host);
     } finally {
       noteGzipMismatch(host);
+      host.wireSaveBytes += endWireAccount(kv);
     }
   });
 }
@@ -1740,7 +1752,8 @@ export async function tryResumeEntries(kv: Kv, host: PaperHost, token: string | 
   return "authorized";
 }
 
-function noteTagged(host: PaperHost, row: KvRead): void {
+/** Logical bytes plus the stored length from the tagged read. No second gzip. */
+export function noteKvRead(host: PaperHost, row: KvRead): void {
   if (row.tag === "value") {
     noteReadBytes(host, row.value);
     host.wireReadBytes += row.wireBytes;
@@ -1787,7 +1800,7 @@ async function readHotForLoad(kv: Kv, host: PaperHost, first: KvRead): Promise<K
     await sleep(HOT_RETRY_GAP_MS);
     attempts += 1;
     const again = await kv.read(HOT_KEY);
-    noteTagged(host, again);
+    noteKvRead(host, again);
     if (again.tag !== "unreadable") return again;
     row = again;
   }
@@ -1803,7 +1816,7 @@ function textOf(row: KvRead | undefined): string | null {
 export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody | null> {
   const plan = splitPlan(host);
   const tagged = await kv.readMany(plan.keys);
-  for (const row of tagged) noteTagged(host, row);
+  for (const row of tagged) noteKvRead(host, row);
   const hotIndex = plan.keys.indexOf(HOT_KEY);
   const hot = await readHotForLoad(kv, host, tagged[hotIndex] ?? { tag: "missing" });
   if (hot.tag === "unreadable") {
@@ -1834,7 +1847,7 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
     await appendIncident(kv, detail);
   } else host.acctUnreadable = false;
   const eq = await kv.read(EQ_FIRST_KEY);
-  noteTagged(host, eq);
+  noteKvRead(host, eq);
   if (eq.tag === "unreadable") {
     host.eqFirstUnreadable = true;
     const detail = { kind: "K2", key: EQ_FIRST_KEY, bytes: eq.bytes, header: eq.header };
@@ -1845,12 +1858,10 @@ export async function loadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBody
   const byKey = new Map(plan.keys.map((key, index) => [key, textOf(tagged[index])]));
   if (hot.tag === "value") byKey.set(HOT_KEY, hot.value);
   const ringRows = await kv.readLists(plan.ringKeys);
+  host.wireReadBytes += takeListWire(kv);
   const rings = new Map<string, string[]>();
   ringRows.forEach((rows, index) => {
-    for (const row of rows) {
-      noteReadBytes(host, row);
-      host.wireReadBytes += Buffer.byteLength(row);
-    }
+    for (const row of rows) noteReadBytes(host, row);
     rings.set(plan.ringKeys[index]!, rows);
   });
   const body = assembleSplit(host, byKey, rings, plan);
@@ -1900,8 +1911,9 @@ export async function reloadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBo
     return loadSplit(kv, host);
   }
   // seq and era are read from the gunzipped JSON. A corrupt gzip is null here and takes the full load below.
-  const tokenRaw = await kv.get(HOT_KEY);
-  noteReadBytes(host, tokenRaw);
+  const tokenRow = await kv.read(HOT_KEY);
+  noteKvRead(host, tokenRow);
+  const tokenRaw = tokenRow.tag === "value" ? tokenRow.value : null;
   const token = parseHotSeq(tokenRaw);
   if (!token || token.seq < host.redisSeq) return loadSplit(kv, host);
   if (token.era !== host.redisSeenEra) return loadSplit(kv, host);
@@ -1921,22 +1933,24 @@ export async function reloadSplit(kv: Kv, host: PaperHost): Promise<PaperStateBo
   const merged = new Map(host.redisRaw);
   merged.set(HOT_KEY, tokenRaw);
   if (readKeys.length > 0) {
-    const values = await kv.mget(readKeys);
-    values.forEach((value, index) => {
-      noteReadBytes(host, value);
-      merged.set(readKeys[index]!, value ?? null);
+    const values = await kv.readMany(readKeys);
+    values.forEach((row, index) => {
+      noteKvRead(host, row);
+      merged.set(readKeys[index]!, row.tag === "value" ? row.value : null);
     });
   }
   const rings = new Map(host.redisRings);
   if (readRings.length > 0) {
     const rows = await kv.readLists(readRings);
+    host.wireReadBytes += takeListWire(kv);
     rows.forEach((list, index) => {
       for (const row of list) noteReadBytes(host, row);
       rings.set(readRings[index]!, list);
     });
   }
-  const confirm = await kv.get(HOT_KEY);
-  noteReadBytes(host, confirm);
+  const confirmRow = await kv.read(HOT_KEY);
+  noteKvRead(host, confirmRow);
+  const confirm = confirmRow.tag === "value" ? confirmRow.value : null;
   const again = parseHotSeq(confirm);
   if (!again || again.seq !== token.seq || confirm !== tokenRaw) return loadSplit(kv, host);
   const body = assembleSplit(host, merged, rings, plan);

@@ -66,6 +66,65 @@ interface MemoryStore {
 }
 
 const memoryStores = new WeakMap<Kv, MemoryStore>();
+const wireSaves = new WeakMap<Kv, number>();
+const accountDepth = new WeakMap<Kv, number>();
+const flushDepth = new WeakMap<Kv, number>();
+const listWire = new WeakMap<Kv, number>();
+
+/**
+ * Count stored lengths until endWireAccount. Fixture writes outside the window
+ * stay out of the redis log. Nested windows each take the bytes written inside them.
+ */
+export function beginWireAccount(kv: Kv): void {
+  accountDepth.set(kv, (accountDepth.get(kv) ?? 0) + 1);
+}
+
+export function endWireAccount(kv: Kv): number {
+  const depth = accountDepth.get(kv) ?? 0;
+  accountDepth.set(kv, Math.max(0, depth - 1));
+  return takeWireSave(kv);
+}
+
+/** Bytes just stored by this Kv since the last take. Lengths are the strings handed to the store. */
+export function takeWireSave(kv: Kv): number {
+  const n = wireSaves.get(kv) ?? 0;
+  wireSaves.set(kv, 0);
+  return n;
+}
+
+function skipWireKey(key: string): boolean {
+  return key === LEASE_KEY || key === LEASE_META_KEY || key === CRON_KEY || key === "p6:incidents" || key.startsWith("p6:hot:corrupt:");
+}
+
+function addWireSave(kv: Kv, bytes: number): void {
+  if ((accountDepth.get(kv) ?? 0) === 0 || bytes <= 0) return;
+  wireSaves.set(kv, (wireSaves.get(kv) ?? 0) + bytes);
+}
+
+function addWireKey(kv: Kv, key: string, bytes: number): void {
+  if (skipWireKey(key) || (flushDepth.get(kv) ?? 0) > 0) return;
+  addWireSave(kv, bytes);
+}
+
+function enterFlush(kv: Kv): void {
+  flushDepth.set(kv, (flushDepth.get(kv) ?? 0) + 1);
+}
+
+function leaveFlush(kv: Kv): void {
+  flushDepth.set(kv, Math.max(0, (flushDepth.get(kv) ?? 0) - 1));
+}
+
+function noteListWire(kv: Kv, raw: string | null): void {
+  if (!raw) return;
+  listWire.set(kv, (listWire.get(kv) ?? 0) + Buffer.byteLength(raw));
+}
+
+/** Stored length of list keys read since the last take. The caller adds this to wireReadBytes. */
+export function takeListWire(kv: Kv): number {
+  const n = listWire.get(kv) ?? 0;
+  listWire.set(kv, 0);
+  return n;
+}
 
 /** Raw stored bytes, including a gz1: value. Null when this Kv is not the memory store. */
 export function peekStored(kv: Kv, key: string): string | null {
@@ -101,7 +160,9 @@ export function memoryKv(clock: () => number = Date.now): Kv {
     async set(key, value, opts) {
       const current = live(key);
       if (opts?.nx && current) return false;
-      rows.set(key, { value: commitStored(key, value), expiresAt: opts?.px != null ? clock() + opts.px : null });
+      const stored = commitStored(key, value);
+      rows.set(key, { value: stored, expiresAt: opts?.px != null ? clock() + opts.px : null });
+      addWireKey(kv, key, Buffer.byteLength(stored));
       return true;
     },
     async del(key) {
@@ -118,7 +179,9 @@ export function memoryKv(clock: () => number = Date.now): Kv {
       const lease = decodeLease(live(leaseKey)?.value ?? null);
       if (!lease || lease.token !== token || lease.release !== "none") return false;
       if (Buffer.byteLength(value) > VALUE_MAX_BYTES) return false;
-      rows.set(key, { value: commitStored(key, value), expiresAt: opts?.px != null ? clock() + opts.px : null });
+      const stored = commitStored(key, value);
+      rows.set(key, { value: stored, expiresAt: opts?.px != null ? clock() + opts.px : null });
+      addWireKey(kv, key, Buffer.byteLength(stored));
       return true;
     },
     async ownedAppend(leaseKey, token, key, member, opts) {
@@ -133,14 +196,23 @@ export function memoryKv(clock: () => number = Date.now): Kv {
       const encoded = JSON.stringify(trimmed);
       if (Buffer.byteLength(encoded) > VALUE_MAX_BYTES) return 3;
       rows.set(key, { value: encoded, expiresAt: opts.px != null ? clock() + opts.px : null });
+      addWireKey(kv, key, Buffer.byteLength(member));
       return 1;
     },
     async ownedFlush(leaseKey, token, nowMs, payload) {
-      if (Buffer.byteLength(payload) <= VALUE_MAX_BYTES) {
-        const hot = (JSON.parse(payload) as { hot?: string }).hot ?? "";
-        if (hot !== "" && Buffer.byteLength(hot) <= VALUE_MAX_BYTES) await kv.ownedSet(leaseKey, token, HOT_KEY, hot);
+      const wire = redisFlushPayload(payload, VALUE_MAX_BYTES);
+      enterFlush(kv);
+      try {
+        if (Buffer.byteLength(payload) <= VALUE_MAX_BYTES) {
+          const hot = (JSON.parse(payload) as { hot?: string }).hot ?? "";
+          if (hot !== "" && Buffer.byteLength(hot) <= VALUE_MAX_BYTES) await kv.ownedSet(leaseKey, token, HOT_KEY, hot);
+        }
+        const code = applyMemoryFlush(rows, clock, leaseKey, token, nowMs, payload);
+        if (code === 1) addWireSave(kv, Buffer.byteLength(wire));
+        return code;
+      } finally {
+        leaveFlush(kv);
       }
-      return applyMemoryFlush(rows, clock, leaseKey, token, nowMs, payload);
     },
     async readMany(keys) {
       return keys.map((key) => readKey(key));
@@ -149,7 +221,11 @@ export function memoryKv(clock: () => number = Date.now): Kv {
       return keys.map((key) => readText(readKey(key)));
     },
     async readLists(keys) {
-      return keys.map((key) => listItems(live(key)?.value ?? null));
+      return keys.map((key) => {
+        const raw = live(key)?.value ?? null;
+        noteListWire(kv, raw);
+        return listItems(raw);
+      });
     },
   };
   memoryStores.set(kv, {
@@ -1142,10 +1218,12 @@ export function redisKvFromUrl(url: string): Kv {
       return readText(await readKey(key));
     },
     async set(key, value, opts) {
-      const parts = ["SET", key, commitStored(key, value)];
+      const stored = commitStored(key, value);
+      const parts = ["SET", key, stored];
       if (opts?.nx) parts.push("NX");
       if (opts?.px != null) parts.push("PX", String(opts.px));
       const reply = await send(parts);
+      if (reply === "OK") addWireKey(kv, key, Buffer.byteLength(stored));
       return reply === "OK";
     },
     async del(key) {
@@ -1156,7 +1234,9 @@ export function redisKvFromUrl(url: string): Kv {
       return reply === "1";
     },
     async ownedSet(leaseKey, token, key, value, opts) {
-      const reply = await send(["EVAL", OWNED_SET_LUA, "2", leaseKey, key, token, commitStored(key, value), String(opts?.px ?? 0)]);
+      const stored = commitStored(key, value);
+      const reply = await send(["EVAL", OWNED_SET_LUA, "2", leaseKey, key, token, stored, String(opts?.px ?? 0)]);
+      if (reply === "1") addWireKey(kv, key, Buffer.byteLength(stored));
       return reply === "1";
     },
     async ownedAppend(leaseKey, token, key, member, opts) {
@@ -1174,12 +1254,21 @@ export function redisKvFromUrl(url: string): Kv {
         String(opts.px ?? 0),
       ]);
       const code = Number(reply);
+      if (code === 1) addWireKey(kv, key, Buffer.byteLength(member));
       return code === 1 || code === 2 || code === 3 ? code : 0;
     },
     async ownedFlush(leaseKey, token, nowMs, payload) {
-      const reply = await send(["EVAL", FLUSH_LUA, "1", leaseKey, token, redisFlushPayload(payload, VALUE_MAX_BYTES), String(nowMs)]);
-      const code = Number(reply);
-      return code === 1 || code === 3 ? code : 0;
+      const wire = redisFlushPayload(payload, VALUE_MAX_BYTES);
+      enterFlush(kv);
+      try {
+        const reply = await send(["EVAL", FLUSH_LUA, "1", leaseKey, token, wire, String(nowMs)]);
+        const code = Number(reply);
+        const result = code === 1 || code === 3 ? code : 0;
+        if (result === 1) addWireSave(kv, Buffer.byteLength(wire));
+        return result;
+      } finally {
+        leaveFlush(kv);
+      }
     },
     async readMany(keys) {
       if (keys.length === 0) return [];
@@ -1199,6 +1288,7 @@ export function redisKvFromUrl(url: string): Kv {
       if (!Array.isArray(reply)) return keys.map(() => []);
       return reply.map((item) => {
         if (typeof item !== "string") return [];
+        noteListWire(kv, item);
         try {
           const parsed = JSON.parse(item) as unknown;
           if (!Array.isArray(parsed)) return [];

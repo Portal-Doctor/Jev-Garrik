@@ -168,13 +168,25 @@ export function gzipFlushPayload(payload: string): string {
   } catch {
     return payload;
   }
-  if (typeof body.hot === "string" && body.hot !== "") body.hot = commitStored("p6:hot", body.hot);
+  let changed = false;
+  if (typeof body.hot === "string" && body.hot !== "") {
+    const next = commitStored("p6:hot", body.hot);
+    if (next !== body.hot) {
+      body.hot = next;
+      changed = true;
+    }
+  }
   if (Array.isArray(body.extra)) {
     for (const row of body.extra) {
       if (!row || typeof row.key !== "string" || typeof row.value !== "string") continue;
-      row.value = commitStored(row.key, row.value);
+      const next = commitStored(row.key, row.value);
+      if (next !== row.value) {
+        row.value = next;
+        changed = true;
+      }
     }
   }
+  if (!changed) return payload;
   return JSON.stringify(body);
 }
 
