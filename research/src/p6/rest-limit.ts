@@ -272,6 +272,11 @@ async function once(state: RestRun, url: string, seed: boolean, mark: boolean, l
   return last ?? new Response("", { status: 429 });
 }
 
+/** Public ticker GET for the dashboard mark. No key. The caller caches it. Not the candle bucket. */
+export function publicTicker(url: string): Promise<Pick<Response, "ok" | "json">> {
+  return globalThis.fetch(url);
+}
+
 /** Serial on this run. A second run has its own lane. `cold: false` returns a 4xx without retrying it, and does not mark cold after a failed retry. */
 export function limited(url: string, run?: RestRun, opts?: { seed?: boolean; cold?: boolean; live?: boolean; backfill?: boolean }): Promise<Response> {
   const state = runOf(run);

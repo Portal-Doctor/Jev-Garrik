@@ -6,6 +6,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { BarOHLC } from "../p3/signals";
 import { paperPnl } from "./engine";
+import { x1TakerOn } from "./x1-fill";
 import { equityExtras, EQ_FIRST_KEY, hourStartSec } from "./pnl-block";
 import { positionSnapBuild } from "./positions-view";
 import { boundJevDone, JEV_PACKET_TTL_MS, queuedForHandover, skipShareReport } from "./jev-call";
@@ -250,6 +251,17 @@ interface HotBody {
   fourSeedThrough: [string, number][];
   overlapSeen: boolean;
   working?: PaperStateBody["working"];
+  /** V7 rev 6. Absent on a snapshot from before running extremes. */
+  hotRev?: number;
+  pendingFills?: PaperStateBody["pendingFills"];
+  quotes?: PaperStateBody["quotes"];
+  sBtMagnitudeBps?: PaperStateBody["sBtMagnitudeBps"];
+  sBtUncappedBps?: PaperStateBody["sBtUncappedBps"];
+  staleQuoteMisses?: number;
+  runLabel?: "X1" | "non-X1";
+  csPrev?: PaperStateBody["csPrev"];
+  csBarSec?: PaperStateBody["csBarSec"];
+  feedLive?: boolean;
   /**
    * Monotonic flush sequence. Written in the same atomic flush as hot and the
    * bars. Absent on snapshots stored before this field existed.
@@ -340,6 +352,22 @@ export function captureHot(host: PaperHost): HotBody {
     fourSeedThrough: [...host.fourSeedThrough.entries()],
     overlapSeen: host.overlapSeen,
     ...(book.working.length > 0 ? { working: book.working } : {}),
+    hotRev: 6,
+    ...(book.pendingFills.length > 0 ? { pendingFills: book.pendingFills } : {}),
+    quotes: book.positions.flatMap((position) => {
+      const quote = book.quotes[position.productId];
+      if (!quote || !(quote.bid > 0)) return [];
+      const row: [string, number, number, [number, number][]?] = [position.productId, quote.bid, quote.tsMs];
+      if (quote.bids && quote.bids.length > 0) row.push(quote.bids.slice(0, 8));
+      return [row];
+    }),
+    sBtMagnitudeBps: book.sBtMagnitudeBps,
+    sBtUncappedBps: book.sBtUncappedBps,
+    staleQuoteMisses: book.staleQuoteMisses,
+    runLabel: x1TakerOn(book.config) ? "X1" : "non-X1",
+    csPrev: book.csPrev,
+    csBarSec: book.csBarSec,
+    feedLive: host.status === "live",
   };
 }
 

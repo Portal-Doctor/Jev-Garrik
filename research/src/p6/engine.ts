@@ -38,7 +38,29 @@ import { bookPanel, parity7d, weeklyHaltsInLast6, type BookPanel } from "./revie
 import { forwardClassRisk, UNPROMOTED_RISK_USD, type KellyHold } from "./kelly";
 import { delayBps, MISSED_SEND_STALE_QUOTE, STALE_QUOTE_MS, type LegLog } from "./legs";
 import { BOOTSTRAP_SEEDS } from "./metrics";
+import { blankExtremes, extremeR, noteBar15Extreme, noteBidExtreme, type BidExtremes } from "./extremes";
 import { applyMidSample, freshMidBook, halfSpreadBps, heartbeatMustReconnect, takerSideFromMaker, type MidBook } from "./mid-feed";
+import {
+  classifyUpdate,
+  driftBps,
+  entryQuoteFillSrc,
+  execCostBps,
+  infoDelayBps,
+  isPreFixB,
+  liveCostBps,
+  l2Fresh,
+  countsInClassMean,
+  modelledPx,
+  PRE_FIX_FILL_SRC,
+  S_BT_CAP_BPS,
+  sBtFromBars,
+  shadowAtModelled,
+  STALE_QUOTE_FILL_SRC,
+  vwapFill,
+  x1TakerOn,
+  type FillSrc,
+  type L2Src,
+} from "./x1-fill";
 import { barBeginsAtOrAfterEntry, strategyBarClosed } from "./signals";
 import {
   classBlockers,
@@ -127,6 +149,22 @@ export interface Position {
   aConfig: string | null;
   /** Assigned beta at entry. Later cluster dates do not reprice an open leg. */
   beta: number | null;
+  /** Running L2 bid extremes and the closed-15m extremes. Absent on a pre-rev position. */
+  mfeBid1m?: number | null;
+  maeBid1m?: number | null;
+  mfeTs?: number | null;
+  maeTs?: number | null;
+  mfeBasis?: BidExtremes["mfeBasis"];
+  maeBasis?: BidExtremes["maeBasis"];
+  mfe15?: number | null;
+  mae15?: number | null;
+  mfe15Basis?: BidExtremes["mfe15Basis"];
+  mae15Basis?: BidExtremes["mae15Basis"];
+  mfeReconstructed?: boolean;
+  /** Registered entry open for this class. Drift is measured against it. Absent means the anchor was missing. */
+  fillAnchorOpen?: number;
+  entryFillSrc?: FillSrc;
+  anchorMissing?: boolean;
 }
 
 export interface ClosedTrade {
@@ -142,6 +180,29 @@ export interface ClosedTrade {
   entryDate: string;
   exitTs: number;
   exitKind: string;
+  /** (bid extreme − fill) × units / risk at the close. */
+  mfeR?: number | null;
+  maeR?: number | null;
+  mfeBasis?: BidExtremes["mfeBasis"];
+  maeBasis?: BidExtremes["maeBasis"];
+  fillSrc?: FillSrc;
+  exitFillSrc?: FillSrc;
+  /** Modelled entry beside the book P/L. netUsd and netR stay the actual round trip. */
+  shadowFillPx?: number;
+  shadowNetUsd?: number;
+  shadowNetR?: number;
+  shadowFillKind?: "modelled";
+  execCostBps?: number | null;
+  driftBps?: number | null;
+  anchorMissing?: boolean;
+  /** Stop exit whose first fresh bid was below the stop. exitKind stays "stop". */
+  gap?: boolean;
+  /** (stop − fill) / stop × 1e4. Reported on its own line. Not part of the execution light. */
+  gapSlippageBps?: number | null;
+  sBtMagnitudeBps?: number;
+  sBtUncappedBps?: number;
+  sBtCapped?: boolean;
+  exitNotionalUsd?: number;
 }
 
 interface Working {
@@ -162,6 +223,35 @@ interface Working {
   stopBps: number;
   filledUnits: number;
   quoteSource?: "l2" | "rest" | "rest_fallback";
+}
+
+/** One signal waiting on the first fresh L2 print. About one slot per unfilled signal. */
+interface PendingFill {
+  id: string;
+  productId: string;
+  classId: ClassId;
+  role: "entry" | "exit";
+  side: "buy" | "sell";
+  notBeforeMs: number;
+  /** Registered entry open. 0 means the anchor was missing and drift stays null. */
+  fillAnchorOpen: number;
+  anchorMissing?: boolean;
+  /** Price the modelled fill is built from. Entry: the bar open. Exit: the trigger bar open. */
+  modelOpen: number;
+  midAtDecision: number;
+  decisionTs?: number;
+  barCloseTs?: number;
+  stop: number;
+  atr1h: number;
+  target: number | null;
+  dailyAtr: number;
+  priorDailyCloses: number[];
+  tick: number;
+  aConfig: string | null;
+  tsMs: number;
+  positionId?: string;
+  exitKind?: string;
+  triggerBarTs: number | null;
 }
 
 export interface Book {
@@ -191,7 +281,7 @@ export interface Book {
   rejected: { id: string; reason: string }[];
   indeterminateByClass: Record<ClassId, number>;
   submittedByClass: Record<ClassId, number>;
-  quotes: Record<string, { bid: number; ask: number; tsMs: number; quoteSrc?: "l2" | "rest_fallback" }>;
+  quotes: Record<string, { bid: number; ask: number; tsMs: number; quoteSrc?: "l2" | "rest_fallback"; bids?: [number, number][] }>;
   momentumDates: string[];
   haltWeeks: string[];
   clusterMonth: string | null;
@@ -209,6 +299,16 @@ export interface Book {
   gapFills: number;
   /** Start of the 15m window whose Jev packets were already counted. */
   jevBarSec?: number;
+  /** Live X1 entry or exit waiting for the first fresh L2 update. Kept in hot. */
+  pendingFills: PendingFill[];
+  /** max(5, 0.5 × CS on 15m) capped at 15, and the same value with no ceiling, per pair. */
+  sBtMagnitudeBps: Record<string, number>;
+  sBtUncappedBps: Record<string, number>;
+  /** Fills tagged stale_quote_modelled. The rate is this count over tagged X1 fills. */
+  staleQuoteMisses: number;
+  /** Previous closed 15m high/low. One bar, not a history. */
+  csPrev: Record<string, { high: number; low: number }>;
+  csBarSec: Record<string, number>;
   /**
    * UTC day the promotion clock may start. Null until p6:acct is loaded or written.
    * Not part of p6:hot. A Monday review while this is null counts from the next
@@ -222,7 +322,21 @@ export interface Book {
 export type ForwardEvent =
   | { kind: "clock"; tsMs: number }
   | { kind: "heartbeat"; tsMs: number }
-  | { kind: "mid"; tsMs: number; productId: string; bid: number; ask: number; tradeVolume?: number }
+  | {
+      kind: "mid";
+      tsMs: number;
+      productId: string;
+      bid: number;
+      ask: number;
+      tradeVolume?: number;
+      /** Age of this L2 update. Omitted means 0. REST snapshot is not a fresh book. */
+      l2AgeMs?: number;
+      l2Src?: L2Src;
+      bids?: [number, number][];
+      asks?: [number, number][];
+      /** Bid was missing. Use mid − half spread and flag the basis. */
+      fallbackMid?: { mid: number; halfSpread: number };
+    }
   | { kind: "beta"; productId: string; beta: number | null }
   | { kind: "kill-switch"; on: boolean }
   | { kind: "brian-ok"; classId: ClassId }
@@ -252,6 +366,11 @@ export type ForwardEvent =
       decisionTs?: number;
       /** When the signal bar closed. Logged. Not a staleness input. */
       barCloseTs?: number;
+      /** Ask ladder for the entry walk. Omitted means the touch is the whole book. */
+      asks?: [number, number][];
+      bids?: [number, number][];
+      /** Registered entry open when the host rewrites nextOpen for a live mid. */
+      fillAnchorOpen?: number;
     }
   | {
       kind: "d-order";
@@ -337,6 +456,7 @@ export function freshBook(config: Partial<BookConfig> = {}): Book {
       memberCloses: config.memberCloses,
       btcCloses: config.btcCloses,
       clusterMemberOn: config.clusterMemberOn,
+      liveQuotes: config.liveQuotes === true,
     },
     nowMs: 0,
     day: null,
@@ -376,6 +496,12 @@ export function freshBook(config: Partial<BookConfig> = {}): Book {
     jevPackets: 0,
     jevSkipped: 0,
     gapFills: 0,
+    pendingFills: [],
+    sBtMagnitudeBps: {},
+    sBtUncappedBps: {},
+    staleQuoteMisses: 0,
+    csPrev: {},
+    csBarSec: {},
     acctFromDay: null,
   };
 }
@@ -699,11 +825,12 @@ function nextAcctDay(nowMs: number): string {
 
 function reviewKelly(book: Book, tsMs: number): void {
   if (!reviewDue(book, tsMs)) return;
-  const streams = CLASSES.map((id) => ({ id, netR: book.closed.filter((trade) => trade.classId === id).map((trade) => trade.netR) }));
+  const counted = book.closed.filter((trade) => countsInClassMean(trade));
+  const streams = CLASSES.map((id) => ({ id, netR: counted.filter((trade) => trade.classId === id).map((trade) => trade.netR) }));
   for (const classId of CLASSES) {
-    const forward = book.closed
+    const forward = counted
       .filter((trade) => trade.classId === classId)
-      .map((trade) => ({ netR: trade.netR, entryDate: trade.entryDate }));
+      .map((trade) => ({ netR: trade.netR, entryDate: trade.entryDate, fillSrc: trade.fillSrc, anchorMissing: trade.anchorMissing }));
     const seed = BOOTSTRAP_SEEDS[`${classId}:bootstrap`];
     const size = forwardClassRisk({
       classId,
@@ -728,8 +855,25 @@ function spreadBps(book: Book, bid: number, ask: number): number | null {
   return halfSpreadBps(bid, ask);
 }
 
-function noteQuote(book: Book, productId: string, bid: number, ask: number, tsMs: number): void {
-  book.quotes[productId] = { bid, ask, tsMs };
+function noteQuote(book: Book, productId: string, bid: number, ask: number, tsMs: number, extra?: { bids?: [number, number][]; quoteSrc?: "l2" | "rest_fallback" }): void {
+  book.quotes[productId] = {
+    bid,
+    ask,
+    tsMs,
+    ...(extra?.quoteSrc ? { quoteSrc: extra.quoteSrc } : {}),
+    ...(extra?.bids && extra.bids.length > 0 ? { bids: extra.bids.slice(0, 8) } : {}),
+  };
+}
+
+function sBtOn(book: Book, productId: string): { sBtMagnitudeBps?: number; sBtUncappedBps?: number; sBtCapped?: boolean } {
+  const magnitude = book.sBtMagnitudeBps[productId];
+  const uncapped = book.sBtUncappedBps[productId];
+  if (magnitude == null && uncapped == null) return {};
+  return {
+    ...(magnitude != null ? { sBtMagnitudeBps: magnitude } : {}),
+    ...(uncapped != null ? { sBtUncappedBps: uncapped } : {}),
+    ...(uncapped != null ? { sBtCapped: uncapped > S_BT_CAP_BPS } : {}),
+  };
 }
 
 function clusterIds(book: Book, productId: string): string[] {
@@ -831,6 +975,46 @@ function pushClosed(book: Book, trade: ClosedTrade): void {
   if (book.realizedUsd + openMtm(book) > book.peakEquity) book.peakEquity = book.realizedUsd + openMtm(book);
 }
 
+function gateEntry(book: Book, opts: {
+  classId: ClassId;
+  productId: string;
+  tsMs: number;
+  stopBps: number;
+  sLive: number;
+}): { reason: string | null; notionalUsd: number; riskUsd: number; openRiskUsd: number } {
+  reviewKnownPairs(book, opts.tsMs);
+  if (pairEntryBlocked(book, opts.productId)) return { reason: "pair-backstop", notionalUsd: 0, riskUsd: 0, openRiskUsd: 0 };
+  const blockers = decisionBlockers(book, opts.classId, opts.tsMs);
+  const decision = paperDecision({
+    classId: opts.classId,
+    blockers,
+    stopBps: opts.stopBps,
+    sBtBps: opts.sLive,
+    breadthPaused: false,
+    scheduledRiskUsd: scheduledRisk(book, opts.classId),
+  });
+  if (!decision.entries) return { reason: blockers.join(",") || "blocked", notionalUsd: 0, riskUsd: 0, openRiskUsd: 0 };
+  const openRisk = book.positions.reduce((sum, position) => sum + liveOpenRisk(book, position), 0);
+  const gross = book.positions.reduce((sum, position) => sum + position.notionalUsd, 0);
+  const failed = entryGates({
+    openPairs: book.positions.map((position) => position.productId),
+    pair: opts.productId,
+    classId: opts.classId,
+    classOpen: book.positions.filter((position) => position.classId === opts.classId).length,
+    bookOpen: book.positions.length,
+    openInCluster: clusterOpen(book, opts.productId, opts.tsMs),
+    openRiskUsd: openRisk,
+    addRiskUsd: decision.openRiskUsd,
+    grossUsd: gross,
+    addNotionalUsd: decision.notionalUsd,
+    betaWeightedUsd: betaAdd(book, opts.productId, decision.notionalUsd),
+    lastExitTsMs: lastExitTs(book, opts.productId),
+    nowTsMs: opts.tsMs,
+  });
+  if (failed.length > 0) return { reason: failed.join(","), notionalUsd: 0, riskUsd: 0, openRiskUsd: 0 };
+  return { reason: null, notionalUsd: decision.notionalUsd, riskUsd: decision.riskUsd, openRiskUsd: decision.openRiskUsd };
+}
+
 function tryEnter(book: Book, opts: {
   id: string;
   classId: ClassId;
@@ -857,50 +1041,30 @@ function tryEnter(book: Book, opts: {
   quoteFallback?: boolean;
   decisionTs?: number;
   barCloseTs?: number;
+  fillSrc?: FillSrc;
+  midAtFill?: number;
+  fillAnchorOpen?: number;
+  /** X1:6 model price. Used when the registered anchor is missing. Never the fill and never the mid. */
+  modelPx?: number;
+  signed?: boolean;
 }): boolean {
-  reviewKnownPairs(book, opts.tsMs);
-  if (pairEntryBlocked(book, opts.productId)) {
-    book.rejected.push({ id: opts.id, reason: "pair-backstop" });
+  const gated = gateEntry(book, opts);
+  if (gated.reason) {
+    book.rejected.push({ id: opts.id, reason: gated.reason });
     return false;
   }
-  const blockers = decisionBlockers(book, opts.classId, opts.tsMs);
-  const decision = paperDecision({
-    classId: opts.classId,
-    blockers,
-    stopBps: opts.stopBps,
-    sBtBps: opts.sLive,
-    breadthPaused: false,
-    scheduledRiskUsd: scheduledRisk(book, opts.classId),
-  });
-  if (!decision.entries) {
-    book.rejected.push({ id: opts.id, reason: blockers.join(",") || "blocked" });
-    return false;
-  }
-  const openRisk = book.positions.reduce((sum, position) => sum + liveOpenRisk(book, position), 0);
-  const gross = book.positions.reduce((sum, position) => sum + position.notionalUsd, 0);
-  const failed = entryGates({
-    openPairs: book.positions.map((position) => position.productId),
-    pair: opts.productId,
-    classId: opts.classId,
-    classOpen: book.positions.filter((position) => position.classId === opts.classId).length,
-    bookOpen: book.positions.length,
-    openInCluster: clusterOpen(book, opts.productId, opts.tsMs),
-    openRiskUsd: openRisk,
-    addRiskUsd: decision.openRiskUsd,
-    grossUsd: gross,
-    addNotionalUsd: decision.notionalUsd,
-    betaWeightedUsd: betaAdd(book, opts.productId, decision.notionalUsd),
-    lastExitTsMs: lastExitTs(book, opts.productId),
-    nowTsMs: opts.tsMs,
-  });
-  if (failed.length > 0) {
-    book.rejected.push({ id: opts.id, reason: failed.join(",") });
-    return false;
-  }
-  const units = decision.notionalUsd / opts.fillPrice;
+  const units = gated.notionalUsd / opts.fillPrice;
   const feeBps = opts.maker ? MAKER_FEE_BPS : TAKER_FEE_BPS;
-  const entryFeeUsd = (decision.notionalUsd * feeBps) / 10_000;
-  const entrySpreadUsd = opts.maker ? 0 : Math.abs(opts.fillPrice - opts.arrivalMid) * units;
+  const entryFeeUsd = (gated.notionalUsd * feeBps) / 10_000;
+  const signedSpread = opts.signed === true ? (opts.fillPrice - opts.arrivalMid) * units : Math.abs(opts.fillPrice - opts.arrivalMid) * units;
+  const entrySpreadUsd = opts.maker ? 0 : signedSpread;
+  const anchor = opts.fillAnchorOpen != null && opts.fillAnchorOpen > 0 ? opts.fillAnchorOpen : null;
+  const anchorMissing = opts.fillSrc != null && anchor == null;
+  const midAtFill = opts.midAtFill ?? opts.arrivalMid;
+  const exec = opts.fillSrc ? execCostBps("buy", opts.fillPrice, midAtFill) : null;
+  const drift = opts.fillSrc && anchor != null ? driftBps(midAtFill, anchor) : null;
+  const delay = opts.fillSrc ? infoDelayBps(midAtFill, opts.decisionMid) : null;
+  const spreadLog = sBtOn(book, opts.productId);
   book.legs.push({
     id: opts.id,
     productId: opts.productId,
@@ -922,6 +1086,20 @@ function tryEnter(book: Book, opts: {
     quoteSrc: opts.quoteFallback ? "rest_fallback" : "l2",
     decisionTs: opts.decisionTs,
     barCloseTs: opts.barCloseTs,
+    ...(opts.fillSrc
+      ? {
+          fillSrc: opts.fillSrc,
+          midAtFill,
+          midAtDecision: opts.decisionMid,
+          ...(anchor != null ? { fillAnchorOpen: anchor } : {}),
+          ...(anchorMissing ? { anchorMissing: true } : {}),
+          execCostBps: exec,
+          driftBps: drift,
+          delayBps: delay,
+          liveCostBps: exec != null && drift != null ? liveCostBps(exec, drift) : null,
+          ...spreadLog,
+        }
+      : {}),
   });
   book.positions.push({
     id: opts.id,
@@ -930,9 +1108,9 @@ function tryEnter(book: Book, opts: {
     entryTs: opts.tsMs,
     fillPrice: opts.fillPrice,
     units,
-    riskUsd: decision.riskUsd,
+    riskUsd: gated.riskUsd,
     stop: opts.stop,
-    notionalUsd: decision.notionalUsd,
+    notionalUsd: gated.notionalUsd,
     sLiveBps: opts.sLive,
     atr1h: opts.atr1h,
     entryFeeUsd,
@@ -943,13 +1121,17 @@ function tryEnter(book: Book, opts: {
     priorDailyCloses: opts.priorDailyCloses ?? [],
     pendingExit: null,
     pendingExitTs: null,
-    rawEntry: opts.rawEntry ?? opts.fillPrice,
+    rawEntry: opts.rawEntry != null && opts.rawEntry > 0 ? opts.rawEntry : opts.modelPx != null && opts.modelPx > 0 ? opts.modelPx : 0,
     initialStop: opts.stop,
     highestClose: null,
     clusterId: clusterOf(book, opts.productId, opts.tsMs),
     tick: opts.tick ?? 0.01,
     aConfig: opts.aConfig ?? null,
     beta: book.betas[opts.productId] ?? null,
+    ...blankExtremes(),
+    ...(anchor != null ? { fillAnchorOpen: anchor } : {}),
+    ...(opts.fillSrc ? { entryFillSrc: opts.fillSrc } : {}),
+    ...(anchorMissing ? { anchorMissing: true } : {}),
   });
   book.submittedByClass[opts.classId] += 1;
   return true;
@@ -966,22 +1148,30 @@ function sellThrough(limit: number, price: number, tick: number, volume: number)
 function closePosition(
   book: Book,
   position: Position,
-  opts: { tsMs: number; fill: number; kind: string; triggerBarTs: number | null; makerExit?: boolean; decisionMid?: number },
+  opts: {
+    tsMs: number;
+    fill: number;
+    kind: string;
+    triggerBarTs: number | null;
+    makerExit?: boolean;
+    decisionMid?: number;
+    signed?: boolean;
+    midAtFill?: number;
+    fillSrc?: FillSrc;
+    bid?: number;
+    ask?: number;
+    gap?: boolean;
+  },
 ): void {
   const quote = book.quotes[position.productId];
   const age = quote ? opts.tsMs - quote.tsMs : Number.POSITIVE_INFINITY;
-  if (book.config.liveQuotes && !(quote && age <= STALE_QUOTE_MS)) {
-    book.rejected.push({ id: `${position.id}:exit`, reason: MISSED_SEND_STALE_QUOTE });
-    book.incidents.push(`${MISSED_SEND_STALE_QUOTE} ${position.id}`);
-    return;
-  }
-  const stale = quote == null || age > STALE_QUOTE_MS || quote.quoteSrc === "rest_fallback";
-  const bid = quote?.bid ?? 0;
-  const ask = quote?.ask ?? 0;
-  const arrivalMid = opts.kind === "stop" ? position.stop : (bid + ask) / 2;
+  const stale = quote == null || age > STALE_QUOTE_MS || age < 0 || quote.quoteSrc === "rest_fallback";
+  const bid = opts.bid ?? quote?.bid ?? 0;
+  const ask = opts.ask ?? quote?.ask ?? 0;
+  const arrivalMid = opts.midAtFill ?? (opts.kind === "stop" || opts.kind === "gap" ? position.stop : (bid + ask) / 2);
   const exitNotional = position.units * opts.fill;
   const exitFee = (exitNotional * (opts.makerExit ? MAKER_FEE_BPS : TAKER_FEE_BPS)) / 10_000;
-  const slip = opts.makerExit ? 0 : Math.max(0, arrivalMid - opts.fill) * position.units;
+  const slip = opts.makerExit ? 0 : opts.signed === true ? (arrivalMid - opts.fill) * position.units : Math.max(0, arrivalMid - opts.fill) * position.units;
   const costUsd = position.entryFeeUsd + position.entrySpreadUsd + exitFee + slip;
   const takerParity = book.config.parity != null && opts.makerExit !== true && position.fillPrice > 0;
   const netBps = ((opts.fill - position.fillPrice) / position.fillPrice) * 10_000 - TAKER_FEE_BPS - TAKER_FEE_BPS;
@@ -990,6 +1180,16 @@ function closePosition(
     : (opts.fill - position.fillPrice) * position.units - position.entryFeeUsd - exitFee;
   const grossUsd = netUsd + costUsd;
   const netR = position.riskUsd > 0 ? netUsd / position.riskUsd : 0;
+  const anchor = position.fillAnchorOpen != null && position.fillAnchorOpen > 0 ? position.fillAnchorOpen : null;
+  const anchorMissing = (opts.fillSrc != null && anchor == null) || position.anchorMissing === true;
+  const midAtFill = opts.midAtFill ?? arrivalMid;
+  const sideFill: FillSrc | undefined = opts.fillSrc;
+  const exec = sideFill ? execCostBps("sell", opts.fill, midAtFill) : null;
+  const drift = sideFill && anchor != null && position.anchorMissing !== true ? driftBps(midAtFill, anchor) : null;
+  const delay = sideFill ? infoDelayBps(midAtFill, opts.decisionMid ?? midAtFill) : null;
+  const spreadLog = sideFill ? sBtOn(book, position.productId) : {};
+  const gap = opts.gap === true;
+  const gapSlippageBps = gap && position.stop > 0 ? ((position.stop - opts.fill) / position.stop) * 10_000 : null;
   book.legs.push({
     id: `${position.id}:exit`,
     productId: position.productId,
@@ -1011,9 +1211,25 @@ function closePosition(
     quoteSrc: quote?.quoteSrc ?? (quote ? "l2" : undefined),
     decisionTs: opts.tsMs,
     barCloseTs: opts.triggerBarTs ?? undefined,
+    ...(sideFill
+      ? {
+          fillSrc: sideFill,
+          midAtFill,
+          midAtDecision: opts.decisionMid ?? midAtFill,
+          ...(anchor != null ? { fillAnchorOpen: anchor } : {}),
+          ...(anchorMissing ? { anchorMissing: true } : {}),
+          execCostBps: exec,
+          driftBps: drift,
+          delayBps: delay,
+          liveCostBps: exec != null && drift != null ? liveCostBps(exec, drift) : null,
+          ...spreadLog,
+        }
+      : {}),
   });
   book.positions = book.positions.filter((item) => item.id !== position.id);
-  pushClosed(book, {
+  const mfeBasis = position.mfeBasis ?? null;
+  const maeBasis = position.maeBasis ?? null;
+  let closed: ClosedTrade = {
     id: position.id,
     classId: position.classId,
     productId: position.productId,
@@ -1026,7 +1242,40 @@ function closePosition(
     entryDate: utcDay(position.entryTs),
     exitTs: opts.tsMs,
     exitKind: opts.kind,
-  });
+    mfeR: extremeR(position.mfeBid1m, position.fillPrice, position.units, position.riskUsd),
+    maeR: extremeR(position.maeBid1m, position.fillPrice, position.units, position.riskUsd),
+    mfeBasis,
+    maeBasis,
+    exitNotionalUsd: exitNotional,
+    ...(position.entryFillSrc ? { fillSrc: position.entryFillSrc } : {}),
+    ...(sideFill ? { exitFillSrc: sideFill } : {}),
+    ...(anchorMissing ? { anchorMissing: true } : {}),
+    ...(gap ? { gap: true, gapSlippageBps } : {}),
+    ...spreadLog,
+    ...(exec != null ? { execCostBps: exec, driftBps: drift } : {}),
+  };
+  if (x1TakerOn(book.config) && isPreFixB({ classId: position.classId, productId: position.productId, entryTs: position.entryTs, fillSrc: position.entryFillSrc })) {
+    const shadow = shadowAtModelled({
+      netUsd,
+      entryFill: position.fillPrice,
+      units: position.units,
+      riskUsd: position.riskUsd,
+      anchor: anchor != null && anchor > 0 ? anchor : position.rawEntry,
+      bid,
+      ask,
+    });
+    const entryLeg = book.legs.find((leg) => leg.id === position.id && leg.side === "entry");
+    if (entryLeg) entryLeg.fillSrc = PRE_FIX_FILL_SRC;
+    closed = {
+      ...closed,
+      fillSrc: PRE_FIX_FILL_SRC,
+      shadowFillPx: shadow.shadowFillPx,
+      shadowNetUsd: shadow.shadowNetUsd,
+      shadowNetR: shadow.shadowNetR,
+      shadowFillKind: shadow.shadowFillKind,
+    };
+  }
+  pushClosed(book, closed);
   reviewPair(book, position.productId, opts.tsMs);
 }
 
@@ -1090,7 +1339,217 @@ function addDFill(book: Book, working: Working, units: number, tsMs: number): vo
     tick: working.tick,
     aConfig: null,
     beta: book.betas[working.order.pair] ?? null,
+    ...blankExtremes(),
   });
+}
+
+function noteOpenBids(book: Book, productId: string, bid: number, ask: number, tsMs: number, fallback?: { mid: number; halfSpread: number }): void {
+  for (const position of book.positions) {
+    if (position.productId !== productId) continue;
+    noteBidExtreme(position, bid, ask, tsMs, fallback);
+  }
+}
+
+function noteClosedBarSpread(book: Book, productId: string, startSec: number, high: number, low: number): void {
+  if (book.csBarSec[productId] === startSec) return;
+  book.csBarSec[productId] = startSec;
+  const next = sBtFromBars(book.csPrev[productId], high, low);
+  if (next) {
+    book.sBtMagnitudeBps[productId] = next.magnitude;
+    book.sBtUncappedBps[productId] = next.uncapped;
+  }
+  if (high > 0 && low > 0) book.csPrev[productId] = { high, low };
+}
+
+interface FillQuote {
+  tsMs: number;
+  nowMs: number;
+  bid: number;
+  ask: number;
+  ageMs: number;
+  src?: L2Src;
+  bids?: [number, number][];
+  asks?: [number, number][];
+}
+
+function quoteOf(event: { bid: number; ask: number; bookTsMs: number; sendTsMs: number; quoteFallback?: boolean; bids?: [number, number][]; asks?: [number, number][] }): FillQuote {
+  return {
+    tsMs: event.bookTsMs,
+    nowMs: event.sendTsMs,
+    bid: event.bid,
+    ask: event.ask,
+    ageMs: event.sendTsMs - event.bookTsMs,
+    src: event.quoteFallback ? "rest_snapshot" : "ws",
+    bids: event.bids,
+    asks: event.asks,
+  };
+}
+
+function armEntry(book: Book, event: Extract<ForwardEvent, { kind: "x1" }>, stop: number): void {
+  book.pendingFills = book.pendingFills.filter((slot) => slot.id !== event.id);
+  const hasAnchor = event.fillAnchorOpen != null && event.fillAnchorOpen > 0;
+  book.pendingFills.push({
+    id: event.id,
+    productId: event.productId,
+    classId: event.classId,
+    role: "entry",
+    side: "buy",
+    notBeforeMs: Math.max(event.tsMs, event.decisionTs ?? event.tsMs),
+    fillAnchorOpen: hasAnchor ? event.fillAnchorOpen! : 0,
+    anchorMissing: !hasAnchor,
+    modelOpen: event.nextOpen,
+    midAtDecision: event.decisionMid,
+    decisionTs: event.decisionTs,
+    barCloseTs: event.barCloseTs,
+    stop,
+    atr1h: event.atr1h,
+    target: event.target ?? null,
+    dailyAtr: event.dailyAtr ?? 0,
+    priorDailyCloses: event.priorDailyCloses ?? [],
+    tick: 0.01,
+    aConfig: event.classId === "A" ? (event.aConfig ?? null) : null,
+    tsMs: event.tsMs,
+    triggerBarTs: null,
+  });
+}
+
+function armExit(book: Book, position: Position, opts: { tsMs: number; kind: string; triggerBarTs: number | null; open: number }): void {
+  if (book.pendingFills.some((slot) => slot.positionId === position.id && slot.role === "exit")) return;
+  book.pendingFills.push({
+    id: `${position.id}:exit`,
+    productId: position.productId,
+    classId: position.classId,
+    role: "exit",
+    side: "sell",
+    notBeforeMs: opts.tsMs,
+    fillAnchorOpen: position.fillAnchorOpen != null && position.fillAnchorOpen > 0 ? position.fillAnchorOpen : 0,
+    anchorMissing: !(position.fillAnchorOpen != null && position.fillAnchorOpen > 0),
+    modelOpen: opts.open,
+    midAtDecision: position.arrivalMid,
+    stop: position.stop,
+    atr1h: position.atr1h,
+    target: position.target,
+    dailyAtr: position.dailyAtr,
+    priorDailyCloses: position.priorDailyCloses,
+    tick: position.tick,
+    aConfig: position.aConfig,
+    tsMs: opts.tsMs,
+    positionId: position.id,
+    exitKind: opts.kind,
+    triggerBarTs: opts.triggerBarTs,
+  });
+}
+
+/** First quote at or after the open fills the slot. An entry older than 2s does not wait for a fresher book. */
+export function resolvePendingFills(book: Book, productId: string, quote: FillQuote): void {
+  if (!x1TakerOn(book.config)) return;
+  const keep: PendingFill[] = [];
+  for (const slot of book.pendingFills) {
+    if (slot.productId !== productId) {
+      keep.push(slot);
+      continue;
+    }
+    const action = classifyUpdate({ notBeforeMs: slot.notBeforeMs, quoteTs: quote.tsMs, ageMs: quote.ageMs, src: quote.src });
+    if (action === "ignore") {
+      keep.push(slot);
+      continue;
+    }
+    const mid = quote.bid > 0 && quote.ask > 0 ? (quote.bid + quote.ask) / 2 : quote.bid > 0 ? quote.bid : quote.ask;
+    const fillSrc: FillSrc = slot.role === "entry"
+      ? entryQuoteFillSrc(quote.ageMs, action === "l2")
+      : action === "l2"
+        ? "l2"
+        : quote.ageMs > STALE_QUOTE_MS
+          ? STALE_QUOTE_FILL_SRC
+          : "modelled";
+    if (slot.role === "entry") {
+      const sLive = spreadBps(book, quote.bid, quote.ask);
+      if (sLive == null) {
+        keep.push(slot);
+        continue;
+      }
+      if (fillSrc === STALE_QUOTE_FILL_SRC) book.staleQuoteMisses += 1;
+      const touch = quote.ask;
+      const hasAnchor = slot.fillAnchorOpen > 0;
+      const modelPx = modelledPx(slot.modelOpen, quote.bid, quote.ask, "buy");
+      const distanceRef = hasAnchor ? slot.fillAnchorOpen : modelPx;
+      const stopBps = distanceRef > slot.stop && distanceRef > 0 ? ((distanceRef - slot.stop) / distanceRef) * 10_000 : 0;
+      if (!(stopBps > 0)) {
+        book.rejected.push({ id: slot.id, reason: hasAnchor ? "stop" : "anchor_missing" });
+        if (!hasAnchor) book.incidents.push(`anchor_missing ${slot.id}`);
+        continue;
+      }
+      const rough = paperUnits(book, slot, sLive, touch, quote.bid, quote.ask);
+      const fill = action === "l2" ? vwapFill("buy", touch, quote.asks, rough) : modelledPx(slot.modelOpen, quote.bid, quote.ask, "buy");
+      tryEnter(book, {
+        id: slot.id,
+        classId: slot.classId,
+        productId: slot.productId,
+        tsMs: slot.tsMs,
+        stopBps,
+        sLive,
+        bid: quote.bid,
+        ask: quote.ask,
+        bookTsMs: quote.tsMs,
+        sendTsMs: quote.nowMs,
+        decisionMid: slot.midAtDecision,
+        arrivalMid: mid,
+        fillPrice: fill,
+        stop: slot.stop,
+        atr1h: slot.atr1h,
+        maker: false,
+        target: slot.target,
+        dailyAtr: slot.dailyAtr,
+        priorDailyCloses: slot.priorDailyCloses,
+        tick: slot.tick,
+        ...(hasAnchor ? { rawEntry: slot.fillAnchorOpen } : { modelPx }),
+        aConfig: slot.aConfig,
+        quoteFallback: quote.src === "rest_snapshot",
+        decisionTs: slot.decisionTs,
+        barCloseTs: slot.barCloseTs,
+        fillSrc,
+        midAtFill: mid,
+        ...(slot.fillAnchorOpen > 0 ? { fillAnchorOpen: slot.fillAnchorOpen } : {}),
+        signed: true,
+      });
+      continue;
+    }
+    const position = book.positions.find((row) => row.id === slot.positionId);
+    if (!position) continue;
+    if (fillSrc === STALE_QUOTE_FILL_SRC) book.staleQuoteMisses += 1;
+    const touch = quote.bid;
+    const gap = (slot.exitKind ?? "stop") === "stop" && action === "l2" && touch < position.stop;
+    const fill = action === "l2" ? vwapFill("sell", touch, quote.bids, position.units) : modelledPx(slot.modelOpen, quote.bid, quote.ask, "sell");
+    closePosition(book, position, {
+      tsMs: quote.nowMs,
+      fill,
+      kind: slot.exitKind ?? "stop",
+      triggerBarTs: slot.triggerBarTs,
+      decisionMid: mid,
+      signed: true,
+      midAtFill: mid,
+      fillSrc,
+      bid: quote.bid,
+      ask: quote.ask,
+      gap,
+    });
+  }
+  book.pendingFills = keep;
+}
+
+function paperUnits(book: Book, slot: PendingFill, sLive: number, touch: number, bid: number, ask: number): number {
+  const distanceRef = slot.fillAnchorOpen > 0 ? slot.fillAnchorOpen : modelledPx(slot.modelOpen, bid, ask, "buy");
+  const stopBps = distanceRef > slot.stop && distanceRef > 0 ? ((distanceRef - slot.stop) / distanceRef) * 10_000 : 0;
+  if (!(stopBps > 0) || !(touch > 0)) return 0;
+  const decision = paperDecision({
+    classId: slot.classId,
+    blockers: decisionBlockers(book, slot.classId, slot.tsMs),
+    stopBps,
+    sBtBps: sLive,
+    breadthPaused: false,
+    scheduledRiskUsd: scheduledRisk(book, slot.classId),
+  });
+  return decision.notionalUsd > 0 ? decision.notionalUsd / touch : 0;
 }
 
 export function applyForward(book: Book, event: ForwardEvent): Book {
@@ -1105,7 +1564,18 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
   }
   if (event.kind === "mid") {
     applyMidSample(book.mids, { productId: event.productId, nowMs: event.tsMs, bid: event.bid, ask: event.ask, tradeVolume: event.tradeVolume });
-    noteQuote(book, event.productId, event.bid, event.ask, event.tsMs);
+    noteQuote(book, event.productId, event.bid, event.ask, event.tsMs, event.bids ? { bids: event.bids } : undefined);
+    noteOpenBids(book, event.productId, event.bid, event.ask, event.tsMs, event.fallbackMid);
+    resolvePendingFills(book, event.productId, {
+      tsMs: event.tsMs,
+      nowMs: event.tsMs,
+      bid: event.bid,
+      ask: event.ask,
+      ageMs: event.l2AgeMs ?? 0,
+      src: event.l2Src,
+      bids: event.bids,
+      asks: event.asks,
+    });
     touchTime(book, event.tsMs);
     return book;
   }
@@ -1261,7 +1731,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       book.rejected.push({ id: event.id, reason: "a-config" });
       return book;
     }
-    if (event.sendTsMs - event.bookTsMs > STALE_QUOTE_MS) {
+    if (event.sendTsMs - event.bookTsMs > STALE_QUOTE_MS && !x1TakerOn(book.config)) {
       book.rejected.push({ id: event.id, reason: MISSED_SEND_STALE_QUOTE });
       book.incidents.push(`${MISSED_SEND_STALE_QUOTE} ${event.id}`);
       return book;
@@ -1273,13 +1743,33 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
     }
     let stop = event.stop;
     if (event.classId === "B" && (event.dailyAtr ?? 0) > 0) stop = Math.max(stop, classBDisasterStop(event.nextOpen, event.dailyAtr ?? 0));
-    const stopBps = ((event.nextOpen - stop) / event.nextOpen) * 10_000;
+    const hasAnchor = event.fillAnchorOpen != null && event.fillAnchorOpen > 0;
+    const liveMissing = !hasAnchor && x1TakerOn(book.config);
+    const distanceRef = hasAnchor
+      ? event.fillAnchorOpen!
+      : liveMissing
+        ? modelledPx(event.nextOpen, event.bid, event.ask, "buy")
+        : event.nextOpen;
+    const stopBps = distanceRef > stop && distanceRef > 0 ? ((distanceRef - stop) / distanceRef) * 10_000 : 0;
     if (!(stopBps > 0)) {
-      book.rejected.push({ id: event.id, reason: "stop" });
+      if (liveMissing) {
+        book.rejected.push({ id: event.id, reason: "anchor_missing" });
+        book.incidents.push(`anchor_missing ${event.id}`);
+      } else book.rejected.push({ id: event.id, reason: "stop" });
       return book;
     }
     const arrivalMid = (event.bid + event.ask) / 2;
     noteQuote(book, event.productId, event.bid, event.ask, event.bookTsMs);
+    if (x1TakerOn(book.config)) {
+      const gated = gateEntry(book, { classId: event.classId, productId: event.productId, tsMs: event.tsMs, stopBps, sLive });
+      if (gated.reason) {
+        book.rejected.push({ id: event.id, reason: gated.reason });
+        return book;
+      }
+      armEntry(book, event, stop);
+      resolvePendingFills(book, event.productId, quoteOf(event));
+      return book;
+    }
     tryEnter(book, {
       id: event.id,
       classId: event.classId,
@@ -1405,34 +1895,91 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       }
       touchTime(book, (event.startSec + 900) * 1000);
       reviewPair(book, event.productId, (event.startSec + 900) * 1000);
+      noteClosedBarSpread(book, event.productId, event.startSec, event.high, event.low);
     }
     const barTs = event.startSec * 1000;
     const bar = { open: event.open, high: event.high, low: event.low, close: event.close };
       const dayClose = event.dailyClose ?? isDayCloseBar(event.startSec);
+    const decisionMs = event.nowSec * 1000;
+    const triggerMs = (event.startSec + 900) * 1000;
+    const liveExit = (position: Position, kind: string, open: number) => {
+      const quote = book.quotes[position.productId];
+      const age = quote ? decisionMs - quote.tsMs : Number.POSITIVE_INFINITY;
+      const src = quote?.quoteSrc === "rest_fallback" ? "rest_snapshot" : "ws";
+      const fresh = quote != null && quote.tsMs >= triggerMs && l2Fresh(age, src);
+      if (fresh && quote) {
+        const mid = quote.bid > 0 && quote.ask > 0 ? (quote.bid + quote.ask) / 2 : quote.bid;
+        const gap = kind === "stop" && quote.bid < position.stop;
+        const fill = vwapFill("sell", quote.bid, quote.bids, position.units);
+        closePosition(book, position, {
+          tsMs: decisionMs,
+          fill,
+          kind,
+          triggerBarTs: triggerMs,
+          decisionMid: mid,
+          signed: true,
+          midAtFill: mid,
+          fillSrc: "l2",
+          bid: quote.bid,
+          ask: quote.ask,
+          gap,
+        });
+        return;
+      }
+      const miss = quote == null || age > STALE_QUOTE_MS || age < 0;
+      const bid = quote?.bid ?? open;
+      const ask = quote?.ask ?? open;
+      if (miss) {
+        book.staleQuoteMisses += 1;
+        book.incidents.push(`${STALE_QUOTE_FILL_SRC} ${position.id}`);
+      }
+      const modelFrom = kind === "stop" ? Math.min(open, position.stop) : open;
+      const gap = kind === "stop" && open <= position.stop;
+      closePosition(book, position, {
+        tsMs: decisionMs,
+        fill: modelledPx(modelFrom, bid, ask, "sell"),
+        kind,
+        triggerBarTs: triggerMs,
+        decisionMid: bid > 0 && ask > 0 ? (bid + ask) / 2 : open,
+        signed: true,
+        midAtFill: bid > 0 && ask > 0 ? (bid + ask) / 2 : open,
+        fillSrc: miss ? STALE_QUOTE_FILL_SRC : "modelled",
+        bid,
+        ask,
+        ...(gap ? { gap: true } : {}),
+      });
+    };
     for (const position of [...book.positions]) {
       if (position.productId !== event.productId) continue;
       if (!closed || !barBeginsAtOrAfterEntry(event.startSec, position.entryTs)) continue;
+      noteBar15Extreme(position, event.high, event.low);
       const stop = position.stop;
       const hit = intrabarFill(bar, stop, Number.POSITIVE_INFINITY);
       if (hit.kind === "stop" && hit.price != null) {
         const gap = event.open <= stop;
         if (phase === "gap" && !gap) continue;
-        const fill = gap ? event.open : stopFillPrice(stop, position.rawEntry, position.sLiveBps, event.atr1h ?? position.atr1h);
         if (event.feedGap) {
           book.gapFills += 1;
           book.incidents.push(`gap fill ${position.id}`);
         }
+        if (x1TakerOn(book.config)) {
+          liveExit(position, "stop", event.open);
+          continue;
+        }
+        const fill = gap ? event.open : stopFillPrice(stop, position.rawEntry, position.sLiveBps, event.atr1h ?? position.atr1h);
         closePosition(book, position, { tsMs: barTs, fill, kind: "stop", triggerBarTs: barTs, decisionMid: event.close });
         continue;
       }
       if (phase === "gap") continue;
       const openFill = () => takerSell(event.open, position.sLiveBps);
       if (position.pendingExitTs != null && event.startSec >= position.pendingExitTs) {
-        closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: "rule", triggerBarTs: barTs, decisionMid: event.close });
+        if (x1TakerOn(book.config)) liveExit(position, "rule", event.open);
+        else closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: "rule", triggerBarTs: barTs, decisionMid: event.close });
         continue;
       }
       if (position.pendingExit) {
-        closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: position.pendingExit, triggerBarTs: barTs, decisionMid: event.close });
+        if (x1TakerOn(book.config)) liveExit(position, position.pendingExit, event.open);
+        else closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: position.pendingExit, triggerBarTs: barTs, decisionMid: event.close });
         continue;
       }
       if (position.classId === "E" && position.target != null && event.high >= position.target) {
@@ -1441,7 +1988,8 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       }
       const hold = position.classId === "C" ? CLASS_C_MAX_HOLD_MS : position.classId === "E" ? CLASS_E_MAX_HOLD_MS : position.classId === "D" ? D_MAX_HOLD_MS : null;
       if (hold != null && barTs >= position.entryTs + hold) {
-        closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: "time", triggerBarTs: barTs, decisionMid: event.close });
+        if (x1TakerOn(book.config)) liveExit(position, "time", event.open);
+        else closePosition(book, position, { tsMs: barTs, fill: openFill(), kind: "time", triggerBarTs: barTs, decisionMid: event.close });
         continue;
       }
       if (position.classId === "B" && event.bScores && dayClose && isMondayCloseBar(dateOfTs(event.startSec)) && !classBHeld(event.bScores, position.productId)) {

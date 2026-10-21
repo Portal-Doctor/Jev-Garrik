@@ -11,6 +11,7 @@
  */
 
 import { kellyFraction, PAPER_MINIMUM_USD } from "../p3/design-rules";
+import { countsInClassMean } from "./x1-fill";
 import { HOLM_ALPHA, holmAdjusted, netRStreamP, oneSided80TradeMean, weeklyGroups, weekKey } from "../p5/stats";
 
 export const UNPROMOTED_RISK_USD = PAPER_MINIMUM_USD;
@@ -28,6 +29,8 @@ export const KELLY_RULING_TEXT =
 export interface ForwardPoint {
   netR: number;
   entryDate: string;
+  fillSrc?: string | null;
+  anchorMissing?: boolean;
 }
 
 export interface KellyStream {
@@ -215,11 +218,12 @@ export function holmPass(classId: string, streams: readonly KellyStream[]): bool
 }
 
 export function forwardBound(points: readonly ForwardPoint[], seed: number, reps?: number): { mean: number | null; l80: number | null } {
-  const mu = mean(points.map((point) => point.netR));
-  if (points.length === 0) return { mean: null, l80: null };
-  const weeks = [...new Set(points.map((point) => weekKey(point.entryDate)))].sort();
+  const counted = points.filter((point) => countsInClassMean(point));
+  const mu = mean(counted.map((point) => point.netR));
+  if (counted.length === 0) return { mean: null, l80: null };
+  const weeks = [...new Set(counted.map((point) => weekKey(point.entryDate)))].sort();
   const grouped = weeklyGroups(
-    points.map((point) => ({ week: weekKey(point.entryDate), value: point.netR })),
+    counted.map((point) => ({ week: weekKey(point.entryDate), value: point.netR })),
     weeks,
   );
   const bound = oneSided80TradeMean(grouped, { seed, reps });
@@ -244,7 +248,8 @@ export function forwardClassRisk(opts: {
   fromDay?: string | null;
 }): KellySize {
   const reviewMonday = weekKey(new Date(opts.nowMs).toISOString().slice(0, 10));
-  const days = forwardDays(opts.forward, opts.nowMs, opts.fromDay);
+  const forward = opts.forward.filter((point) => countsInClassMean(point));
+  const days = forwardDays(forward, opts.nowMs, opts.fromDay);
   if (opts.held && opts.held.reviewMonday === reviewMonday) {
     return {
       riskUsd: opts.held.riskUsd,
@@ -258,16 +263,16 @@ export function forwardClassRisk(opts: {
       bankrollUsd: PAPER_BANKROLL_USD,
     };
   }
-  const bound = forwardBound(opts.forward, opts.bootstrapSeed, opts.reps);
+  const bound = forwardBound(forward, opts.bootstrapSeed, opts.reps);
   const eligible =
     days >= PROMOTION_MIN_DAYS &&
-    opts.forward.length >= PROMOTION_MIN_N &&
+    forward.length >= PROMOTION_MIN_N &&
     bound.mean != null &&
     bound.mean > 0 &&
     bound.l80 != null &&
     bound.l80 > 0 &&
     holmPass(opts.classId, opts.streams);
-  const fraction = eligible && bound.l80 != null ? kellyFraction(bound.l80, sampleVariance(opts.forward.map((point) => point.netR))) : null;
+  const fraction = eligible && bound.l80 != null ? kellyFraction(bound.l80, sampleVariance(forward.map((point) => point.netR))) : null;
   const riskUsd = fraction != null && fraction > 0 ? fraction * PAPER_BANKROLL_USD : UNPROMOTED_RISK_USD;
   return {
     riskUsd,

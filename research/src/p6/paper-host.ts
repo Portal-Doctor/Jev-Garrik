@@ -19,7 +19,8 @@ import { isDayCloseBar } from "../p5/book";
 import { assertSafeToStart } from "../safety";
 import { readPairMonth } from "../data/store";
 import { readDailyHistory } from "./daily";
-import { applyForward, freshBook, forwardBookPanel, noteMemberDay, type Book } from "./engine";
+import { applyForward, freshBook, forwardBookPanel, noteMemberDay, resolvePendingFills, type Book } from "./engine";
+import { restoreExtremes } from "./extremes";
 import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
 import { completedDays, deriveForwardBook, forwardBarAnnotation, generateForward, hourAtrAt, vetoFromBtc, withExplicitGaps, type FifteenBar, type GeneratedEntry, type GenerateResult } from "./generate";
@@ -955,6 +956,15 @@ function levelsOf(host: PaperHost, productId: string): { bids: Map<string, numbe
   return book;
 }
 
+function ladder(levels: Map<string, number>): [number, number][] {
+  const out: [number, number][] = [];
+  for (const [price, qty] of levels) {
+    const px = Number(price);
+    if (px > 0 && qty > 0) out.push([px, qty]);
+  }
+  return out;
+}
+
 function touch(book: { bids: Map<string, number>; asks: Map<string, number> }): { bid: number; ask: number } | null {
   let bid = 0;
   let ask = Number.POSITIVE_INFINITY;
@@ -1068,7 +1078,17 @@ export function applyPublic(host: PaperHost, shardIndex: number, events: readonl
     if (top && book) {
       host.book.quotes[productId] = { bid: top.bid, ask: top.ask, tsMs: nowMs, quoteSrc: "l2" };
       host.jevTape.onBook(productId, nowMs, book);
-      applyForward(host.book, { kind: "mid", tsMs: nowMs, productId, bid: top.bid, ask: top.ask });
+      const waiting = host.book.pendingFills.some((slot) => slot.productId === productId);
+      applyForward(host.book, {
+        kind: "mid",
+        tsMs: nowMs,
+        productId,
+        bid: top.bid,
+        ask: top.ask,
+        l2AgeMs: 0,
+        l2Src: host.l2BookSrc.get(productId) === "rest_snapshot" ? "rest_snapshot" : "ws",
+        ...(waiting ? { bids: ladder(book.bids), asks: ladder(book.asks) } : {}),
+      });
     }
   }
   kickDurable(host);
@@ -1352,7 +1372,20 @@ export async function resyncBooksFromRest(
       host.l2BookSrc.set(productId, "rest_snapshot");
       host.l2Ts.set(productId, host.clock());
       const top = touch(book);
-      if (top) host.book.quotes[productId] = { bid: top.bid, ask: top.ask, tsMs: host.clock(), quoteSrc: "rest_fallback" };
+      if (top) {
+        const nowMs = host.clock();
+        host.book.quotes[productId] = { bid: top.bid, ask: top.ask, tsMs: nowMs, quoteSrc: "rest_fallback" };
+        resolvePendingFills(host.book, productId, {
+          tsMs: nowMs,
+          nowMs,
+          bid: top.bid,
+          ask: top.ask,
+          ageMs: 0,
+          src: "rest_snapshot",
+          bids: ladder(book.bids),
+          asks: ladder(book.asks),
+        });
+      }
       host.book.incidents.push(`l2 rest snapshot ${productId}`);
     } catch (error) {
       host.book.incidents.push(`l2 rest snapshot ${productId} ${error instanceof Error ? error.message : "failed"}`);
@@ -1404,14 +1437,20 @@ export function flushEntries(host: PaperHost, nowMs: number, opts?: { keepUntrie
     if (entry.tsMs > nowMs) continue;
     const quoteKind = publishLiveQuote(host, entry.productId, nowMs);
     const quoted = host.book.quotes[entry.productId];
-    if (quoteKind === "stale" || !quoted || nowMs - quoted.tsMs > STALE_QUOTE_MS) {
+    const quoteAge = quoted ? nowMs - quoted.tsMs : Number.POSITIVE_INFINITY;
+    const staleMiss = quoteKind === "stale" || !quoted || quoteAge > STALE_QUOTE_MS;
+    if (staleMiss) {
       if (opts?.keepUntried && !host.quoteTried.has(id)) continue;
-      host.queued.delete(id);
-      host.emitted.add(id);
-      host.book.rejected.push({ id, reason: MISSED_SEND_STALE_QUOTE });
-      host.book.incidents.push(`${MISSED_SEND_STALE_QUOTE} ${id}`);
-      continue;
+      const priced = quoted != null && quoted.bid > 0 && quoted.ask > 0;
+      if (entry.kind === "d-order" || !priced) {
+        host.queued.delete(id);
+        host.emitted.add(id);
+        host.book.rejected.push({ id, reason: MISSED_SEND_STALE_QUOTE });
+        host.book.incidents.push(`${MISSED_SEND_STALE_QUOTE} ${id}`);
+        continue;
+      }
     }
+    if (!quoted) continue;
     host.queued.delete(id);
     const top = { bid: quoted.bid, ask: quoted.ask };
     const quoteFallback = quoted.quoteSrc === "rest_fallback";
@@ -1422,6 +1461,7 @@ export function flushEntries(host: PaperHost, nowMs: number, opts?: { keepUntrie
       host.book.rejected.push({ id, reason: "tick" });
       continue;
     }
+    const registeredOpen = entry.nextOpen;
     let nextOpen = entry.nextOpen;
     let stop = entry.stop;
     if (entry.fillAtOpen || !(nextOpen > 0)) {
@@ -1475,6 +1515,7 @@ export function flushEntries(host: PaperHost, nowMs: number, opts?: { keepUntrie
       quoteFallback,
       decisionTs: entry.decisionTs ?? entry.tsMs,
       barCloseTs: entry.barCloseTs ?? entry.tsMs,
+      ...(registeredOpen > 0 ? { fillAnchorOpen: registeredOpen } : {}),
     });
   }
   kickDurable(host);
@@ -1753,6 +1794,16 @@ export interface PaperStateBody {
   ema200?: [string, "seeded" | "live"][];
   fourSeedThrough?: [string, number][];
   overlapSeen?: boolean;
+  hotRev?: number;
+  pendingFills?: Book["pendingFills"];
+  quotes?: [string, number, number, [number, number][]?][];
+  sBtMagnitudeBps?: Book["sBtMagnitudeBps"];
+  sBtUncappedBps?: Book["sBtUncappedBps"];
+  staleQuoteMisses?: number;
+  runLabel?: "X1" | "non-X1";
+  csPrev?: Book["csPrev"];
+  csBarSec?: Book["csBarSec"];
+  feedLive?: boolean;
 }
 
 /** Persistence for the book and the last processed bar. The driver does not choose the store. */
@@ -1897,6 +1948,20 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
 
 export function installPaperState(host: PaperHost, body: Partial<PaperStateBody> & { aPickConfig?: string | null }): void {
   host.book.positions = body.positions ?? [];
+  for (const position of host.book.positions) restoreExtremes(position, body.hotRev);
+  host.book.pendingFills = body.pendingFills ?? [];
+  if (body.sBtMagnitudeBps) host.book.sBtMagnitudeBps = body.sBtMagnitudeBps;
+  if (body.sBtUncappedBps) host.book.sBtUncappedBps = body.sBtUncappedBps;
+  if (typeof body.staleQuoteMisses === "number") host.book.staleQuoteMisses = body.staleQuoteMisses;
+  if (body.csPrev) host.book.csPrev = body.csPrev;
+  if (body.csBarSec) host.book.csBarSec = body.csBarSec;
+  if (body.quotes) {
+    for (const [productId, bid, tsMs] of body.quotes) {
+      if (!(bid > 0) || !Number.isFinite(tsMs)) continue;
+      const prev = host.book.quotes[productId];
+      host.book.quotes[productId] = { bid, ask: prev?.ask && prev.ask >= bid ? prev.ask : bid, tsMs, quoteSrc: prev?.quoteSrc };
+    }
+  }
   host.book.closed = body.closed ?? [];
   if (body.kelly) host.book.kelly = body.kelly;
   host.book.pairs = body.pairs ?? {};

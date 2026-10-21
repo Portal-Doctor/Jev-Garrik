@@ -818,3 +818,140 @@ test("paper P/L separates equity, fees, spread, drawdown, and the backstops", ()
   expect(killed.classBackstopUsd).toBe(1200);
   expect(killed.pairBackstopUsd).toBe(500);
 });
+
+test("a planted host in the new public fields is absent from the HTML and the RSC view", async () => {
+  const host = "x.upstash.io";
+  const shown = redactP6View(publicView({
+    positions: [
+      {
+        productId: "BTC-USD",
+        id: "A-BTC-USD-1710000000000",
+        mfeBid1m: 1.25,
+        maeBid1m: 0.5,
+        mfeTs: 1_700_000_000_000,
+        maeTs: 1_700_000_060_000,
+        mfe15: 2,
+        mae15: 0.4,
+        mfeBasis: "bid1m",
+        maeBasis: "mid-half-spread",
+        mfe15Basis: "bar15-high",
+        mae15Basis: "bar15-low",
+        grossR: -0.27,
+        netR: -0.31,
+      },
+      {
+        productId: host,
+        id: host,
+        mfeBid1m: Number.POSITIVE_INFINITY,
+        maeBid1m: Number.NaN,
+        mfeBasis: host,
+        maeBasis: "not-a-basis",
+        mfe15Basis: host,
+        grossR: Number.POSITIVE_INFINITY,
+      },
+    ],
+    closed: [
+      { productId: "ETH-USD", classId: "B", netUsd: 1, mfeR: 0.4, maeR: -0.2, fillSrc: "modelled", execCostBps: 3.5, driftBps: 1.2, delayBps: -0.4, shadowNetUsd: 2, shadowNetR: 0.1, shadowFillPx: 100.2, shadowFillKind: "modelled", mfeBasis: "bid1m" },
+      { productId: "SOL-USD", classId: "C", netUsd: 3, fillSrc: "entry_stale_quote", shadowFillPx: 1, shadowFillKind: "not-a-kind" },
+      { productId: host, classId: host, netUsd: host as never, fillSrc: host, execCostBps: Number.NaN, driftBps: Number.POSITIVE_INFINITY, mfeR: host as never, shadowNetUsd: host as never, shadowFillPx: host as never, shadowFillKind: host },
+    ],
+    mark: {
+      pnlNow: -21.4,
+      label: host as never,
+      state: host as never,
+      staleText: `stale since ${host}`,
+      restLabel: host as never,
+      openRGross: -0.27,
+      openRNet: Number.NaN,
+      grossUsd: -21.4,
+      riskUsd: 80,
+      quoteFresh: false,
+      rows: [
+        { productId: "BTC-USD", pnl: -5.35, grossUsd: -5.35, grossR: -0.27, netR: -0.3 },
+        { productId: host, pnl: Number.POSITIVE_INFINITY, grossUsd: Number.NaN, grossR: host as never, netR: -1 },
+      ],
+    },
+    fills: [
+      { classId: "B", share: 0.25, execCost: "red" },
+      { classId: host, share: Number.NaN, execCost: host as never },
+    ],
+    markInputs: { positions: [], quotes: { [host]: { bid: 1, tsMs: 1 } }, disconnected: true },
+  }));
+  const rendered = formatP6Public(shown);
+  const html = `<section id="mark-now"><p class="${shown.mark?.state === "rest" ? "rest" : shown.mark?.state === "stale" ? "grey" : ""}">${rendered.mark}</p></section>`;
+  const flight = JSON.stringify({ html, view: shown, mark: rendered.mark });
+  const output = `${html}\n${flight}\n${JSON.stringify(rendered)}`;
+  expect(output.includes(host)).toBe(false);
+  expect(output.includes("upstash")).toBe(false);
+  expect(output.includes("Infinity")).toBe(false);
+  expect(output.includes("NaN")).toBe(false);
+  expect(rendered.mark).toContain("marked to bid, taker 0.90% exit");
+  expect(rendered.mark).toContain("n/a");
+  expect(rendered.mark).toContain("B red");
+  expect(rendered.mark).toContain("-0.27R");
+  expect(rendered.trades[0]?.label).toBe("ETH-USD · B");
+  expect(shown.positions[0]?.mfeBasis).toBe("bid1m");
+  expect(shown.positions[0]?.maeBasis).toBe("mid-half-spread");
+  expect(shown.positions[0]?.mfe15Basis).toBe("bar15-high");
+  expect(shown.positions[0]?.mfeBid1m).toBe(1.25);
+  expect(shown.positions[1]?.mfeBasis).toBeUndefined();
+  expect(shown.positions[1]?.mfeBid1m).toBeUndefined();
+  expect(shown.closed[0]?.fillSrc).toBe("modelled");
+  expect(shown.closed[0]?.shadowFillPx).toBe(100.2);
+  expect(shown.closed[0]?.shadowFillKind).toBe("modelled");
+  expect(shown.closed[1]?.fillSrc).toBe("entry_stale_quote");
+  expect(shown.closed[1]?.shadowFillPx).toBe(1);
+  expect(shown.closed[1]?.shadowFillKind).toBeUndefined();
+  expect(shown.closed[2]?.fillSrc).toBeUndefined();
+  expect(shown.closed[2]?.shadowFillPx).toBeUndefined();
+  expect(shown.closed[2]?.shadowFillKind).toBeUndefined();
+  expect(shown.mark?.state).toBe("na");
+  expect(shown.mark?.label).toBe("marked to bid, taker 0.90% exit");
+  expect(shown.mark?.staleText).toBeUndefined();
+  expect(shown.mark?.restLabel).toBeUndefined();
+  expect(shown.mark?.rows[1]?.productId).toBe("redacted");
+  expect(shown.mark?.rows[1]?.pnl).toBeNull();
+  expect(shown.fills?.[0]?.execCost).toBe("red");
+  expect(shown.fills?.[1]?.classId).toBeUndefined();
+  expect(shown.fills?.[1]?.execCost).toBe("ok");
+  expect(shown.markInputs).toBeUndefined();
+  const root = join(import.meta.dir, "..", "..", "..");
+  const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
+  expect(page.includes("shown.mark")).toBe(true);
+  expect(page.includes("formatP6Public(view)")).toBe(true);
+  const reactPkg = join(root, "web/node_modules/react/package.json");
+  if (!existsSync(reactPkg)) return;
+  const { createRequire } = await import("node:module");
+  const require = createRequire(join(root, "web/package.json"));
+  const { createElement } = require("react") as { createElement: (...args: unknown[]) => unknown };
+  const { renderToStaticMarkup } = require("react-dom/server") as { renderToStaticMarkup: (node: unknown) => string };
+  const markup = renderToStaticMarkup(createElement("p", { id: "mark-now" }, rendered.mark));
+  expect(markup.includes(host)).toBe(false);
+  expect(markup).toContain("marked to bid, taker 0.90% exit");
+  const { spawnSync } = await import("node:child_process");
+  const rsc = spawnSync(
+    process.execPath,
+    ["--conditions=react-server", "-e", [
+      'const { createElement } = require("react");',
+      'const { renderToReadableStream } = require("next/dist/compiled/react-server-dom-webpack/server.node");',
+      "let mark = '';",
+      "process.stdin.setEncoding('utf8');",
+      "process.stdin.on('data', (chunk) => { mark += chunk; });",
+      "process.stdin.on('end', async () => {",
+      "  const stream = renderToReadableStream(createElement('p', { id: 'mark-now' }, mark));",
+      "  const reader = stream.getReader();",
+      "  const chunks = [];",
+      "  for (;;) {",
+      "    const step = await reader.read();",
+      "    if (step.done) break;",
+      "    chunks.push(Buffer.from(step.value));",
+      "  }",
+      "  process.stdout.write(Buffer.concat(chunks).toString('utf8'));",
+      "});",
+    ].join("\n")],
+    { cwd: join(root, "web"), input: rendered.mark, encoding: "utf8" },
+  );
+  expect(rsc.status, rsc.stderr).toBe(0);
+  expect(rsc.stdout.includes(host)).toBe(false);
+  expect(rsc.stdout).toContain("marked to bid");
+});

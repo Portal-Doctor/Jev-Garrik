@@ -6,6 +6,7 @@
 import { breadthNetRSplit, forwardAbKill, sprtReport, type BreadthLabel } from "../p5/guards";
 import { holmAdjusted, netRStreamP, oneSided80, oneSided80TradeMean, weeklyGroups, weeklyValues, weekKey, WEEKS_PER_MONTH, type PValue } from "../p5/stats";
 import { classPanel, costDrag, entryWeek, medianNetR, payoffBreakEven, placeboP, type ReviewTrade } from "./metrics";
+import { countsInClassMean } from "./x1-fill";
 
 export const FORWARD_CLASSES = ["A", "B", "C", "D", "E"] as const;
 export type ForwardClass = (typeof FORWARD_CLASSES)[number];
@@ -47,7 +48,8 @@ export function forwardReview(opts: {
   reps?: number;
   seed?: number;
 }): ForwardReview {
-  const trades = opts.trades.filter((trade) => trade.classId === opts.classId);
+  const eligible = opts.trades.filter((trade) => countsInClassMean(trade));
+  const trades = eligible.filter((trade) => trade.classId === opts.classId);
   const netR = trades.map((trade) => trade.netR);
   const grouped = weeklyGroups(trades.map((trade) => ({ week: entryWeek(trade.entryDate), value: trade.netR })), opts.weeks);
   const bound = oneSided80TradeMean(grouped, { reps: opts.reps, seed: opts.seed });
@@ -58,7 +60,7 @@ export function forwardReview(opts: {
   const l80 = bound?.l80 ?? null;
   const panel = classPanel({
     classId: opts.classId,
-    trades: opts.trades,
+    trades: eligible,
     forwardDays: opts.forwardDays ?? 0,
     meanNetR,
     l80NetR: l80,
@@ -68,7 +70,7 @@ export function forwardReview(opts: {
     indeterminateShare: opts.indeterminateShare ?? null,
   });
   const streams: PValue[] = FORWARD_CLASSES.map((id) => {
-    const values = opts.trades.filter((trade) => trade.classId === id).map((trade) => trade.netR);
+    const values = eligible.filter((trade) => trade.classId === id).map((trade) => trade.netR);
     return { id, p: netRStreamP(values).p };
   });
   const adjusted = holmAdjusted(streams);
@@ -97,7 +99,7 @@ export function forwardReview(opts: {
     holm: {
       family: "5-stream",
       streams: adjusted.map((row) => {
-        const values = opts.trades.filter((trade) => trade.classId === row.id).map((trade) => trade.netR);
+        const values = eligible.filter((trade) => trade.classId === row.id).map((trade) => trade.netR);
         const stream = netRStreamP(values);
         return { id: row.id as ForwardClass, n: stream.n, p: row.p, status: stream.status, adjusted: row.adjusted };
       }),

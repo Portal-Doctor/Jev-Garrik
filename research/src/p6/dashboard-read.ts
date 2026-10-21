@@ -21,6 +21,8 @@ import {
   type HourAgg,
   type PnlBlock,
 } from "./pnl-block";
+import { closedNow, fetchRestBids, type MarkNow, type MarkPosition, type MarkQuote } from "./mark-now";
+import { classMeanNetR, classStress, execCostWord, modelledShare, quoteMissStats, type ClassStress, type ExecWord, type StressGrade, type StressTrade } from "./x1-fill";
 
 export { type PnlBlock };
 
@@ -441,7 +443,7 @@ function publicLastRun(raw: Record<string, unknown> | null): Record<string, unkn
  * Anything else becomes `redacted`, and a Jev-caller error becomes `call_error`.
  */
 export function redactP6View(view: DashboardView): DashboardView {
-  return {
+  const shown: DashboardView = {
     ...view,
     unreadable: view.unreadable,
     lastUnreadable: view.lastUnreadable,
@@ -455,27 +457,153 @@ export function redactP6View(view: DashboardView): DashboardView {
     emitted: view.emitted.map(publicEmitted),
     closed: view.closed.map(publicClosed),
     positions: view.positions.map(publicPosition),
+    mark: publicMark(view.mark),
+    fills: publicFills(view.fills ?? []),
+    runLabel: publicEnum(view.runLabel, RUN_LABEL) === "non-X1" ? "non-X1" : publicEnum(view.runLabel, RUN_LABEL) === "X1" ? "X1" : undefined,
   };
+  delete shown.markInputs;
+  return shown;
 }
 
-function publicClosed(row: DashboardView["closed"][number]): { productId?: string; classId?: string; netUsd?: number } {
+const BASIS = new Set(["bid1m", "mid-half-spread", "bar15-high", "bar15-low"]);
+const FILL_SRC = new Set(["l2", "modelled", "stale_quote_modelled", "pre-fix fill model", "entry_stale_quote"]);
+const SHADOW_KIND = new Set(["modelled"]);
+const MARK_STATE = new Set(["live", "stale", "rest", "na"]);
+const EXEC_WORD = new Set(["ok", "yellow", "red"]);
+const STRESS_GRADE = new Set(["insufficient", "indicative", "decision-grade"]);
+const RUN_LABEL = new Set(["X1", "non-X1"]);
+const PUBLIC_MARK_LABEL = "marked to bid, taker 0.90% exit";
+const PUBLIC_REST_LABEL = "REST mark";
+
+function publicNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function publicEnum(value: unknown, allowed: ReadonlySet<string>): string | undefined {
+  return typeof value === "string" && allowed.has(value) ? value : undefined;
+}
+
+function publicClosed(row: DashboardView["closed"][number]): DashboardView["closed"][number] {
   const productId = typeof row.productId === "string" ? publicScalar(row.productId, "productId") : undefined;
   const classId = typeof row.classId === "string" ? publicScalar(row.classId, "classId") : undefined;
-  const netUsd = typeof row.netUsd === "number" && Number.isFinite(row.netUsd) ? row.netUsd : undefined;
+  const netUsd = publicNumber(row.netUsd);
+  const mfeR = publicNumber(row.mfeR);
+  const maeR = publicNumber(row.maeR);
+  const fillSrc = publicEnum(row.fillSrc, FILL_SRC);
+  const execCostBps = publicNumber(row.execCostBps);
+  const driftBps = publicNumber(row.driftBps);
+  const delayBps = publicNumber(row.delayBps);
+  const shadowNetUsd = publicNumber(row.shadowNetUsd);
+  const shadowNetR = publicNumber(row.shadowNetR);
+  const shadowFillPx = publicNumber(row.shadowFillPx);
+  const shadowFillKind = publicEnum(row.shadowFillKind, SHADOW_KIND);
+  const mfeBasis = publicEnum(row.mfeBasis, BASIS);
+  const maeBasis = publicEnum(row.maeBasis, BASIS);
   return {
-    ...(productId ? { productId } : {}),
+    ...(productId && productId !== "redacted" ? { productId } : productId === "redacted" ? { productId } : {}),
     ...(classId ? { classId } : {}),
     ...(netUsd !== undefined ? { netUsd } : {}),
+    ...(mfeR !== undefined ? { mfeR } : {}),
+    ...(maeR !== undefined ? { maeR } : {}),
+    ...(fillSrc ? { fillSrc } : {}),
+    ...(execCostBps !== undefined ? { execCostBps } : {}),
+    ...(driftBps !== undefined ? { driftBps } : {}),
+    ...(delayBps !== undefined ? { delayBps } : {}),
+    ...(shadowNetUsd !== undefined ? { shadowNetUsd } : {}),
+    ...(shadowNetR !== undefined ? { shadowNetR } : {}),
+    ...(shadowFillPx !== undefined ? { shadowFillPx } : {}),
+    ...(shadowFillKind ? { shadowFillKind } : {}),
+    ...(mfeBasis ? { mfeBasis } : {}),
+    ...(maeBasis ? { maeBasis } : {}),
   };
 }
 
-function publicPosition(row: DashboardView["positions"][number]): { productId?: string; id?: string } {
+function publicPosition(row: DashboardView["positions"][number]): DashboardView["positions"][number] {
   const productId = typeof row.productId === "string" ? publicScalar(row.productId, "productId") : undefined;
   const id = typeof row.id === "string" ? publicScalar(row.id, "id") : undefined;
+  const mfeBid1m = publicNumber(row.mfeBid1m);
+  const maeBid1m = publicNumber(row.maeBid1m);
+  const mfeTs = publicNumber(row.mfeTs);
+  const maeTs = publicNumber(row.maeTs);
+  const mfe15 = publicNumber(row.mfe15);
+  const mae15 = publicNumber(row.mae15);
+  const grossR = publicNumber(row.grossR);
+  const netR = publicNumber(row.netR);
+  const mfeBasis = publicEnum(row.mfeBasis, BASIS);
+  const maeBasis = publicEnum(row.maeBasis, BASIS);
+  const mfe15Basis = publicEnum(row.mfe15Basis, BASIS);
+  const mae15Basis = publicEnum(row.mae15Basis, BASIS);
   return {
     ...(productId ? { productId } : {}),
     ...(id ? { id } : {}),
+    ...(mfeBid1m !== undefined ? { mfeBid1m } : {}),
+    ...(maeBid1m !== undefined ? { maeBid1m } : {}),
+    ...(mfeTs !== undefined ? { mfeTs } : {}),
+    ...(maeTs !== undefined ? { maeTs } : {}),
+    ...(mfe15 !== undefined ? { mfe15 } : {}),
+    ...(mae15 !== undefined ? { mae15 } : {}),
+    ...(grossR !== undefined ? { grossR } : {}),
+    ...(netR !== undefined ? { netR } : {}),
+    ...(mfeBasis ? { mfeBasis } : {}),
+    ...(maeBasis ? { maeBasis } : {}),
+    ...(mfe15Basis ? { mfe15Basis } : {}),
+    ...(mae15Basis ? { mae15Basis } : {}),
   };
+}
+
+function publicMark(mark: MarkNow | null | undefined): MarkNow | null {
+  if (!mark) return null;
+  const state = publicEnum(mark.state, MARK_STATE);
+  const label = mark.label === PUBLIC_MARK_LABEL ? PUBLIC_MARK_LABEL : undefined;
+  const restLabel = mark.restLabel === PUBLIC_REST_LABEL ? PUBLIC_REST_LABEL : undefined;
+  const staleText = typeof mark.staleText === "string" && /^stale since \d{2}:\d{2} CT$/.test(mark.staleText) ? mark.staleText : undefined;
+  const rows: MarkNow["rows"] = mark.rows.map((row) => {
+    const productId = typeof row.productId === "string" ? publicScalar(row.productId, "productId") : "redacted";
+    return {
+      productId,
+      pnl: publicNumber(row.pnl) ?? null,
+      grossUsd: publicNumber(row.grossUsd) ?? null,
+      grossR: publicNumber(row.grossR) ?? null,
+      netR: publicNumber(row.netR) ?? null,
+    };
+  });
+  return {
+    pnlNow: publicNumber(mark.pnlNow) ?? null,
+    label: label ?? PUBLIC_MARK_LABEL,
+    state: (state as MarkNow["state"] | undefined) ?? "na",
+    ...(staleText ? { staleText } : {}),
+    ...(restLabel ? { restLabel } : {}),
+    openRGross: publicNumber(mark.openRGross) ?? null,
+    openRNet: publicNumber(mark.openRNet) ?? null,
+    grossUsd: publicNumber(mark.grossUsd) ?? null,
+    riskUsd: publicNumber(mark.riskUsd) ?? 0,
+    quoteFresh: mark.quoteFresh === true,
+    rows,
+  };
+}
+
+function publicFills(rows: DashboardView["fills"]): DashboardView["fills"] {
+  return (rows ?? []).map((row) => {
+    const classId = typeof row.classId === "string" ? publicScalar(row.classId, "classId") : undefined;
+    const word = publicEnum(row.execCost, EXEC_WORD);
+    const grade = publicEnum(row.stressGrade, STRESS_GRADE);
+    const execCost: ExecWord = word === "yellow" || word === "red" ? word : "ok";
+    return {
+      ...(classId && classId !== "redacted" ? { classId } : {}),
+      share: publicNumber(row.share) ?? 0,
+      execCost,
+      capHitCount: publicNumber(row.capHitCount) ?? 0,
+      missCount: publicNumber(row.missCount) ?? 0,
+      missRate: publicNumber(row.missRate) ?? 0,
+      gapSlippageBps: publicNumber(row.gapSlippageBps) ?? null,
+      stressN: publicNumber(row.stressN) ?? 0,
+      stressGrade: (grade as StressGrade | undefined) ?? "insufficient",
+      stressNetR: publicNumber(row.stressNetR) ?? null,
+      cappedNetR: publicNumber(row.cappedNetR) ?? null,
+      meanNetR: publicNumber(row.meanNetR) ?? null,
+      spreadFragile: row.spreadFragile === true,
+    };
+  });
 }
 
 /** The strings the /p6 page interpolates into HTML. */
@@ -486,6 +614,7 @@ export function formatP6Public(view: DashboardView): {
   causes: string;
   trades: { label: string; netUsd: number | null }[];
   positions: string;
+  mark: string;
 } {
   const safe = redactP6View(view);
   const outcome = safe.lastRun && typeof safe.lastRun.outcome === "string" ? safe.lastRun.outcome : "no run";
@@ -499,12 +628,102 @@ export function formatP6Public(view: DashboardView): {
       netUsd: typeof row.netUsd === "number" ? row.netUsd : null,
     })),
     positions: safe.positions.map((row) => [row.productId, row.id].filter((part) => part && part.length > 0).join(" ")).join(" | "),
+    mark: markLine(safe),
   };
+}
+
+function markLine(view: DashboardView): string {
+  const mark = view.mark;
+  if (!mark) return "";
+  const pnl = mark.state === "na" || mark.pnlNow == null ? "n/a" : mark.pnlNow.toFixed(2);
+  const grossUsd = mark.grossUsd == null ? "n/a" : mark.grossUsd.toFixed(2);
+  const openR = mark.openRGross == null ? "n/a" : `${mark.openRGross.toFixed(2)}R`;
+  const netR = mark.openRNet == null ? "n/a" : `${mark.openRNet.toFixed(2)}R`;
+  const rows = mark.rows
+    .map((row) => {
+      const id = row.productId ?? "";
+      const gross = row.grossR == null ? "n/a" : `${row.grossR.toFixed(2)}R`;
+      const basis = view.positions.find((position) => position.productId === row.productId);
+      const labels = [basis?.mfeBasis, basis?.maeBasis, basis?.mfe15Basis, basis?.mae15Basis].filter((part) => part && part.length > 0);
+      return [id, gross, ...labels].filter((part) => part && part.length > 0).join(" ");
+    })
+    .join(" | ");
+  const fills = (view.fills ?? [])
+    .filter((row) => row.execCost === "yellow" || row.execCost === "red")
+    .map((row) => `${row.classId ?? ""} ${row.execCost}`.trim())
+    .join(" ");
+  const caps = (view.fills ?? [])
+    .filter((row) => (row.capHitCount ?? 0) > 0)
+    .map((row) => `${row.classId ?? ""} cap ${row.capHitCount}`.trim())
+    .join(" ");
+  const gaps = (view.fills ?? [])
+    .filter((row) => row.gapSlippageBps != null)
+    .map((row) => `${row.classId ?? ""} gap slippage ${row.gapSlippageBps!.toFixed(2)}`.trim())
+    .join(" ");
+  const stress = (view.fills ?? [])
+    .filter((row) => (row.stressN ?? 0) > 0)
+    .map((row) => stressLine(row))
+    .filter((line) => line.length > 0)
+    .join(" ");
+  const misses = (view.fills ?? [])
+    .filter((row) => (row.missCount ?? 0) > 0)
+    .map((row) => `${row.classId ?? ""} misses ${row.missCount} ${(row.missRate ?? 0).toFixed(2)}`.trim())
+    .join(" ");
+  const fresh = mark.quoteFresh === false ? "stale quote" : undefined;
+  const run = view.runLabel === "non-X1" ? "non-X1" : undefined;
+  return [mark.label, mark.state, fresh, `gross $${grossUsd}`, `net $${pnl}`, `open R ${openR} gross ${netR} net`, rows, fills, caps, gaps, stress, misses, run]
+    .filter((part) => part && part.length > 0)
+    .join(" · ");
+}
+
+function stressLine(row: NonNullable<DashboardView["fills"]>[number]): string {
+  const id = row.classId ?? "";
+  if (row.stressGrade === "insufficient" || (row.stressN ?? 0) < 10) return `${id} insufficient n ${row.stressN ?? 0}`.trim();
+  const fragile = row.spreadFragile === true ? "spread-fragile" : row.stressGrade ?? "";
+  const net = row.stressNetR == null ? "" : `${row.stressNetR.toFixed(2)}R`;
+  const capped = row.cappedNetR == null ? "" : `capped, report-only ${row.cappedNetR.toFixed(2)}R`;
+  const mean = row.meanNetR == null ? "" : `mean ${row.meanNetR.toFixed(4)}R`;
+  return [id, fragile, net, capped, mean].filter((part) => part && part.length > 0).join(" ");
 }
 
 export interface DashboardLease {
   holder: string;
   untilMs: number;
+}
+
+export interface DashboardPosition {
+  productId?: string;
+  id?: string;
+  mfeBid1m?: number;
+  maeBid1m?: number;
+  mfeTs?: number;
+  maeTs?: number;
+  mfe15?: number;
+  mae15?: number;
+  mfeBasis?: string;
+  maeBasis?: string;
+  mfe15Basis?: string;
+  mae15Basis?: string;
+  grossR?: number;
+  netR?: number;
+}
+
+export interface DashboardClosed {
+  productId?: string;
+  classId?: string;
+  netUsd?: number;
+  mfeR?: number;
+  maeR?: number;
+  mfeBasis?: string;
+  maeBasis?: string;
+  fillSrc?: string;
+  execCostBps?: number;
+  driftBps?: number;
+  delayBps?: number;
+  shadowNetUsd?: number;
+  shadowNetR?: number;
+  shadowFillPx?: number;
+  shadowFillKind?: string;
 }
 
 export interface DashboardView {
@@ -513,9 +732,30 @@ export interface DashboardView {
   killSwitch: boolean;
   incidents: string[];
   gaps: { startMs: number; endMs: number; cause?: string }[];
-  positions: { productId?: string; id?: string }[];
-  closed: { productId?: string; classId?: string; netUsd?: number }[];
+  positions: DashboardPosition[];
+  closed: DashboardClosed[];
   emitted: string[];
+  mark?: MarkNow | null;
+  fills?: {
+    classId?: string;
+    share: number;
+    execCost: ExecWord;
+    capHitCount?: number;
+    missCount?: number;
+    missRate?: number;
+    gapSlippageBps?: number | null;
+    stressN?: number;
+    stressGrade?: StressGrade;
+    stressNetR?: number | null;
+    cappedNetR?: number | null;
+    /** Per-trade mean of eligible net R. Null below n = 10. */
+    meanNetR?: number | null;
+    spreadFragile?: boolean;
+  }[];
+  /** Parity runs are non-X1 and are excluded from the X1 promotion stats above. */
+  runLabel?: "X1" | "non-X1";
+  /** Present only between the hot read and the mark build. Redact drops it. */
+  markInputs?: { positions: MarkPosition[]; quotes: Record<string, MarkQuote>; disconnected: boolean };
   /** True when p6:hot was present and could not be decoded. Missing hot stays false. */
   unreadable: boolean;
   /** True when p6:lastRun was present and could not be decoded. Missing lastRun stays false. */
@@ -549,6 +789,69 @@ export async function readP6Dashboard(kv: Pick<Kv, "readMany">): Promise<Dashboa
   const gaps = Array.isArray(hot.gaps) ? (hot.gaps as DashboardView["gaps"]) : [];
   const positions = Array.isArray(hot.positions) ? (hot.positions as DashboardView["positions"]) : [];
   const closed = Array.isArray(hot.closed) ? (hot.closed as DashboardView["closed"]) : [];
+  const quotes: Record<string, MarkQuote> = {};
+  if (Array.isArray(hot.quotes)) {
+    for (const row of hot.quotes) {
+      if (!Array.isArray(row) || row.length < 3) continue;
+      const [productId, bid, tsMs, levels] = row as [unknown, unknown, unknown, unknown];
+      if (typeof productId !== "string" || typeof bid !== "number" || typeof tsMs !== "number") continue;
+      const bids = bidLevels(levels);
+      quotes[productId] = bids ? { bid, tsMs, bids } : { bid, tsMs };
+    }
+  }
+  const markPositions: MarkPosition[] = positions.map((row) => {
+    const source = row as DashboardPosition & { fillPrice?: unknown; units?: unknown; entryFeeUsd?: unknown; riskUsd?: unknown };
+    return {
+      productId: typeof source.productId === "string" ? source.productId : "",
+      fillPrice: typeof source.fillPrice === "number" ? source.fillPrice : Number.NaN,
+      units: typeof source.units === "number" ? source.units : Number.NaN,
+      entryFeeUsd: typeof source.entryFeeUsd === "number" ? source.entryFeeUsd : Number.NaN,
+      riskUsd: typeof source.riskUsd === "number" ? source.riskUsd : Number.NaN,
+    };
+  });
+  const runLabel = hot.runLabel === "non-X1" ? "non-X1" : "X1";
+  const stressRows = runLabel === "non-X1" ? [] : stressTrades(closed);
+  const fills = (["A", "B", "C", "D", "E"] as const).map((classId) => {
+    const mine = stressRows.filter((row) => row.classId === classId);
+    const share = modelledShare(
+      mine.map((row) => ({
+        classId: row.classId,
+        side: "entry" as const,
+        fillSrc: row.exitFillSrc === "modelled" || row.exitFillSrc === "stale_quote_modelled" ? row.exitFillSrc : row.fillSrc,
+        anchorMissing: row.anchorMissing,
+      })),
+      classId,
+    );
+    const stress: ClassStress = classStress(mine, classId);
+    const mean = classMeanNetR(
+      stressRows.map((row) => ({ classId: row.classId, netR: row.netR ?? 0, fillSrc: row.fillSrc, anchorMissing: row.anchorMissing })),
+      classId,
+    );
+    const misses = quoteMissStats(
+      mine.flatMap((row) => [
+        { classId: row.classId, fillSrc: row.fillSrc },
+        { classId: row.classId, fillSrc: row.exitFillSrc },
+      ]),
+      classId,
+    );
+    const gaps = mine.filter((row) => row.gap === true && row.gapSlippageBps != null && Number.isFinite(row.gapSlippageBps));
+    const gapSlippageBps = gaps.length === 0 ? null : gaps.reduce((sum, row) => sum + (row.gapSlippageBps ?? 0), 0) / gaps.length;
+    return {
+      classId,
+      share,
+      execCost: execCostWord(share),
+      capHitCount: stress.capHitCount,
+      missCount: misses.missCount,
+      missRate: misses.missRate,
+      gapSlippageBps,
+      stressN: stress.n,
+      stressGrade: stress.grade,
+      stressNetR: stress.netR2xUncapped,
+      cappedNetR: stress.netR2xCapped,
+      meanNetR: mean.meanNetR,
+      spreadFragile: stress.spreadFragile,
+    };
+  });
   const emitted = Array.isArray(hot.emitted) ? hot.emitted.filter((row): row is string => typeof row === "string") : [];
   let lastRun: Record<string, unknown> | null = null;
   if (lastRaw) {
@@ -564,9 +867,57 @@ export async function readP6Dashboard(kv: Pick<Kv, "readMany">): Promise<Dashboa
     positions,
     closed,
     emitted,
+    mark: null,
+    fills,
+    runLabel,
+    markInputs: { positions: markPositions, quotes, disconnected: hot.feedLive === false },
     unreadable,
     lastUnreadable,
   };
+}
+
+function bidLevels(value: unknown): [number, number][] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const levels: [number, number][] = [];
+  for (const row of value) {
+    if (!Array.isArray(row) || row.length < 2) return undefined;
+    const price = typeof row[0] === "number" ? row[0] : Number.NaN;
+    const qty = typeof row[1] === "number" ? row[1] : Number.NaN;
+    if (!(price > 0) || !(qty > 0) || !Number.isFinite(price) || !Number.isFinite(qty)) return undefined;
+    levels.push([price, qty]);
+  }
+  return levels.length > 0 ? levels : undefined;
+}
+
+function stressTrades(closed: DashboardView["closed"]): StressTrade[] {
+  return closed.map((row) => {
+    const source = row as DashboardView["closed"][number] & Record<string, unknown>;
+    const num = (key: string): number | null => {
+      const value = source[key];
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
+    };
+    return {
+      classId: typeof source.classId === "string" ? source.classId : "",
+      netUsd: num("netUsd") ?? 0,
+      netR: num("netR") ?? 0,
+      riskUsd: num("riskUsd") ?? 0,
+      notionalUsd: num("notionalUsd") ?? 0,
+      ...(num("exitNotionalUsd") != null ? { exitNotionalUsd: num("exitNotionalUsd")! } : {}),
+      sBtRawBps: num("sBtUncappedBps"),
+      sBtUncappedBps: num("sBtUncappedBps"),
+      sBtMagnitudeBps: num("sBtMagnitudeBps"),
+      legs: [
+        { liquidity: source.classId === "D" ? "maker" as const : "taker" as const },
+        { liquidity: "taker" as const },
+      ],
+      sBtCapped: source.sBtCapped === true,
+      fillSrc: typeof source.fillSrc === "string" ? source.fillSrc : null,
+      exitFillSrc: typeof source.exitFillSrc === "string" ? source.exitFillSrc : null,
+      anchorMissing: source.anchorMissing === true,
+      gap: source.gap === true,
+      gapSlippageBps: num("gapSlippageBps"),
+    };
+  });
 }
 
 function refuse(): never {
@@ -771,8 +1122,32 @@ export function summaryFreshness(input: { hasLastRun: boolean; flushMs: number |
 }
 
 /** Dashboard mget plus the equity mget. Both are reads. */
-export async function readP6Page(kv: Pick<Kv, "mget" | "readMany">, nowMs: number): Promise<{ view: DashboardView; block: PnlBlock }> {
+export async function readP6Page(
+  kv: Pick<Kv, "mget" | "readMany">,
+  nowMs: number,
+  fetchImpl?: (url: string) => Promise<Pick<Response, "ok" | "json">>,
+): Promise<{ view: DashboardView; block: PnlBlock }> {
   const [view, equity] = await Promise.all([readP6Dashboard(kv), readPnlWindows(kv, nowMs)]);
+  const inputs = view.markInputs;
+  delete view.markInputs;
+  if (inputs && inputs.positions.length > 0) {
+    const first = closedNow(inputs.positions, inputs.quotes, nowMs, { disconnected: inputs.disconnected });
+    let restBids: Record<string, number> | undefined;
+    if (first.state === "rest") {
+      restBids = await fetchRestBids(
+        inputs.positions.map((position) => position.productId),
+        nowMs,
+        fetchImpl,
+      );
+    }
+    view.mark = closedNow(inputs.positions, inputs.quotes, nowMs, { disconnected: inputs.disconnected, restBids });
+    for (const row of view.mark.rows) {
+      const position = view.positions.find((item) => item.productId === row.productId);
+      if (!position) continue;
+      if (row.grossR != null) position.grossR = row.grossR;
+      if (row.netR != null) position.netR = row.netR;
+    }
+  }
   const last = view.lastRun;
   const pnl = last && typeof last.pnl === "object" && last.pnl != null ? (last.pnl as Record<string, unknown>) : null;
   const block = buildPnlBlock({
