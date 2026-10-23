@@ -63,6 +63,16 @@ import {
 } from "./x1-fill";
 import { barBeginsAtOrAfterEntry, strategyBarClosed } from "./signals";
 import {
+  armDFreshFloor,
+  classLatchOn,
+  dEntryBeforeFresh,
+  haltLatchOn,
+  syncRiskLatches,
+  type LatchEquity,
+  type LatchRearm,
+  type RiskLatches,
+} from "./latches";
+import {
   classBlockers,
   entryGates,
   equityState,
@@ -317,6 +327,17 @@ export interface Book {
    * its fromDay argument is omitted.
    */
   acctFromDay: string | null;
+  /**
+   * Entry latches. Omitted when nothing has tripped. Daily and weekly clear on
+   * their window roll. Book and class stay until a bound clear.
+   */
+  latches?: RiskLatches;
+  /** Last 20 book and class ids Brian has cleared. A reused token does not clear a new trip. */
+  clearedLatchIds?: string[];
+  /** The trigger must fall back under the line before that latch can trip again. */
+  latchRearm?: LatchRearm;
+  /** A cancelled class-D entry is not replaced before the next 4h evaluation. */
+  dEntryNotBeforeMs?: number;
 }
 
 export type ForwardEvent =
@@ -752,11 +773,34 @@ function pairEntryBlocked(book: Book, productId: string): boolean {
   return pairLatched(book, productId);
 }
 
+/** Brian sets this in the host. The engine only reads it, and only here. */
+function clearLatchToken(): string | undefined {
+  const value = process.env.P6_CLEAR_LATCH;
+  return value && value.length > 0 ? value : undefined;
+}
+
+function latchEquity(book: Book): LatchEquity {
+  const equity = book.realizedUsd + openMtm(book);
+  const peakEquity = Math.max(book.peakEquity, equity);
+  return {
+    dailyLoss: Math.max(0, book.dayStartEquity - equity),
+    weeklyLoss: Math.max(0, book.weekStartEquity - equity),
+    drawdown: Math.max(0, peakEquity - equity),
+    peakEquity,
+  };
+}
+
+function syncLatches(book: Book, tsMs: number): void {
+  if (book.config.parity) return;
+  syncRiskLatches(book, tsMs, clearLatchToken(), latchEquity(book));
+}
+
 function decisionBlockers(book: Book, classId: ClassId, tsMs: number) {
+  if (!book.config.parity) syncLatches(book, tsMs);
   const equity = equityOf(book);
   const blockers = classBlockers(classId, book.classes[classId], {
-    halt: equity.halt,
-    backstop: equity.backstop,
+    halt: book.config.parity ? equity.halt : equity.halt || haltLatchOn(book),
+    backstop: book.config.parity ? equity.backstop : equity.backstop || classLatchOn(book, classId),
     momentumBlocked: book.config.parity ? false : momentumBlocked(book.momentumDates, utcDay(tsMs)),
     killSwitch: book.killSwitch,
   });
@@ -808,6 +852,66 @@ function touchTime(book: Book, tsMs: number): void {
   if (book.nowMs !== 0 && tsMs < book.nowMs) return;
   rollClock(book, tsMs);
   reviewKelly(book, tsMs);
+  syncLatches(book, tsMs);
+}
+
+function dEntryBlocked(book: Book, productId: string, tsMs: number): boolean {
+  if (book.config.parity) return false;
+  if (pairEntryBlocked(book, productId)) return true;
+  const blockers = decisionBlockers(book, "D", tsMs);
+  const decision = paperDecision({
+    classId: "D",
+    blockers,
+    stopBps: 1,
+    sBtBps: 0,
+    breadthPaused: false,
+    scheduledRiskUsd: scheduledRisk(book, "D"),
+  });
+  return !decision.entries;
+}
+
+function releaseBlockedD(book: Book, tsMs: number): void {
+  if (book.config.parity || book.working.length === 0) return;
+  const keep: Working[] = [];
+  for (const working of book.working) {
+    if (working.status !== "working" || !dEntryBlocked(book, working.order.pair, tsMs)) {
+      keep.push(working);
+      continue;
+    }
+    book.incidents.push(`cancel_blocked ${working.order.id}`);
+    armDFreshFloor(book, tsMs);
+  }
+  book.working = keep;
+}
+
+function stampOf(event: ForwardEvent, book: Book): number {
+  switch (event.kind) {
+    case "clock":
+    case "heartbeat":
+    case "mid":
+    case "btc":
+    case "x1":
+    case "minute":
+    case "pair-enable":
+      return event.tsMs;
+    case "trade":
+      return event.tsMs ?? book.nowMs;
+    case "d-order":
+      return event.placedTs;
+    case "realize":
+      return event.exitTs;
+    case "bar15":
+      return event.nowSec * 1000;
+    default:
+      return book.nowMs;
+  }
+}
+
+function finishLatchPass(book: Book, event: ForwardEvent): void {
+  if (book.config.parity) return;
+  const tsMs = stampOf(event, book);
+  syncLatches(book, tsMs);
+  releaseBlockedD(book, tsMs);
 }
 
 function reviewDue(book: Book, tsMs: number): boolean {
@@ -1553,6 +1657,7 @@ function paperUnits(book: Book, slot: PendingFill, sLive: number, touch: number,
 }
 
 export function applyForward(book: Book, event: ForwardEvent): Book {
+  try {
   if (event.kind === "clock") {
     touchTime(book, event.tsMs);
     return book;
@@ -1686,6 +1791,11 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
         keep.push(working);
         continue;
       }
+      if (dEntryBlocked(book, working.order.pair, tsMs)) {
+        book.incidents.push(`blocked_fill ${working.order.id}`);
+        armDFreshFloor(book, tsMs);
+        continue;
+      }
       working.filledUnits += units;
       addDFill(book, working, units, tsMs);
       if (working.filledUnits + 1e-9 < working.order.unitsRemaining) keep.push(working);
@@ -1800,6 +1910,10 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
   }
   if (event.kind === "d-order") {
     touchTime(book, event.placedTs);
+    if (dEntryBeforeFresh(book, event.placedTs)) {
+      book.rejected.push({ id: event.id, reason: "d-fresh" });
+      return book;
+    }
     if ((event.sendTsMs ?? event.placedTs) - event.bookTsMs > STALE_QUOTE_MS) {
       book.rejected.push({ id: event.id, reason: MISSED_SEND_STALE_QUOTE });
       book.incidents.push(`${MISSED_SEND_STALE_QUOTE} ${event.id}`);
@@ -2019,4 +2133,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
     return book;
   }
   return book;
+  } finally {
+    finishLatchPass(book, event);
+  }
 }

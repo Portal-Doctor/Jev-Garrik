@@ -20,6 +20,7 @@ import { assertSafeToStart } from "../safety";
 import { readPairMonth } from "../data/store";
 import { readDailyHistory } from "./daily";
 import { applyForward, freshBook, forwardBookPanel, noteMemberDay, resolvePendingFills, type Book } from "./engine";
+import { adoptLatchState, latchHotFields, type LatchRearm, type RiskLatches } from "./latches";
 import { restoreExtremes } from "./extremes";
 import { parsePublicMessage, type PublicEvent } from "./feed";
 import type { BarOHLC } from "../p3/signals";
@@ -1804,6 +1805,10 @@ export interface PaperStateBody {
   csPrev?: Book["csPrev"];
   csBarSec?: Book["csBarSec"];
   feedLive?: boolean;
+  latches?: RiskLatches;
+  clearedLatchIds?: string[];
+  latchRearm?: LatchRearm;
+  dEntryNotBeforeMs?: number;
 }
 
 /** Persistence for the book and the last processed bar. The driver does not choose the store. */
@@ -1943,6 +1948,7 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     ema200: [...host.ema200.entries()],
     fourSeedThrough: [...host.fourSeedThrough.entries()],
     overlapSeen: host.overlapSeen,
+    ...latchHotFields(host.book),
   };
 }
 
@@ -1980,6 +1986,7 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   host.book.rejected = body.rejected ?? [];
   host.book.haltWeeks = body.haltWeeks ?? [];
   host.book.momentumDates = body.momentumDates ?? [];
+  adoptLatchState(host.book, body);
   host.restCursor = new Map(body.restCursor ?? []);
   host.appliedThrough = new Map(body.appliedThrough ?? []);
   host.applied = new Set(body.applied ?? []);

@@ -24,6 +24,7 @@ import {
   type PaperStateBody,
   retainDailyCloses,
 } from "./paper-host";
+import { latchHotFields, type LatchRearm, type RiskLatches } from "./latches";
 import { decodeStored, takeGzipMismatches, type KvRead } from "./redis-gzip";
 import { barMarker, beginWireAccount, endWireAccount, HOT_KEY, LEASE_KEY, peekStored, takeListWire, VALUE_MAX_BYTES, type Kv } from "./relay";
 
@@ -284,6 +285,11 @@ interface HotBody {
   base?: number;
   /** Ignored. Older snapshots may still carry it. Readers use `era` only. */
   keyEra?: Record<string, string>;
+  /** Entry latches. Absent when none are set, so an empty book pays nothing. */
+  latches?: RiskLatches;
+  clearedLatchIds?: string[];
+  latchRearm?: LatchRearm;
+  dEntryNotBeforeMs?: number;
 }
 
 export function captureHot(host: PaperHost): HotBody {
@@ -368,6 +374,7 @@ export function captureHot(host: PaperHost): HotBody {
     csPrev: book.csPrev,
     csBarSec: book.csBarSec,
     feedLive: host.status === "live",
+    ...latchHotFields(book),
   };
 }
 
