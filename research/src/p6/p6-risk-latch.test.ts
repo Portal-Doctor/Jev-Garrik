@@ -5,7 +5,7 @@ import type { ClassId } from "../p3/portfolio";
 import { applyForward, freshBook, type Book, type ForwardEvent, type Position } from "./engine";
 import { captureHot, HOT_MAX_BYTES, hotBytes, loadSplit, persistSplit } from "./hot-store";
 import { isoWeekWindow } from "./latches";
-import { installPaperState, startPaperHost } from "./paper-host";
+import { capturePaperState, installPaperState, startPaperHost } from "./paper-host";
 import { decodeStored } from "./redis-gzip";
 import { decodeLease, HOT_KEY, LEASE_KEY, memoryKv, peekStored, tryAcquire } from "./relay";
 import { classDollarBackstop } from "./session";
@@ -519,6 +519,107 @@ test("after a clear, D is placed again only as a fresh 4h signal at the current 
   expect(book.working).toHaveLength(1);
   expect(book.working[0]?.order.limit).toBe(110);
   expect(book.working[0]?.order.id).toBe("d-fresh-signal");
+});
+
+test("a weekly latch still blocks the next day after a green close in the same ISO week", () => {
+  const sat = Date.parse("2026-10-17T12:00:00.000Z");
+  const sun = Date.parse("2026-10-18T06:00:00.000Z");
+  let book = applyForward(boot(sat), realize("week-loss", "C", "LOSS-USD", -480, sat, -1, 480));
+  expect(book.latches?.weekly?.window).toBe(isoWeekWindow("2026-10-17"));
+  book = applyForward(book, realize("week-green", "C", "GAIN-USD", 500, sun, 1, 20));
+  expect(book.latches?.daily).toBeUndefined();
+  expect(book.latches?.book).toBeUndefined();
+  expect(book.latches?.weekly).toBeDefined();
+  expect(book.latches?.weekly?.window).toBe(isoWeekWindow("2026-10-18"));
+  const blocked = applyForward(book, x1("week-next", "E", "SOL-USD", sun + 1));
+  expect(blocked.positions).toHaveLength(0);
+  expect(blocked.rejected.at(-1)?.reason ?? "").toContain("halt");
+});
+
+test("a book clear leaves every class latch in place", () => {
+  const at = Date.parse("2026-10-21T10:00:00.000Z");
+  const tripped = applyForward(boot(at), realize("book-class", "A", "LOSS-USD", -1_600, at, -1, 1_600));
+  expect(tripped.latches?.book?.id).toBe(`book-${at}`);
+  expect(tripped.latches?.class?.A?.id).toBe(`class-A-${at}`);
+  const token = `book:book-${at}:${at}`;
+  const cleared = withClear(token, () => applyForward(tripped, { kind: "clock", tsMs: at + 1 }));
+  expect(leaks(cleared, token)).toBe(false);
+  expect(cleared.latches?.book).toBeUndefined();
+  expect(cleared.latches?.class?.A?.id).toBe(`class-A-${at}`);
+  expect(cleared.latches?.class?.B).toBeUndefined();
+  expect(cleared.latches?.class?.C).toBeUndefined();
+  expect(cleared.latches?.class?.D).toBeUndefined();
+  expect(cleared.latches?.class?.E).toBeUndefined();
+});
+
+test("a pair backstop alone cancels that pair's resting D order", () => {
+  const sat = Date.parse("2026-10-17T12:00:00.000Z");
+  const mon = Date.parse("2026-10-19T12:00:00.000Z");
+  const tue = Date.parse("2026-10-20T12:00:00.000Z");
+  let book = applyForward(boot(sat), realize("pair-sat", "E", "ETH-USD", -230, sat, -1, 230));
+  book = applyForward(book, realize("pair-mon", "E", "ETH-USD", -230, mon, -1, 230));
+  book = applyForward(book, dOrder("d-pair", "ETH-USD", tue, 100, 90));
+  expect(book.working).toHaveLength(1);
+  expect(book.latches?.daily).toBeUndefined();
+  expect(book.latches?.weekly).toBeUndefined();
+  book = applyForward(book, realize("pair-tue", "E", "ETH-USD", -40, tue + 1, -1, 40));
+  expect(book.latches?.daily).toBeUndefined();
+  expect(book.latches?.weekly).toBeUndefined();
+  expect(book.latches?.book).toBeUndefined();
+  expect(book.pairs["ETH-USD"]?.latched).toBe(true);
+  expect(book.working).toHaveLength(0);
+  expect(book.incidents).toContain("cancel_blocked d-pair");
+});
+
+test("a full snapshot with no latch fields clears latches already in memory", () => {
+  const at = Date.parse("2026-10-21T10:00:00.000Z");
+  const clean = startPaperHost(["BTC-USD"], {});
+  clean.clock = () => at;
+  applyForward(clean.book, { kind: "clock", tsMs: at });
+  const body = capturePaperState(clean);
+  expect(body.positions).toEqual([]);
+  expect("latches" in body).toBe(false);
+
+  const host = startPaperHost(["BTC-USD"], {});
+  host.clock = () => at;
+  applyForward(host.book, { kind: "clock", tsMs: at });
+  applyForward(host.book, realize("snap-book", "A", "LOSS-USD", -1_600, at, -1, 1_600));
+  expect(host.book.latches?.book?.id).toBe(`book-${at}`);
+  installPaperState(host, body);
+  expect(host.book.latches).toBeUndefined();
+});
+
+test("a leading zero in the trip text does not clear", () => {
+  const at = Date.parse("2026-10-21T10:00:00.000Z");
+  const tripped = applyForward(boot(at), realize("pad-loss", "A", "LOSS-USD", -1_600, at, -1, 1_600));
+  const latchId = tripped.latches?.book?.id ?? "";
+  expect(latchId).toBe(`book-${at}`);
+  const padded = `book:${latchId}:0${at}`;
+  const book = withClear(padded, () => applyForward(tripped, { kind: "clock", tsMs: at + 1 }));
+  expect(leaks(book, padded)).toBe(false);
+  expect(book.latches?.book?.id).toBe(latchId);
+  expect(book.latches?.class?.A?.id).toBe(`class-A-${at}`);
+  expect(book.incidents.some((line) => line === "latch_clear_mismatch" || line.startsWith("latch_clear_mismatch "))).toBe(true);
+  expect(book.incidents.some((line) => line.startsWith("latch_cleared"))).toBe(false);
+});
+
+test("a consumed clear token is one mismatch and later ticks do not repeat it", () => {
+  const at = Date.parse("2026-10-21T11:00:00.000Z");
+  const tripped = applyForward(boot(at), realize("used-loss", "C", "LOSS-USD", -1_600, at, -1, 1_600));
+  const latchId = tripped.latches?.book?.id ?? "";
+  const token = `book:${latchId}:${at}`;
+  const line = `latch_clear_mismatch scope=book id=${latchId}`;
+  let book = withClear(token, () => applyForward(tripped, { kind: "clock", tsMs: at + 1 }));
+  expect(leaks(book, token)).toBe(false);
+  expect(book.latches?.book).toBeUndefined();
+  expect(book.clearedLatchIds).toContain(latchId);
+  expect(book.incidents.filter((row) => row === `latch_cleared who=brian scope=book id=${latchId}`)).toHaveLength(1);
+  expect(book.incidents.filter((row) => row === line)).toHaveLength(1);
+  book = withClear(token, () => applyForward(book, { kind: "clock", tsMs: at + 2 }));
+  book = withClear(token, () => applyForward(book, { kind: "clock", tsMs: at + 3 }));
+  expect(book.incidents.filter((row) => row === line)).toHaveLength(1);
+  expect(book.latches?.book).toBeUndefined();
+  expect(book.latches?.class?.C?.id).toBe(`class-C-${at}`);
 });
 
 test("parity keeps the recomputed backtest and does not latch", () => {

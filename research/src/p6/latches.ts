@@ -82,7 +82,8 @@ export interface LatchBook {
 interface ClearRequest {
   scope: string;
   latchId: string;
-  tripAt: number;
+  /** Canonical decimal. A leading zero is a different token and does not match. */
+  tripText: string;
 }
 
 const clearSeen = new WeakMap<LatchBook, string>();
@@ -112,9 +113,11 @@ function parseClear(token: string): ClearRequest | null {
   const latchId = parts[1] ?? "";
   const tripText = parts[2] ?? "";
   if (!CLEAR_SCOPES.has(scope) || !INT_TOKEN.test(tripText)) return null;
+  // The trip text is the id's suffix. Number("0123") is 123, so a leading zero must not match.
+  if (latchId !== `${scope}-${tripText}` || String(Number(tripText)) !== tripText) return null;
   const tripAt = Number(tripText);
-  if (!Number.isSafeInteger(tripAt) || latchId !== `${scope}-${tripAt}`) return null;
-  return { scope, latchId, tripAt };
+  if (!Number.isSafeInteger(tripAt)) return null;
+  return { scope, latchId, tripText };
 }
 
 function currentLatch(book: LatchBook, scope: string): { id: string; tripAt: number } | null {
@@ -152,7 +155,7 @@ function dropClassLatch(book: LatchBook, classId: ClassId): void {
 
 /**
  * Bound manual clear. The token is scope:latchId:tripAtMs.
- * A match removes that book or class latch. Anything else is one incident and changes nothing.
+ * A match removes that book or class latch. A mismatch, a stale token, or a token whose id was already cleared is one incident and changes nothing. The same line is not written again.
  * The raw token is not written onto the book.
  */
 function applyClear(book: LatchBook, token: string | undefined): void {
@@ -163,10 +166,10 @@ function applyClear(book: LatchBook, token: string | undefined): void {
   const seenKey = `${token}\0${current?.id ?? ""}`;
   if (clearSeen.get(book) === seenKey) return;
   clearSeen.set(book, seenKey);
-  if (!parsed || !current || current.id !== parsed.latchId || current.tripAt !== parsed.tripAt) {
-    if (parsed && book.clearedLatchIds?.includes(parsed.latchId) && !current) return;
-    if (parsed) book.incidents.push(`latch_clear_mismatch scope=${parsed.scope} id=${parsed.latchId}`);
-    else book.incidents.push("latch_clear_mismatch");
+  const tripText = String(current?.tripAt ?? "");
+  if (!parsed || !current || current.id !== parsed.latchId || tripText !== parsed.tripText) {
+    const line = parsed ? `latch_clear_mismatch scope=${parsed.scope} id=${parsed.latchId}` : "latch_clear_mismatch";
+    if (!book.incidents.includes(line)) book.incidents.push(line);
     return;
   }
   if (parsed.scope === "book") dropBookLatch(book);
