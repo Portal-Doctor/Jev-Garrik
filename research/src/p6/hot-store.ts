@@ -290,6 +290,8 @@ interface HotBody {
   clearedLatchIds?: string[];
   latchRearm?: LatchRearm;
   dEntryNotBeforeMs?: number;
+  /** sha256 of the last latch_clear_mismatch dedupe key. Absent until one is logged. */
+  latchMismatchSeen?: string;
 }
 
 export function captureHot(host: PaperHost): HotBody {

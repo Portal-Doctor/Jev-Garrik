@@ -614,8 +614,9 @@ test("a consumed clear token is one mismatch and later ticks do not repeat it", 
   expect(book.latches?.book).toBeUndefined();
   expect(book.clearedLatchIds).toContain(latchId);
   expect(book.incidents.filter((row) => row === `latch_cleared who=brian scope=book id=${latchId}`)).toHaveLength(1);
-  expect(book.incidents.filter((row) => row === line)).toHaveLength(1);
+  expect(book.incidents.filter((row) => row === line)).toHaveLength(0);
   book = withClear(token, () => applyForward(book, { kind: "clock", tsMs: at + 2 }));
+  expect(book.incidents.filter((row) => row === line)).toHaveLength(1);
   book = withClear(token, () => applyForward(book, { kind: "clock", tsMs: at + 3 }));
   expect(book.incidents.filter((row) => row === line)).toHaveLength(1);
   expect(book.latches?.book).toBeUndefined();
@@ -644,6 +645,7 @@ test("latch bytes are omitted when nothing is tripped and stay inside the hot bu
   expect("clearedLatchIds" in emptyHot).toBe(false);
   expect("latchRearm" in emptyHot).toBe(false);
   expect("dEntryNotBeforeMs" in emptyHot).toBe(false);
+  expect("latchMismatchSeen" in emptyHot).toBe(false);
 
   const host = startPaperHost(["BTC-USD"], {});
   host.clock = () => SAT;
@@ -661,4 +663,93 @@ test("latch bytes are omitted when nothing is tripped and stay inside the hot bu
   expect(payload).toBeLessThan(2_048);
   expect(hotBytes(host)).toBeLessThan(HOT_MAX_BYTES);
   expect(full.latches).toBeDefined();
+});
+
+test("a clear that syncs more than once does not also log a mismatch", () => {
+  const at = Date.parse("2026-10-21T12:00:00.000Z");
+  const tripped = applyForward(boot(at), realize("multi", "C", "LOSS-USD", -1_600, at, -1, 1_600));
+  const latchId = tripped.latches?.book?.id ?? "";
+  const token = `book:${latchId}:${at}`;
+  const line = `latch_clear_mismatch scope=book id=${latchId}`;
+  const book = withClear(token, () => applyForward(tripped, x1("during-clear", "E", "SOL-USD", at + 1)));
+  expect(leaks(book, token)).toBe(false);
+  expect(book.latches?.book).toBeUndefined();
+  expect(book.incidents.filter((row) => row.startsWith("latch_cleared"))).toHaveLength(1);
+  expect(book.incidents.filter((row) => row === line)).toHaveLength(0);
+  expect(book.latchMismatchSeen).toBeUndefined();
+});
+
+test("the mismatch dedupe key survives a reload with gzip writes off and on", async () => {
+  const gzip = process.env.P6_GZIP_WRITES;
+  const clear = process.env.P6_CLEAR_LATCH;
+  delete process.env.P6_CLEAR_LATCH;
+  try {
+    for (const flag of ["0", "1"] as const) {
+      process.env.P6_GZIP_WRITES = flag;
+      const at = Date.parse("2026-10-21T13:00:00.000Z") + Number(flag);
+      const host = startPaperHost(["BTC-USD"], {});
+      host.clock = () => at;
+      applyForward(host.book, { kind: "clock", tsMs: at });
+      applyForward(host.book, realize(`gz-${flag}`, "A", "LOSS-USD", -1_600, at, -1, 1_600));
+      const tripAt = host.book.latches?.book?.tripAt ?? 0;
+      const latchId = host.book.latches?.book?.id ?? "";
+      const token = `book:${latchId}:${tripAt}`;
+      const line = `latch_clear_mismatch scope=book id=${latchId}`;
+      withClear(token, () => applyForward(host.book, { kind: "clock", tsMs: at + 1 }));
+      expect(host.book.latches?.book).toBeUndefined();
+      expect(host.book.incidents.filter((row) => row === line)).toHaveLength(0);
+      expect(host.book.incidents.filter((row) => row === `latch_cleared who=brian scope=book id=${latchId}`)).toHaveLength(1);
+      expect(leaks(host.book, token)).toBe(false);
+
+      const kv = memoryKv(() => at);
+      expect(await tryAcquire(kv, `latch-gz-${flag}`, at + 86_400_000, at)).toBe(true);
+      host.leaseToken = decodeLease(await kv.get(LEASE_KEY))?.token ?? null;
+      await persistSplit(kv, host);
+      const stored = peekStored(kv, HOT_KEY);
+      expect(stored).not.toBeNull();
+      expect(stored!.startsWith("gz1:")).toBe(flag === "1");
+      const text = decodeStored(HOT_KEY, stored) ?? "";
+      expect(text.includes(token)).toBe(false);
+
+      const loaded = startPaperHost(["BTC-USD"], {});
+      loaded.clock = () => at;
+      const body = await loadSplit(kv, loaded);
+      expect(body).not.toBeNull();
+      installPaperState(loaded, body!);
+      expect(loaded.book.latches?.book).toBeUndefined();
+      expect(loaded.book.latchMismatchSeen).toBeUndefined();
+      withClear(token, () => applyForward(loaded.book, { kind: "clock", tsMs: at + 2 }));
+      expect(loaded.book.incidents.filter((row) => row === line)).toHaveLength(1);
+      expect(loaded.book.latchMismatchSeen).toMatch(/^[0-9a-f]{64}$/);
+      expect(leaks(loaded.book, token)).toBe(false);
+
+      const kv2 = memoryKv(() => at);
+      expect(await tryAcquire(kv2, `latch-gz2-${flag}`, at + 86_400_000, at)).toBe(true);
+      loaded.leaseToken = decodeLease(await kv2.get(LEASE_KEY))?.token ?? null;
+      await persistSplit(kv2, loaded);
+      const againText = decodeStored(HOT_KEY, peekStored(kv2, HOT_KEY)) ?? "";
+      expect(againText.includes(token)).toBe(false);
+      expect(againText).toContain(loaded.book.latchMismatchSeen);
+
+      const next = startPaperHost(["BTC-USD"], {});
+      next.clock = () => at;
+      const restored = await loadSplit(kv2, next);
+      expect(restored).not.toBeNull();
+      installPaperState(next, restored!);
+      expect(next.book.latchMismatchSeen).toBe(loaded.book.latchMismatchSeen);
+      next.book.incidents = next.book.incidents.filter((row) => row !== line);
+      withClear(token, () => applyForward(next.book, { kind: "clock", tsMs: at + 3 }));
+      withClear(token, () => applyForward(next.book, { kind: "clock", tsMs: at + 4 }));
+      expect(next.book.incidents.filter((row) => row === line)).toHaveLength(0);
+
+      delete next.book.latchMismatchSeen;
+      withClear(token, () => applyForward(next.book, { kind: "clock", tsMs: at + 5 }));
+      expect(next.book.incidents.filter((row) => row === line)).toHaveLength(1);
+    }
+  } finally {
+    if (gzip === undefined) delete process.env.P6_GZIP_WRITES;
+    else process.env.P6_GZIP_WRITES = gzip;
+    if (clear === undefined) delete process.env.P6_CLEAR_LATCH;
+    else process.env.P6_CLEAR_LATCH = clear;
+  }
 });

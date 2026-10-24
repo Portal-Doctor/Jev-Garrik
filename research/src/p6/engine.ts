@@ -66,6 +66,7 @@ import {
   armDFreshFloor,
   classLatchOn,
   dEntryBeforeFresh,
+  finishClearEcho,
   haltLatchOn,
   syncRiskLatches,
   type LatchEquity,
@@ -338,6 +339,8 @@ export interface Book {
   latchRearm?: LatchRearm;
   /** A cancelled class-D entry is not replaced before the next 4h evaluation. */
   dEntryNotBeforeMs?: number;
+  /** sha256 of the last mismatch dedupe key. The clear token is not stored. */
+  latchMismatchSeen?: string;
 }
 
 export type ForwardEvent =
@@ -912,6 +915,7 @@ function finishLatchPass(book: Book, event: ForwardEvent): void {
   const tsMs = stampOf(event, book);
   syncLatches(book, tsMs);
   releaseBlockedD(book, tsMs);
+  finishClearEcho(book);
 }
 
 function reviewDue(book: Book, tsMs: number): boolean {

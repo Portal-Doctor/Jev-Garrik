@@ -1809,6 +1809,7 @@ export interface PaperStateBody {
   clearedLatchIds?: string[];
   latchRearm?: LatchRearm;
   dEntryNotBeforeMs?: number;
+  latchMismatchSeen?: string;
 }
 
 /** Persistence for the book and the last processed bar. The driver does not choose the store. */
