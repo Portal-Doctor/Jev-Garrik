@@ -17,6 +17,8 @@ import {
   CLASS_A_INTRO_PROMOTE_GROSS_BPS,
   CLASS_A_KILL_USD,
   CLASS_A_LOOKBACK,
+  CLASS_A_MAX_OPEN,
+  CLASS_A_MAX_OPEN_RISK_USD,
   CLASS_A_MAKER_FEE_BPS,
   CLASS_A_MARKED_ENTRY_FEE_BPS,
   CLASS_A_MARKED_EXIT_FEE_BPS,
@@ -778,6 +780,128 @@ test("a maker order stays pending through the four hour window and survives a re
   resolveClassAResting(viaBar, at + 900_000, { pair: "SOL-USD", bar: { startMs: at, endMs: at + 900_000, low: close - 0.02 } });
   expect(viaBar.rows[0]?.fill).toBe("fill");
   expect(viaBar.open[0]?.entryMs).toBe(at);
+});
+
+test("five maker fills at once stop at 3 positions and $60, earlier placement then pair", () => {
+  const days = daysOf().map((day) => ({ ...day, high: day.close + 5, low: day.close - 5 }));
+  const close = days[69]!.close;
+  const at = signalCloseMs(days[69]!.date);
+  const paper = book();
+  // Same signal close, inserted out of symbol order. Pair A→Z is the tiebreak.
+  for (const pair of ["ETH-USD", "DOGE-USD", "BTC-USD", "SOL-USD", "ADA-USD"]) {
+    expect(evaluateSignal(paper, signal({ pair, days, prints: [], asOfMs: at }))?.fill).toBe("pending");
+  }
+  expect(paper.open).toHaveLength(0);
+  expect(paper.resting).toHaveLength(5);
+  resolveClassAResting(paper, at + 60_000, {
+    bar: { startMs: at, endMs: at + 900_000, low: close - 5 },
+  });
+  const filled = ["ADA-USD", "BTC-USD", "DOGE-USD"];
+  const rejected = ["ETH-USD", "SOL-USD"];
+  expect(paper.open.map((sim) => sim.pair).sort()).toEqual([...filled].sort());
+  expect(paper.open).toHaveLength(CLASS_A_MAX_OPEN);
+  const risk = paper.open.reduce((total, sim) => total + sim.notionalUsd * ((sim.entry - sim.initialStop) / sim.entry), 0);
+  expect(risk).toBeLessThanOrEqual(CLASS_A_MAX_OPEN_RISK_USD);
+  expect(risk).toBeCloseTo(60, 6);
+  for (const pair of filled) expect(paper.rows.find((row) => row.pair === pair)?.fill).toBe("fill");
+  for (const pair of rejected) {
+    const row = paper.rows.find((item) => item.pair === pair);
+    expect(row?.fill).toBe("nofill");
+    expect(row?.skipReason).toBe("cap_full");
+    expect(row?.notionalUsd).toBeNull();
+    expect(row?.feesUsd).toBeNull();
+  }
+  expect(paper.resting).toHaveLength(0);
+  const restored = restoreClassABook(JSON.parse(JSON.stringify(paper)));
+  expect(restored?.rows.filter((row) => row.skipReason === "cap_full").map((row) => row.pair).sort()).toEqual(rejected);
+  expect(restored?.open).toHaveLength(CLASS_A_MAX_OPEN);
+  expect(scrubClassAPaper(paper).skips.cap_full).toBe(rejected.length);
+
+  // One slot left. The earlier signal fills even though its pair sorts after the other.
+  const timed = book();
+  for (const pair of ["ADA-USD", "SOL-USD"]) {
+    expect(evaluateSignal(timed, signal({ pair, days, prints: [], asOfMs: at }))?.fill).toBe("pending");
+  }
+  const older = timed.resting?.find((order) => order.pair === "SOL-USD");
+  const olderRow = timed.rows.find((row) => row.id === older?.rowId);
+  if (!older || !olderRow) throw new Error("missing older order");
+  older.signalMs -= 1;
+  olderRow.signalMs -= 1;
+  for (const pair of ["ETH-USD", "DOGE-USD"]) {
+    timed.open.push({
+      rowId: `planted:${pair}`,
+      pair,
+      scored: true,
+      entry: 100,
+      entryMs: START,
+      entryDate: "2024-03-11",
+      stop: 80,
+      initialStop: 80,
+      notionalUsd: 100,
+      units: 1,
+      feeEntryBps: 35,
+      sBps: 5,
+      highestClose: 100,
+      priorCloses: [],
+      pending: null,
+    });
+  }
+  resolveClassAResting(timed, at + 60_000, { bar: { startMs: at, endMs: at + 900_000, low: close - 5 } });
+  expect(timed.rows.find((row) => row.pair === "SOL-USD")?.fill).toBe("fill");
+  expect(timed.rows.find((row) => row.pair === "ADA-USD")?.skipReason).toBe("cap_full");
+  expect(timed.open).toHaveLength(CLASS_A_MAX_OPEN);
+
+  // Risk cap rejects while a position slot is still open.
+  const riskBook = book();
+  expect(evaluateSignal(riskBook, signal({ pair: "SOL-USD", days, prints: [], asOfMs: at }))?.fill).toBe("pending");
+  riskBook.open.push({
+    rowId: "planted:ETH-USD",
+    pair: "ETH-USD",
+    scored: true,
+    entry: 100,
+    entryMs: START,
+    entryDate: "2024-03-11",
+    stop: 50,
+    initialStop: 50,
+    notionalUsd: 100,
+    units: 1,
+    feeEntryBps: 35,
+    sBps: 5,
+    highestClose: 100,
+    priorCloses: [],
+    pending: null,
+  });
+  resolveClassAResting(riskBook, at + 60_000, { bar: { startMs: at, endMs: at + 900_000, low: close - 5 } });
+  expect(riskBook.rows.find((row) => row.pair === "SOL-USD")?.skipReason).toBe("cap_full");
+  expect(riskBook.open).toHaveLength(1);
+
+  // Count cap rejects while open risk is still under $60.
+  const countBook = book();
+  expect(evaluateSignal(countBook, signal({ pair: "SOL-USD", days, prints: [], asOfMs: at }))?.fill).toBe("pending");
+  for (const pair of ["ETH-USD", "ADA-USD", "DOGE-USD"]) {
+    countBook.open.push({
+      rowId: `planted:${pair}`,
+      pair,
+      scored: true,
+      entry: 100,
+      entryMs: START,
+      entryDate: "2024-03-11",
+      stop: 90,
+      initialStop: 90,
+      notionalUsd: 10,
+      units: 0.1,
+      feeEntryBps: 35,
+      sBps: 5,
+      highestClose: 100,
+      priorCloses: [],
+      pending: null,
+    });
+  }
+  resolveClassAResting(countBook, at + 60_000, { bar: { startMs: at, endMs: at + 900_000, low: close - 5 } });
+  expect(countBook.rows.find((row) => row.pair === "SOL-USD")?.skipReason).toBe("cap_full");
+  expect(countBook.open).toHaveLength(CLASS_A_MAX_OPEN);
+  const countRisk = countBook.open.reduce((total, sim) => total + sim.notionalUsd * ((sim.entry - sim.initialStop) / sim.entry), 0);
+  expect(countRisk).toBeLessThan(CLASS_A_MAX_OPEN_RISK_USD);
 });
 
 test("an unknown minimum is skip_minsize_unknown and the dashboard count survives the scrub", () => {

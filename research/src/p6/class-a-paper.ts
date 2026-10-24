@@ -97,6 +97,7 @@ export const CLASS_A_SKIP_REASONS = [
   "skip_volume",
   "skip_btcveto",
   "skip_nofill",
+  "cap_full",
   "skip_spread",
   "skip_depth",
   "skip_stale",
@@ -878,7 +879,8 @@ export function classAPaperView(book: ClassABook, asOfMs = Date.now()): ClassAPa
     if (!row || typeof row !== "object") continue;
     if (row.fill === "fill") fills += 1;
     // errata 001 item 27. Maker orders placed are the rows that passed every check.
-    if (row.fill === "fill" || row.skipReason === "skip_nofill") placed += 1;
+    // cap_full was placed, then rejected when the fill would have broken a cap.
+    if (row.fill === "fill" || row.skipReason === "skip_nofill" || row.skipReason === "cap_full") placed += 1;
     if (!row.skipReason || !(CLASS_A_SKIP_REASONS as readonly string[]).includes(row.skipReason)) continue;
     skips[row.skipReason] = (skips[row.skipReason] ?? 0) + 1;
   }
@@ -1313,6 +1315,8 @@ function openMaker(book: ClassABook, row: ClassARow, pair: string, limit: number
 /**
  * Spec A4. A pending maker order fills on a print, or on an intrabar low, inside [close, close+4h).
  * nofill is recorded only once that window has ended with neither.
+ * Orders that can fill in one pass are taken by placement time (signalMs), then pair, then row id.
+ * Each fill rechecks the open-count cap and the open-risk cap. A reject is nofill cap_full.
  */
 export function resolveClassAResting(
   book: ClassABook,
@@ -1322,7 +1326,14 @@ export function resolveClassAResting(
   const resting = book.resting ?? [];
   book.resting = resting;
   if (!Number.isFinite(nowMs)) return;
-  for (const order of [...resting]) {
+  // Placement time, then symbol, then id. Array order is not the fill order.
+  const ordered = [...resting].sort((a, b) => {
+    if (a.signalMs !== b.signalMs) return a.signalMs - b.signalMs;
+    if (a.pair !== b.pair) return a.pair < b.pair ? -1 : 1;
+    if (a.rowId !== b.rowId) return a.rowId < b.rowId ? -1 : 1;
+    return 0;
+  });
+  for (const order of ordered) {
     const row = book.rows.find((item) => item.id === order.rowId && item.fill === "pending");
     if (!row) {
       book.resting = resting.filter((item) => item !== order);
@@ -1342,6 +1353,17 @@ export function resolveClassAResting(
       }
     }
     if (fillMs != null) {
+      const openRisk = book.open.reduce((total, sim) => total + sim.notionalUsd * ((sim.entry - sim.initialStop) / sim.entry), 0);
+      const orderRisk = order.limit > 0 ? (order.notionalUsd * (order.limit - order.stop)) / order.limit : Number.POSITIVE_INFINITY;
+      if (book.open.length >= CLASS_A_MAX_OPEN || openRisk + orderRisk > CLASS_A_MAX_OPEN_RISK_USD) {
+        row.fill = "nofill";
+        row.skipReason = "cap_full";
+        row.check = "cap";
+        row.notionalUsd = null;
+        row.feesUsd = null;
+        book.resting = (book.resting ?? []).filter((item) => item !== order);
+        continue;
+      }
       openMaker(book, row, order.pair, order.limit, fillMs, order.entryDate, order, order.sBps, order.priorCloses, row.measured ?? order.limit);
       book.resting = (book.resting ?? []).filter((item) => item !== order);
       continue;
