@@ -12,7 +12,7 @@
  * - Logged R is PnL / $20. The 30-day rule uses price versus the initial stop.
  * - skip_pair, skip_reentry, and skip_kill are labels for rules the spec states without a code.
  * - A one-pair book fails the best-pair removal check because the remainder is 0.
- * - Same-timestamp signals are ordered by product id. The spec says timestamp order only.
+ * - Signals are evaluated in the order supplied. The spec says timestamp order and does not name a same-timestamp tie-break, so none is added.
  * - The 4h window is [close, close+4h). A print at exactly 04:00 does not fill.
  * - Stop slippage of 5 bps is taken off the entry price.
  * - A missing quoted-spread median uses the 5 bps floor.
