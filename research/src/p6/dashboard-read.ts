@@ -22,6 +22,7 @@ import {
   type PnlBlock,
 } from "./pnl-block";
 import { closedNow, fetchRestBids, type MarkNow, type MarkPosition, type MarkQuote } from "./mark-now";
+import { isIsoDate, readSystemCostHurdle, type SystemCostHurdle, type SystemCostItem } from "./system-cost";
 import { classMeanNetR, classStress, execCostWord, modelledShare, quoteMissStats, type ClassStress, type ExecWord, type StressGrade, type StressTrade } from "./x1-fill";
 
 export { type PnlBlock };
@@ -441,6 +442,7 @@ function publicLastRun(raw: Record<string, unknown> | null): Record<string, unkn
  * Incident text, outcome codes, gap causes, decision ids, product ids, and class ids are allowlisted.
  * Closed trades and positions keep only those fields plus finite numbers.
  * Anything else becomes `redacted`, and a Jev-caller error becomes `call_error`.
+ * The system-cost hurdle is allowlisted field by field. It is display only.
  */
 export function redactP6View(view: DashboardView): DashboardView {
   const shown: DashboardView = {
@@ -459,10 +461,91 @@ export function redactP6View(view: DashboardView): DashboardView {
     positions: view.positions.map(publicPosition),
     mark: publicMark(view.mark),
     fills: publicFills(view.fills ?? []),
+    systemCost: publicSystemCost(view.systemCost),
     runLabel: publicEnum(view.runLabel, RUN_LABEL) === "non-X1" ? "non-X1" : publicEnum(view.runLabel, RUN_LABEL) === "X1" ? "X1" : undefined,
   };
   delete shown.markInputs;
   return shown;
+}
+
+const COST_TEXT = /^[A-Za-z0-9 $.,;()':-]{1,240}$/;
+
+/**
+ * Prose from the committed cost file. A host, a URL, or any other shape is dropped.
+ * Whether a line is an estimate is the boolean `estimate` field, not this prose.
+ */
+function publicCostText(value: unknown): string | undefined {
+  if (typeof value !== "string" || !COST_TEXT.test(value)) return undefined;
+  if (/\.[A-Za-z]{2,}/.test(value)) return undefined;
+  if (/upstash|password|token|secret|\/\//i.test(value)) return undefined;
+  return value;
+}
+
+function finiteCost(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function nullableCost(value: unknown): number | null | undefined {
+  if (value == null) return null;
+  return finiteCost(value);
+}
+
+/**
+ * Public system-cost fields. Numbers stay when they are finite.
+ * Names and notes stay only when they are the committed prose shape.
+ * Any other key, including a planted host, is omitted.
+ */
+function publicSystemCost(raw: unknown): SystemCostHurdle {
+  const unavailable: SystemCostHurdle = { status: "unavailable", light: "unavailable" };
+  if (!raw || typeof raw !== "object") return unavailable;
+  const row = raw as Record<string, unknown>;
+  if (row.status !== "ok") return unavailable;
+  const light = row.light === "green" || row.light === "amber" || row.light === "red" || row.light === "unavailable" ? row.light : "unavailable";
+  const out: SystemCostHurdle = { status: "ok", light };
+  if (typeof row.lastUpdated === "string" && isIsoDate(row.lastUpdated)) out.lastUpdated = row.lastUpdated;
+  const monthlyUsd = finiteCost(row.monthlyUsd);
+  if (monthlyUsd != null && monthlyUsd >= 0) out.monthlyUsd = monthlyUsd;
+  const monthlyR = finiteCost(row.monthlyR);
+  if (monthlyR != null && monthlyR >= 0) out.monthlyR = monthlyR;
+  const accruedUsd = finiteCost(row.accruedUsd);
+  if (accruedUsd != null && accruedUsd >= 0) out.accruedUsd = accruedUsd;
+  const accruedR = finiteCost(row.accruedR);
+  if (accruedR != null && accruedR >= 0) out.accruedR = accruedR;
+  const pnlUsd = nullableCost(row.pnlUsd);
+  if (pnlUsd !== undefined) out.pnlUsd = pnlUsd;
+  const pnlR = nullableCost(row.pnlR);
+  if (pnlR !== undefined) out.pnlR = pnlR;
+  const netUsd = nullableCost(row.netUsd);
+  if (netUsd !== undefined) out.netUsd = netUsd;
+  const netR = nullableCost(row.netR);
+  if (netR !== undefined) out.netR = netR;
+  if (typeof row.since === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(row.since)) out.since = row.since;
+  const elapsedDays = finiteCost(row.elapsedDays);
+  if (elapsedDays != null && elapsedDays >= 0) out.elapsedDays = elapsedDays;
+  if (Array.isArray(row.items)) {
+    const items: SystemCostItem[] = [];
+    for (const item of row.items.slice(0, 12)) {
+      if (!item || typeof item !== "object") continue;
+      const source = item as Record<string, unknown>;
+      const name = publicCostText(source.name);
+      const itemMonthly = finiteCost(source.monthlyUsd);
+      if (!name || itemMonthly == null || itemMonthly < 0) continue;
+      const note = publicCostText(source.note);
+      const estimate = source.estimate === true;
+      items.push({ name, monthlyUsd: itemMonthly, ...(note ? { note } : {}), ...(estimate ? { estimate: true } : {}) });
+    }
+    if (items.length > 0) out.items = items;
+  }
+  return out;
+}
+
+/** /p6/health.json. The hurdle is the scrubbed view, not the raw read. */
+export function p6HealthJson(
+  view: DashboardView,
+  health: "Healthy" | "Stale" | "Error",
+): { health: "Healthy" | "Stale" | "Error"; systemCost: SystemCostHurdle } {
+  const safe = redactP6View(view);
+  return { health, systemCost: safe.systemCost ?? { status: "unavailable", light: "unavailable" } };
 }
 
 const BASIS = new Set(["bid1m", "mid-half-spread", "bar15-high", "bar15-low"]);
@@ -760,6 +843,8 @@ export interface DashboardView {
   unreadable: boolean;
   /** True when p6:lastRun was present and could not be decoded. Missing lastRun stays false. */
   lastUnreadable: boolean;
+  /** Display-only system-cost hurdle. Absent only before the page read fills it. */
+  systemCost?: SystemCostHurdle;
 }
 
 function leaseOf(raw: string | null): DashboardLease | null {
@@ -1163,6 +1248,7 @@ export async function readP6Page(
     points: equity.points,
     trades: equity.trades,
   });
+  view.systemCost = readSystemCostHurdle(pnl ? numField(pnl, "equityUsd") : null, nowMs);
   return { view, block };
 }
 

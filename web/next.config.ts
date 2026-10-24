@@ -12,6 +12,8 @@ const nextConfig: NextConfig = {
     "/p6": ["../research/data/candles/**", "../research/data/daily/**", "../research/data/**/*.sqlite"],
   },
   outputFileTracingIncludes: {
+    "/p6": ["../research/src/p6/system-cost.json"],
+    "/p6/health.json": ["../research/src/p6/system-cost.json"],
     "/api/engine": [
       "../research/data/reports/p4-registration.json",
       "../research/data/reports/universe-membership.json",
