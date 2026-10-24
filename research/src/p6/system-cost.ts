@@ -5,6 +5,8 @@
  */
 
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { PNL_START_USD } from "./pnl-block";
 
 /**
@@ -98,10 +100,38 @@ export function parseSystemCostConfig(raw: unknown): SystemCostConfig | null {
   return { lastUpdated: body.lastUpdated, items };
 }
 
+/**
+ * The committed JSON. A static `new URL("./system-cost.json")` is rewritten into a
+ * page asset that readFileSync cannot open, so the dashboard would show unavailable
+ * while the route still loaded. These are plain paths. The file is also listed in
+ * web/next.config.ts so the deploy trace keeps it.
+ */
+function committedConfigText(): string {
+  const paths: string[] = [];
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    paths.push(join(/*turbopackIgnore: true*/ here, "system-cost.json"));
+  } catch {
+    // A bundled url is not a file path. The cwd candidates below still apply.
+  }
+  const cwd = process.cwd();
+  paths.push(join(/*turbopackIgnore: true*/ cwd, "research", "src", "p6", "system-cost.json"));
+  paths.push(join(/*turbopackIgnore: true*/ cwd, "..", "research", "src", "p6", "system-cost.json"));
+  let last: unknown;
+  for (const path of paths) {
+    try {
+      return readFileSync(/*turbopackIgnore: true*/ path, "utf8");
+    } catch (error) {
+      last = error;
+    }
+  }
+  throw last instanceof Error ? last : new Error("system cost config missing");
+}
+
 /** Reads the committed JSON. Any parse or validation failure is null, not a throw. */
 export function loadSystemCostConfig(text?: string): SystemCostConfig | null {
   try {
-    const raw = text ?? readFileSync(new URL("./system-cost.json", import.meta.url), "utf8");
+    const raw = text ?? committedConfigText();
     return parseSystemCostConfig(JSON.parse(raw));
   } catch {
     return null;
