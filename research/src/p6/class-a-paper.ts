@@ -173,7 +173,7 @@ export interface ClassASignal {
 }
 
 export interface ClassACounterfactual {
-  status: "chase" | "open" | "closed" | "unavailable";
+  status: "chase" | "open" | "closed" | "unavailable" | "no_next_bar";
   entry: number | null;
   grossBps: number | null;
   netBps: number | null;
@@ -1479,16 +1479,22 @@ function armOrDefer(book: ClassABook, row: ClassARow, nextHourOpen: number | nul
 
 /**
  * The 15m bar that starts at the signal close is the next 1h open.
- * Arm any counterfactual that was waiting on that open. Chase still applies.
+ * A positive open at that start arms the counterfactual. Chase still applies.
+ * A null or non-positive open at that start, or any later bar for the pair while that bar never arrived, is no_next_bar.
+ * There is no clock limit. A bar before the hour open leaves the wait in place.
  */
-export function armClassAHourOpen(book: ClassABook, pair: string, barStartMs: number, open: number): void {
-  if (!(open > 0) || !Number.isFinite(barStartMs)) return;
+export function armClassAHourOpen(book: ClassABook, pair: string, barStartMs: number, open: number | null): void {
+  if (!Number.isFinite(barStartMs)) return;
   for (const row of book.rows) {
-    if (row.awaitHourOpen !== true || row.pair !== pair || row.signalMs !== barStartMs) continue;
+    if (row.awaitHourOpen !== true || row.pair !== pair || barStartMs < row.signalMs) continue;
     row.awaitHourOpen = false;
-    const signalClose = row.signalClose ?? open;
-    row.counterfactual = counterfactualOf(open, signalClose, row.atr ?? 0);
-    liveShadow(book, row, open, row.sBps ?? takerSpreadBps(null), row.shadowPrior ?? []);
+    if (barStartMs === row.signalMs && open != null && open > 0) {
+      const signalClose = row.signalClose ?? open;
+      row.counterfactual = counterfactualOf(open, signalClose, row.atr ?? 0);
+      liveShadow(book, row, open, row.sBps ?? takerSpreadBps(null), row.shadowPrior ?? []);
+      continue;
+    }
+    row.counterfactual = { status: "no_next_bar", entry: null, grossBps: null, netBps: null, netR: null, exitReason: "no_next_bar" };
   }
 }
 

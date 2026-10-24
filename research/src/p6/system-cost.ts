@@ -18,10 +18,9 @@ export const SYSTEM_COST_START_MS = Date.parse(SYSTEM_COST_START_ISO);
 
 /**
  * Hosting cutover to a local Docker server at no charge.
- * The committed file bills the prior Vercel and Redis lines up to this instant and $0 after it.
- * The date is the commit calendar day at 00:00Z. Brian still needs to confirm it.
+ * Brian set this to the forward start. Vercel and Redis accrue until this instant, and $0 applies after it.
  */
-export const SYSTEM_COST_CUTOVER_ISO = "2026-10-24T00:00:00.000Z";
+export const SYSTEM_COST_CUTOVER_ISO = "2026-10-26T00:00:00.000Z";
 
 /**
  * Display conversion. $20 is 1R, the unpromoted paper risk.
@@ -60,7 +59,7 @@ export interface SystemCostConfig {
   items: SystemCostItem[];
   /** Effective-dated rates. Accrual integrates these. Absent on a legacy file. */
   spans?: SystemCostSpan[];
-  /** ISO date of the hosting cutover. Display only. Brian must confirm it. */
+  /** ISO date of the hosting cutover. Display only. Brian set it to the forward start. */
   cutover?: string;
 }
 
@@ -124,12 +123,43 @@ function dateMs(isoDate: string): number {
   return Date.parse(`${isoDate}T00:00:00.000Z`);
 }
 
+/** A span that shares any positive-length interval with another. Touching endpoints are contiguous, not an overlap. */
+export class SystemCostSpanOverlapError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SystemCostSpanOverlapError";
+  }
+}
+
+function spanLabel(span: SystemCostSpan): string {
+  return `${span.from}..${span.until ?? "open"}`;
+}
+
+/** Returns the first overlapping pair. Contiguous spans, where one `until` equals the next `from`, are not a pair. */
+export function overlappingSystemCostSpans(spans: readonly SystemCostSpan[]): [SystemCostSpan, SystemCostSpan] | null {
+  const ordered = spans
+    .map((span, index) => ({
+      span,
+      index,
+      fromMs: dateMs(span.from),
+      untilMs: span.until == null ? Number.POSITIVE_INFINITY : dateMs(span.until),
+    }))
+    .sort((a, b) => a.fromMs - b.fromMs || a.untilMs - b.untilMs || a.index - b.index);
+  for (let i = 1; i < ordered.length; i += 1) {
+    const prev = ordered[i - 1]!;
+    const next = ordered[i]!;
+    if (prev.untilMs > next.fromMs) return [prev.span, next.span];
+  }
+  return null;
+}
+
 /**
  * A config is accepted only when lastUpdated is a real ISO date and every
  * line item has a name and a non-negative finite monthlyUsd. One bad item
  * rejects the file. There is no partial sum.
  * A legacy file is `{ lastUpdated, items }` and accrues that one rate.
  * An effective-dated file is `{ lastUpdated, spans }` and integrates each span.
+ * Overlapping spans throw SystemCostSpanOverlapError. A span that ends where the next starts stays valid.
  */
 export function parseSystemCostConfig(raw: unknown): SystemCostConfig | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -149,6 +179,8 @@ export function parseSystemCostConfig(raw: unknown): SystemCostConfig | null {
       if (!items) return null;
       spans.push({ from: span.from, ...(typeof span.until === "string" ? { until: span.until } : {}), items });
     }
+    const overlap = overlappingSystemCostSpans(spans);
+    if (overlap) throw new SystemCostSpanOverlapError(`overlapping system cost spans: ${spanLabel(overlap[0])} and ${spanLabel(overlap[1])}`);
     const open = spans.filter((span) => span.until == null);
     const items = (open.length === 1 ? open[0] : spans[spans.length - 1])!.items.map((item) => ({ ...item }));
     return { lastUpdated: body.lastUpdated, items, spans, ...(typeof body.cutover === "string" ? { cutover: body.cutover } : {}) };
@@ -186,12 +218,16 @@ function committedConfigText(): string {
   throw last instanceof Error ? last : new Error("system cost config missing");
 }
 
-/** Reads the committed JSON. Any parse or validation failure is null, not a throw. */
+/**
+ * Reads the committed JSON. A malformed file is null.
+ * Overlapping spans throw SystemCostSpanOverlapError instead of being billed twice.
+ */
 export function loadSystemCostConfig(text?: string): SystemCostConfig | null {
   try {
     const raw = text ?? committedConfigText();
     return parseSystemCostConfig(JSON.parse(raw));
-  } catch {
+  } catch (error) {
+    if (error instanceof SystemCostSpanOverlapError) throw error;
     return null;
   }
 }
@@ -273,6 +309,7 @@ export function systemCostHurdle(input: {
     let accruedUsd = accruedSystemCostUsd(monthlyUsd, startMs, input.nowMs);
     let items = config.items.map((item) => ({ ...item }));
     if (spans.length > 0) {
+      if (overlappingSystemCostSpans(spans)) return SYSTEM_COST_UNAVAILABLE;
       monthlyUsd = 0;
       accruedUsd = 0;
       items = [];

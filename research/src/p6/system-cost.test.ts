@@ -175,24 +175,24 @@ test("a bad config is unavailable and does not throw", () => {
   expect(systemCostHurdle({ config: null, pnlUsd: 10, nowMs: Number.NaN }).status).toBe("unavailable");
 });
 
-test("the committed file freezes the $115.25 history at the 2026-10-24 cutover and bills $0 after it", () => {
+test("the committed file freezes the $115.25 history at the 2026-10-26 cutover and bills $0 after it", () => {
   const config = loadSystemCostConfig();
   const dockerNote = "Brian's local Docker server, no charge after the cutover";
   expect(config?.lastUpdated).toBe("2026-10-24");
-  expect(config?.cutover).toBe("2026-10-24");
+  expect(config?.cutover).toBe("2026-10-26");
   expect(config?.spans).toEqual([
     {
       from: "2026-10-10",
-      until: "2026-10-24",
+      until: "2026-10-26",
       items: [
         { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE },
         { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
       ],
     },
-    { from: "2026-10-24", items: [{ name: "Local Docker", monthlyUsd: 0, note: dockerNote }] },
+    { from: "2026-10-26", items: [{ name: "Local Docker", monthlyUsd: 0, note: dockerNote }] },
   ]);
   expect(config?.items).toEqual([{ name: "Local Docker", monthlyUsd: 0, note: dockerNote }]);
-  const now = Date.parse("2026-10-24T00:00:00.000Z");
+  const now = Date.parse("2026-10-26T00:00:00.000Z");
   const days = (now - SYSTEM_COST_START_MS) / DAY_MS;
   const frozen = (MONTHLY_USD * 12) / 365.25 * days;
   const hurdle = systemCostHurdle({ config, pnlUsd: 0, nowMs: now });
@@ -203,9 +203,9 @@ test("the committed file freezes the $115.25 history at the 2026-10-24 cutover a
   expect(hurdle.elapsedDays).toBe(days);
   expect(hurdle.accruedUsd).toBeCloseTo(frozen, 8);
   expect(hurdle.light).toBe("red");
-  expect(hurdle.items?.[0]).toEqual({ name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE, from: "2026-10-10", until: "2026-10-24" });
-  expect(hurdle.items?.[1]).toEqual({ name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE, from: "2026-10-10", until: "2026-10-24" });
-  expect(hurdle.items?.[2]).toEqual({ name: "Local Docker", monthlyUsd: 0, note: dockerNote, from: "2026-10-24" });
+  expect(hurdle.items?.[0]).toEqual({ name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE, from: "2026-10-10", until: "2026-10-26" });
+  expect(hurdle.items?.[1]).toEqual({ name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE, from: "2026-10-10", until: "2026-10-26" });
+  expect(hurdle.items?.[2]).toEqual({ name: "Local Docker", monthlyUsd: 0, note: dockerNote, from: "2026-10-26" });
   const before = systemCostHurdle({ config, pnlUsd: 0, nowMs: now - 1 });
   expect(before.monthlyUsd).toBe(MONTHLY_USD);
   expect(before.accruedUsd).toBeLessThan(frozen);
@@ -221,6 +221,48 @@ test("the committed file freezes the $115.25 history at the 2026-10-24 cutover a
   expect(confirmed?.spans).toBeUndefined();
   expect(parseSystemCostConfig({ lastUpdated: "2026-10-24", spans: [] })).toBeNull();
   expect(parseSystemCostConfig({ lastUpdated: "2026-10-24", spans: [{ from: "2026-10-24", until: "2026-10-10", items: [] }] })).toBeNull();
+});
+
+test("overlapping cost spans are rejected and contiguous spans are billed once", () => {
+  const item = (name: string, monthlyUsd: number) => [{ name, monthlyUsd }];
+  const overlap = {
+    lastUpdated: "2026-10-24",
+    spans: [
+      { from: "2026-10-10", until: "2026-10-26", items: item("Vercel Pro", 110) },
+      { from: "2026-10-20", until: "2026-11-01", items: item("Redis Cloud", 5.25) },
+    ],
+  };
+  expect(() => parseSystemCostConfig(overlap)).toThrow("overlapping system cost spans: 2026-10-10..2026-10-26 and 2026-10-20..2026-11-01");
+  expect(() => loadSystemCostConfig(JSON.stringify(overlap))).toThrow("overlapping system cost spans");
+  const doubled = systemCostHurdle({
+    config: {
+      lastUpdated: "2026-10-24",
+      items: [],
+      spans: [
+        { from: "2026-10-10", until: "2026-10-26", items: item("Vercel Pro", 100) },
+        { from: "2026-10-10", until: "2026-10-26", items: item("Redis Cloud", 100) },
+      ],
+    },
+    pnlUsd: 0,
+    nowMs: Date.parse("2026-10-26T00:00:00.000Z"),
+  });
+  expect(doubled.status).toBe("unavailable");
+  expect(doubled.accruedUsd).toBeUndefined();
+  const contiguous = parseSystemCostConfig({
+    lastUpdated: "2026-10-24",
+    spans: [
+      { from: "2026-10-10", until: "2026-10-26", items: item("Vercel Pro", 110) },
+      { from: "2026-10-26", items: item("Local Docker", 0) },
+    ],
+  });
+  expect(contiguous?.spans).toHaveLength(2);
+  const now = Date.parse("2026-10-26T00:00:00.000Z");
+  const once = accruedSystemCostUsd(110, SYSTEM_COST_START_MS, now);
+  const hurdle = systemCostHurdle({ config: contiguous, pnlUsd: 0, nowMs: now + 10 * DAY_MS });
+  expect(hurdle.status).toBe("ok");
+  expect(hurdle.monthlyUsd).toBe(0);
+  expect(hurdle.accruedUsd).toBeCloseTo(once, 8);
+  expect(hurdle.accruedUsd).not.toBeCloseTo(once * 2, 8);
 });
 
 test("the scrubber keeps the system-cost fields and drops a planted host", () => {
@@ -405,8 +447,8 @@ test("a page read puts the hurdle on the view from the displayed equity P/L", as
   const { view: loaded } = await readP6Page(kv, now);
   expect(loaded.systemCost?.status).toBe("ok");
   expect(loaded.systemCost?.pnlUsd).toBe(120);
-  expect(loaded.systemCost?.monthlyUsd).toBe(0);
-  expect(loaded.systemCost?.monthlyR).toBe(0);
+  expect(loaded.systemCost?.monthlyUsd).toBe(MONTHLY_USD);
+  expect(loaded.systemCost?.monthlyR).toBe(5.7625);
   expect(loaded.systemCost?.items?.[0]?.note).toBe(VERCEL_NOTE);
   expect(loaded.systemCost?.items?.[0]?.estimate).toBe(true);
   expect(loaded.systemCost?.items?.[1]?.name).toBe("Redis Cloud");
