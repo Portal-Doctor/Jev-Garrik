@@ -1,9 +1,30 @@
 import { expect, test } from "bun:test";
-import { CLASS_A_PAPER_START_MS } from "./class-a-paper";
+import { CLASS_A_PAPER_START_MS, emptyClassABook, type ClassABook } from "./class-a-paper";
+import { stepClassAFromHost, type ClassALiveHost } from "./class-a-live";
 import { captureHot, loadSplit, persistSplit } from "./hot-store";
 import { acceptRestBar, startPaperHost } from "./paper-host";
 import { decodeLease, LEASE_KEY, memoryKv, tryAcquire } from "./relay";
 import { hostHolder } from "./vercel-live";
+
+const DAY_MS = 86_400_000;
+
+function liveHost(book: ClassABook, over: Partial<ClassALiveHost> = {}): ClassALiveHost {
+  return {
+    classAPaper: book,
+    clock: () => CLASS_A_PAPER_START_MS,
+    dailyBars: new Map(),
+    hourWarm: new Map(),
+    ticks: new Map([["SOL-USD", 0.01]]),
+    trades: [],
+    books: new Map(),
+    book: { quotes: {} },
+    ...over,
+  };
+}
+
+function dayBar(date: string, close: number) {
+  return { ts: Date.parse(`${date}T00:00:00.000Z`) / 1000, open: close, high: close + 0.05, low: close - 0.05, close, volume: 100_000 };
+}
 
 const DAY = 86_400;
 
@@ -144,4 +165,83 @@ test("the production bar path keeps a pending maker order across a reload, fills
     if (gzip === undefined) delete process.env.P6_GZIP_WRITES;
     else process.env.P6_GZIP_WRITES = gzip;
   }
+});
+
+test("a day close before the book start does not log a spread or a row", () => {
+  const paper = emptyClassABook(CLASS_A_PAPER_START_MS);
+  const openSec = Date.parse("2026-10-24T00:00:00.000Z") / 1000;
+  const host = liveHost(paper, {
+    dailyBars: new Map([["SOL-USD", [dayBar("2026-10-24", 100)]]]),
+    book: { quotes: { "SOL-USD": { bid: 100, ask: 100.02, tsMs: CLASS_A_PAPER_START_MS } } },
+  });
+  stepClassAFromHost(host, { productId: "SOL-USD", startSec: openSec + 86_400 - 900, open: 100, high: 100.05, low: 99.95, close: 100 });
+  expect(paper.rows).toHaveLength(0);
+  expect(paper.spreadLog?.["SOL-USD"]).toBeUndefined();
+});
+
+test("a day close with a quote appends that spread on a fresh book", () => {
+  const paper = emptyClassABook(CLASS_A_PAPER_START_MS);
+  const openSec = Date.parse("2026-10-25T00:00:00.000Z") / 1000;
+  const host = liveHost(paper, {
+    dailyBars: new Map([["SOL-USD", [dayBar("2026-10-25", 100)]]]),
+    book: { quotes: { "SOL-USD": { bid: 100, ask: 100.02, tsMs: CLASS_A_PAPER_START_MS } } },
+    listingFirstMs: { "SOL-USD": Date.parse("2024-01-01T00:00:00.000Z") },
+  });
+  stepClassAFromHost(host, { productId: "SOL-USD", startSec: openSec + 86_400 - 900, open: 100, high: 100.05, low: 99.95, close: 100 });
+  expect(paper.spreadLog?.["SOL-USD"]).toHaveLength(1);
+  expect(paper.spreadLog?.["SOL-USD"]?.[0]).toBeGreaterThan(0);
+});
+
+test("a young listing does not enter and an unknown listing is flagged", () => {
+  const last = Date.parse("2026-10-25T00:00:00.000Z");
+  const bars = Array.from({ length: 70 }, (_, index) => {
+    const close = index === 69 ? 100.05 : 100;
+    return dayBar(new Date(last - (69 - index) * DAY_MS).toISOString().slice(0, 10), close);
+  });
+  const bar = { productId: "SOL-USD", startSec: last / 1000 + 86_400 - 900, open: 100.05, high: 100.1, low: 100, close: 100.05 };
+  const young = emptyClassABook(CLASS_A_PAPER_START_MS);
+  stepClassAFromHost(liveHost(young, {
+    dailyBars: new Map([["SOL-USD", bars]]),
+    listingFirstMs: { "SOL-USD": CLASS_A_PAPER_START_MS - 10 * DAY_MS },
+  }), bar);
+  expect(young.rows).toHaveLength(0);
+  expect(young.open).toHaveLength(0);
+  const unknown = emptyClassABook(CLASS_A_PAPER_START_MS);
+  stepClassAFromHost(liveHost(unknown, {
+    dailyBars: new Map([["SOL-USD", bars]]),
+    listingFirstMs: { "SOL-USD": null },
+  }), bar);
+  expect(unknown.open).toHaveLength(0);
+  expect(unknown.rows.some((row) => row.listedDaysEstimated === true)).toBe(true);
+});
+
+test("a live bar stops an open position when the low trades through the stop", () => {
+  const paper = emptyClassABook(CLASS_A_PAPER_START_MS);
+  paper.open.push({
+    rowId: "SOL-USD:1",
+    pair: "SOL-USD",
+    scored: true,
+    entry: 100,
+    entryMs: CLASS_A_PAPER_START_MS,
+    entryDate: "2026-10-26",
+    stop: 90,
+    initialStop: 90,
+    notionalUsd: 100,
+    units: 1,
+    feeEntryBps: 35,
+    sBps: 5,
+    highestClose: 100,
+    priorCloses: [],
+    pending: null,
+  });
+  stepClassAFromHost(liveHost(paper), {
+    productId: "SOL-USD",
+    startSec: CLASS_A_PAPER_START_MS / 1000 + 900,
+    open: 95,
+    high: 96,
+    low: 80,
+    close: 94,
+  });
+  expect(paper.open).toHaveLength(0);
+  expect(paper.scored).toHaveLength(1);
 });

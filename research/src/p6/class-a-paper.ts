@@ -24,6 +24,11 @@
  * - errata 002 item 4: bootstrap seed 20261011 and 10,000 resamples are fixed.
  * - errata 002 item 5: the start close and a signal at exactly startMs are included.
  * - errata 002 item 6: the benchmark is the drifted buy-and-hold series below. Drift versus daily rebalancing, and zero rebalance fees, are fixed readings. They are not switches. A change waits on errata 003.
+ *
+ * Errata 003 (sha256 57e2285efa068cf92e0ed54fc2c43d303bef8cd4b677e61083fc86868477ad7c) is report-only.
+ * Errata 005 items 5 and 6 set its rates: maker 35, taker 75 + s, exit fee 35 bps times V.
+ * Errata 004 (sha256 8291e0b4af55b2592fcbce04da246eab4277fac0ce4d60143eb3b2d87499afa8) is a rule change.
+ * The buy-and-hold gate compares A_marked, with the 005 taker exit, to the gross buy-and-hold return.
  */
 
 import { classATrigger, type DailyBar } from "../p3/classes";
@@ -62,8 +67,11 @@ export const CLASS_A_INTRO_TAKER_FEE_BPS = 90;
 export const CLASS_A_INTRO_PROMOTE_GROSS_BPS = 2 * (CLASS_A_INTRO_MAKER_FEE_BPS + CLASS_A_INTRO_TAKER_FEE_BPS + 5);
 /**
  * errata 005 items 5 and 6. Shared with errata 003 (#2 maker, #4 taker + s, #5b exit) and errata 004 row 1.
- * Those reports are not built here. The rates are the Advanced 1 schedule so the next run does not fork them.
+ * sha256 57e2285efa068cf92e0ed54fc2c43d303bef8cd4b677e61083fc86868477ad7c
+ * sha256 8291e0b4af55b2592fcbce04da246eab4277fac0ce4d60143eb3b2d87499afa8
  */
+export const CLASS_A_ERRATA_003_SHA256 = "57e2285efa068cf92e0ed54fc2c43d303bef8cd4b677e61083fc86868477ad7c";
+export const CLASS_A_ERRATA_004_SHA256 = "8291e0b4af55b2592fcbce04da246eab4277fac0ce4d60143eb3b2d87499afa8";
 export const CLASS_A_BH_FEE_MAKER_BPS = CLASS_A_MAKER_FEE_BPS;
 export const CLASS_A_BH_FEE_TAKER_BPS = CLASS_A_TAKER_FEE_BPS;
 export const CLASS_A_BH_EXIT_FEE_BPS = CLASS_A_MAKER_FEE_BPS;
@@ -87,8 +95,12 @@ export const CLASS_A_BOOTSTRAP_SEED = BOOTSTRAP_SEED;
  * The five ETF-venue ids are not named in the errata or this repo. These placeholders fail closed until a review record names them.
  */
 export const CLASS_A_HOLM_FAMILY = ["A", "capitulation", "access-event", "etf-venue-1", "etf-venue-2", "etf-venue-3", "etf-venue-4", "etf-venue-5"] as const;
-/** errata 001 item 12. Spread samples required inside the 30 days before the signal. */
+/**
+ * errata 001 item 12. Spread samples required inside the 30 days before the signal.
+ * The first 20 day closes are skip_spread until the spread log has 20 samples.
+ */
 export const CLASS_A_SPREAD_MIN_DAYS = 20;
+export const CLASS_A_SPREAD_WARMUP_NOTE = "The first 20 day closes are skip_spread until the spread log has 20 samples.";
 const DAY_MS = 86_400_000;
 const LISTED_DAYS = 90;
 const EXCLUSION_RULES = new Set<ExclusionEntry["rule"]>(["fiat-or-fx", "commodity", "wrapped-or-bridged", "staking-receipt"]);
@@ -144,6 +156,11 @@ export interface ClassASignal {
    * The signal day is not included. errata 001 item 12.
    */
   spreadSamples?: readonly (number | null)[];
+  /**
+   * True when the listing age is not known from a products snapshot or a first-candle date.
+   * The row is flagged and does not enter. Bars held are not used as the age.
+   */
+  listedDaysEstimated?: boolean;
   nextHourOpen: number | null;
   hourAtr14: number | null;
   prints: readonly { tsMs: number; price: number }[];
@@ -195,6 +212,12 @@ export interface ClassARow {
   gap?: boolean;
   /** Out of timestamp order, or the same pair and signal time again. Not applied. Not a skip reason. */
   signalOrder?: "out-of-order" | "duplicate";
+  /** Listing age was not known. The signal did not enter. The public view counts these rows. */
+  listedDaysEstimated?: boolean;
+  /** The next 1h open is not known yet. The counterfactual waits for that bar. It does not use the signal close. */
+  awaitHourOpen?: boolean;
+  /** Closes carried until the next 1h open is known. */
+  shadowPrior?: number[];
 }
 
 interface Sim {
@@ -258,6 +281,8 @@ export interface ClassABook {
   spreadLog?: Record<string, number[]>;
   /** Maker orders waiting on [close, close+4h). Absent on a snapshot from before pending orders means none. */
   resting?: ClassAResting[];
+  /** Last daily close per pair. The review mark uses this price and does not invent one. */
+  lastClose?: Record<string, number>;
 }
 
 export interface ClassAIntroSensitivity {
@@ -278,6 +303,50 @@ export interface ClassASHeadroom {
   medianSBps: number | null;
   /** 2 × (35 + 75 + median s). Null when median s is unknown. Does not gate. */
   barBps: number | null;
+}
+
+/** errata 004 item 6. One open position marked at the review close. Resting orders are not in this list. */
+export interface ClassAMark {
+  pair: string;
+  entryMs: number;
+  entry: number;
+  qty: number;
+  cReview: number;
+  entryFeeUsd: number;
+  exitFeeUsd: number;
+  sBps: number;
+  sUsd: number;
+  markedPnl: number;
+}
+
+export interface ClassARestingView {
+  pair: string;
+  limit: number;
+  qty: number;
+}
+
+/** errata 003 report lines and the errata 004 review. Null when that input is missing. */
+export interface ClassABhReport {
+  /** errata 003 #2. Maker 35 bps on the initial buy and each rebalance. No exit fee. */
+  feeReturn: number | null;
+  /** errata 003 #3. Membership-change closes, excluding the initial buy. */
+  membershipChanges: number | null;
+  /** errata 003 #3. Sum of turnover, including the initial buy. */
+  turnover: number | null;
+  /** errata 003 #4. Taker 75 bps + s per side, turnover-weighted. */
+  takerReturn: number | null;
+  /** errata 003 #5b. The fee-charged series plus an exit fee of 35 bps times V. */
+  feeExitReturn: number | null;
+  /** errata 003 #6. Share of gross buy-and-hold return from the largest pair. */
+  concentration: number | null;
+  /** errata 003 #5a. Realized net plus open marks with no exit fee, over $6,000. */
+  aMtmNoExit: number | null;
+  /** errata 004 #1. Realized net plus open marks at taker 75 + s, over $6,000. */
+  aMarked: number | null;
+  /** errata 004 #8. Realized gross plus open price P/L, over $6,000. */
+  aMarkedGross: number | null;
+  marks: ClassAMark[];
+  resting: ClassARestingView[];
 }
 
 export interface ClassAPaperView {
@@ -320,6 +389,32 @@ export interface ClassAPaperView {
   sHeadroom: ClassASHeadroom;
   /** errata 005 item 8. */
   promotionPrecondition: string;
+  /** Rows whose listing age was unknown. Bars held are not the age. */
+  listedDaysEstimated: number;
+  /** errata 001 item 12. The first 20 day closes stay skip_spread. */
+  spreadWarmupNote: string;
+  /** errata 004 #1. Null when an open position has no review close. */
+  aMarked: number | null;
+  /** errata 004 #8. Report only. */
+  aMarkedGross: number | null;
+  /** errata 003 #5a. Report only. No exit fee. */
+  aMtmNoExit: number | null;
+  /** errata 003 #2. Report only. Null until a buy-and-hold input is supplied. */
+  bhFeeReturn: number | null;
+  /** errata 003 #3. */
+  bhMembershipChanges: number | null;
+  /** errata 003 #3. */
+  bhTurnover: number | null;
+  /** errata 003 #4. Taker 75 + s. */
+  bhTakerReturn: number | null;
+  /** errata 003 #5b. Fee-charged series plus the 35 bps exit. */
+  bhFeeExitReturn: number | null;
+  /** errata 003 #6. */
+  bhConcentration: number | null;
+  /** errata 004 #6. Open positions only. */
+  marks: ClassAMark[];
+  /** errata 004 #9. Unfilled maker orders. Not positions. */
+  resting: ClassARestingView[];
 }
 
 /**
@@ -362,6 +457,7 @@ export function emptyClassABook(startMs: number | null = null, preflight: { ok: 
     lastSignalMs: null,
     spreadLog: {},
     resting: [],
+    lastClose: {},
   };
 }
 
@@ -423,6 +519,17 @@ export function walkCostBps(mid: number, levels: readonly { price: number; size:
   }
   if (left > 1e-8) return Number.POSITIVE_INFINITY;
   return ((spent / baseNeeded - mid) / mid) * 10_000;
+}
+
+/**
+ * Whole UTC days from the first candle or listing instant to the signal close.
+ * Unknown age is estimated. Callers must not substitute the number of bars held.
+ */
+export function resolveListedDays(firstMs: number | null, signalMs: number): { listedDays: number; estimated: boolean } {
+  if (firstMs == null || !Number.isFinite(firstMs) || !Number.isFinite(signalMs)) return { listedDays: 0, estimated: true };
+  const listedDays = Math.floor((signalMs - firstMs) / DAY_MS);
+  if (!Number.isFinite(listedDays) || listedDays < 0) return { listedDays: 0, estimated: false };
+  return { listedDays, estimated: false };
 }
 
 export function signalCloseMs(openDated: string): number {
@@ -510,6 +617,8 @@ export interface ClassABhPair {
   closes: readonly (number | null)[];
   /** Base volume. USD volume is close times this. */
   volumes: readonly (number | null)[];
+  /** Quoted spread bps. The 30 days before a rebalance, not including that close. errata 003 #4. */
+  spreads?: readonly (number | null)[];
 }
 
 export interface ClassABhInput {
@@ -527,6 +636,43 @@ export interface ClassABhPoint {
   members: string[];
 }
 
+function bhCarried(values: readonly (number | null)[], index: number): number | null {
+  for (let i = index; i >= 0; i -= 1) {
+    const value = values[i];
+    if (value != null && Number.isFinite(value) && value > 0) return value;
+  }
+  return null;
+}
+
+function bhMembership(input: ClassABhInput, t: number): string[] {
+  const excluded = new Set(input.excluded);
+  const names: string[] = [];
+  for (const candle of input.candles) {
+    if (excluded.has(candle.pair) || t - candle.listedIndex < 90 || t < 30) continue;
+    const days = candle.closes.map((close, index) => {
+      const quoted = close != null && Number.isFinite(close) && close > 0 ? close : bhCarried(candle.closes, index);
+      const volume = candle.volumes[index];
+      return {
+        close: quoted != null && quoted > 0 ? quoted : 0,
+        baseVolume: volume != null && Number.isFinite(volume) && volume >= 0 ? volume : 0,
+      };
+    });
+    const usd = medianVolumeUsd(days, t);
+    if (usd != null && usd >= CLASS_A_VOLUME_FLOOR_USD) names.push(candle.pair);
+  }
+  names.sort();
+  return names;
+}
+
+function bhRatio(input: ClassABhInput, pair: string, t: number): number {
+  const candle = input.candles.find((row) => row.pair === pair);
+  if (!candle) return 1;
+  const now = bhCarried(candle.closes, t);
+  const prev = bhCarried(candle.closes, t - 1);
+  if (now == null || prev == null || !(prev > 0)) return 1;
+  return now / prev;
+}
+
 /**
  * errata 002 item 6. Equal-weight buy-and-hold of the A2 eligible set.
  * Weights reset to 1/N at the first window close and when membership changes, and drift with price in between.
@@ -534,44 +680,9 @@ export interface ClassABhPoint {
  * The pair stays until the 30-day median of those carried days falls below $5M. A zero-volume day is a day, not a hole.
  */
 export function classABuyHoldSeries(input: ClassABhInput): ClassABhPoint[] {
-  const excluded = new Set(input.excluded);
-  const carried = (values: readonly (number | null)[], index: number): number | null => {
-    for (let i = index; i >= 0; i -= 1) {
-      const value = values[i];
-      if (value != null && Number.isFinite(value) && value > 0) return value;
-    }
-    return null;
-  };
-  const membership = (t: number): string[] => {
-    const names: string[] = [];
-    for (const candle of input.candles) {
-      if (excluded.has(candle.pair) || t - candle.listedIndex < 90 || t < 30) continue;
-      const days = candle.closes.map((close, index) => {
-        const quoted = close != null && Number.isFinite(close) && close > 0 ? close : carried(candle.closes, index);
-        const volume = candle.volumes[index];
-        return {
-          close: quoted != null && quoted > 0 ? quoted : 0,
-          baseVolume: volume != null && Number.isFinite(volume) && volume >= 0 ? volume : 0,
-        };
-      });
-      const usd = medianVolumeUsd(days, t);
-      if (usd != null && usd >= CLASS_A_VOLUME_FLOOR_USD) names.push(candle.pair);
-    }
-    names.sort();
-    return names;
-  };
-  const byPair = new Map(input.candles.map((candle) => [candle.pair, candle]));
-  const ratio = (pair: string, t: number): number => {
-    const candle = byPair.get(pair);
-    if (!candle) return 1;
-    const now = carried(candle.closes, t);
-    const prev = carried(candle.closes, t - 1);
-    if (now == null || prev == null || !(prev > 0)) return 1;
-    return now / prev;
-  };
   const out: ClassABhPoint[] = [];
   if (!(input.t1 >= input.t0)) return out;
-  let mem = membership(input.t0);
+  let mem = bhMembership(input, input.t0);
   let weights = new Map(mem.map((pair) => [pair, mem.length > 0 ? 1 / mem.length : 0]));
   let value = 1;
   out.push({ t: input.t0, V: value, members: mem });
@@ -579,16 +690,16 @@ export function classABuyHoldSeries(input: ClassABhInput): ClassABhPoint[] {
     let growth = 0;
     if (weights.size === 0) growth = 1;
     else {
-      for (const [pair, weight] of weights) growth += weight * ratio(pair, t);
+      for (const [pair, weight] of weights) growth += weight * bhRatio(input, pair, t);
     }
     if (!(growth > 0)) growth = 1;
     value *= growth;
     if (weights.size > 0) {
       const next = new Map<string, number>();
-      for (const [pair, weight] of weights) next.set(pair, (weight * ratio(pair, t)) / growth);
+      for (const [pair, weight] of weights) next.set(pair, (weight * bhRatio(input, pair, t)) / growth);
       weights = next;
     }
-    const nextMem = membership(t);
+    const nextMem = bhMembership(input, t);
     if (nextMem.join(",") !== mem.join(",")) {
       mem = nextMem;
       weights = new Map(mem.map((pair) => [pair, mem.length > 0 ? 1 / mem.length : 0]));
@@ -603,6 +714,97 @@ export function classABuyHoldReturn(input: ClassABhInput): number | null {
   const series = classABuyHoldSeries(input);
   const last = series[series.length - 1];
   return last ? last.V - 1 : null;
+}
+
+function bhSpreadBps(input: ClassABhInput, pair: string, t: number): number {
+  const candle = input.candles.find((row) => row.pair === pair);
+  const window = (candle?.spreads ?? []).slice(Math.max(0, t - 30), t);
+  const samples = window.filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0);
+  if (samples.length < CLASS_A_SPREAD_MIN_DAYS) return takerSpreadBps(null);
+  return takerSpreadBps(median(samples));
+}
+
+function bhTurnover(input: ClassABhInput, drifted: ReadonlyMap<string, number>, target: ReadonlyMap<string, number>, t: number, taker: boolean): { turnover: number; fraction: number } {
+  const names = new Set<string>([...drifted.keys(), ...target.keys()]);
+  let turnover = 0;
+  let fraction = 0;
+  for (const pair of names) {
+    const delta = Math.abs((target.get(pair) ?? 0) - (drifted.get(pair) ?? 0));
+    if (!(delta > 0)) continue;
+    turnover += delta;
+    const bps = taker ? CLASS_A_BH_FEE_TAKER_BPS + bhSpreadBps(input, pair, t) : CLASS_A_BH_FEE_MAKER_BPS;
+    fraction += (delta * bps) / 10_000;
+  }
+  return { turnover, fraction };
+}
+
+/**
+ * errata 003, at the errata 005 rates. Same membership and drift as the gross series.
+ * Maker 35 bps on the initial buy and each rebalance. Taker sensitivity is 75 bps + s per side.
+ * The exit fee is a separate line. Nothing here gates.
+ */
+export function classABhReport(input: ClassABhInput): Pick<ClassABhReport, "feeReturn" | "membershipChanges" | "turnover" | "takerReturn" | "feeExitReturn" | "concentration"> {
+  const empty = { feeReturn: null, membershipChanges: null, turnover: null, takerReturn: null, feeExitReturn: null, concentration: null };
+  if (!(input.t1 >= input.t0)) return empty;
+  let mem = bhMembership(input, input.t0);
+  let weights = new Map(mem.map((pair) => [pair, mem.length > 0 ? 1 / mem.length : 0]));
+  let gross = 1;
+  let feeV = 1;
+  let takerV = 1;
+  let turnover = 0;
+  let membershipChanges = 0;
+  const contributions = new Map<string, number>();
+  const targetOf = (names: readonly string[]) => new Map(names.map((pair) => [pair, names.length > 0 ? 1 / names.length : 0]));
+  const applyFee = (drifted: Map<string, number>, names: readonly string[], t: number) => {
+    const target = targetOf(names);
+    const maker = bhTurnover(input, drifted, target, t, false);
+    const taker = bhTurnover(input, drifted, target, t, true);
+    turnover += maker.turnover;
+    feeV *= Math.max(0, 1 - maker.fraction);
+    takerV *= Math.max(0, 1 - taker.fraction);
+    weights = new Map(target);
+  };
+  applyFee(new Map(), mem, input.t0);
+  for (let t = input.t0 + 1; t <= input.t1; t += 1) {
+    let growth = 0;
+    if (weights.size === 0) growth = 1;
+    else {
+      for (const [pair, weight] of weights) growth += weight * bhRatio(input, pair, t);
+    }
+    if (!(growth > 0)) growth = 1;
+    const prev = gross;
+    for (const [pair, weight] of weights) {
+      const ret = bhRatio(input, pair, t) - 1;
+      contributions.set(pair, (contributions.get(pair) ?? 0) + weight * ret * prev);
+    }
+    gross *= growth;
+    feeV *= growth;
+    takerV *= growth;
+    if (weights.size > 0) {
+      const next = new Map<string, number>();
+      for (const [pair, weight] of weights) next.set(pair, (weight * bhRatio(input, pair, t)) / growth);
+      weights = next;
+    }
+    const nextMem = bhMembership(input, t);
+    if (nextMem.join(",") !== mem.join(",")) {
+      membershipChanges += 1;
+      mem = nextMem;
+      applyFee(weights, mem, t);
+    }
+  }
+  const grossReturn = gross - 1;
+  let best: number | null = null;
+  for (const value of contributions.values()) if (best == null || value > best) best = value;
+  const concentration = best == null || grossReturn === 0 ? null : best / grossReturn;
+  const exit = Math.max(0, 1 - CLASS_A_BH_EXIT_FEE_BPS / 10_000);
+  return {
+    feeReturn: feeV - 1,
+    membershipChanges,
+    turnover,
+    takerReturn: takerV - 1,
+    feeExitReturn: feeV * exit - 1,
+    concentration,
+  };
 }
 
 /** Book return divided by the average fraction of the $6,000 book that was deployed. */
@@ -669,6 +871,10 @@ export interface ClassAPromotion {
   bhReturn: number | null;
   beatsBh: boolean | null;
   exposureAdjustedReturn: number | null;
+  /** errata 004 #1. Defaults to the realized book return when no open marks are supplied. */
+  aMarked: number | null;
+  /** errata 004 #8. Report only. */
+  aMarkedGross: number | null;
 }
 
 export interface PromotionOpts {
@@ -683,8 +889,16 @@ export interface PromotionOpts {
   bhCandles?: ClassABhInput;
   /** Older day interface. Used only when bhReturn and bhCandles are omitted. */
   bhDays?: readonly BhDay[];
-  /** Average deployed fraction series. Reported only. errata 001 item 2b. */
+  /** Average deployed fraction series. Reported only. errata 001 item 2b and errata 004 #5. Uses A_marked. */
   deployedFraction?: readonly number[];
+  /**
+   * errata 004 #1. Realized net plus open marks, over $6,000.
+   * Omitted means there is nothing open to mark, so A_marked is the realized book return.
+   * Null means a review close is missing and the gate stays unresolved.
+   */
+  aMarked?: number | null;
+  /** errata 004 #8. Report only. */
+  aMarkedGross?: number | null;
 }
 
 /** One-sided p for a mean above `bar`. Null when fewer than two observations. */
@@ -767,16 +981,20 @@ export function promotionOf(scored: readonly ClassAScored[], opts: PromotionOpts
     holmP = adjusted.find((row) => row.id === "A")?.adjusted ?? null;
   }
   const bhReturn = opts.bhReturn != null && Number.isFinite(opts.bhReturn) ? opts.bhReturn : opts.bhCandles != null ? classABuyHoldReturn(opts.bhCandles) : opts.bhDays != null ? equalWeightBuyHold(opts.bhDays) : null;
-  const beatsBh = bookReturn != null && bhReturn != null ? bookReturn > bhReturn : null;
-  const exposureAdjustedReturn = bookReturn != null && opts.deployedFraction != null ? exposureAdjusted(bookReturn, opts.deployedFraction) : null;
-  const report: ClassAPromotion = { status: "unresolved", holmP, tP, bootstrapP, bookReturn, bhReturn, beatsBh, exposureAdjustedReturn };
+  // errata 004 #1 and #5. No open marks means A_marked is the realized book return. A missing review close stays null.
+  const aMarked = opts.aMarked === undefined ? bookReturn : opts.aMarked;
+  const aMarkedGross = opts.aMarkedGross === undefined ? null : opts.aMarkedGross;
+  const beatsBh = aMarked != null && bhReturn != null ? aMarked > bhReturn : null;
+  const exposureAdjustedReturn = aMarked != null && opts.deployedFraction != null ? exposureAdjusted(aMarked, opts.deployedFraction) : null;
+  const report: ClassAPromotion = { status: "unresolved", holmP, tP, bootstrapP, bookReturn, bhReturn, beatsBh, exposureAdjustedReturn, aMarked, aMarkedGross };
   if (scored.length < CLASS_A_PROMOTE_MIN_N) return { ...report, status: "not-considered" };
   const concentration = concentrationOf(scored);
   if (gross == null || gross < CLASS_A_PROMOTE_GROSS_BPS || concentration.top3Kill || concentration.pairKill) return { ...report, status: "blocked" };
   if (!family) return { ...report, status: "unresolved" };
   if (holmP == null || !(holmP < CLASS_A_HOLM_ALPHA)) return { ...report, status: "blocked" };
   if (bhReturn == null || bookReturn == null) return { ...report, status: "unresolved" };
-  if (!(bookReturn > bhReturn)) return { ...report, status: "blocked" };
+  if (aMarked == null) return { ...report, status: "unresolved" };
+  if (!(aMarked > bhReturn)) return { ...report, status: "blocked" };
   return { ...report, status: "pass" };
 }
 
@@ -834,6 +1052,68 @@ export function sHeadroomOf(rows: readonly ClassARow[]): ClassASHeadroom {
   return { medianSBps, barBps: 2 * (CLASS_A_MAKER_FEE_BPS + CLASS_A_TAKER_FEE_BPS + medianSBps) };
 }
 
+function emptyBhScalars(): Pick<ClassABhReport, "feeReturn" | "membershipChanges" | "turnover" | "takerReturn" | "feeExitReturn" | "concentration" | "aMtmNoExit" | "aMarked" | "aMarkedGross"> {
+  return {
+    feeReturn: null,
+    membershipChanges: null,
+    turnover: null,
+    takerReturn: null,
+    feeExitReturn: null,
+    concentration: null,
+    aMtmNoExit: null,
+    aMarked: null,
+    aMarkedGross: null,
+  };
+}
+
+/**
+ * errata 004 #1 and #6, and errata 003 #5a.
+ * An open position without a stored daily close leaves A_marked unresolved. The price is not invented.
+ * A position whose daily-close exit is pending is still open, so it is marked at C_review, not the next open.
+ * Resting unfilled orders are listed separately and are not marks.
+ */
+export function classAMarkedReview(book: ClassABook): ClassABhReport {
+  const resting = (book.resting ?? []).map((order) => ({ pair: order.pair, limit: order.limit, qty: order.units }));
+  const realizedNet = book.scored.reduce((total, row) => total + row.netUsd, 0);
+  const realizedGross = book.scored.reduce((total, row) => total + row.grossUsd, 0);
+  const base = { ...emptyBhScalars(), marks: [] as ClassAMark[], resting };
+  if (book.scored.length === 0 && book.open.length === 0) return base;
+  const marks: ClassAMark[] = [];
+  for (const sim of book.open) {
+    const cReview = book.lastClose?.[sim.pair];
+    if (cReview == null || !(cReview > 0)) return { ...base, marks };
+    const samples = (book.spreadLog?.[sim.pair] ?? []).slice(-30);
+    const sBps = samples.length >= CLASS_A_SPREAD_MIN_DAYS ? takerSpreadBps(median(samples)) : sim.sBps;
+    const exitNotional = cReview * sim.units;
+    const entryFeeUsd = (sim.notionalUsd * sim.feeEntryBps) / 10_000;
+    const exitFeeUsd = (exitNotional * (CLASS_A_MARKED_EXIT_FEE_BPS + sBps)) / 10_000;
+    const sUsd = (exitNotional * sBps) / 10_000;
+    const grossPnl = (cReview - sim.entry) * sim.units;
+    marks.push({
+      pair: sim.pair,
+      entryMs: sim.entryMs,
+      entry: sim.entry,
+      qty: sim.units,
+      cReview,
+      entryFeeUsd,
+      exitFeeUsd,
+      sBps,
+      sUsd,
+      markedPnl: grossPnl - entryFeeUsd - exitFeeUsd,
+    });
+  }
+  const markedPnlSum = marks.reduce((total, mark) => total + mark.markedPnl, 0);
+  const mtmSum = marks.reduce((total, mark) => total + (mark.markedPnl + mark.exitFeeUsd), 0);
+  const grossOpen = marks.reduce((total, mark) => total + (mark.cReview - mark.entry) * mark.qty, 0);
+  return {
+    ...base,
+    marks,
+    aMarked: (realizedNet + markedPnlSum) / CLASS_A_BOOK_USD,
+    aMarkedGross: (realizedGross + grossOpen) / CLASS_A_BOOK_USD,
+    aMtmNoExit: (realizedNet + mtmSum) / CLASS_A_BOOK_USD,
+  };
+}
+
 export function emptyClassAPaperView(): ClassAPaperView {
   return {
     specSha256: CLASS_A_SPEC_SHA256,
@@ -867,6 +1147,19 @@ export function emptyClassAPaperView(): ClassAPaperView {
     introSensitivity: emptyIntroSensitivity(),
     sHeadroom: emptySHeadroom(),
     promotionPrecondition: CLASS_A_PROMOTION_PRECONDITION,
+    listedDaysEstimated: 0,
+    spreadWarmupNote: CLASS_A_SPREAD_WARMUP_NOTE,
+    aMarked: null,
+    aMarkedGross: null,
+    aMtmNoExit: null,
+    bhFeeReturn: null,
+    bhMembershipChanges: null,
+    bhTurnover: null,
+    bhTakerReturn: null,
+    bhFeeExitReturn: null,
+    bhConcentration: null,
+    marks: [],
+    resting: [],
   };
 }
 
@@ -882,7 +1175,10 @@ export function classAPaperView(book: ClassABook, asOfMs = Date.now()): ClassAPa
     if (!row.skipReason || !(CLASS_A_SKIP_REASONS as readonly string[]).includes(row.skipReason)) continue;
     skips[row.skipReason] = (skips[row.skipReason] ?? 0) + 1;
   }
-  const promotion = promotionOf(book.scored);
+  let listedDaysEstimated = 0;
+  for (const row of book.rows) if (row?.listedDaysEstimated) listedDaysEstimated += 1;
+  const review = classAMarkedReview(book);
+  const promotion = promotionOf(book.scored, { aMarked: review.aMarked, aMarkedGross: review.aMarkedGross });
   const regimes: Record<ClassARegime, number> = { BULL: 0, BEAR: 0, CHOP: 0 };
   for (const row of book.scored) {
     if (row.regime === "BULL" || row.regime === "BEAR" || row.regime === "CHOP") regimes[row.regime] += 1;
@@ -919,6 +1215,19 @@ export function classAPaperView(book: ClassABook, asOfMs = Date.now()): ClassAPa
     introSensitivity: introSensitivityOf(book.rows),
     sHeadroom: sHeadroomOf(book.rows),
     promotionPrecondition: CLASS_A_PROMOTION_PRECONDITION,
+    listedDaysEstimated,
+    spreadWarmupNote: CLASS_A_SPREAD_WARMUP_NOTE,
+    aMarked: review.aMarked,
+    aMarkedGross: review.aMarkedGross,
+    aMtmNoExit: review.aMtmNoExit,
+    bhFeeReturn: null,
+    bhMembershipChanges: null,
+    bhTurnover: null,
+    bhTakerReturn: null,
+    bhFeeExitReturn: null,
+    bhConcentration: null,
+    marks: review.marks,
+    resting: review.resting,
   };
 }
 
@@ -986,7 +1295,59 @@ function scrubClassAView(value: unknown): ClassAPaperView {
     introSensitivity: scrubIntro(row.introSensitivity),
     sHeadroom: scrubHeadroom(row.sHeadroom),
     promotionPrecondition: CLASS_A_PROMOTION_PRECONDITION,
+    listedDaysEstimated: finiteNonNeg(row.listedDaysEstimated) ?? 0,
+    spreadWarmupNote: CLASS_A_SPREAD_WARMUP_NOTE,
+    aMarked: finiteOrNull(row.aMarked),
+    aMarkedGross: finiteOrNull(row.aMarkedGross),
+    aMtmNoExit: finiteOrNull(row.aMtmNoExit),
+    bhFeeReturn: finiteOrNull(row.bhFeeReturn),
+    bhMembershipChanges: finiteOrNull(row.bhMembershipChanges),
+    bhTurnover: finiteOrNull(row.bhTurnover),
+    bhTakerReturn: finiteOrNull(row.bhTakerReturn),
+    bhFeeExitReturn: finiteOrNull(row.bhFeeExitReturn),
+    bhConcentration: finiteOrNull(row.bhConcentration),
+    marks: scrubMarks(row.marks),
+    resting: scrubResting(row.resting),
   };
+}
+
+const PAIR_ID = /^[A-Z0-9]{2,12}-[A-Z]{2,5}$/;
+
+function scrubMarks(value: unknown): ClassAMark[] {
+  if (!Array.isArray(value)) return [];
+  const out: ClassAMark[] = [];
+  for (const item of value.slice(0, 12)) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.pair !== "string" || !PAIR_ID.test(row.pair)) continue;
+    const entryMs = finiteOrNull(row.entryMs);
+    const entry = finiteOrNull(row.entry);
+    const qty = finiteOrNull(row.qty);
+    const cReview = finiteOrNull(row.cReview);
+    const entryFeeUsd = finiteOrNull(row.entryFeeUsd);
+    const exitFeeUsd = finiteOrNull(row.exitFeeUsd);
+    const sBps = finiteOrNull(row.sBps);
+    const sUsd = finiteOrNull(row.sUsd);
+    const markedPnl = finiteOrNull(row.markedPnl);
+    if (entryMs == null || entry == null || qty == null || cReview == null || entryFeeUsd == null || exitFeeUsd == null || sBps == null || sUsd == null || markedPnl == null) continue;
+    out.push({ pair: row.pair, entryMs, entry, qty, cReview, entryFeeUsd, exitFeeUsd, sBps, sUsd, markedPnl });
+  }
+  return out;
+}
+
+function scrubResting(value: unknown): ClassARestingView[] {
+  if (!Array.isArray(value)) return [];
+  const out: ClassARestingView[] = [];
+  for (const item of value.slice(0, 12)) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.pair !== "string" || !PAIR_ID.test(row.pair)) continue;
+    const limit = finiteOrNull(row.limit);
+    const qty = finiteOrNull(row.qty);
+    if (limit == null || qty == null) continue;
+    out.push({ pair: row.pair, limit, qty });
+  }
+  return out;
 }
 
 function scrubIntro(value: unknown): ClassAIntroSensitivity {
@@ -1104,7 +1465,32 @@ function orderRow(book: ClassABook, input: ClassASignal, signalMs: number, close
   return row;
 }
 
-function liveShadow(book: ClassABook, row: ClassARow, input: ClassASignal, entry: number, sBps: number, prior: number[]): void {
+/** Spec A4. A known next-hour open arms the taker shadow. A missing open waits. The signal close is not an entry. */
+function armOrDefer(book: ClassABook, row: ClassARow, nextHourOpen: number | null, sBps: number, prior: number[]): void {
+  if (nextHourOpen != null && nextHourOpen > 0) {
+    liveShadow(book, row, nextHourOpen, sBps, prior);
+    return;
+  }
+  row.awaitHourOpen = true;
+  row.shadowPrior = prior.slice();
+}
+
+/**
+ * The 15m bar that starts at the signal close is the next 1h open.
+ * Arm any counterfactual that was waiting on that open. Chase still applies.
+ */
+export function armClassAHourOpen(book: ClassABook, pair: string, barStartMs: number, open: number): void {
+  if (!(open > 0) || !Number.isFinite(barStartMs)) return;
+  for (const row of book.rows) {
+    if (row.awaitHourOpen !== true || row.pair !== pair || row.signalMs !== barStartMs) continue;
+    row.awaitHourOpen = false;
+    const signalClose = row.signalClose ?? open;
+    row.counterfactual = counterfactualOf(open, signalClose, row.atr ?? 0);
+    liveShadow(book, row, open, row.sBps ?? takerSpreadBps(null), row.shadowPrior ?? []);
+  }
+}
+
+function liveShadow(book: ClassABook, row: ClassARow, entry: number, sBps: number, prior: number[]): void {
   if (!row.counterfactual || row.counterfactual.status !== "open") return;
   const sized = sizedOrder(entry, row.atr ?? 0);
   if (!sized) {
@@ -1114,11 +1500,11 @@ function liveShadow(book: ClassABook, row: ClassARow, input: ClassASignal, entry
   const stop = entry - CLASS_A_K * (row.atr ?? 0);
   book.shadows.push({
     rowId: row.id,
-    pair: input.pair,
+    pair: row.pair,
     scored: false,
     entry,
     entryMs: row.signalMs + 3_600_000,
-    entryDate: addDays(input.days[input.index]!.date, 1),
+    entryDate: new Date(row.signalMs).toISOString().slice(0, 10),
     stop,
     initialStop: stop,
     notionalUsd: sized.notionalUsd,
@@ -1159,12 +1545,21 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
   const signalMs = signalCloseMs(day.date);
   // errata 001 item 1 and item 13. A failed exclusion preflight or a start in the future records nothing.
   if (book.exclusionOk === false || book.startMs == null || signalMs < book.startMs) return null;
-  if (EXCLUDED.has(input.pair) || input.listedDays < LISTED_DAYS) return null;
+  if (EXCLUDED.has(input.pair)) return null;
+  if (!input.listedDaysEstimated && input.listedDays < LISTED_DAYS) return null;
   const history = input.index + 1;
   const triggered = classATrigger(barsOf(input.days), input.index, CLASS_A_LOOKBACK, history < 200);
   if (!triggered) return null;
   const atr = atrAt(input.days, input.index);
   if (atr == null) return null;
+  if (input.listedDaysEstimated) {
+    const estimated = skipRow(book, input, signalMs, day.close, atr, "skip_volume", "listed-days", null, LISTED_DAYS, false, null);
+    estimated.skipReason = null;
+    estimated.check = "listed-days";
+    estimated.listedDaysEstimated = true;
+    return estimated;
+  }
+  if (input.listedDays < LISTED_DAYS) return null;
   if (book.lastSignalMs != null && signalMs < book.lastSignalMs) return orderRow(book, input, signalMs, day.close, atr, "out-of-order");
   if (book.rows.some((row) => row.pair === input.pair && row.signalMs === signalMs)) return orderRow(book, input, signalMs, day.close, atr, "duplicate");
   const volume = medianVolumeUsd(input.days, input.index);
@@ -1191,7 +1586,7 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
   const liveSkip = (reason: ClassASkip, check: string, measured: number | null, threshold: number | null): ClassARow => {
     const row = skipRow(book, input, signalMs, day.close, atr, reason, check, measured, threshold, false, counterfactual);
     // Spec A4 and A5. A live-check skip still runs the counterfactual taker. errata 001 item 16 does not cover these four.
-    liveShadow(book, row, input, input.nextHourOpen ?? day.close, sBps, prior);
+    armOrDefer(book, row, input.nextHourOpen, sBps, prior);
     return row;
   };
   // errata 001 item 12. Twenty of the thirty days before the signal. Nineteen skips. The 5 bps floor is not used.
@@ -1277,7 +1672,7 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
       entryDate: addDays(day.date, 1),
     });
   }
-  liveShadow(book, row, input, input.nextHourOpen ?? day.close, sBps, prior);
+  armOrDefer(book, row, input.nextHourOpen, sBps, prior);
   pushRow(book, row);
   if (book.lastSignalMs == null || signalMs >= book.lastSignalMs) book.lastSignalMs = signalMs;
   return row;
@@ -1423,6 +1818,9 @@ export function onIntrabar(book: ClassABook, bar: { pair: string; tsMs: number; 
 }
 
 export function onDaily(book: ClassABook, bar: { pair: string; date: string; open: number; low: number; close: number; atr: number; hourAtr: number }): void {
+  const closes = book.lastClose ?? {};
+  book.lastClose = closes;
+  if (bar.close > 0 && Number.isFinite(bar.close)) closes[bar.pair] = bar.close;
   const closeMs = signalCloseMs(bar.date);
   const closeDate = addDays(bar.date, 1);
   for (const sim of [...book.open, ...book.shadows]) {
@@ -1475,7 +1873,18 @@ export function restoreClassABook(value: unknown): ClassABook | null {
     lastSignalMs: typeof row.lastSignalMs === "number" && Number.isFinite(row.lastSignalMs) ? row.lastSignalMs : null,
     spreadLog: spreadLogOf(row.spreadLog),
     resting: Array.isArray(row.resting) ? row.resting.filter(restingOk) : [],
+    lastClose: lastCloseOf(row.lastClose),
   };
+}
+
+function lastCloseOf(value: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [pair, close] of Object.entries(value as Record<string, unknown>)) {
+    if (!PAIR_ID.test(pair) || typeof close !== "number" || !(close > 0) || !Number.isFinite(close)) continue;
+    out[pair] = close;
+  }
+  return out;
 }
 
 function restingOk(value: unknown): value is ClassAResting {

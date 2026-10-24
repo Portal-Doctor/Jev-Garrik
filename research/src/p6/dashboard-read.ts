@@ -534,7 +534,16 @@ function publicSystemCost(raw: unknown): SystemCostHurdle {
       if (!name || itemMonthly == null || itemMonthly < 0) continue;
       const note = publicCostText(source.note);
       const estimate = source.estimate === true;
-      items.push({ name, monthlyUsd: itemMonthly, ...(note ? { note } : {}), ...(estimate ? { estimate: true } : {}) });
+      const from = typeof source.from === "string" && isIsoDate(source.from) ? source.from : undefined;
+      const until = typeof source.until === "string" && isIsoDate(source.until) ? source.until : undefined;
+      items.push({
+        name,
+        monthlyUsd: itemMonthly,
+        ...(note ? { note } : {}),
+        ...(estimate ? { estimate: true } : {}),
+        ...(from ? { from } : {}),
+        ...(until ? { until } : {}),
+      });
     }
     if (items.length > 0) out.items = items;
   }

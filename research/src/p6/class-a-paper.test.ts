@@ -8,6 +8,9 @@ import { decodeLease, HOT_KEY, LEASE_KEY, memoryKv, peekStored, tryAcquire } fro
 import { countsInClassMean, classMeanNetR } from "./x1-fill";
 import {
   CLASS_A_BH_EXIT_FEE_BPS,
+  CLASS_A_BOOK_USD,
+  CLASS_A_ERRATA_003_SHA256,
+  CLASS_A_ERRATA_004_SHA256,
   CLASS_A_BH_FEE_MAKER_BPS,
   CLASS_A_BH_FEE_TAKER_BPS,
   CLASS_A_BOOTSTRAP_REPS,
@@ -26,7 +29,12 @@ import {
   CLASS_A_SPEC_SHA256,
   CLASS_A_TAKER_FEE_BPS,
   classABuyHoldSeries,
+  armClassAHourOpen,
+  classABhReport,
+  classAMarkedReview,
   classAPaperView,
+  CLASS_A_SPREAD_WARMUP_NOTE,
+  resolveListedDays,
   classARuleExit,
   classAStartMs,
   concentrationOf,
@@ -471,6 +479,7 @@ test("the paper book round-trips through hot storage with gzip writes off and on
       expect("classAPaper" in empty).toBe(false);
       const paper = book();
       evaluateSignal(paper, signal());
+      paper.spreadLog = { "SOL-USD": [1.25, 2.5] };
       host.classAPaper = paper;
       const kv = memoryKv(() => START);
       expect(await tryAcquire(kv, `class-a-${flag}`, START + 86_400_000, START)).toBe(true);
@@ -485,6 +494,7 @@ test("the paper book round-trips through hot storage with gzip writes off and on
       installPaperState(loaded, body!);
       expect(loaded.classAPaper?.open).toHaveLength(1);
       expect(loaded.classAPaper?.rows[0]?.fill).toBe("fill");
+      expect(loaded.classAPaper?.spreadLog?.["SOL-USD"]).toEqual([1.25, 2.5]);
       installPaperState(loaded, { classAPaper: { leak: "user:PASSWORD@x.upstash.io" } as never });
       expect(loaded.classAPaper).toBeUndefined();
       const text = decodeStored(HOT_KEY, stored) ?? "";
@@ -828,4 +838,191 @@ test("errata 005 bills Advanced 1 and keeps Intro on the sensitivity line", () =
   expect(view.sHeadroom.barBps).toBe(2 * (35 + 75 + (row?.sBps ?? 0)));
   expect(view.promotionPrecondition).toBe(CLASS_A_PROMOTION_PRECONDITION);
   expect(view.promotion).not.toBe("pass");
+  expect(view.spreadWarmupNote).toBe(CLASS_A_SPREAD_WARMUP_NOTE);
+});
+
+test("Holm equality stays blocked and a missing buy-and-hold stays unresolved", () => {
+  const row = (pair: string, grossBps: number): ClassAScored => ({
+    pair,
+    grossUsd: 1,
+    netUsd: 1,
+    grossBps,
+    netBps: grossBps,
+    netR: 0.05,
+    regime: "CHOP",
+  });
+  const gross = [...Array.from({ length: 27 }, () => 256), ...Array.from({ length: 3 }, () => 825)];
+  const edge = gross.map((bps, index) => row(`P${index}-USD`, bps));
+  const family = CLASS_A_HOLM_FAMILY.map((id) => ({ id, p: id === "access-event" ? 0.00625 : 0.9 }));
+  const holm = promotionOf(edge, { bhReturn: -1, family });
+  expect(holm.tP).toBeGreaterThan(0.00625);
+  expect(holm.tP ?? 1).toBeLessThanOrEqual(0.05 / 7);
+  expect(holm.holmP).toBe(0.05);
+  expect(holm.status).toBe("blocked");
+  const strong = Array.from({ length: 30 }, (_, index) => ({ ...row(`N${index}-USD`, 400), netUsd: 10, grossUsd: 10 }));
+  const openFamily = CLASS_A_HOLM_FAMILY.map((id) => ({ id, p: 0.9 }));
+  expect(promotionOf(strong, { family: openFamily }).status).toBe("unresolved");
+  const marked = promotionOf(strong, { bhReturn: 0.04, family: openFamily, aMarked: 0.01 });
+  expect(marked.status).toBe("blocked");
+  expect(marked.beatsBh).toBe(false);
+  expect(marked.bookReturn).toBeGreaterThan(0.04);
+  const lifted = promotionOf(strong, { bhReturn: 0.04, family: openFamily, aMarked: 0.2, deployedFraction: [2] });
+  expect(lifted.status).toBe("pass");
+  expect(lifted.exposureAdjustedReturn).toBeCloseTo(0.1, 8);
+  expect(promotionOf(strong, { bhReturn: 0.04, family: openFamily, aMarked: null }).status).toBe("unresolved");
+});
+
+test("buy-and-hold keeps a pair whose median volume is exactly $5M", () => {
+  const closes = Array.from({ length: 91 }, () => 1);
+  const volumes = Array.from({ length: 91 }, () => 5_000_000);
+  const held = classABuyHoldSeries({ t0: 90, t1: 90, excluded: [], candles: [{ pair: "SOL-USD", listedIndex: 0, closes, volumes }] });
+  expect(held[0]?.members).toEqual(["SOL-USD"]);
+  const under = classABuyHoldSeries({
+    t0: 90,
+    t1: 90,
+    excluded: [],
+    candles: [{ pair: "SOL-USD", listedIndex: 0, closes, volumes: volumes.map(() => 4_999_999) }],
+  });
+  expect(under[0]?.members).toEqual([]);
+});
+
+test("errata 003 reports the fee-charged buy-and-hold at the 005 rates", () => {
+  expect(CLASS_A_ERRATA_003_SHA256).toBe("57e2285efa068cf92e0ed54fc2c43d303bef8cd4b677e61083fc86868477ad7c");
+  const flat = Array.from({ length: 92 }, () => 1);
+  const volume = Array.from({ length: 92 }, () => 5_000_000);
+  const quiet = classABhReport({
+    t0: 90,
+    t1: 92,
+    excluded: [],
+    candles: [{ pair: "SOL-USD", listedIndex: 0, closes: flat, volumes: volume }],
+  });
+  expect(quiet.membershipChanges).toBe(0);
+  expect(quiet.turnover).toBe(1);
+  expect(quiet.feeReturn).toBeCloseTo(-CLASS_A_BH_FEE_MAKER_BPS / 10_000, 10);
+  expect(quiet.takerReturn).toBeCloseTo(-(CLASS_A_BH_FEE_TAKER_BPS + 5) / 10_000, 10);
+  expect(quiet.feeExitReturn).toBeCloseTo((1 - CLASS_A_BH_FEE_MAKER_BPS / 10_000) * (1 - CLASS_A_BH_EXIT_FEE_BPS / 10_000) - 1, 10);
+  expect(quiet.concentration).toBeNull();
+  const joined = classABhReport({
+    t0: 90,
+    t1: 91,
+    excluded: [],
+    candles: [
+      { pair: "SOL-USD", listedIndex: 0, closes: flat, volumes: volume },
+      { pair: "ADA-USD", listedIndex: 1, closes: flat, volumes: volume },
+    ],
+  });
+  expect(joined.membershipChanges).toBe(1);
+  expect(joined.turnover).toBe(2);
+  const kept = 1 - CLASS_A_BH_FEE_MAKER_BPS / 10_000;
+  expect(joined.feeReturn).toBeCloseTo(kept * kept - 1, 10);
+  const doubled = flat.slice();
+  doubled[91] = 2;
+  const share = classABhReport({
+    t0: 90,
+    t1: 91,
+    excluded: [],
+    candles: [
+      { pair: "SOL-USD", listedIndex: 0, closes: doubled, volumes: volume },
+      { pair: "ADA-USD", listedIndex: 0, closes: flat, volumes: volume },
+    ],
+  });
+  expect(share.concentration).toBeCloseTo(1, 8);
+});
+
+test("errata 004 marks open positions at the review close and leaves resting orders out", () => {
+  expect(CLASS_A_ERRATA_004_SHA256).toBe("8291e0b4af55b2592fcbce04da246eab4277fac0ce4d60143eb3b2d87499afa8");
+  const paper = book();
+  evaluateSignal(paper, signal());
+  const sim = paper.open[0]!;
+  sim.pending = "rule";
+  const cReview = sim.entry * 1.01;
+  paper.lastClose = { "SOL-USD": cReview };
+  paper.spreadLog = { "SOL-USD": Array.from({ length: 20 }, () => 20) };
+  paper.resting = [{
+    rowId: "ADA-USD:1",
+    pair: "ADA-USD",
+    signalMs: 1,
+    windowEndMs: 2,
+    limit: 3,
+    tick: 0.01,
+    notionalUsd: 10,
+    units: 2,
+    stop: 1,
+    sBps: 5,
+    priorCloses: [],
+    entryDate: "2024-01-02",
+  }];
+  const review = classAMarkedReview(paper);
+  const entryFee = (sim.notionalUsd * sim.feeEntryBps) / 10_000;
+  const exitNotional = cReview * sim.units;
+  const exitFee = (exitNotional * (CLASS_A_MARKED_EXIT_FEE_BPS + 10)) / 10_000;
+  const marked = (cReview - sim.entry) * sim.units - entryFee - exitFee;
+  expect(review.marks).toHaveLength(1);
+  expect(review.marks[0]?.pair).toBe("SOL-USD");
+  expect(review.marks[0]?.cReview).toBe(cReview);
+  expect(review.marks[0]?.sBps).toBe(10);
+  expect(review.marks[0]?.sUsd).toBeCloseTo((exitNotional * 10) / 10_000, 8);
+  expect(review.marks[0]?.entryFeeUsd).toBeCloseTo(entryFee, 8);
+  expect(review.marks[0]?.exitFeeUsd).toBeCloseTo(exitFee, 8);
+  expect(review.marks[0]?.markedPnl).toBeCloseTo(marked, 8);
+  expect(review.aMarked).toBeCloseTo(marked / CLASS_A_BOOK_USD, 10);
+  expect(review.aMarkedGross).toBeCloseTo(((cReview - sim.entry) * sim.units) / CLASS_A_BOOK_USD, 10);
+  expect(review.aMtmNoExit).toBeCloseTo(((cReview - sim.entry) * sim.units - entryFee) / CLASS_A_BOOK_USD, 10);
+  expect(review.resting).toEqual([{ pair: "ADA-USD", limit: 3, qty: 2 }]);
+  expect(review.marks.some((mark) => mark.pair === "ADA-USD")).toBe(false);
+  paper.spreadLog = { "SOL-USD": Array.from({ length: 19 }, () => 40) };
+  sim.sBps = 7;
+  expect(classAMarkedReview(paper).marks[0]?.sBps).toBe(7);
+  paper.lastClose = {};
+  expect(classAMarkedReview(paper).aMarked).toBeNull();
+  const shown = scrubClassAPaper({
+    aMarked: 0.02,
+    aMtmNoExit: 0.03,
+    bhFeeReturn: -0.0035,
+    listedDaysEstimated: 2,
+    spreadWarmupNote: "user:PASSWORD@x.upstash.io",
+    marks: [
+      { pair: "SOL-USD", entryMs: 1, entry: 2, qty: 3, cReview: 4, entryFeeUsd: 0.1, exitFeeUsd: 0.2, sBps: 5, sUsd: 0.05, markedPnl: 0.4, note: "user:PASSWORD@x.upstash.io" },
+      { pair: "nope", entry: 1 },
+    ],
+    resting: [{ pair: "ADA-USD", limit: 3, qty: 1, note: "x.upstash.io" }],
+  });
+  expect(shown.spreadWarmupNote).toBe(CLASS_A_SPREAD_WARMUP_NOTE);
+  expect(shown.aMarked).toBe(0.02);
+  expect(shown.bhFeeReturn).toBe(-0.0035);
+  expect(shown.listedDaysEstimated).toBe(2);
+  expect(shown.marks).toHaveLength(1);
+  expect(shown.resting).toEqual([{ pair: "ADA-USD", limit: 3, qty: 1 }]);
+  expect(JSON.stringify(shown).includes("PASSWORD")).toBe(false);
+  expect(JSON.stringify(shown).includes("upstash")).toBe(false);
+});
+
+test("a counterfactual waits for the next 1h open and a young or unknown listing does not enter", () => {
+  const deferred = book();
+  const row = evaluateSignal(deferred, signal({ nextHourOpen: null }));
+  expect(row?.counterfactual?.status).toBe("unavailable");
+  expect(row?.awaitHourOpen).toBe(true);
+  expect(deferred.shadows).toHaveLength(0);
+  const hourOpen = (row?.signalClose ?? 0) + 0.01;
+  armClassAHourOpen(deferred, "SOL-USD", row?.signalMs ?? 0, hourOpen);
+  expect(row?.awaitHourOpen).toBe(false);
+  expect(row?.counterfactual?.status).toBe("open");
+  expect(row?.counterfactual?.entry).toBe(hourOpen);
+  expect(deferred.shadows[0]?.entry).toBe(hourOpen);
+  const chased = book();
+  const waiting = evaluateSignal(chased, signal({ nextHourOpen: null }));
+  armClassAHourOpen(chased, "SOL-USD", waiting?.signalMs ?? 0, (waiting?.signalClose ?? 0) + 10);
+  expect(waiting?.counterfactual?.status).toBe("chase");
+  expect(chased.shadows).toHaveLength(0);
+  const signalMs = signalCloseMs(daysOf()[daysOf().length - 1]!.date);
+  expect(resolveListedDays(signalMs - 10 * 86_400_000, signalMs)).toEqual({ listedDays: 10, estimated: false });
+  expect(resolveListedDays(null, signalMs)).toEqual({ listedDays: 0, estimated: true });
+  expect(evaluateSignal(book(), signal({ listedDays: 10 }))).toBeNull();
+  const unknownBook = book();
+  const unknown = evaluateSignal(unknownBook, signal({ listedDays: 9999, listedDaysEstimated: true }));
+  expect(unknown?.listedDaysEstimated).toBe(true);
+  expect(unknown?.fill).toBe("skip");
+  expect(unknownBook.open).toHaveLength(0);
+  expect(classAPaperView(unknownBook).listedDaysEstimated).toBe(1);
+  expect(classAPaperView(unknownBook).spreadWarmupNote).toBe(CLASS_A_SPREAD_WARMUP_NOTE);
 });

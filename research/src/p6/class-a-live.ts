@@ -10,10 +10,12 @@ import { readFileSync } from "node:fs";
 import { ema, wilderAtr } from "../p2/indicators";
 import { isDayCloseBar } from "../p5/book";
 import {
+  armClassAHourOpen,
   evaluateSignal,
   onDaily,
   onIntrabar,
   resolveClassAResting,
+  resolveListedDays,
   signalCloseMs,
   sizedOrder,
   walkCostBps,
@@ -41,6 +43,11 @@ export interface ClassALiveHost {
   trades: readonly { productId: string; tsSec: number; price: number }[];
   books: ReadonlyMap<string, { asks: ReadonlyMap<string, number> }>;
   book: { quotes: Record<string, { bid: number; ask: number; tsMs: number } | undefined> };
+  /**
+   * First candle or listing instant, ms, per product. A null value is unknown.
+   * When this map is set, the coverage file is not consulted.
+   */
+  listingFirstMs?: Readonly<Record<string, number | null>>;
 }
 
 function asDays(bars: readonly Ohlc[]): { days: ClassADay[]; opens: number[] } {
@@ -86,6 +93,7 @@ export function stepClassAFromHost(host: ClassALiveHost, bar: { productId: strin
     bar: { startMs: bar.startSec * 1000, endMs: closeMs, low: bar.low },
   });
   const hourAtr = hourAtrAt(host.hourWarm.get(bar.productId) ?? [], closeMs / 1000);
+  armClassAHourOpen(book, bar.productId, bar.startSec * 1000, bar.open);
   onIntrabar(book, { pair: bar.productId, tsMs: closeMs, open: bar.open, low: bar.low, hourAtr });
   if (!isDayCloseBar(bar.startSec)) return;
   const series = asDays(host.dailyBars.get(bar.productId) ?? []);
@@ -123,9 +131,11 @@ export function stepClassAFromHost(host: ClassALiveHost, bar: { productId: strin
       .sort((a, b) => a.price - b.price);
     depth = levels.length > 0 ? walkCostBps(mid, levels, sized.units) : null;
   }
+  const age = resolveListedDays(listingFirstOf(host, bar.productId), signalMs);
   evaluateSignal(book, {
     pair: bar.productId,
-    listedDays: days.length,
+    listedDays: age.listedDays,
+    listedDaysEstimated: age.estimated,
     days,
     index,
     btcClose,
@@ -147,6 +157,37 @@ export function stepClassAFromHost(host: ClassALiveHost, bar: { productId: strin
     asOfMs: nowMs,
   });
   if (spread != null && Number.isFinite(spread) && spread >= 0) log[bar.productId] = [...(log[bar.productId] ?? []), spread].slice(-30);
+}
+
+let listingCache: Map<string, number> | null = null;
+
+/** First nonempty candle from the coverage report. Listing dates are not in the products payload. */
+function loadListingFirst(): Map<string, number> {
+  if (listingCache) return listingCache;
+  const map = new Map<string, number>();
+  const path = dataFile("reports", "coverage.json");
+  if (path) {
+    try {
+      const body = JSON.parse(readFileSync(path, "utf8")) as { products?: { productId?: string; firstNonemptyBar?: unknown }[] };
+      for (const row of body.products ?? []) {
+        if (!row.productId || typeof row.firstNonemptyBar !== "string") continue;
+        const ms = Date.parse(row.firstNonemptyBar);
+        if (Number.isFinite(ms)) map.set(row.productId, ms);
+      }
+    } catch {
+      map.clear();
+    }
+  }
+  listingCache = map;
+  return map;
+}
+
+function listingFirstOf(host: ClassALiveHost, productId: string): number | null {
+  if (host.listingFirstMs) {
+    const value = host.listingFirstMs[productId];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  return loadListingFirst().get(productId) ?? null;
 }
 
 function printsOf(host: ClassALiveHost, productId: string): { tsMs: number; price: number }[] {
