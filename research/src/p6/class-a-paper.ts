@@ -3,28 +3,26 @@
  * Spec sha256 56fb7543d69a80b536d7ae4d9f9d9240ebde33f1500fde45e6b5235e70a753d0.
  * Paper only. This book does not place orders and does not replace the live X1 class A stream.
  *
- * Errata, not resolved here:
- * - Start date is still TBD. A null start records nothing.
- * - Holm's test and the buy-and-hold comparison used for promotion are not defined, so a pass is never recommended.
- * - The live class A path is still the X1 taker. This book is separate.
- * - s here is max(5 bps, 0.5 × the median the caller supplies), with no 15 bps cap.
- * - The 30-day volume window includes the signal day. "Before the signal close" can be read the other way.
- * - Logged R is PnL / $20. The 30-day rule uses price versus the initial stop.
- * - skip_pair, skip_reentry, and skip_kill are labels for rules the spec states without a code.
- * - A one-pair book fails the best-pair removal check because the remainder is 0.
- * - Signals are evaluated in the order supplied. The spec says timestamp order and does not name a same-timestamp tie-break, so none is added.
- * - The 4h window is [close, close+4h). A print at exactly 04:00 does not fill.
- * - Stop slippage of 5 bps is taken off the entry price.
- * - A missing quoted-spread median uses the 5 bps floor.
- * - The agreed exclusion list is still marked unconfirmed in code. This book applies that list.
+ * Errata 001 (sha256 31cba546e426e7c0054202d21e9b3c491d9e4510102d2da0d821336ac6128969) settles the open questions.
+ * Spec text still governs where it already answered. Paper only.
+ * - errata 001 item 1: start is CLASS_A_PAPER_START_MS, or the first 00:00Z close at or after deploy, whichever is later. No backfill.
+ * - errata 001 item 2a/2b: promotion reports a one-sided t against 290 bps, Holm at family alpha 0.05, a 10k bootstrap p, and a buy-and-hold gate.
+ * - errata 001 item 3: this maker book is the scored A record. Live X1 rows are tagged elsewhere and are not scored here.
+ * - errata 001 item 5 and item 9: 30-day volume excludes the signal day, and that median then the pair symbol orders same-timestamp signals.
+ * - errata 001 item 11: a stop fills at stop − max(5 bps of the stop, 0.1 × 1h ATR), or at the open on a gap.
+ * - errata 001 item 12: the spread median needs 20 of the 30 prior days, otherwise skip_spread.
+ * - errata 001 item 13: a static exclusion preflight blocks the start. The live Coinbase list is not checked here.
+ * - errata 001 item 16: counterfactuals on veto, cap, pair, reentry, and kill skips are not built.
+ * - errata 001 item 22: fewer than three winning trades still enter the top-share check.
+ * - errata 001 item 27: fill rate is fills divided by maker orders placed.
  */
 
 import { classATrigger, type DailyBar } from "../p3/classes";
 import { classATenDayExit } from "../p3/design-rules";
-import { AGREED_EXCLUSIONS } from "../p2/exclusion";
 import { wilderAtr } from "../p2/indicators";
 import { btcVeto, type BtcDay } from "../p3/signals";
-import { addDays, daysBetween } from "../p5/stats";
+import { AGREED_EXCLUSIONS, type ExclusionEntry } from "../p2/exclusion";
+import { addDays, BOOTSTRAP_SEED, daysBetween, holmAdjusted, studentTCdf } from "../p5/stats";
 
 export const CLASS_A_SPEC_SHA256 = "56fb7543d69a80b536d7ae4d9f9d9240ebde33f1500fde45e6b5235e70a753d0";
 export const CLASS_A_CONFIG = "A55-k3" as const;
@@ -45,7 +43,17 @@ export const CLASS_A_KILL_USD = -400;
 export const CLASS_A_PROMOTE_GROSS_BPS = 290;
 export const CLASS_A_PROMOTE_MIN_N = 30;
 export const CLASS_A_NO_REENTRY_MS = 24 * 60 * 60 * 1000;
+/** errata 001 item 1. Committed daily close. Not an environment variable. */
+export const CLASS_A_PAPER_START_MS = Date.parse("2026-10-26T00:00:00.000Z");
+/** errata 001 item 2a. Holm family-wise alpha. Equality does not pass. */
+export const CLASS_A_HOLM_ALPHA = 0.05;
+/** errata 001 item 2a. Reported beside the t-test. Not the gate. Seed is the house bootstrap seed. */
+export const CLASS_A_BOOTSTRAP_REPS = 10_000;
+/** errata 001 item 12. Spread samples required inside the 30 days before the signal. */
+export const CLASS_A_SPREAD_MIN_DAYS = 20;
+const DAY_MS = 86_400_000;
 const LISTED_DAYS = 90;
+const EXCLUSION_RULES = new Set<ExclusionEntry["rule"]>(["fiat-or-fx", "commodity", "wrapped-or-bridged", "staking-receipt"]);
 
 export const CLASS_A_SKIP_REASONS = [
   "skip_volume",
@@ -90,7 +98,13 @@ export interface ClassASignal {
   quoteAgeMs: number | null;
   minOrderBase: number | null;
   tick: number | null;
+  /** Kept for callers. The entry gate uses spreadSamples (errata 001 item 12). */
   medianSpreadBps: number | null;
+  /**
+   * Quoted spread, bps, on the 30 completed days before the signal day.
+   * The signal day is not included. errata 001 item 12.
+   */
+  spreadSamples?: readonly (number | null)[];
   nextHourOpen: number | null;
   hourAtr14: number | null;
   prints: readonly { tsMs: number; price: number }[];
@@ -129,6 +143,8 @@ export interface ClassARow {
   grossR: number | null;
   netR: number | null;
   counterfactual: ClassACounterfactual | null;
+  /** errata 001 item 11. True when a stop exit fills at the bar open. */
+  gap?: boolean;
 }
 
 interface Sim {
@@ -168,6 +184,8 @@ export interface ClassABook {
   reentryUntil: Record<string, number>;
   rows: ClassARow[];
   scored: ClassAScored[];
+  /** errata 001 item 13. False blocks recording. Absent on an old snapshot means the check had not been stored. */
+  exclusionOk?: boolean;
 }
 
 export interface ClassAPaperView {
@@ -181,6 +199,8 @@ export interface ClassAPaperView {
   n: number;
   fills: number;
   fillRate: number | null;
+  /** errata 001 item 27. Fills divided by every logged row. Reported beside fillRate. */
+  perSignalRate: number | null;
   skips: Partial<Record<ClassASkip, number>>;
   meanGrossBps: number | null;
   meanNetBps: number | null;
@@ -188,13 +208,72 @@ export interface ClassAPaperView {
   cumNetUsd: number;
   open: number;
   kill: boolean;
-  promotion: "not-considered" | "blocked" | "unresolved" | "redacted";
+  promotion: "not-considered" | "blocked" | "unresolved" | "pass" | "redacted";
+  /** errata 001 item 2a. Holm-adjusted one-sided t. The gate is adjusted p < 0.05. */
+  holmP: number | null;
+  tP: number | null;
+  /** errata 001 item 2a. 10k iid bootstrap. Reported, not the gate. */
+  bootstrapP: number | null;
+  /** errata 001 item 2b. Cumulative net USD / $6,000. */
+  bookReturn: number | null;
+  bhReturn: number | null;
+  beatsBh: boolean | null;
+  /** errata 001 item 2b and item 21. Reported. Does not gate. */
+  exposureAdjustedReturn: number | null;
   regimes: Record<ClassARegime, number>;
   healthDue: ("90d" | "6m")[];
 }
 
+/**
+ * errata 001 item 1. A deploy exactly on 00:00Z uses that close. Any later instant uses the next 00:00Z.
+ * The committed start is the floor, so an earlier deploy does not backfill.
+ */
+export function classAStartMs(deployedAtMs: number): number {
+  if (!Number.isFinite(deployedAtMs)) return CLASS_A_PAPER_START_MS;
+  const close = Math.ceil(deployedAtMs / DAY_MS) * DAY_MS;
+  return Math.max(CLASS_A_PAPER_START_MS, close);
+}
+
+/**
+ * errata 001 item 13. Static check only: non-empty, unique USD product ids, known category.
+ * `confirmed` stays false. A live Coinbase catalog diff is not run here.
+ */
+export function exclusionPreflight(entries: readonly ExclusionEntry[] = AGREED_EXCLUSIONS): { ok: boolean; reason: string | null } {
+  if (entries.length === 0) return { ok: false, reason: "empty" };
+  const seen = new Set<string>();
+  for (const row of entries) {
+    if (!/^[A-Z0-9]{2,12}-USD$/.test(row.productId)) return { ok: false, reason: "shape" };
+    if (seen.has(row.productId)) return { ok: false, reason: "duplicate" };
+    seen.add(row.productId);
+    if (!EXCLUSION_RULES.has(row.rule)) return { ok: false, reason: "rule" };
+  }
+  return { ok: true, reason: null };
+}
+
 export function emptyClassABook(startMs: number | null = null): ClassABook {
-  return { startMs, killed: false, cumNetUsd: 0, open: [], shadows: [], reentryUntil: {}, rows: [], scored: [] };
+  const preflight = exclusionPreflight();
+  return {
+    startMs: preflight.ok ? startMs : null,
+    killed: false,
+    cumNetUsd: 0,
+    open: [],
+    shadows: [],
+    reentryUntil: {},
+    rows: [],
+    scored: [],
+    exclusionOk: preflight.ok,
+  };
+}
+
+/** errata 001 item 1. Production constructor. An explicit test start stays on emptyClassABook. */
+export function openClassABook(deployedAtMs: number): ClassABook {
+  return emptyClassABook(classAStartMs(deployedAtMs));
+}
+
+/** errata 001 item 1. First attach uses the host clock. A book already on the host is left alone. */
+export function ensureClassAPaper(host: { clock: () => number; classAPaper?: ClassABook }): void {
+  if (host.classAPaper) return;
+  host.classAPaper = openClassABook(host.clock());
 }
 
 export function median(values: readonly number[]): number | null {
@@ -204,11 +283,11 @@ export function median(values: readonly number[]): number | null {
   return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
-/** Thirty completed days ending at the signal day, inclusive. Null when a day is missing. */
+/** errata 001 item 5. Thirty completed days ending the day before the signal bar. Null when a day is missing. */
 export function medianVolumeUsd(days: readonly { baseVolume: number; close: number }[], index: number): number | null {
-  if (index < 29) return null;
+  if (index < 30) return null;
   const usd: number[] = [];
-  for (let i = index - 29; i <= index; i += 1) {
+  for (let i = index - 30; i <= index - 1; i += 1) {
     const day = days[i];
     if (!day || !(day.close > 0) || !Number.isFinite(day.baseVolume) || day.baseVolume < 0) return null;
     usd.push(day.baseVolume * day.close);
@@ -224,7 +303,7 @@ export function regimeOf(close: number | null, sma200: number | null, sma50: num
   return "CHOP";
 }
 
-/** Spec s. No 15 bps cap. A missing median uses the 5 bps floor. */
+/** Spec s. No 15 bps cap (errata 001 item 4). A missing median still floors at 5 for this helper. The entry gate does not use that floor (errata 001 item 12). */
 export function takerSpreadBps(medianQuotedSpreadBps: number | null): number {
   if (medianQuotedSpreadBps == null || !Number.isFinite(medianQuotedSpreadBps) || medianQuotedSpreadBps < 0) return 5;
   return Math.max(5, 0.5 * medianQuotedSpreadBps);
@@ -250,9 +329,13 @@ export function signalCloseMs(openDated: string): number {
   return Date.parse(`${addDays(openDated, 1)}T00:00:00.000Z`);
 }
 
-export function stopFillPx(stop: number, entry: number, hourAtr: number, open: number): number {
+/**
+ * errata 001 item 11. Spec formula is stop − max(5 bps, 0.1 × 1h ATR), or the open on a gap.
+ * The 5 bps term is taken off the stop. The shared design-rule stop fill, which uses s_bt of the entry, is unchanged.
+ */
+export function stopFillPx(stop: number, hourAtr: number, open: number): number {
   if (open <= stop) return open;
-  const five = entry > 0 ? (entry * 5) / 10_000 : 0;
+  const five = stop > 0 ? (stop * 5) / 10_000 : 0;
   const atrSlip = Number.isFinite(hourAtr) && hourAtr > 0 ? 0.1 * hourAtr : 0;
   return stop - Math.max(five, atrSlip);
 }
@@ -344,7 +427,8 @@ export function concentrationOf(scored: readonly ClassAScored[]): Concentration 
   const posSum = positive.reduce((total, value) => total + value, 0);
   const topSum = positive.slice(0, 3).reduce((total, value) => total + value, 0);
   const top3Share = posSum > 0 ? topSum / posSum : null;
-  const top3Kill = top3Share != null && positive.length >= 3 && top3Share > 0.5;
+  // errata 001 item 22. Fewer than three winners use every winner. Exactly 50% does not kill.
+  const top3Kill = top3Share != null && top3Share > 0.5;
   const byPair = new Map<string, number>();
   for (const row of scored) byPair.set(row.pair, (byPair.get(row.pair) ?? 0) + row.netUsd);
   let bestPair: string | null = null;
@@ -371,12 +455,97 @@ function mean(values: readonly number[]): number | null {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
-export function promotionOf(scored: readonly ClassAScored[]): "not-considered" | "blocked" | "unresolved" {
-  if (scored.length < CLASS_A_PROMOTE_MIN_N) return "not-considered";
-  const gross = mean(scored.map((row) => row.grossBps));
+export interface ClassAPromotion {
+  status: "not-considered" | "blocked" | "unresolved" | "pass";
+  holmP: number | null;
+  tP: number | null;
+  bootstrapP: number | null;
+  bookReturn: number | null;
+  bhReturn: number | null;
+  beatsBh: boolean | null;
+  exposureAdjustedReturn: number | null;
+}
+
+export interface PromotionOpts {
+  /** Sibling forward-paper classes live at the review. Class A is added. Omitted means the family is A alone. errata 001 item 2a. */
+  family?: readonly { id: string; p: number }[];
+  /** Precomputed equal-weight buy-and-hold return. errata 001 item 2b. */
+  bhReturn?: number | null;
+  /** Built with equalWeightBuyHold when bhReturn is omitted. */
+  bhDays?: readonly BhDay[];
+  /** Average deployed fraction series. Reported only. errata 001 item 2b. */
+  deployedFraction?: readonly number[];
+}
+
+/** One-sided p for a mean above `bar`. Null when fewer than two observations. */
+function meanAboveBarP(values: readonly number[], bar: number): number | null {
+  if (values.length < 2) return null;
+  const n = values.length;
+  const avg = values.reduce((total, value) => total + value, 0) / n;
+  const variance = values.reduce((total, value) => total + (value - avg) ** 2, 0) / (n - 1);
+  const sd = Math.sqrt(variance);
+  if (!(sd > 0)) return avg > bar ? 0 : 1;
+  const t = (avg - bar) / (sd / Math.sqrt(n));
+  const cdf = studentTCdf(t, n - 1);
+  if (!Number.isFinite(cdf)) return null;
+  return Math.min(1, Math.max(0, 1 - cdf));
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Fraction of iid resample means at or below `bar`. errata 001 item 2a. */
+function bootstrapMeanP(values: readonly number[], bar: number, reps: number, seed: number): number | null {
+  if (values.length === 0) return null;
+  const rand = mulberry32(seed);
+  let atOrBelow = 0;
+  for (let i = 0; i < reps; i += 1) {
+    let sum = 0;
+    for (let j = 0; j < values.length; j += 1) {
+      const pick = values[Math.floor(rand() * values.length)];
+      sum += pick ?? 0;
+    }
+    if (sum / values.length <= bar) atOrBelow += 1;
+  }
+  return atOrBelow / reps;
+}
+
+/**
+ * errata 001 item 2a and item 2b.
+ * Pass means the numeric gates cleared. It does not change live trading.
+ * The default Holm family is class A alone until a review doc names the other live classes.
+ */
+export function promotionOf(scored: readonly ClassAScored[], opts: PromotionOpts = {}): ClassAPromotion {
+  const grossValues = scored.map((row) => row.grossBps);
+  const gross = mean(grossValues);
+  const bookReturn = scored.length > 0 ? scored.reduce((total, row) => total + row.netUsd, 0) / CLASS_A_BOOK_USD : null;
+  const tP = meanAboveBarP(grossValues, CLASS_A_PROMOTE_GROSS_BPS);
+  const bootstrapP = bootstrapMeanP(grossValues, CLASS_A_PROMOTE_GROSS_BPS, CLASS_A_BOOTSTRAP_REPS, BOOTSTRAP_SEED);
+  const siblings = (opts.family ?? []).filter((row) => row.id !== "A" && Number.isFinite(row.p) && row.p >= 0 && row.p <= 1);
+  let holmP: number | null = null;
+  if (tP != null) {
+    const adjusted = holmAdjusted([{ id: "A", p: tP }, ...siblings]);
+    holmP = adjusted.find((row) => row.id === "A")?.adjusted ?? null;
+  }
+  const bhReturn = opts.bhReturn != null ? opts.bhReturn : opts.bhDays != null ? equalWeightBuyHold(opts.bhDays) : null;
+  const beatsBh = bookReturn != null && bhReturn != null ? bookReturn > bhReturn : null;
+  const exposureAdjustedReturn = bookReturn != null && opts.deployedFraction != null ? exposureAdjusted(bookReturn, opts.deployedFraction) : null;
+  const report: ClassAPromotion = { status: "unresolved", holmP, tP, bootstrapP, bookReturn, bhReturn, beatsBh, exposureAdjustedReturn };
+  if (scored.length < CLASS_A_PROMOTE_MIN_N) return { ...report, status: "not-considered" };
   const concentration = concentrationOf(scored);
-  if (gross == null || gross < CLASS_A_PROMOTE_GROSS_BPS || concentration.top3Kill || concentration.pairKill) return "blocked";
-  return "unresolved";
+  if (gross == null || gross < CLASS_A_PROMOTE_GROSS_BPS || concentration.top3Kill || concentration.pairKill) return { ...report, status: "blocked" };
+  if (holmP == null || !(holmP < CLASS_A_HOLM_ALPHA)) return { ...report, status: "blocked" };
+  if (bhReturn == null || bookReturn == null) return { ...report, status: "unresolved" };
+  if (!(bookReturn > bhReturn)) return { ...report, status: "blocked" };
+  return { ...report, status: "pass" };
 }
 
 function finiteNonNeg(value: unknown): number | null {
@@ -393,12 +562,13 @@ export function emptyClassAPaperView(): ClassAPaperView {
     config: CLASS_A_CONFIG,
     lookback: 55,
     k: 3,
-    start: null,
-    status: "awaiting-start",
+    start: new Date(CLASS_A_PAPER_START_MS).toISOString(),
+    status: "running",
     paper: true,
     n: 0,
     fills: 0,
     fillRate: null,
+    perSignalRate: null,
     skips: {},
     meanGrossBps: null,
     meanNetBps: null,
@@ -407,6 +577,13 @@ export function emptyClassAPaperView(): ClassAPaperView {
     open: 0,
     kill: false,
     promotion: "not-considered",
+    holmP: null,
+    tP: null,
+    bootstrapP: null,
+    bookReturn: null,
+    bhReturn: null,
+    beatsBh: null,
+    exposureAdjustedReturn: null,
     regimes: { BULL: 0, BEAR: 0, CHOP: 0 },
     healthDue: [],
   };
@@ -415,12 +592,16 @@ export function emptyClassAPaperView(): ClassAPaperView {
 export function classAPaperView(book: ClassABook, asOfMs = 0): ClassAPaperView {
   const skips: ClassAPaperView["skips"] = {};
   let fills = 0;
+  let placed = 0;
   for (const row of book.rows) {
     if (!row || typeof row !== "object") continue;
     if (row.fill === "fill") fills += 1;
+    // errata 001 item 27. Maker orders placed are the rows that passed every check.
+    if (row.fill === "fill" || row.skipReason === "skip_nofill") placed += 1;
     if (!row.skipReason || !(CLASS_A_SKIP_REASONS as readonly string[]).includes(row.skipReason)) continue;
     skips[row.skipReason] = (skips[row.skipReason] ?? 0) + 1;
   }
+  const promotion = promotionOf(book.scored);
   const regimes: Record<ClassARegime, number> = { BULL: 0, BEAR: 0, CHOP: 0 };
   for (const row of book.scored) {
     if (row.regime === "BULL" || row.regime === "BEAR" || row.regime === "CHOP") regimes[row.regime] += 1;
@@ -435,7 +616,8 @@ export function classAPaperView(book: ClassABook, asOfMs = 0): ClassAPaperView {
     paper: true,
     n: book.scored.length,
     fills,
-    fillRate: book.rows.length > 0 ? fills / book.rows.length : null,
+    fillRate: placed > 0 ? fills / placed : null,
+    perSignalRate: book.rows.length > 0 ? fills / book.rows.length : null,
     skips,
     meanGrossBps: mean(book.scored.map((row) => row.grossBps)),
     meanNetBps: mean(book.scored.map((row) => row.netBps)),
@@ -443,7 +625,14 @@ export function classAPaperView(book: ClassABook, asOfMs = 0): ClassAPaperView {
     cumNetUsd: book.cumNetUsd,
     open: book.open.length,
     kill: book.killed,
-    promotion: promotionOf(book.scored),
+    promotion: promotion.status,
+    holmP: promotion.holmP,
+    tP: promotion.tP,
+    bootstrapP: promotion.bootstrapP,
+    bookReturn: promotion.bookReturn,
+    bhReturn: promotion.bhReturn,
+    beatsBh: promotion.beatsBh,
+    exposureAdjustedReturn: promotion.exposureAdjustedReturn,
     regimes,
     healthDue: healthCheckpoints(book.startMs, asOfMs),
   };
@@ -481,7 +670,8 @@ function scrubClassAView(value: unknown): ClassAPaperView {
     for (const item of row.healthDue) if ((item === "90d" || item === "6m") && !healthDue.includes(item)) healthDue.push(item);
   }
   const status = row.status === "awaiting-start" || row.status === "running" || row.status === "killed" ? row.status : "redacted";
-  const promotion = row.promotion === "not-considered" || row.promotion === "blocked" || row.promotion === "unresolved" ? row.promotion : "redacted";
+  const promotion = row.promotion === "not-considered" || row.promotion === "blocked" || row.promotion === "unresolved" || row.promotion === "pass" ? row.promotion : "redacted";
+  const beatsBh = row.beatsBh === true ? true : row.beatsBh === false ? false : null;
   const start = typeof row.start === "string" && /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}\.\d{3}Z)?$/.test(row.start) ? row.start : null;
   return {
     ...base,
@@ -491,6 +681,7 @@ function scrubClassAView(value: unknown): ClassAPaperView {
     n: finiteNonNeg(row.n) ?? 0,
     fills: finiteNonNeg(row.fills) ?? 0,
     fillRate: finiteOrNull(row.fillRate),
+    perSignalRate: finiteOrNull(row.perSignalRate),
     skips,
     meanGrossBps: finiteOrNull(row.meanGrossBps),
     meanNetBps: finiteOrNull(row.meanNetBps),
@@ -499,6 +690,13 @@ function scrubClassAView(value: unknown): ClassAPaperView {
     open: finiteNonNeg(row.open) ?? 0,
     kill: row.kill === true,
     promotion,
+    holmP: finiteOrNull(row.holmP),
+    tP: finiteOrNull(row.tP),
+    bootstrapP: finiteOrNull(row.bootstrapP),
+    bookReturn: finiteOrNull(row.bookReturn),
+    bhReturn: finiteOrNull(row.bhReturn),
+    beatsBh,
+    exposureAdjustedReturn: finiteOrNull(row.exposureAdjustedReturn),
     regimes,
     healthDue,
   };
@@ -589,11 +787,34 @@ function liveShadow(book: ClassABook, row: ClassARow, input: ClassASignal, entry
   });
 }
 
+/** errata 001 item 9. Timestamp, then higher 30-day median volume, then pair A→Z. */
+export function orderClassASignals(signals: readonly ClassASignal[]): ClassASignal[] {
+  const stamp = (signal: ClassASignal): number => {
+    const day = signal.days[signal.index];
+    return day ? signalCloseMs(day.date) : 0;
+  };
+  return signals.slice().sort((a, b) => {
+    const delta = stamp(a) - stamp(b);
+    if (delta !== 0) return delta;
+    const av = medianVolumeUsd(a.days, a.index) ?? Number.NEGATIVE_INFINITY;
+    const bv = medianVolumeUsd(b.days, b.index) ?? Number.NEGATIVE_INFINITY;
+    if (av !== bv) return bv - av;
+    if (a.pair === b.pair) return 0;
+    return a.pair < b.pair ? -1 : 1;
+  });
+}
+
+/** errata 001 item 9. Evaluates in timestamp order with the volume then A→Z tie-break. */
+export function evaluateSignals(book: ClassABook, signals: readonly ClassASignal[]): (ClassARow | null)[] {
+  return orderClassASignals(signals).map((signal) => evaluateSignal(book, signal));
+}
+
 export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow | null {
   const day = input.days[input.index];
   if (!day) return null;
   const signalMs = signalCloseMs(day.date);
-  if (book.startMs == null || signalMs < book.startMs) return null;
+  // errata 001 item 1 and item 13. A failed exclusion preflight or a start in the future records nothing.
+  if (book.exclusionOk === false || book.startMs == null || signalMs < book.startMs) return null;
   if (EXCLUDED.has(input.pair) || input.listedDays < LISTED_DAYS) return null;
   const history = input.index + 1;
   const triggered = classATrigger(barsOf(input.days), input.index, CLASS_A_LOOKBACK, history < 200);
@@ -613,10 +834,16 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
     below4hEma: false,
   };
   const veto = input.btcClose != null && btcVeto(vetoDay);
+  // errata 001 item 16. A counterfactual on this skip is optional and is not built.
   if (veto) return skipRow(book, input, signalMs, day.close, atr, "skip_btcveto", "btc", input.btcDailyMove, -0.03, true, null);
-  const sBps = takerSpreadBps(input.medianSpreadBps);
   const counterfactual = counterfactualOf(input.nextHourOpen, day.close, atr);
   if (book.killed) return skipRow(book, input, signalMs, day.close, atr, "skip_kill", "kill", book.cumNetUsd, CLASS_A_KILL_USD, false, null);
+  const spreadSamples = (input.spreadSamples ?? []).filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0);
+  // errata 001 item 12. Twenty of the thirty days before the signal. Nineteen skips. The 5 bps floor is not used.
+  if (spreadSamples.length < CLASS_A_SPREAD_MIN_DAYS) {
+    return skipRow(book, input, signalMs, day.close, atr, "skip_spread", "spread-days", spreadSamples.length, CLASS_A_SPREAD_MIN_DAYS, false, counterfactual);
+  }
+  const sBps = takerSpreadBps(median(spreadSamples));
   const spreadLimit = volume > CLASS_A_VOLUME_TIGHT_USD ? 5 : 10;
   if (input.spreadBps == null || input.spreadBps > spreadLimit) {
     return skipRow(book, input, signalMs, day.close, atr, "skip_spread", "spread", input.spreadBps, spreadLimit, false, counterfactual);
@@ -704,7 +931,7 @@ function pnlOf(sim: Sim, exitPx: number): { grossUsd: number; netUsd: number; gr
   return { grossUsd, netUsd, grossBps, netBps, grossR: grossUsd / CLASS_A_RISK_USD, netR: netUsd / CLASS_A_RISK_USD };
 }
 
-function closeSim(book: ClassABook, sim: Sim, exitMs: number, exitPx: number, reason: "stop" | "rule"): void {
+function closeSim(book: ClassABook, sim: Sim, exitMs: number, exitPx: number, reason: "stop" | "rule", gap = false): void {
   const pnl = pnlOf(sim, exitPx);
   const row = book.rows.find((item) => item.id === sim.rowId);
   if (sim.scored) {
@@ -729,6 +956,7 @@ function closeSim(book: ClassABook, sim: Sim, exitMs: number, exitPx: number, re
       row.netBps = pnl.netBps;
       row.grossR = pnl.grossR;
       row.netR = pnl.netR;
+      if (gap) row.gap = true;
     }
     return;
   }
@@ -740,7 +968,9 @@ function closeSim(book: ClassABook, sim: Sim, exitMs: number, exitPx: number, re
 
 function hitStop(sim: Sim, open: number, low: number, hourAtr: number, tsMs: number, book: ClassABook): boolean {
   if (!(open <= sim.stop) && !(low <= sim.stop)) return false;
-  closeSim(book, sim, tsMs, stopFillPx(sim.stop, sim.entry, hourAtr, open), "stop");
+  // errata 001 item 11. The open at or through the stop is a gap. A later touch keeps the slipped stop.
+  const gap = open <= sim.stop;
+  closeSim(book, sim, tsMs, stopFillPx(sim.stop, hourAtr, open), "stop", gap);
   return true;
 }
 
@@ -803,5 +1033,7 @@ export function restoreClassABook(value: unknown): ClassABook | null {
     reentryUntil: reentry,
     rows: row.rows,
     scored: row.scored.filter((item): item is ClassAScored => !!item && typeof item.pair === "string" && typeof item.netUsd === "number"),
+    // errata 001 item 13. An old snapshot without the flag keeps trading. An explicit false stays false.
+    exclusionOk: row.exclusionOk === false ? false : true,
   };
 }

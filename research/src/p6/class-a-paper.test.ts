@@ -1,23 +1,30 @@
 import { expect, test } from "bun:test";
 import { addDays, daysBetween } from "../p5/stats";
+import { applyForward, freshBook } from "./engine";
 import { captureHot, loadSplit, persistSplit } from "./hot-store";
 import { installPaperState, startPaperHost } from "./paper-host";
 import { decodeStored } from "./redis-gzip";
 import { decodeLease, HOT_KEY, LEASE_KEY, memoryKv, peekStored, tryAcquire } from "./relay";
 import {
   CLASS_A_KILL_USD,
+  CLASS_A_PAPER_START_MS,
   CLASS_A_SPEC_SHA256,
   classARuleExit,
+  classAStartMs,
   concentrationOf,
   deployedFraction,
   emptyClassABook,
   equalWeightBuyHold,
   evaluateSignal,
+  evaluateSignals,
+  exclusionPreflight,
   exposureAdjusted,
   healthCheckpoints,
   medianVolumeUsd,
   onDaily,
   onIntrabar,
+  openClassABook,
+  orderClassASignals,
   promotionOf,
   regimeOf,
   scrubClassAPaper,
@@ -68,6 +75,7 @@ function signal(over: Partial<ClassASignal> = {}): ClassASignal {
     minOrderBase: 0.0001,
     tick: 0.01,
     medianSpreadBps: 10,
+    spreadSamples: Array.from({ length: 30 }, () => 10),
     nextHourOpen: close,
     hourAtr14: 0.2,
     prints: [{ tsMs: at + 60_000, price: close - 0.01 }],
@@ -89,7 +97,8 @@ test("a null start records nothing", () => {
   const idle = emptyClassABook(null);
   expect(evaluateSignal(idle, signal())).toBeNull();
   expect(idle.rows).toHaveLength(0);
-  expect(scrubClassAPaper(undefined).status).toBe("awaiting-start");
+  expect(scrubClassAPaper(undefined).status).toBe("running");
+  expect(scrubClassAPaper(undefined).start).toBe("2026-10-26T00:00:00.000Z");
   expect(CLASS_A_SPEC_SHA256).toBe("56fb7543d69a80b536d7ae4d9f9d9240ebde33f1500fde45e6b5235e70a753d0");
 });
 
@@ -101,10 +110,12 @@ test("excluded names and a listing under 90 days produce no row", () => {
   expect(paper.rows).toHaveLength(1);
 });
 
-test("the volume floor is the 30-day median ending on the signal day", () => {
-  const flat = Array.from({ length: 30 }, () => ({ baseVolume: 50_000, close: 100 }));
-  expect(medianVolumeUsd(flat, 29)).toBe(5_000_000);
-  expect(medianVolumeUsd(flat, 28)).toBeNull();
+test("the volume floor is the 30 completed days before the signal day", () => {
+  const prior = Array.from({ length: 30 }, () => ({ baseVolume: 50_000, close: 100 }));
+  const withSignal = [...prior, { baseVolume: 1_000_000, close: 100 }];
+  expect(medianVolumeUsd(withSignal, 30)).toBe(5_000_000);
+  expect(medianVolumeUsd(prior, 29)).toBeNull();
+  expect(medianVolumeUsd(withSignal, 29)).toBeNull();
   const below = book();
   const skipped = evaluateSignal(below, signal({ days: daysOf(49_000) }));
   expect(skipped?.skipReason).toBe("skip_volume");
@@ -246,11 +257,19 @@ test("a stop gap fills at the open and a touch fills at the stop minus the large
   const gap = book();
   evaluateSignal(gap, signal());
   const sim = gap.open[0]!;
-  expect(stopFillPx(sim.stop, sim.entry, 1, sim.stop - 1)).toBe(sim.stop - 1);
-  expect(stopFillPx(sim.stop, sim.entry, 1, sim.stop + 1)).toBeCloseTo(sim.stop - 0.1, 8);
-  expect(stopFillPx(sim.stop, sim.entry, 0.1, sim.stop + 1)).toBeCloseTo(sim.stop - sim.entry * 0.0005, 8);
+  expect(stopFillPx(sim.stop, 1, sim.stop - 1)).toBe(sim.stop - 1);
+  expect(stopFillPx(sim.stop, 1, sim.stop + 1)).toBeCloseTo(sim.stop - 0.1, 8);
+  expect(stopFillPx(sim.stop, 0.1, sim.stop + 1)).toBeCloseTo(sim.stop * (1 - 0.0005), 8);
   onIntrabar(gap, { pair: "SOL-USD", tsMs: sim.entryMs + 1_000, open: sim.stop + 0.2, low: sim.stop - 0.01, hourAtr: 1 });
   expect(gap.rows[0]?.exitPrice).toBeCloseTo(sim.stop - 0.1, 8);
+  expect(gap.rows[0]?.gap).toBeUndefined();
+  const through = book();
+  evaluateSignal(through, signal());
+  const openSim = through.open[0]!;
+  onIntrabar(through, { pair: "SOL-USD", tsMs: openSim.entryMs + 1_000, open: openSim.stop - 1, low: openSim.stop - 2, hourAtr: 0.2 });
+  const gapped = through.rows.find((row) => row.fill === "fill");
+  expect(gapped?.gap).toBe(true);
+  expect(gapped?.exitPrice).toBe(openSim.stop - 1);
 });
 
 test("the chandelier ratchets up and a 10-day or 30-day rule exits at the next open", () => {
@@ -347,14 +366,14 @@ test("regime tags are descriptive and promotion never recommends", () => {
     regime: "CHOP",
   });
   const sample = Array.from({ length: 30 }, (_, i) => row(`P${i}-USD`, 10, 300));
-  expect(promotionOf(sample)).toBe("unresolved");
-  expect(promotionOf(sample.slice(0, 29))).toBe("not-considered");
-  expect(promotionOf(sample.map((item) => ({ ...item, grossBps: 100 })))).toBe("blocked");
+  expect(promotionOf(sample).status).toBe("unresolved");
+  expect(promotionOf(sample.slice(0, 29)).status).toBe("not-considered");
+  expect(promotionOf(sample.map((item) => ({ ...item, grossBps: 100 }))).status).toBe("blocked");
   const concentrated = sample.map((item, i) => (i < 3 ? { ...item, grossUsd: 100, netUsd: 100, netR: 5 } : item));
   expect(concentrationOf(concentrated).top3Kill).toBe(true);
-  expect(promotionOf(concentrated)).toBe("blocked");
+  expect(promotionOf(concentrated).status).toBe("blocked");
   expect(concentrationOf(sample.map((item) => ({ ...item, pair: "SOL-USD" }))).pairKill).toBe(true);
-  expect(promotionOf([row("SOL-USD", 10, 300)])).toBe("not-considered");
+  expect(promotionOf([row("SOL-USD", 10, 300)]).status).toBe("not-considered");
   expect(concentrationOf([row("SOL-USD", 10, 300)]).pairKill).toBe(true);
 });
 
@@ -439,4 +458,185 @@ test("the paper book round-trips through hot storage with gzip writes off and on
     if (gzip === undefined) delete process.env.P6_GZIP_WRITES;
     else process.env.P6_GZIP_WRITES = gzip;
   }
+});
+
+test("errata 001 start is the committed close or the next 00:00Z, with no backfill", () => {
+  expect(CLASS_A_PAPER_START_MS).toBe(Date.parse("2026-10-26T00:00:00.000Z"));
+  expect(classAStartMs(Date.parse("2026-10-24T14:53:00.000Z"))).toBe(CLASS_A_PAPER_START_MS);
+  expect(classAStartMs(CLASS_A_PAPER_START_MS)).toBe(CLASS_A_PAPER_START_MS);
+  expect(classAStartMs(CLASS_A_PAPER_START_MS + 1)).toBe(CLASS_A_PAPER_START_MS + 86_400_000);
+  const opened = openClassABook(Date.parse("2026-10-24T14:53:00.000Z"));
+  expect(opened.startMs).toBe(CLASS_A_PAPER_START_MS);
+  expect(evaluateSignal(opened, signal())).toBeNull();
+  const days = daysOf();
+  const at = signalCloseMs(days[days.length - 1]!.date);
+  expect(at % 86_400_000).toBe(0);
+  expect(evaluateSignal(emptyClassABook(at), signal({ days }))?.fill).toBe("fill");
+  expect(evaluateSignal(emptyClassABook(at + 1), signal({ days }))).toBeNull();
+});
+
+test("errata 001 spread days, volume ties, concentration, and fill rate", () => {
+  const twenty = Array.from({ length: 20 }, () => 10);
+  const nineteen = Array.from({ length: 19 }, () => 10);
+  expect(evaluateSignal(book(), signal({ spreadSamples: twenty }))?.skipReason).not.toBe("skip_spread");
+  const short = evaluateSignal(book(), signal({ spreadSamples: nineteen }));
+  expect(short?.skipReason).toBe("skip_spread");
+  expect(short?.check).toBe("spread-days");
+  expect(short?.measured).toBe(19);
+  expect(short?.threshold).toBe(20);
+  const holes = [...nineteen, ...Array.from({ length: 11 }, () => null)];
+  expect(evaluateSignal(book(), signal({ spreadSamples: holes }))?.measured).toBe(19);
+
+  const rich = trade("SOL-USD", { days: daysOf(80_000) });
+  const thin = trade("ETH-USD", { days: daysOf(50_000) });
+  expect(orderClassASignals([thin, rich]).map((row) => row.pair)).toEqual(["SOL-USD", "ETH-USD"]);
+  const ada = trade("ADA-USD", { days: daysOf(80_000) });
+  const eth = trade("ETH-USD", { days: daysOf(80_000) });
+  expect(orderClassASignals([eth, ada]).map((row) => row.pair)).toEqual(["ADA-USD", "ETH-USD"]);
+  const capped = book();
+  evaluateSignal(capped, trade("BTC-USD"));
+  evaluateSignal(capped, trade("DOGE-USD"));
+  const raced = evaluateSignals(capped, [thin, rich]);
+  expect(raced.find((row) => row?.pair === "SOL-USD")?.fill).toBe("fill");
+  expect(raced.find((row) => row?.pair === "ETH-USD")?.skipReason).toBe("skip_cap");
+  const tied = book();
+  evaluateSignal(tied, trade("BTC-USD"));
+  evaluateSignal(tied, trade("DOGE-USD"));
+  const az = evaluateSignals(tied, [eth, ada]);
+  expect(az.find((row) => row?.pair === "ADA-USD")?.fill).toBe("fill");
+  expect(az.find((row) => row?.pair === "ETH-USD")?.skipReason).toBe("skip_cap");
+
+  const row = (pair: string, grossUsd: number, grossBps: number): ClassAScored => ({
+    pair,
+    grossUsd,
+    netUsd: grossUsd,
+    grossBps,
+    netBps: grossBps,
+    netR: grossUsd / 20,
+    regime: "CHOP",
+  });
+  const two = [row("AAA-USD", 10, 400), row("BBB-USD", 10, 400)];
+  expect(concentrationOf(two).top3Share).toBe(1);
+  expect(concentrationOf(two).top3Kill).toBe(true);
+  const six = Array.from({ length: 6 }, (_, i) => row(`Q${i}-USD`, 10, 400));
+  expect(concentrationOf(six).top3Share).toBeCloseTo(0.5, 8);
+  expect(concentrationOf(six).top3Kill).toBe(false);
+  expect(concentrationOf([row("AAA-USD", -5, 100), row("BBB-USD", 0, 100)]).top3Kill).toBe(false);
+
+  const rate = book();
+  evaluateSignal(rate, signal());
+  const days = daysOf();
+  const at = signalCloseMs(days[days.length - 1]!.date);
+  evaluateSignal(rate, trade("ETH-USD", { days, prints: [{ tsMs: at + 4 * 60 * 60 * 1000, price: 1 }] }));
+  evaluateSignal(rate, trade("ADA-USD", { days: daysOf(1_000) }));
+  const view = scrubClassAPaper(rate);
+  expect(view.fills).toBe(1);
+  expect(view.fillRate).toBeCloseTo(0.5, 8);
+  expect(view.perSignalRate).toBeCloseTo(1 / 3, 8);
+});
+
+test("errata 001 promotion uses Holm and buy-and-hold, and the exclusion preflight is static", () => {
+  const row = (pair: string, grossUsd: number, grossBps: number): ClassAScored => ({
+    pair,
+    grossUsd,
+    netUsd: grossUsd,
+    grossBps,
+    netBps: grossBps,
+    netR: grossUsd / 20,
+    regime: "CHOP",
+  });
+  const strong = Array.from({ length: 30 }, (_, i) => row(`N${i}-USD`, 10, 400));
+  const passed = promotionOf(strong, { bhReturn: 0.04, deployedFraction: [2] });
+  expect(passed.status).toBe("pass");
+  expect(passed.tP).toBe(0);
+  expect(passed.holmP).toBe(0);
+  expect(passed.bootstrapP).toBe(0);
+  expect(passed.bookReturn).toBeCloseTo(0.05, 8);
+  expect(passed.beatsBh).toBe(true);
+  expect(passed.exposureAdjustedReturn).toBeLessThan(0.04);
+  expect(promotionOf(strong, { bhReturn: 0.05 }).status).toBe("blocked");
+  expect(promotionOf(strong).status).toBe("unresolved");
+  expect(promotionOf(strong, { bhReturn: 0.05 }).bhReturn).toBe(0.05);
+  const flatHold = promotionOf(strong, {
+    bhDays: [
+      { members: ["SOL-USD"], close: { "SOL-USD": 10 } },
+      { members: ["SOL-USD"], close: { "SOL-USD": 10 } },
+    ],
+  });
+  expect(flatHold.bhReturn).toBeCloseTo(0, 8);
+  expect(flatHold.status).toBe("pass");
+  const borderline = [
+    ...Array.from({ length: 20 }, (_, i) => row(`L${i}-USD`, 1, 250)),
+    ...Array.from({ length: 10 }, (_, i) => row(`H${i}-USD`, 1, 481)),
+  ];
+  const alone = promotionOf(borderline, { bhReturn: -1 });
+  const family = promotionOf(borderline, { bhReturn: -1, family: [{ id: "B", p: 0.9 }] });
+  expect(alone.holmP).toBeLessThan(0.05);
+  expect(alone.status).toBe("pass");
+  expect(family.holmP).toBeGreaterThanOrEqual(0.05);
+  expect(family.status).toBe("blocked");
+  expect(family.bootstrapP).not.toBeNull();
+  const level = Array.from({ length: 30 }, (_, i) => row(`E${i}-USD`, 1, 290));
+  expect(promotionOf(level, { bhReturn: -1 }).status).toBe("blocked");
+  expect(promotionOf(level, { bhReturn: -1 }).tP).toBe(1);
+
+  expect(exclusionPreflight().ok).toBe(true);
+  expect(exclusionPreflight([]).reason).toBe("empty");
+  expect(exclusionPreflight([
+    { productId: "SOL-USD", rule: "fiat-or-fx", source: "x" },
+    { productId: "SOL-USD", rule: "fiat-or-fx", source: "y" },
+  ]).reason).toBe("duplicate");
+  expect(exclusionPreflight([{ productId: "sol-usd", rule: "fiat-or-fx", source: "x" }]).reason).toBe("shape");
+  expect(exclusionPreflight([{ productId: "BTC-EUR", rule: "fiat-or-fx", source: "x" }]).reason).toBe("shape");
+  expect(exclusionPreflight([{ productId: "BTC-USD", rule: "nope" as "fiat-or-fx", source: "x" }]).reason).toBe("rule");
+  const blocked = emptyClassABook(START);
+  blocked.exclusionOk = false;
+  expect(evaluateSignal(blocked, signal())).toBeNull();
+  const shown = scrubClassAPaper({
+    status: "running",
+    promotion: "pass",
+    holmP: 0.01,
+    bootstrapP: 0.2,
+    bookReturn: 0.1,
+    bhReturn: 0.04,
+    beatsBh: true,
+    exposureAdjustedReturn: 0.2,
+    perSignalRate: 0.5,
+    note: "user:PASSWORD@x.upstash.io",
+  });
+  expect(shown.promotion).toBe("pass");
+  expect(shown.holmP).toBe(0.01);
+  expect(shown.bootstrapP).toBe(0.2);
+  expect(shown.beatsBh).toBe(true);
+  expect(JSON.stringify(shown).includes("PASSWORD")).toBe(false);
+});
+
+test("errata 001 live X1 class A is tagged and still class A", () => {
+  const ts = Date.parse("2026-10-15T01:00:00.000Z");
+  const entry = {
+    kind: "x1" as const,
+    classId: "A" as const,
+    productId: "ETH-USD",
+    tsMs: ts,
+    nextOpen: 100,
+    stop: 90,
+    atr1h: 1,
+    bid: 100,
+    ask: 100.1,
+    bookTsMs: ts,
+    sendTsMs: ts,
+    decisionMid: 100,
+  };
+  const live = freshBook({ members: ["ETH-USD"], liveQuotes: true });
+  applyForward(live, { ...entry, id: "live-a", aConfig: live.aPick?.config });
+  const tagged = live.positions.find((row) => row.id === "live-a");
+  expect(tagged?.scoreClass).toBe("A_x1_unscored");
+  expect(tagged?.classId).toBe("A");
+  const quiet = freshBook({ members: ["ETH-USD"] });
+  applyForward(quiet, { ...entry, id: "quiet-a", aConfig: quiet.aPick?.config });
+  expect(quiet.positions.find((row) => row.id === "quiet-a")?.scoreClass).toBeUndefined();
+  const other = freshBook({ members: ["ETH-USD"], liveQuotes: true });
+  applyForward(other, { ...entry, id: "live-c", classId: "C" });
+  expect(other.positions.find((row) => row.id === "live-c")?.classId).toBe("C");
+  expect(other.positions.find((row) => row.id === "live-c")?.scoreClass).toBeUndefined();
 });

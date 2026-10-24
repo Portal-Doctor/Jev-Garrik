@@ -176,6 +176,8 @@ export interface Position {
   fillAnchorOpen?: number;
   entryFillSrc?: FillSrc;
   anchorMissing?: boolean;
+  /** errata 001 item 3. Live X1 class A stays classId A and is never the scored paper record. */
+  scoreClass?: "A_x1_unscored";
 }
 
 export interface ClosedTrade {
@@ -206,6 +208,8 @@ export interface ClosedTrade {
   execCostBps?: number | null;
   driftBps?: number | null;
   anchorMissing?: boolean;
+  /** errata 001 item 3. Copied from the open position. classId stays A. */
+  scoreClass?: "A_x1_unscored";
   /** Stop exit whose first fresh bid was below the stop. exitKind stays "stop". */
   gap?: boolean;
   /** (stop − fill) / stop × 1e4. Reported on its own line. Not part of the execution light. */
@@ -1240,6 +1244,8 @@ function tryEnter(book: Book, opts: {
     ...(anchor != null ? { fillAnchorOpen: anchor } : {}),
     ...(opts.fillSrc ? { entryFillSrc: opts.fillSrc } : {}),
     ...(anchorMissing ? { anchorMissing: true } : {}),
+    // errata 001 item 3. Tag only the live X1 stream. The frozen Kelly path still reads classId.
+    ...(opts.classId === "A" && x1TakerOn(book.config) ? { scoreClass: "A_x1_unscored" as const } : {}),
   });
   book.submittedByClass[opts.classId] += 1;
   return true;
@@ -1356,6 +1362,7 @@ function closePosition(
     maeBasis,
     exitNotionalUsd: exitNotional,
     ...(position.entryFillSrc ? { fillSrc: position.entryFillSrc } : {}),
+    ...(position.scoreClass === "A_x1_unscored" ? { scoreClass: "A_x1_unscored" as const } : {}),
     ...(sideFill ? { exitFillSrc: sideFill } : {}),
     ...(anchorMissing ? { anchorMissing: true } : {}),
     ...(gap ? { gap: true, gapSlippageBps } : {}),

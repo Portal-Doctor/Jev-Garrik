@@ -344,7 +344,8 @@ export default async function P6DashboardPage({
                   ? "Redacted"
                   : "Awaiting start"
           } · n ${view.classAPaper?.n ?? 0} · net ${moneyOrDash(view.classAPaper?.cumNetUsd, true)}`}
-          {view.classAPaper?.promotion === "blocked" ? " · promotion blocked" : view.classAPaper?.promotion === "unresolved" ? " · promotion unresolved" : ""}
+          {view.classAPaper?.promotion === "blocked" ? " · promotion blocked" : view.classAPaper?.promotion === "unresolved" ? " · promotion unresolved" : view.classAPaper?.promotion === "pass" ? " · promotion pass" : ""}
+          {view.classAPaper?.fillRate != null ? ` · maker fill ${Math.round(view.classAPaper.fillRate * 100)}%` : ""}
           {(view.classAPaper?.healthDue.length ?? 0) > 0 ? ` · health ${view.classAPaper?.healthDue.join(" ")}` : ""}
         </p>
       </section>

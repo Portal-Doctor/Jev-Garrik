@@ -517,6 +517,7 @@ function publicClosed(row: DashboardView["closed"][number]): DashboardView["clos
     ...(shadowFillKind ? { shadowFillKind } : {}),
     ...(mfeBasis ? { mfeBasis } : {}),
     ...(maeBasis ? { maeBasis } : {}),
+    ...(row.scoreClass === "A_x1_unscored" ? { scoreClass: "A_x1_unscored" as const } : {}),
   };
 }
 
@@ -726,6 +727,8 @@ export interface DashboardClosed {
   shadowNetR?: number;
   shadowFillPx?: number;
   shadowFillKind?: string;
+  /** errata 001 item 3. Present only for a live X1 class A close. */
+  scoreClass?: "A_x1_unscored";
 }
 
 export interface DashboardView {

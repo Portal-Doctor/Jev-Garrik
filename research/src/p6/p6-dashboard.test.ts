@@ -344,7 +344,8 @@ test("a no-cookie GET /p6 returns 200 and the public output is redacted", () => 
 
 test("class A paper on the public view is allowlisted", () => {
   const idle = redactP6View(publicView());
-  expect(idle.classAPaper?.status).toBe("awaiting-start");
+  expect(idle.classAPaper?.status).toBe("running");
+  expect(idle.classAPaper?.start).toBe("2026-10-26T00:00:00.000Z");
   expect(idle.classAPaper?.config).toBe("A55-k3");
   expect(idle.classAPaper?.paper).toBe(true);
   expect(idle.classAPaper?.specSha256).toBe(CLASS_A_SPEC_SHA256);
@@ -390,6 +391,10 @@ test("class A paper on the public view is allowlisted", () => {
   expect(fromBook.classAPaper?.status).toBe("running");
   expect(fromBook.classAPaper?.specSha256).toBe(CLASS_A_SPEC_SHA256);
   expect(fromBook.classAPaper?.skips).toEqual({ skip_spread: 1 });
+  const tagged = redactP6View(publicView({ closed: [{ productId: "ETH-USD", classId: "A", netUsd: 1, scoreClass: "A_x1_unscored" }] }));
+  expect(tagged.closed[0]?.scoreClass).toBe("A_x1_unscored");
+  const dropped = redactP6View(publicView({ closed: [{ productId: "ETH-USD", classId: "A", netUsd: 1, scoreClass: "scored" as "A_x1_unscored" }] }));
+  expect(dropped.closed[0]?.scoreClass).toBeUndefined();
   const both = `${output}\n${JSON.stringify(fromBook)}`;
   for (const secret of ["upstash", "PASSWORD", "host", "recommend", "A20", "nope"]) {
     expect(both.includes(secret), secret).toBe(false);
