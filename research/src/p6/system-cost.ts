@@ -19,8 +19,10 @@ export const SYSTEM_COST_START_MS = Date.parse(SYSTEM_COST_START_ISO);
 /**
  * Hosting cutover to a local Docker server at no charge.
  * Brian set this to the forward start. Vercel and Redis accrue until this instant, and $0 applies after it.
+ * The hurdle light uses this same instant: cost before it is sunk history.
  */
 export const SYSTEM_COST_CUTOVER_ISO = "2026-10-26T00:00:00.000Z";
+export const SYSTEM_COST_CUTOVER_MS = Date.parse(SYSTEM_COST_CUTOVER_ISO);
 
 /**
  * Display conversion. $20 is 1R, the unpromoted paper risk.
@@ -74,7 +76,16 @@ export interface SystemCostHurdle {
   monthlyR?: number;
   accruedUsd?: number;
   accruedR?: number;
-  /** Existing displayed P/L: equity minus the paper start capital. Null when equity is missing. */
+  /**
+   * Cost accrued before the forward start (SYSTEM_COST_CUTOVER_ISO).
+   * Shown on the dashboard. Excluded from net and from the light.
+   */
+  sunkUsd?: number;
+  sunkR?: number;
+  /**
+   * Existing displayed P/L: equity minus the paper start capital.
+   * Includes open marks. Not realized-only. Null when equity is missing.
+   */
   pnlUsd?: number | null;
   pnlR?: number | null;
   netUsd?: number | null;
@@ -251,7 +262,10 @@ export function usdToR(usd: number): number {
   return usd / SYSTEM_COST_R_USD;
 }
 
-/** Existing P/L minus accrued system cost. */
+/**
+ * Existing P/L minus a cost figure.
+ * The hurdle passes only cost accrued since the forward start.
+ */
 export function netAfterSystemCost(pnlUsd: number, accruedUsd: number): number {
   return pnlUsd - accruedUsd;
 }
@@ -259,15 +273,21 @@ export function netAfterSystemCost(pnlUsd: number, accruedUsd: number): number {
 /**
  * Hurdle light. Display only. It does not promote or kill.
  *
- * green: net P/L after system costs is strictly positive (`netUsd > 0`).
- * red: net is at or below minus one month of system cost (`netUsd <= -monthlyUsd`).
- * amber: net is known, and it is neither green nor red.
- * Exactly zero is not strictly positive. With a positive monthly cost it is amber.
- * With a zero monthly cost, zero is red because `0 <= -0`.
+ * Net is P/L minus cost accrued from the forward start
+ * (SYSTEM_COST_CUTOVER_ISO, 2026-10-26T00:00:00.000Z) onward.
+ * Cost before that instant is sunk history and is not in the light.
+ * P/L is the header definition: equity minus the paper start capital.
+ * It includes open marks. It is not realized-only.
+ *
+ * amber: there is no closed trade yet, or net == 0.
+ * red: at least one closed trade and net < 0.
+ * green: at least one closed trade and net > 0.
+ * Amber stays reachable when the monthly rate is $0, because net == 0 is amber.
  */
-export function systemCostLight(netUsd: number, monthlyUsd: number): Exclude<SystemCostLight, "unavailable"> {
+export function systemCostLight(netUsd: number, closedTrades: number): Exclude<SystemCostLight, "unavailable"> {
+  if (!(closedTrades > 0) || netUsd === 0) return "amber";
+  if (netUsd < 0) return "red";
   if (netUsd > 0) return "green";
-  if (netUsd <= -monthlyUsd) return "red";
   return "amber";
 }
 
@@ -290,48 +310,67 @@ export function formatSignedR(value: number): string {
 }
 
 /**
- * Monthly total, accrued cost since the forward test began, that cost in R,
- * and net P/L after system costs. `startMs` defaults to the forward-test start.
+ * Monthly total, accrued cost since the cost file's start, sunk history before
+ * the forward start, and net P/L after cost accrued from that start onward.
+ * `startMs` defaults to the cost accrual start. `closedTrades` defaults to 0,
+ * which keeps the light amber.
  */
 export function systemCostHurdle(input: {
   config: SystemCostConfig | null;
   pnlUsd: number | null;
   nowMs: number;
   startMs?: number;
+  /** Closed trades on the book. Zero or missing means there is no closed trade yet. */
+  closedTrades?: number;
 }): SystemCostHurdle {
   try {
     const config = input.config;
     if (!config || !Number.isFinite(input.nowMs)) return SYSTEM_COST_UNAVAILABLE;
     const startMs = input.startMs ?? SYSTEM_COST_START_MS;
-    if (!Number.isFinite(startMs)) return SYSTEM_COST_UNAVAILABLE;
+    if (!Number.isFinite(startMs) || !Number.isFinite(SYSTEM_COST_CUTOVER_MS)) return SYSTEM_COST_UNAVAILABLE;
+    const forwardMs = SYSTEM_COST_CUTOVER_MS;
     const spans = config.spans ?? [];
     let monthlyUsd = config.items.reduce((sum, item) => sum + item.monthlyUsd, 0);
-    let accruedUsd = accruedSystemCostUsd(monthlyUsd, startMs, input.nowMs);
+    let accruedUsd = 0;
+    let sunkUsd = 0;
+    let forwardUsd = 0;
     let items = config.items.map((item) => ({ ...item }));
+    const addAccrual = (monthly: number, fromMs: number, untilMs: number) => {
+      const overlapStart = Math.max(startMs, fromMs);
+      const overlapEnd = Math.min(input.nowMs, untilMs);
+      if (!(overlapEnd > overlapStart)) return;
+      accruedUsd += accruedSystemCostUsd(monthly, overlapStart, overlapEnd);
+      const sunkEnd = Math.min(overlapEnd, forwardMs);
+      if (sunkEnd > overlapStart) sunkUsd += accruedSystemCostUsd(monthly, overlapStart, sunkEnd);
+      const forwardStart = Math.max(overlapStart, forwardMs);
+      if (overlapEnd > forwardStart) forwardUsd += accruedSystemCostUsd(monthly, forwardStart, overlapEnd);
+    };
     if (spans.length > 0) {
       if (overlappingSystemCostSpans(spans)) return SYSTEM_COST_UNAVAILABLE;
       monthlyUsd = 0;
-      accruedUsd = 0;
       items = [];
       for (const span of spans) {
         const fromMs = dateMs(span.from);
         const untilMs = span.until == null ? Number.POSITIVE_INFINITY : dateMs(span.until);
         const spanMonthly = span.items.reduce((sum, item) => sum + item.monthlyUsd, 0);
         if (input.nowMs >= fromMs && input.nowMs < untilMs) monthlyUsd += spanMonthly;
-        const overlapStart = Math.max(startMs, fromMs);
-        const overlapEnd = Math.min(input.nowMs, untilMs);
-        if (overlapEnd > overlapStart) accruedUsd += accruedSystemCostUsd(spanMonthly, overlapStart, overlapEnd);
+        addAccrual(spanMonthly, fromMs, untilMs);
         for (const item of span.items) {
           items.push({ ...item, from: span.from, ...(span.until ? { until: span.until } : {}) });
         }
       }
+    } else {
+      addAccrual(monthlyUsd, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY);
     }
-    if (!nonNegativeFinite(monthlyUsd) || !nonNegativeFinite(accruedUsd)) return SYSTEM_COST_UNAVAILABLE;
+    if (!nonNegativeFinite(monthlyUsd) || !nonNegativeFinite(accruedUsd) || !nonNegativeFinite(sunkUsd) || !nonNegativeFinite(forwardUsd)) {
+      return SYSTEM_COST_UNAVAILABLE;
+    }
     const elapsedDays = Math.max(0, input.nowMs - startMs) / MS_PER_DAY;
     if (!Number.isFinite(accruedUsd) || !Number.isFinite(elapsedDays)) return SYSTEM_COST_UNAVAILABLE;
     const pnlUsd = input.pnlUsd != null && Number.isFinite(input.pnlUsd) ? input.pnlUsd : null;
-    const netUsd = pnlUsd == null ? null : netAfterSystemCost(pnlUsd, accruedUsd);
-    const light = netUsd == null ? "unavailable" : systemCostLight(netUsd, monthlyUsd);
+    const netUsd = pnlUsd == null ? null : netAfterSystemCost(pnlUsd, forwardUsd);
+    const closedTrades = typeof input.closedTrades === "number" && Number.isFinite(input.closedTrades) ? input.closedTrades : 0;
+    const light = netUsd == null ? "unavailable" : systemCostLight(netUsd, closedTrades);
     return {
       status: "ok",
       light,
@@ -340,6 +379,8 @@ export function systemCostHurdle(input: {
       monthlyR: usdToR(monthlyUsd),
       accruedUsd,
       accruedR: usdToR(accruedUsd),
+      sunkUsd,
+      sunkR: usdToR(sunkUsd),
       pnlUsd,
       pnlR: pnlUsd == null ? null : usdToR(pnlUsd),
       netUsd,
@@ -353,13 +394,14 @@ export function systemCostHurdle(input: {
   }
 }
 
-/** Loads the committed file and builds the hurdle. Never throws. */
-export function readSystemCostHurdle(equityUsd: number | null, nowMs: number): SystemCostHurdle {
+/** Loads the committed file and builds the hurdle. Never throws. Missing closed count stays amber. */
+export function readSystemCostHurdle(equityUsd: number | null, nowMs: number, closedTrades = 0): SystemCostHurdle {
   try {
     return systemCostHurdle({
       config: loadSystemCostConfig(),
       pnlUsd: displayedPnlUsd(equityUsd),
       nowMs,
+      closedTrades,
     });
   } catch {
     return SYSTEM_COST_UNAVAILABLE;

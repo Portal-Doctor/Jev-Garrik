@@ -764,11 +764,11 @@ function SystemCost({ cost }: { cost: SystemCostHurdle | undefined }) {
   const net = known && typeof hurdle.netUsd === "number" ? hero(hurdle.netUsd) : null;
   const rule =
     light === "green"
-      ? "Net P/L after system costs is above zero."
+      ? "At least one closed trade, and P/L minus cost since the forward start is above zero."
       : light === "red"
-        ? "Net P/L after system costs is at or below minus one month of system cost."
+        ? "At least one closed trade, and P/L minus cost since the forward start is below zero."
         : light === "amber"
-          ? "Net P/L after system costs is not above zero, and it is above minus one month of system cost."
+          ? "No closed trade yet, or P/L minus cost since the forward start is zero. Cost before the forward start is sunk history and is not in this light."
           : "System cost could not be read, or P/L is missing.";
   return (
     <div className={styles.cost} id="system-cost" aria-label="System cost hurdle">
@@ -789,6 +789,9 @@ function SystemCost({ cost }: { cost: SystemCostHurdle | undefined }) {
           </div>
           <div className={styles.costLine}>
             Accrued {moneyOrDash(hurdle.accruedUsd)} · {moneyR(hurdle.accruedR)}
+          </div>
+          <div className={styles.costLine}>
+            Sunk history {moneyOrDash(hurdle.sunkUsd)} · {moneyR(hurdle.sunkR)}
           </div>
           {hurdle.items?.map((item) => (
             <div key={`${item.name}:${item.from ?? ""}:${item.until ?? ""}`} className={styles.hint}>

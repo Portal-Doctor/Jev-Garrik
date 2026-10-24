@@ -16,6 +16,7 @@ import {
   netAfterSystemCost,
   parseSystemCostConfig,
   readSystemCostHurdle,
+  SYSTEM_COST_CUTOVER_MS,
   SYSTEM_COST_R_USD,
   SYSTEM_COST_START_ISO,
   SYSTEM_COST_START_MS,
@@ -96,37 +97,56 @@ test("$20 is 1R and net P/L is the existing P/L minus accrued cost", () => {
   expect(formatSignedR(0)).toBe("0.00R");
 });
 
-test("the light is amber at exactly zero net, green just above, and amber just below", () => {
-  expect(systemCostLight(0, 110)).toBe("amber");
-  expect(systemCostLight(1e-9, 110)).toBe("green");
-  expect(systemCostLight(-1e-9, 110)).toBe("amber");
+test("the light is amber with no closed trade or with net exactly zero, red below zero, and green above zero", () => {
+  expect(systemCostLight(10, 0)).toBe("amber");
+  expect(systemCostLight(-10, 0)).toBe("amber");
+  expect(systemCostLight(0, 0)).toBe("amber");
+  expect(systemCostLight(0, 1)).toBe("amber");
+  expect(systemCostLight(-1e-9, 1)).toBe("red");
+  expect(systemCostLight(1e-9, 1)).toBe("green");
+  const none = systemCostHurdle({ config: committed, pnlUsd: 10, nowMs: SYSTEM_COST_START_MS, closedTrades: 0 });
+  expect(none.netUsd).toBe(10);
+  expect(none.light).toBe("amber");
+  const openLoss = systemCostHurdle({ config: committed, pnlUsd: -10, nowMs: SYSTEM_COST_START_MS, closedTrades: 0 });
+  expect(openLoss.netUsd).toBe(-10);
+  expect(openLoss.light).toBe("amber");
+  const closed = (pnlUsd: number) => systemCostHurdle({ config: committed, pnlUsd, nowMs: SYSTEM_COST_START_MS, closedTrades: 1 });
   expect(atStart(0).accruedUsd).toBe(0);
+  expect(atStart(0).sunkUsd).toBe(0);
   expect(atStart(0).netUsd).toBe(0);
   expect(atStart(0).netR).toBe(0);
   expect(atStart(0).light).toBe("amber");
-  expect(atStart(0.01).netUsd).toBe(0.01);
-  expect(atStart(0.01).light).toBe("green");
-  expect(atStart(-0.01).netUsd).toBe(-0.01);
-  expect(atStart(-0.01).light).toBe("amber");
+  expect(closed(0).netUsd).toBe(0);
+  expect(closed(0).light).toBe("amber");
+  expect(closed(0.01).netUsd).toBe(0.01);
+  expect(closed(0.01).light).toBe("green");
+  expect(closed(-0.01).netUsd).toBe(-0.01);
+  expect(closed(-0.01).light).toBe("red");
 });
 
-test("red begins at minus one month of system cost", () => {
-  expect(systemCostLight(-110, 110)).toBe("red");
-  expect(systemCostLight(-110 + 1e-9, 110)).toBe("amber");
-  expect(systemCostLight(-110 - 1e-9, 110)).toBe("red");
-  expect(atStart(-MONTHLY_USD).light).toBe("red");
-  expect(atStart(-MONTHLY_USD + 0.01).light).toBe("amber");
-  expect(atStart(-MONTHLY_USD - 0.01).light).toBe("red");
-  expect(systemCostLight(0, 0)).toBe("red");
+test("a full year still accrues twelve months, and only the part after the forward start is in the light", () => {
   const later = atStart(0, SYSTEM_COST_START_MS + DAY_MS);
   expect(later.accruedUsd).toBeGreaterThan(0);
-  expect(later.netUsd).toBeCloseTo(-later.accruedUsd!, 10);
+  expect(later.sunkUsd).toBeCloseTo(later.accruedUsd!, 10);
+  expect(later.netUsd).toBe(0);
   expect(later.light).toBe("amber");
   expect(later.monthlyR).toBe(5.7625);
   expect(later.accruedR).toBeCloseTo(usdToR(later.accruedUsd!), 10);
-  const year = atStart(0, SYSTEM_COST_START_MS + 365.25 * DAY_MS);
+  const year = systemCostHurdle({
+    config: committed,
+    pnlUsd: 0,
+    nowMs: SYSTEM_COST_START_MS + 365.25 * DAY_MS,
+    closedTrades: 1,
+  });
   expect(year.accruedUsd).toBeCloseTo(MONTHLY_USD * 12, 6);
+  const sunk = accruedSystemCostUsd(MONTHLY_USD, SYSTEM_COST_START_MS, SYSTEM_COST_CUTOVER_MS);
+  expect(year.sunkUsd).toBeCloseTo(sunk, 6);
+  expect(year.netUsd).toBeCloseTo(-(year.accruedUsd! - year.sunkUsd!), 6);
+  expect(year.netUsd!).toBeLessThan(0);
   expect(year.light).toBe("red");
+  const waiting = systemCostHurdle({ config: committed, pnlUsd: 0, nowMs: SYSTEM_COST_START_MS + 365.25 * DAY_MS, closedTrades: 0 });
+  expect(waiting.netUsd).toBeCloseTo(year.netUsd!, 6);
+  expect(waiting.light).toBe("amber");
 });
 
 test("a missing P/L leaves the cost numbers and an unavailable light", () => {
@@ -202,16 +222,26 @@ test("the committed file freezes the $115.25 history at the 2026-10-26 cutover a
   expect(hurdle.since).toBe(SYSTEM_COST_START_ISO);
   expect(hurdle.elapsedDays).toBe(days);
   expect(hurdle.accruedUsd).toBeCloseTo(frozen, 8);
-  expect(hurdle.light).toBe("red");
+  expect(hurdle.sunkUsd).toBeCloseTo(frozen, 8);
+  expect(hurdle.sunkR).toBeCloseTo(usdToR(frozen), 8);
+  expect(hurdle.netUsd).toBe(0);
+  expect(hurdle.light).toBe("amber");
+  const closedAtZero = systemCostHurdle({ config, pnlUsd: 0, nowMs: now, closedTrades: 1 });
+  expect(closedAtZero.netUsd).toBe(0);
+  expect(closedAtZero.light).toBe("amber");
   expect(hurdle.items?.[0]).toEqual({ name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE, from: "2026-10-10", until: "2026-10-26" });
   expect(hurdle.items?.[1]).toEqual({ name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE, from: "2026-10-10", until: "2026-10-26" });
   expect(hurdle.items?.[2]).toEqual({ name: "Local Docker", monthlyUsd: 0, note: dockerNote, from: "2026-10-26" });
   const before = systemCostHurdle({ config, pnlUsd: 0, nowMs: now - 1 });
   expect(before.monthlyUsd).toBe(MONTHLY_USD);
   expect(before.accruedUsd).toBeLessThan(frozen);
+  expect(before.sunkUsd).toBeCloseTo(before.accruedUsd!, 8);
+  expect(before.netUsd).toBe(0);
   const later = systemCostHurdle({ config, pnlUsd: 0, nowMs: now + 30 * DAY_MS });
   expect(later.monthlyUsd).toBe(0);
   expect(later.accruedUsd).toBeCloseTo(frozen, 8);
+  expect(later.sunkUsd).toBeCloseTo(frozen, 8);
+  expect(later.netUsd).toBe(0);
   expect(later.elapsedDays).toBe(days + 30);
   const confirmed = parseSystemCostConfig({
     lastUpdated: "2026-10-24",
@@ -262,7 +292,66 @@ test("overlapping cost spans are rejected and contiguous spans are billed once",
   expect(hurdle.status).toBe("ok");
   expect(hurdle.monthlyUsd).toBe(0);
   expect(hurdle.accruedUsd).toBeCloseTo(once, 8);
+  expect(hurdle.sunkUsd).toBeCloseTo(once, 8);
+  expect(hurdle.netUsd).toBe(0);
   expect(hurdle.accruedUsd).not.toBeCloseTo(once * 2, 8);
+});
+
+test("pre-cutover cost is excluded from the light and shown as sunk history, including the exact forward-start boundary", () => {
+  const config = loadSystemCostConfig();
+  const now = Date.parse("2026-10-24T00:00:00.000Z");
+  const cutover = SYSTEM_COST_CUTOVER_MS;
+  expect(cutover).toBe(Date.parse("2026-10-26T00:00:00.000Z"));
+  const sunk = (MONTHLY_USD * 12) / 365.25 * ((now - SYSTEM_COST_START_MS) / DAY_MS);
+  const green = systemCostHurdle({ config, pnlUsd: 1, nowMs: now, closedTrades: 1 });
+  expect(green.sunkUsd).toBeCloseTo(sunk, 8);
+  expect(green.accruedUsd).toBeCloseTo(sunk, 8);
+  expect(green.netUsd).toBeCloseTo(1, 8);
+  expect(green.netUsd).not.toBeCloseTo(1 - sunk, 2);
+  expect(green.light).toBe("green");
+  const red = systemCostHurdle({ config, pnlUsd: -1, nowMs: now, closedTrades: 1 });
+  expect(red.netUsd).toBeCloseTo(-1, 8);
+  expect(red.light).toBe("red");
+  const waiting = systemCostHurdle({ config, pnlUsd: 50, nowMs: now, closedTrades: 0 });
+  expect(waiting.netUsd).toBeCloseTo(50, 8);
+  expect(waiting.sunkUsd).toBeCloseTo(sunk, 8);
+  expect(waiting.light).toBe("amber");
+  const frozen = (MONTHLY_USD * 12) / 365.25 * ((cutover - SYSTEM_COST_START_MS) / DAY_MS);
+  const at = systemCostHurdle({ config, pnlUsd: 0, nowMs: cutover, closedTrades: 1 });
+  expect(at.monthlyUsd).toBe(0);
+  expect(at.sunkUsd).toBeCloseTo(frozen, 8);
+  expect(at.accruedUsd).toBeCloseTo(frozen, 8);
+  expect(at.netUsd).toBe(0);
+  expect(at.light).toBe("amber");
+  const justBefore = systemCostHurdle({ config, pnlUsd: 0, nowMs: cutover - 1, closedTrades: 1 });
+  expect(justBefore.monthlyUsd).toBe(MONTHLY_USD);
+  expect(justBefore.sunkUsd).toBeLessThan(frozen);
+  expect(justBefore.sunkUsd).toBeCloseTo(justBefore.accruedUsd!, 8);
+  expect(justBefore.netUsd).toBe(0);
+  expect(justBefore.light).toBe("amber");
+  const justAfter = systemCostHurdle({ config, pnlUsd: 5, nowMs: cutover + 1, closedTrades: 1 });
+  expect(justAfter.sunkUsd).toBeCloseTo(frozen, 8);
+  expect(justAfter.accruedUsd).toBeCloseTo(frozen, 8);
+  expect(justAfter.netUsd).toBeCloseTo(5, 8);
+  expect(justAfter.light).toBe("green");
+  const paidAfter = parseSystemCostConfig({
+    lastUpdated: "2026-10-24",
+    spans: [
+      { from: "2026-10-10", until: "2026-10-26", items: [{ name: "Vercel Pro", monthlyUsd: 110 }] },
+      { from: "2026-10-26", items: [{ name: "Local Docker", monthlyUsd: 30 }] },
+    ],
+  });
+  const postNow = cutover + 30 * DAY_MS;
+  const pre = accruedSystemCostUsd(110, SYSTEM_COST_START_MS, cutover);
+  const post = accruedSystemCostUsd(30, cutover, postNow);
+  const billed = systemCostHurdle({ config: paidAfter, pnlUsd: 0, nowMs: postNow, closedTrades: 1 });
+  expect(billed.sunkUsd).toBeCloseTo(pre, 8);
+  expect(billed.accruedUsd).toBeCloseTo(pre + post, 8);
+  expect(billed.netUsd).toBeCloseTo(-post, 8);
+  expect(billed.light).toBe("red");
+  const stillOpen = systemCostHurdle({ config: paidAfter, pnlUsd: 0, nowMs: postNow, closedTrades: 0 });
+  expect(stillOpen.netUsd).toBeCloseTo(-post, 8);
+  expect(stillOpen.light).toBe("amber");
 });
 
 test("the scrubber keeps the system-cost fields and drops a planted host", () => {
@@ -275,6 +364,8 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
     monthlyR: 5.7625,
     accruedUsd: 42,
     accruedR: 2.1,
+    sunkUsd: 53.1,
+    sunkR: 2.655,
     pnlUsd: 32,
     pnlR: 1.6,
     netUsd: -10,
@@ -297,6 +388,8 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
   expect(shown.systemCost?.monthlyR).toBe(5.7625);
   expect(shown.systemCost?.accruedUsd).toBe(42);
   expect(shown.systemCost?.accruedR).toBe(2.1);
+  expect(shown.systemCost?.sunkUsd).toBe(53.1);
+  expect(shown.systemCost?.sunkR).toBe(2.655);
   expect(shown.systemCost?.pnlUsd).toBe(32);
   expect(shown.systemCost?.pnlR).toBe(1.6);
   expect(shown.systemCost?.netUsd).toBe(-10);
@@ -316,6 +409,21 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
   expect(output.includes("holder")).toBe(false);
   const again = redactP6View(shown);
   expect(again.systemCost).toEqual(shown.systemCost);
+  const hostile = redactP6View(
+    view({
+      systemCost: {
+        status: "ok",
+        light: "amber",
+        sunkUsd: Number.NaN,
+        sunkR: "53" as unknown as number,
+        sunkNote: host,
+      },
+    }),
+  );
+  expect(hostile.systemCost?.sunkUsd).toBeUndefined();
+  expect(hostile.systemCost?.sunkR).toBeUndefined();
+  expect(JSON.stringify(hostile).includes(host)).toBe(false);
+  expect(JSON.stringify(hostile).includes("sunkNote")).toBe(false);
 });
 
 test("health.json is the scrubbed hurdle", () => {
@@ -457,9 +565,12 @@ test("a page read puts the hurdle on the view from the displayed equity P/L", as
   expect(loaded.systemCost?.items?.[2]?.monthlyUsd).toBe(0);
   const frozen = (MONTHLY_USD * 12) / 365.25 * ((now - SYSTEM_COST_START_MS) / DAY_MS);
   expect(loaded.systemCost?.accruedUsd).toBeCloseTo(frozen, 8);
-  expect(loaded.systemCost?.netUsd).toBeCloseTo(120 - frozen, 8);
+  expect(loaded.systemCost?.sunkUsd).toBeCloseTo(frozen, 8);
+  expect(loaded.systemCost?.netUsd).toBeCloseTo(120, 8);
+  expect(loaded.systemCost?.light).toBe("amber");
   const shown = redactP6View(loaded);
   expect(shown.systemCost?.pnlUsd).toBe(120);
+  expect(shown.systemCost?.sunkUsd).toBeCloseTo(frozen, 8);
   expect(shown.systemCost?.light).toBe(loaded.systemCost?.light);
   const body = p6HealthJson(loaded, "Healthy");
   const cost = shown.systemCost;
@@ -469,6 +580,7 @@ test("a page read puts the hurdle on the view from the displayed equity P/L", as
   const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
   const route = readFileSync(join(root, "web/src/app/p6/health.json/route.ts"), "utf8");
   expect(page.includes("Net after system cost")).toBe(true);
+  expect(page.includes("Sunk history")).toBe(true);
   expect(page.includes("view.systemCost")).toBe(true);
   expect(page.includes("item.estimate === true")).toBe(true);
   expect(page.includes("(est.)")).toBe(true);

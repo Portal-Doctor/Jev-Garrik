@@ -513,6 +513,10 @@ function publicSystemCost(raw: unknown): SystemCostHurdle {
   if (accruedUsd != null && accruedUsd >= 0) out.accruedUsd = accruedUsd;
   const accruedR = finiteCost(row.accruedR);
   if (accruedR != null && accruedR >= 0) out.accruedR = accruedR;
+  const sunkUsd = finiteCost(row.sunkUsd);
+  if (sunkUsd != null && sunkUsd >= 0) out.sunkUsd = sunkUsd;
+  const sunkR = finiteCost(row.sunkR);
+  if (sunkR != null && sunkR >= 0) out.sunkR = sunkR;
   const pnlUsd = nullableCost(row.pnlUsd);
   if (pnlUsd !== undefined) out.pnlUsd = pnlUsd;
   const pnlR = nullableCost(row.pnlR);
@@ -1266,7 +1270,7 @@ export async function readP6Page(
     points: equity.points,
     trades: equity.trades,
   });
-  view.systemCost = readSystemCostHurdle(pnl ? numField(pnl, "equityUsd") : null, nowMs);
+  view.systemCost = readSystemCostHurdle(pnl ? numField(pnl, "equityUsd") : null, nowMs, view.closed.length);
   return { view, block };
 }
 
