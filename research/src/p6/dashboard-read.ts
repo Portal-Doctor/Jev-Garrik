@@ -22,7 +22,7 @@ import {
   type PnlBlock,
 } from "./pnl-block";
 import { closedNow, fetchRestBids, type MarkNow, type MarkPosition, type MarkQuote } from "./mark-now";
-import { scrubClassAPaper, type ClassAPaperView } from "./class-a-paper";
+import { classALightBasis, restoreClassABook, scrubClassAPaper, type ClassAPaperView } from "./class-a-paper";
 import { isIsoDate, readSystemCostHurdle, type SystemCostHurdle, type SystemCostItem } from "./system-cost";
 import { classMeanNetR, classStress, execCostWord, modelledShare, quoteMissStats, type ClassStress, type ExecWord, type StressGrade, type StressTrade } from "./x1-fill";
 
@@ -521,6 +521,10 @@ function publicSystemCost(raw: unknown): SystemCostHurdle {
   if (pnlUsd !== undefined) out.pnlUsd = pnlUsd;
   const pnlR = nullableCost(row.pnlR);
   if (pnlR !== undefined) out.pnlR = pnlR;
+  const classAPnlUsd = nullableCost(row.classAPnlUsd);
+  if (classAPnlUsd !== undefined) out.classAPnlUsd = classAPnlUsd;
+  const classAPnlR = nullableCost(row.classAPnlR);
+  if (classAPnlR !== undefined) out.classAPnlR = classAPnlR;
   const netUsd = nullableCost(row.netUsd);
   if (netUsd !== undefined) out.netUsd = netUsd;
   const netR = nullableCost(row.netR);
@@ -1270,7 +1274,8 @@ export async function readP6Page(
     points: equity.points,
     trades: equity.trades,
   });
-  view.systemCost = readSystemCostHurdle(pnl ? numField(pnl, "equityUsd") : null, nowMs, view.closed.length);
+  const basis = classALightBasis(restoreClassABook(view.classAPaper));
+  view.systemCost = readSystemCostHurdle(pnl ? numField(pnl, "equityUsd") : null, nowMs, basis.closedTrades, basis.pnlUsd);
   return { view, block };
 }
 

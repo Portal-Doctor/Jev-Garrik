@@ -83,11 +83,17 @@ export interface SystemCostHurdle {
   sunkUsd?: number;
   sunkR?: number;
   /**
-   * Existing displayed P/L: equity minus the paper start capital.
-   * Includes open marks. Not realized-only. Null when equity is missing.
+   * Header P/L: engine equity minus the paper start capital.
+   * Includes the engine's open marks. Not the class A book. Null when equity is missing.
    */
   pnlUsd?: number | null;
   pnlR?: number | null;
+  /**
+   * Class A book P/L used by the light: realized plus open marks since the forward start.
+   * Null when that input was not supplied. Zero is a real book with nothing accrued.
+   */
+  classAPnlUsd?: number | null;
+  classAPnlR?: number | null;
   netUsd?: number | null;
   netR?: number | null;
   since?: string;
@@ -273,16 +279,18 @@ export function netAfterSystemCost(pnlUsd: number, accruedUsd: number): number {
 /**
  * Hurdle light. Display only. It does not promote or kill.
  *
- * Net is P/L minus cost accrued from the forward start
+ * Net is class A book P/L minus cost accrued from the forward start
  * (SYSTEM_COST_CUTOVER_ISO, 2026-10-26T00:00:00.000Z) onward.
+ * That P/L is realized plus open marks accrued from the same instant.
+ * The closed-trade count is class A closes since that instant, not the engine's closed list.
  * Cost before that instant is sunk history and is not in the light.
- * P/L is the header definition: equity minus the paper start capital.
- * It includes open marks. It is not realized-only.
+ * The header P/L stays equity minus the paper start capital. It is not this net.
  *
- * amber: there is no closed trade yet, or net == 0.
- * red: at least one closed trade and net < 0.
- * green: at least one closed trade and net > 0.
+ * amber: there is no class A closed trade yet, or net == 0.
+ * red: at least one class A close since the forward start and net < 0.
+ * green: at least one class A close since the forward start and net > 0.
  * Amber stays reachable when the monthly rate is $0, because net == 0 is amber.
+ * A missing closed count is no data and stays amber.
  */
 export function systemCostLight(netUsd: number, closedTrades: number): Exclude<SystemCostLight, "unavailable"> {
   if (!(closedTrades > 0) || netUsd === 0) return "amber";
@@ -317,10 +325,16 @@ export function formatSignedR(value: number): string {
  */
 export function systemCostHurdle(input: {
   config: SystemCostConfig | null;
+  /** Header P/L. Stored on the hurdle. Not the light, unless lightPnlUsd is omitted. */
   pnlUsd: number | null;
+  /**
+   * Class A book P/L for the light. Omit only when the caller is the cost-math test
+   * and the header figure is the number under test. The page always passes this.
+   */
+  lightPnlUsd?: number | null;
   nowMs: number;
   startMs?: number;
-  /** Closed trades on the book. Zero or missing means there is no closed trade yet. */
+  /** Class A closes since the forward start. Zero, missing, or non-finite means there is no closed trade yet. */
   closedTrades?: number;
 }): SystemCostHurdle {
   try {
@@ -368,7 +382,9 @@ export function systemCostHurdle(input: {
     const elapsedDays = Math.max(0, input.nowMs - startMs) / MS_PER_DAY;
     if (!Number.isFinite(accruedUsd) || !Number.isFinite(elapsedDays)) return SYSTEM_COST_UNAVAILABLE;
     const pnlUsd = input.pnlUsd != null && Number.isFinite(input.pnlUsd) ? input.pnlUsd : null;
-    const netUsd = pnlUsd == null ? null : netAfterSystemCost(pnlUsd, forwardUsd);
+    const usesClassA = input.lightPnlUsd !== undefined;
+    const lightPnl = !usesClassA ? pnlUsd : input.lightPnlUsd != null && Number.isFinite(input.lightPnlUsd) ? input.lightPnlUsd : null;
+    const netUsd = lightPnl == null ? null : netAfterSystemCost(lightPnl, forwardUsd);
     const closedTrades = typeof input.closedTrades === "number" && Number.isFinite(input.closedTrades) ? input.closedTrades : 0;
     const light = netUsd == null ? "unavailable" : systemCostLight(netUsd, closedTrades);
     return {
@@ -383,6 +399,7 @@ export function systemCostHurdle(input: {
       sunkR: usdToR(sunkUsd),
       pnlUsd,
       pnlR: pnlUsd == null ? null : usdToR(pnlUsd),
+      ...(usesClassA ? { classAPnlUsd: lightPnl, classAPnlR: lightPnl == null ? null : usdToR(lightPnl) } : {}),
       netUsd,
       netR: netUsd == null ? null : usdToR(netUsd),
       since: new Date(startMs).toISOString(),
@@ -394,12 +411,22 @@ export function systemCostHurdle(input: {
   }
 }
 
-/** Loads the committed file and builds the hurdle. Never throws. Missing closed count stays amber. */
-export function readSystemCostHurdle(equityUsd: number | null, nowMs: number, closedTrades = 0): SystemCostHurdle {
+/**
+ * Loads the committed file and builds the hurdle. Never throws.
+ * closedTrades defaults to 0 when the caller has no class A book.
+ * lightPnlUsd defaults to the header figure only when omitted. The page passes the class A basis.
+ */
+export function readSystemCostHurdle(
+  equityUsd: number | null,
+  nowMs: number,
+  closedTrades = 0,
+  lightPnlUsd?: number | null,
+): SystemCostHurdle {
   try {
     return systemCostHurdle({
       config: loadSystemCostConfig(),
       pnlUsd: displayedPnlUsd(equityUsd),
+      ...(lightPnlUsd !== undefined ? { lightPnlUsd } : {}),
       nowMs,
       closedTrades,
     });

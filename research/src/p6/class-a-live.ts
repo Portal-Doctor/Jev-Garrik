@@ -21,6 +21,8 @@ import {
   walkCostBps,
   type ClassABook,
   type ClassADay,
+  type ClassAResting,
+  type ClassARow,
 } from "./class-a-paper";
 import { hourAtrAt } from "./generate";
 import { dataFile } from "./live-data";
@@ -48,6 +50,34 @@ export interface ClassALiveHost {
    * When this map is set, the coverage file is not consulted.
    */
   listingFirstMs?: Readonly<Record<string, number | null>>;
+  /** Bars of the 15m bucket currently being settled together. Not part of the saved book. */
+  classABucket?: ClassABucket;
+}
+
+interface ClassABucketBar {
+  productId: string;
+  startSec: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+interface ClassARowSnap {
+  fill: ClassARow["fill"];
+  skipReason: ClassARow["skipReason"];
+  check: string | null;
+  notionalUsd: number | null;
+  feesUsd: number | null;
+  measured: number | null;
+  stop: number | null;
+}
+
+interface ClassABucket {
+  startSec: number;
+  bars: ClassABucketBar[];
+  resting: ClassAResting[];
+  rows: Map<string, ClassARowSnap>;
 }
 
 function asDays(bars: readonly Ohlc[]): { days: ClassADay[]; opens: number[] } {
@@ -78,20 +108,78 @@ function quotedSpreadBps(bid: number, ask: number): number | null {
   return ((ask - bid) / mid) * 10_000;
 }
 
+function cloneResting(orders: readonly ClassAResting[]): ClassAResting[] {
+  return orders.map((order) => ({ ...order, priorCloses: order.priorCloses.slice() }));
+}
+
+function snapshotBucket(book: ClassABook, startSec: number): ClassABucket {
+  const rows = new Map<string, ClassARowSnap>();
+  for (const order of book.resting ?? []) {
+    const row = book.rows.find((item) => item.id === order.rowId);
+    if (!row) continue;
+    rows.set(row.id, {
+      fill: row.fill,
+      skipReason: row.skipReason,
+      check: row.check,
+      notionalUsd: row.notionalUsd,
+      feesUsd: row.feesUsd,
+      measured: row.measured,
+      stop: row.stop,
+    });
+  }
+  return { startSec, bars: [], resting: cloneResting(book.resting ?? []), rows };
+}
+
+/** Put this bucket's cap and fill decisions back, so a later pair in the same 15m bar can be ordered with the rest. */
+function revertBucket(book: ClassABook, snap: ClassABucket): void {
+  const ids = new Set(snap.rows.keys());
+  book.open = book.open.filter((sim) => !ids.has(sim.rowId));
+  for (const row of book.rows) {
+    const saved = snap.rows.get(row.id);
+    if (!saved) continue;
+    row.fill = saved.fill;
+    row.skipReason = saved.skipReason;
+    row.check = saved.check;
+    row.notionalUsd = saved.notionalUsd;
+    row.feesUsd = saved.feesUsd;
+    row.measured = saved.measured;
+    row.stop = saved.stop;
+  }
+  const added = (book.resting ?? []).filter((order) => !ids.has(order.rowId));
+  book.resting = [...cloneResting(snap.resting), ...added];
+}
+
 /**
- * One accepted 15m bar. Resting maker orders resolve on every bar. Intrabar stops run on every bar.
- * The day-close bar (23:45Z) updates the daily rule and, when that close is the signal time, evaluates the pair.
+ * One 15m bucket, all pairs together. Placement time, then pair A→Z, then row id.
+ * Push order does not choose which orders fill.
+ */
+function settleClassABucket(host: ClassALiveHost, bar: ClassABucketBar): void {
+  const book = host.classAPaper;
+  if (!book) return;
+  if (!host.classABucket || host.classABucket.startSec !== bar.startSec) host.classABucket = snapshotBucket(book, bar.startSec);
+  else revertBucket(book, host.classABucket);
+  host.classABucket.bars.push(bar);
+  const closeMs = (bar.startSec + 900) * 1000;
+  const nowMs = Math.max(closeMs, host.clock());
+  resolveClassAResting(book, nowMs, {
+    events: host.classABucket.bars.map((item) => ({
+      pair: item.productId,
+      prints: printsOf(host, item.productId),
+      bar: { startMs: item.startSec * 1000, endMs: (item.startSec + 900) * 1000, low: item.low },
+    })),
+  });
+}
+
+/**
+ * One accepted 15m bar. Resting maker orders for that 15m bucket resolve together, not one pair per push.
+ * Intrabar stops run on every bar. The day-close bar (23:45Z) updates the daily rule and, when that close is the signal time, evaluates the pair.
  */
 export function stepClassAFromHost(host: ClassALiveHost, bar: { productId: string; startSec: number; open: number; high: number; low: number; close: number }): void {
   const book = host.classAPaper;
   if (!book || book.exclusionOk === false || book.startMs == null) return;
   const closeMs = (bar.startSec + 900) * 1000;
   const nowMs = Math.max(closeMs, host.clock());
-  resolveClassAResting(book, nowMs, {
-    pair: bar.productId,
-    prints: printsOf(host, bar.productId),
-    bar: { startMs: bar.startSec * 1000, endMs: closeMs, low: bar.low },
-  });
+  settleClassABucket(host, bar);
   const hourAtr = hourAtrAt(host.hourWarm.get(bar.productId) ?? [], closeMs / 1000);
   armClassAHourOpen(book, bar.productId, bar.startSec * 1000, bar.open);
   onIntrabar(book, { pair: bar.productId, tsMs: closeMs, open: bar.open, low: bar.low, hourAtr });
@@ -196,7 +284,8 @@ function printsOf(host: ClassALiveHost, productId: string): { tsMs: number; pric
 
 let minSizes: Map<string, number> | null = null;
 
-function sizeOf(row: { base_min_size?: unknown; base_increment?: unknown }): number | null {
+/** base_min_size when it is present and positive. Otherwise base_increment. Unknown stays null, never zero. */
+export function classAMinSizeOf(row: { base_min_size?: unknown; base_increment?: unknown }): number | null {
   const minSize = Number(row.base_min_size);
   if (minSize > 0) return minSize;
   const increment = Number(row.base_increment);
@@ -220,7 +309,7 @@ function loadClassAMinSizes(): Map<string, number> {
       const body = JSON.parse(readFileSync(path, "utf8")) as { id?: string; base_min_size?: unknown; base_increment?: unknown }[];
       if (Array.isArray(body)) {
         for (const row of body) {
-          const min = sizeOf(row);
+          const min = classAMinSizeOf(row);
           if (row.id && min != null) map.set(row.id, min);
         }
       }
@@ -235,7 +324,7 @@ function loadClassAMinSizes(): Map<string, number> {
         const body = JSON.parse(proc.stdout) as { id?: string; base_min_size?: unknown; base_increment?: unknown }[];
         if (Array.isArray(body)) {
           for (const row of body) {
-            const min = sizeOf(row);
+            const min = classAMinSizeOf(row);
             if (row.id && min != null) map.set(row.id, min);
           }
         }

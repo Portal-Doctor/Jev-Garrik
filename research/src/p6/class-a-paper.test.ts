@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { stepClassAFromHost, type ClassALiveHost } from "./class-a-live";
 import { addDays, daysBetween } from "../p5/stats";
 import { applyForward, freshBook } from "./engine";
 import { captureHot, loadSplit, persistSplit } from "./hot-store";
@@ -31,6 +32,7 @@ import {
   CLASS_A_SPEC_SHA256,
   CLASS_A_TAKER_FEE_BPS,
   classABuyHoldSeries,
+  classALightBasis,
   armClassAHourOpen,
   classABhReport,
   classAMarkedReview,
@@ -792,6 +794,70 @@ test("a maker order stays pending through the four hour window and survives a re
   expect(viaBar.open[0]?.entryMs).toBe(at);
 });
 
+test("a resting fill is inside the half-open window and needs one tick through the limit", () => {
+  const days = daysOf();
+  const close = days[69]!.close;
+  const at = signalCloseMs(days[69]!.date);
+  const tick = 0.01;
+  const end = at + 4 * 60 * 60 * 1000;
+  const plant = () => {
+    const paper = book();
+    expect(evaluateSignal(paper, signal({ days, prints: [], asOfMs: at, tick }))?.fill).toBe("pending");
+    return paper;
+  };
+  const atClose = plant();
+  resolveClassAResting(atClose, at + 1, { pair: "SOL-USD", prints: [{ tsMs: at, price: close - tick }] });
+  expect(atClose.rows[0]?.fill).toBe("fill");
+  const atLimit = plant();
+  resolveClassAResting(atLimit, at + 1, { pair: "SOL-USD", prints: [{ tsMs: at + 1, price: close }] });
+  expect(atLimit.rows[0]?.fill).toBe("pending");
+  const through = plant();
+  resolveClassAResting(through, at + 1, { pair: "SOL-USD", prints: [{ tsMs: at + 1, price: close - tick }] });
+  expect(through.rows[0]?.fill).toBe("fill");
+  const onEnd = plant();
+  resolveClassAResting(onEnd, end, { pair: "SOL-USD", prints: [{ tsMs: end, price: close - tick }] });
+  expect(onEnd.rows[0]?.skipReason).toBe("skip_nofill");
+  const justInside = plant();
+  resolveClassAResting(justInside, end, { pair: "SOL-USD", prints: [{ tsMs: end - 1, price: close - tick }] });
+  expect(justInside.rows[0]?.fill).toBe("fill");
+  const barAtClose = plant();
+  resolveClassAResting(barAtClose, at + 900_000, { pair: "SOL-USD", bar: { startMs: at, endMs: at + 900_000, low: close - tick } });
+  expect(barAtClose.rows[0]?.fill).toBe("fill");
+  const barAtEnd = plant();
+  resolveClassAResting(barAtEnd, end, { pair: "SOL-USD", bar: { startMs: end, endMs: end + 900_000, low: close - tick } });
+  expect(barAtEnd.rows[0]?.skipReason).toBe("skip_nofill");
+});
+
+test("pushing the pairs in reverse order fills the same three orders", () => {
+  const days = daysOf().map((day) => ({ ...day, high: day.close + 5, low: day.close - 5 }));
+  const close = days[69]!.close;
+  const at = signalCloseMs(days[69]!.date);
+  const run = (pairs: string[]) => {
+    const paper = book();
+    for (const pair of ["ETH-USD", "DOGE-USD", "BTC-USD", "SOL-USD", "ADA-USD"]) {
+      expect(evaluateSignal(paper, signal({ pair, days, prints: [], asOfMs: at }))?.fill).toBe("pending");
+    }
+    const host: ClassALiveHost = {
+      classAPaper: paper,
+      clock: () => at + 900_000,
+      dailyBars: new Map(),
+      hourWarm: new Map(),
+      ticks: new Map(),
+      trades: [],
+      books: new Map(),
+      book: { quotes: {} },
+    };
+    for (const pair of pairs) {
+      stepClassAFromHost(host, { productId: pair, startSec: at / 1000, open: close, high: close, low: close - 0.02, close });
+    }
+    return paper.open.map((sim) => sim.pair).sort();
+  };
+  const forward = run(["ADA-USD", "BTC-USD", "DOGE-USD", "ETH-USD", "SOL-USD"]);
+  const reverse = run(["SOL-USD", "ETH-USD", "DOGE-USD", "BTC-USD", "ADA-USD"]);
+  expect(forward).toEqual(["ADA-USD", "BTC-USD", "DOGE-USD"]);
+  expect(reverse).toEqual(forward);
+});
+
 test("five maker fills at once stop at 3 positions and $60, earlier placement then pair", () => {
   const days = daysOf().map((day) => ({ ...day, high: day.close + 5, low: day.close - 5 }));
   const close = days[69]!.close;
@@ -817,15 +883,19 @@ test("five maker fills at once stop at 3 positions and $60, earlier placement th
   for (const pair of rejected) {
     const row = paper.rows.find((item) => item.pair === pair);
     expect(row?.fill).toBe("nofill");
-    expect(row?.skipReason).toBe("cap_full");
+    expect(row?.skipReason).toBe("skip_cap");
     expect(row?.notionalUsd).toBeNull();
     expect(row?.feesUsd).toBeNull();
   }
   expect(paper.resting).toHaveLength(0);
   const restored = restoreClassABook(JSON.parse(JSON.stringify(paper)));
-  expect(restored?.rows.filter((row) => row.skipReason === "cap_full").map((row) => row.pair).sort()).toEqual(rejected);
+  expect(restored?.rows.filter((row) => row.skipReason === "skip_cap").map((row) => row.pair).sort()).toEqual(rejected);
   expect(restored?.open).toHaveLength(CLASS_A_MAX_OPEN);
-  expect(scrubClassAPaper(paper).skips.cap_full).toBe(rejected.length);
+  expect(scrubClassAPaper(paper).skips.skip_cap).toBe(rejected.length);
+  const rate = classAPaperView(paper);
+  expect(rate.fills).toBe(filled.length);
+  expect(rate.skips.skip_cap).toBe(rejected.length);
+  expect(rate.fillRate).toBe(1);
 
   // One slot left. The earlier signal fills even though its pair sorts after the other.
   const timed = book();
@@ -858,7 +928,7 @@ test("five maker fills at once stop at 3 positions and $60, earlier placement th
   }
   resolveClassAResting(timed, at + 60_000, { bar: { startMs: at, endMs: at + 900_000, low: close - 5 } });
   expect(timed.rows.find((row) => row.pair === "SOL-USD")?.fill).toBe("fill");
-  expect(timed.rows.find((row) => row.pair === "ADA-USD")?.skipReason).toBe("cap_full");
+  expect(timed.rows.find((row) => row.pair === "ADA-USD")?.skipReason).toBe("skip_cap");
   expect(timed.open).toHaveLength(CLASS_A_MAX_OPEN);
 
   // Risk cap rejects while a position slot is still open.
@@ -882,7 +952,7 @@ test("five maker fills at once stop at 3 positions and $60, earlier placement th
     pending: null,
   });
   resolveClassAResting(riskBook, at + 60_000, { bar: { startMs: at, endMs: at + 900_000, low: close - 5 } });
-  expect(riskBook.rows.find((row) => row.pair === "SOL-USD")?.skipReason).toBe("cap_full");
+  expect(riskBook.rows.find((row) => row.pair === "SOL-USD")?.skipReason).toBe("skip_cap");
   expect(riskBook.open).toHaveLength(1);
 
   // Count cap rejects while open risk is still under $60.
@@ -908,7 +978,7 @@ test("five maker fills at once stop at 3 positions and $60, earlier placement th
     });
   }
   resolveClassAResting(countBook, at + 60_000, { bar: { startMs: at, endMs: at + 900_000, low: close - 5 } });
-  expect(countBook.rows.find((row) => row.pair === "SOL-USD")?.skipReason).toBe("cap_full");
+  expect(countBook.rows.find((row) => row.pair === "SOL-USD")?.skipReason).toBe("skip_cap");
   expect(countBook.open).toHaveLength(CLASS_A_MAX_OPEN);
   const countRisk = countBook.open.reduce((total, sim) => total + sim.notionalUsd * ((sim.entry - sim.initialStop) / sim.entry), 0);
   expect(countRisk).toBeLessThan(CLASS_A_MAX_OPEN_RISK_USD);
@@ -1128,36 +1198,45 @@ test("a counterfactual waits for the next 1h open and a young or unknown listing
   expect(row?.awaitHourOpen).toBe(true);
   expect(deferred.shadows).toHaveLength(0);
   const hourOpen = (row?.signalClose ?? 0) + 0.01;
-  armClassAHourOpen(deferred, "SOL-USD", row?.signalMs ?? 0, hourOpen);
+  const entrySignalMs = row?.signalMs ?? 0;
+  armClassAHourOpen(deferred, "SOL-USD", entrySignalMs, hourOpen);
+  expect(row?.awaitHourOpen).toBe(true);
+  expect(deferred.shadows).toHaveLength(0);
+  armClassAHourOpen(deferred, "SOL-USD", entrySignalMs + 3_600_000, hourOpen);
   expect(row?.awaitHourOpen).toBe(false);
   expect(row?.counterfactual?.status).toBe("open");
   expect(row?.counterfactual?.entry).toBe(hourOpen);
   expect(deferred.shadows[0]?.entry).toBe(hourOpen);
+  expect(deferred.shadows[0]?.entryMs).toBe(entrySignalMs + 3_600_000);
   const chased = book();
   const waiting = evaluateSignal(chased, signal({ nextHourOpen: null }));
-  armClassAHourOpen(chased, "SOL-USD", waiting?.signalMs ?? 0, (waiting?.signalClose ?? 0) + 10);
+  armClassAHourOpen(chased, "SOL-USD", (waiting?.signalMs ?? 0) + 3_600_000, (waiting?.signalClose ?? 0) + 10);
   expect(waiting?.counterfactual?.status).toBe("chase");
   expect(chased.shadows).toHaveLength(0);
   const days = daysOf();
   const at = signalCloseMs(days[days.length - 1]!.date);
   const armed = book();
   const pending = evaluateSignal(armed, signal({ days, nextHourOpen: null }));
-  armClassAHourOpen(armed, "ETH-USD", at, (pending?.signalClose ?? 0) + 0.01);
+  armClassAHourOpen(armed, "ETH-USD", at + 3_600_000, (pending?.signalClose ?? 0) + 0.01);
   armClassAHourOpen(armed, "SOL-USD", at - 900_000, pending?.signalClose ?? 0);
+  armClassAHourOpen(armed, "SOL-USD", at, pending?.signalClose ?? 0);
   expect(pending?.awaitHourOpen).toBe(true);
   expect(pending?.counterfactual?.status).toBe("unavailable");
   const nextOpen = (pending?.signalClose ?? 0) + 0.01;
-  armClassAHourOpen(armed, "SOL-USD", at, nextOpen);
+  armClassAHourOpen(armed, "SOL-USD", at + 3_600_000, nextOpen);
   expect(pending?.counterfactual?.status).toBe("open");
   expect(pending?.counterfactual?.entry).toBe(nextOpen);
+  expect(armed.shadows[0]?.entry).toBe(nextOpen);
+  expect(armed.shadows[0]?.entryMs).toBe(at + 3_600_000);
   expect(armed.shadows).toHaveLength(1);
-  armClassAHourOpen(armed, "SOL-USD", at + 900_000, nextOpen + 1);
+  armClassAHourOpen(armed, "SOL-USD", at + 3_600_000 + 900_000, nextOpen + 1);
   expect(pending?.counterfactual?.status).toBe("open");
+  expect(pending?.counterfactual?.entry).toBe(nextOpen);
   const missed = book();
   const later = evaluateSignal(missed, signal({ days, nextHourOpen: null }));
-  armClassAHourOpen(missed, "ETH-USD", at + 900_000, nextOpen);
+  armClassAHourOpen(missed, "ETH-USD", at + 3_600_000 + 900_000, nextOpen);
   expect(later?.awaitHourOpen).toBe(true);
-  armClassAHourOpen(missed, "SOL-USD", at + 900_000, nextOpen);
+  armClassAHourOpen(missed, "SOL-USD", at + 3_600_000 + 900_000, nextOpen);
   expect(later?.awaitHourOpen).toBe(false);
   expect(later?.counterfactual?.status).toBe("no_next_bar");
   expect(later?.counterfactual?.entry).toBeNull();
@@ -1165,7 +1244,7 @@ test("a counterfactual waits for the next 1h open and a young or unknown listing
   expect(missed.shadows).toHaveLength(0);
   const hole = book();
   const emptyBar = evaluateSignal(hole, signal({ days, nextHourOpen: null }));
-  armClassAHourOpen(hole, "SOL-USD", at, null);
+  armClassAHourOpen(hole, "SOL-USD", at + 3_600_000, null);
   expect(emptyBar?.counterfactual?.status).toBe("no_next_bar");
   expect(hole.shadows).toHaveLength(0);
   const restored = restoreClassABook(JSON.parse(JSON.stringify(missed)));
@@ -1181,4 +1260,81 @@ test("a counterfactual waits for the next 1h open and a young or unknown listing
   expect(unknownBook.open).toHaveLength(0);
   expect(classAPaperView(unknownBook).listedDaysEstimated).toBe(1);
   expect(classAPaperView(unknownBook).spreadWarmupNote).toBe(CLASS_A_SPREAD_WARMUP_NOTE);
+  expect(CLASS_A_PROMOTION_PRECONDITION.includes("evaluated at that tier's bar (Intro: 290 bps)")).toBe(true);
+  expect(scrubClassAPaper(unknownBook).promotionPrecondition.includes("evaluated at that tier's bar (Intro: 290 bps)")).toBe(true);
+});
+
+test("class A light basis is realized plus open marks from the forward start, and no book is zero", () => {
+  const paper = book();
+  const closed = {
+    id: "SOL-USD:old",
+    pair: "SOL-USD",
+    signalMs: CLASS_A_PAPER_START_MS - 86_400_000,
+    medianVolumeUsd: null,
+    signalClose: 100,
+    atr: 1,
+    stop: 90,
+    notionalUsd: 2_000,
+    fill: "fill" as const,
+    skipReason: null,
+    check: null,
+    measured: 100,
+    threshold: null,
+    regime: "CHOP" as const,
+    btcVeto: false,
+    exitReason: "stop",
+    exitMs: CLASS_A_PAPER_START_MS - 1,
+    exitPrice: 110,
+    grossBps: 500,
+    netBps: 500,
+    grossR: 5,
+    netR: 5,
+    feesUsd: 1,
+    counterfactual: null,
+  };
+  paper.rows.push(closed);
+  expect(classALightBasis(paper)).toEqual({ pnlUsd: 0, closedTrades: 0 });
+  paper.rows.push({ ...closed, id: "SOL-USD:new", signalMs: CLASS_A_PAPER_START_MS, exitMs: CLASS_A_PAPER_START_MS, netBps: 0 });
+  expect(classALightBasis(paper)).toEqual({ pnlUsd: 0, closedTrades: 1 });
+  paper.rows[1]!.netBps = 100;
+  expect(classALightBasis(paper)).toEqual({ pnlUsd: 20, closedTrades: 1 });
+  paper.open.push({
+    rowId: "ETH-USD:open",
+    pair: "ETH-USD",
+    scored: true,
+    entry: 100,
+    entryMs: CLASS_A_PAPER_START_MS,
+    entryDate: "2026-10-26",
+    stop: 90,
+    initialStop: 90,
+    notionalUsd: 100,
+    units: 1,
+    feeEntryBps: 0,
+    sBps: 0,
+    highestClose: 100,
+    priorCloses: [],
+    pending: null,
+  });
+  paper.lastClose = { "ETH-USD": 110, "BTC-USD": 500 };
+  paper.open.push({
+    rowId: "BTC-USD:early",
+    pair: "BTC-USD",
+    scored: true,
+    entry: 100,
+    entryMs: CLASS_A_PAPER_START_MS - 1,
+    entryDate: "2026-10-25",
+    stop: 90,
+    initialStop: 90,
+    notionalUsd: 100,
+    units: 1,
+    feeEntryBps: 0,
+    sBps: 0,
+    highestClose: 100,
+    priorCloses: [],
+    pending: null,
+  });
+  const marked = classALightBasis(paper);
+  expect(marked.closedTrades).toBe(1);
+  expect(marked.pnlUsd).toBeCloseTo(20 + 10 - (110 * 75) / 10_000, 8);
+  expect(classALightBasis(null)).toEqual({ pnlUsd: 0, closedTrades: 0 });
 });

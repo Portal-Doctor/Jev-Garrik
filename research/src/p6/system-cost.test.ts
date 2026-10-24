@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { PAPER_MINIMUM_USD } from "../p3/design-rules";
+import { CLASS_A_PAPER_START_MS } from "./class-a-paper";
 import { p6HealthJson, readP6Page, redactP6View } from "./dashboard-read";
-import { PNL_START_USD } from "./pnl-block";
+import { PNL_START_USD, signedUsd } from "./pnl-block";
+import { formatUsd } from "./positions-view";
 import { memoryKv } from "./relay";
 import { FORWARD_BAR_1 } from "./select";
 import {
@@ -368,6 +370,8 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
     sunkR: 2.655,
     pnlUsd: 32,
     pnlR: 1.6,
+    classAPnlUsd: 7,
+    classAPnlR: 0.35,
     netUsd: -10,
     netR: -0.5,
     since: SYSTEM_COST_START_ISO,
@@ -392,6 +396,8 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
   expect(shown.systemCost?.sunkR).toBe(2.655);
   expect(shown.systemCost?.pnlUsd).toBe(32);
   expect(shown.systemCost?.pnlR).toBe(1.6);
+  expect(shown.systemCost?.classAPnlUsd).toBe(7);
+  expect(shown.systemCost?.classAPnlR).toBe(0.35);
   expect(shown.systemCost?.netUsd).toBe(-10);
   expect(shown.systemCost?.netR).toBe(-0.5);
   expect(shown.systemCost?.since).toBe(SYSTEM_COST_START_ISO);
@@ -416,12 +422,14 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
         light: "amber",
         sunkUsd: Number.NaN,
         sunkR: "53" as unknown as number,
+        classAPnlUsd: "20" as unknown as number,
         sunkNote: host,
       },
     }),
   );
   expect(hostile.systemCost?.sunkUsd).toBeUndefined();
   expect(hostile.systemCost?.sunkR).toBeUndefined();
+  expect(hostile.systemCost?.classAPnlUsd).toBeUndefined();
   expect(JSON.stringify(hostile).includes(host)).toBe(false);
   expect(JSON.stringify(hostile).includes("sunkNote")).toBe(false);
 });
@@ -566,10 +574,12 @@ test("a page read puts the hurdle on the view from the displayed equity P/L", as
   const frozen = (MONTHLY_USD * 12) / 365.25 * ((now - SYSTEM_COST_START_MS) / DAY_MS);
   expect(loaded.systemCost?.accruedUsd).toBeCloseTo(frozen, 8);
   expect(loaded.systemCost?.sunkUsd).toBeCloseTo(frozen, 8);
-  expect(loaded.systemCost?.netUsd).toBeCloseTo(120, 8);
+  expect(loaded.systemCost?.classAPnlUsd).toBe(0);
+  expect(loaded.systemCost?.netUsd).toBe(0);
   expect(loaded.systemCost?.light).toBe("amber");
   const shown = redactP6View(loaded);
   expect(shown.systemCost?.pnlUsd).toBe(120);
+  expect(shown.systemCost?.classAPnlUsd).toBe(0);
   expect(shown.systemCost?.sunkUsd).toBeCloseTo(frozen, 8);
   expect(shown.systemCost?.light).toBe(loaded.systemCost?.light);
   const body = p6HealthJson(loaded, "Healthy");
@@ -581,12 +591,137 @@ test("a page read puts the hurdle on the view from the displayed equity P/L", as
   const route = readFileSync(join(root, "web/src/app/p6/health.json/route.ts"), "utf8");
   expect(page.includes("Net after system cost")).toBe(true);
   expect(page.includes("Sunk history")).toBe(true);
+  expect(page.includes("Class A book P/L")).toBe(true);
+  expect(page.includes("engine P/L")).toBe(true);
+  expect(page.includes("realized plus open marks")).toBe(true);
   expect(page.includes("view.systemCost")).toBe(true);
   expect(page.includes("item.estimate === true")).toBe(true);
   expect(page.includes("(est.)")).toBe(true);
+  const texts = pageCostTexts(page);
+  const hurdle = loaded.systemCost;
+  if (hurdle == null) throw new Error("system cost missing");
+  expect(texts.monthlyCostText(hurdle)).toBe(`~${formatUsd(MONTHLY_USD)}/mo (est.)`);
+  expect(texts.sunkHistoryText(hurdle)).toBe(`~${formatUsd(hurdle.sunkUsd ?? 0)} (est.)`);
+  const after = systemCostHurdle({ config: loadSystemCostConfig(), pnlUsd: 0, lightPnlUsd: 0, nowMs: SYSTEM_COST_CUTOVER_MS, closedTrades: 0 });
+  expect(texts.monthlyCostText(after)).toBe(formatUsd(0));
+  expect(texts.sunkHistoryText(after).includes("(est.)")).toBe(true);
   expect(shown.systemCost?.items?.[0]?.estimate).toBe(true);
   expect(route.includes("p6HealthJson(")).toBe(true);
   expect(route.includes("DASHBOARD_TOKEN")).toBe(false);
   expect(readSystemCostHurdle(null, now).pnlUsd).toBeNull();
+  expect(readSystemCostHurdle(null, now).light).toBe("unavailable");
   expect(readSystemCostHurdle(8120, now).pnlUsd).toBe(120);
+});
+
+function extractFunction(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}(`);
+  if (start < 0) throw new Error(name);
+  let depth = 0;
+  let seen = false;
+  for (let index = start; index < source.length; index += 1) {
+    const ch = source[index];
+    if (ch === "{") {
+      depth += 1;
+      seen = true;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (seen && depth === 0) {
+        return source.slice(start, index + 1).replace(/\(([^)]*)\)/, (_match, args: string) => {
+          const plain = args
+            .split(",")
+            .map((part) => {
+              const [left, right] = part.split("=");
+              const param = (left ?? "").split(":")[0]?.trim() ?? "";
+              return right == null ? param : `${param} = ${right.trim()}`;
+            })
+            .filter((part) => part !== "")
+            .join(", ");
+          return `(${plain})`;
+        }).replace(/:\s*string/g, "");
+      }
+    }
+  }
+  throw new Error(name);
+}
+
+function pageCostTexts(source: string): {
+  monthlyCostText: (hurdle: SystemCostHurdle) => string;
+  sunkHistoryText: (hurdle: SystemCostHurdle) => string;
+} {
+  const body = `${extractFunction(source, "moneyOrDash")}\n${extractFunction(source, "monthlyCostText")}\n${extractFunction(source, "sunkHistoryText")}\nreturn { monthlyCostText, sunkHistoryText };`;
+  return new Function("formatUsd", "signedUsd", body)(formatUsd, signedUsd);
+}
+
+test("the page wires class A closes into the light, and a zero class A net with a close stays amber", async () => {
+  const now = Date.parse("2026-10-24T00:00:00.000Z");
+  const bookFor = (netBps: number) => ({
+    killed: false,
+    cumNetUsd: (netBps / 10_000) * 2_000,
+    open: [],
+    shadows: [],
+    rows: [
+      {
+        id: "SOL-USD:1",
+        pair: "SOL-USD",
+        signalMs: CLASS_A_PAPER_START_MS,
+        medianVolumeUsd: 1,
+        signalClose: 100,
+        atr: 1,
+        stop: 90,
+        notionalUsd: 2_000,
+        fill: "fill",
+        skipReason: null,
+        check: null,
+        measured: 100,
+        threshold: null,
+        regime: "CHOP",
+        btcVeto: false,
+        exitReason: "rule",
+        exitMs: CLASS_A_PAPER_START_MS + DAY_MS,
+        exitPrice: 101,
+        grossBps: netBps,
+        netBps,
+        grossR: 1,
+        netR: 1,
+        feesUsd: 1,
+        counterfactual: null,
+      },
+    ],
+    scored: [{ pair: "SOL-USD", grossUsd: 1, netUsd: (netBps / 10_000) * 2_000, grossBps: netBps, netBps, netR: 1, regime: "CHOP" }],
+    reentryUntil: {},
+  });
+  const read = async (netBps: number) => {
+    const kv = memoryKv();
+    await kv.set(
+      "p6:lastRun",
+      JSON.stringify({ outcome: "handover", end: now, pnl: { equityUsd: 8120, realizedUsd: 0, unrealizedUsd: 0, feesUsd: 0, spreadSlipUsd: 0 } }),
+    );
+    await kv.set("p6:hot", JSON.stringify({ positions: [], closed: [{ productId: "ETH-USD", classId: "B", netUsd: -50 }], classAPaper: bookFor(netBps) }));
+    return readP6Page(kv, now);
+  };
+  const green = await read(100);
+  expect(green.view.closed).toHaveLength(1);
+  expect(green.view.systemCost?.pnlUsd).toBe(120);
+  expect(green.view.systemCost?.classAPnlUsd).toBe(20);
+  expect(green.view.systemCost?.netUsd).toBe(20);
+  expect(green.view.systemCost?.light).toBe("green");
+  expect(redactP6View(green.view).systemCost?.classAPnlUsd).toBe(20);
+  const amber = await read(0);
+  expect(amber.view.systemCost?.classAPnlUsd).toBe(0);
+  expect(amber.view.systemCost?.netUsd).toBe(0);
+  expect(amber.view.systemCost?.light).toBe("amber");
+});
+
+test("a missing or non-finite closed count stays amber even when net is not zero", () => {
+  const omitted = systemCostHurdle({ config: committed, pnlUsd: 10, nowMs: SYSTEM_COST_START_MS });
+  expect(omitted.netUsd).toBe(10);
+  expect(omitted.light).toBe("amber");
+  const nan = systemCostHurdle({ config: committed, pnlUsd: 10, nowMs: SYSTEM_COST_START_MS, closedTrades: Number.NaN });
+  expect(nan.light).toBe("amber");
+  const headerOnly = readSystemCostHurdle(8120, SYSTEM_COST_START_MS);
+  expect(headerOnly.pnlUsd).toBe(120);
+  expect(headerOnly.classAPnlUsd).toBeUndefined();
+  expect(headerOnly.netUsd).toBe(120);
+  expect(headerOnly.light).toBe("amber");
+  expect(readSystemCostHurdle(null, SYSTEM_COST_START_MS).light).toBe("unavailable");
 });

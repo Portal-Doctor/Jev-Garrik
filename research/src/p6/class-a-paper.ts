@@ -109,7 +109,6 @@ export const CLASS_A_SKIP_REASONS = [
   "skip_volume",
   "skip_btcveto",
   "skip_nofill",
-  "cap_full",
   "skip_spread",
   "skip_depth",
   "skip_stale",
@@ -1115,6 +1114,23 @@ export function classAMarkedReview(book: ClassABook): ClassABhReport {
   };
 }
 
+/**
+ * Light basis. Class A book P/L is realized net plus open marks, and only the part from the forward start.
+ * The closed count is class A closes since that instant. The engine's closed list is not this count.
+ * A missing book is no data: P/L 0 and no closed trade. A missing review close is not invented.
+ */
+export function classALightBasis(book: ClassABook | null | undefined): { pnlUsd: number; closedTrades: number } {
+  if (!book || !Array.isArray(book.rows) || !Array.isArray(book.open)) return { pnlUsd: 0, closedTrades: 0 };
+  const closed = book.rows.filter((row) => row.fill === "fill" && row.exitMs != null && row.exitMs >= CLASS_A_PAPER_START_MS && row.exitPrice != null);
+  const realized = closed.reduce((sum, row) => {
+    if (row.netBps == null || row.notionalUsd == null) return sum;
+    return sum + (row.netBps / 10_000) * row.notionalUsd;
+  }, 0);
+  const open = book.open.filter((sim) => sim.scored !== false && sim.entryMs >= CLASS_A_PAPER_START_MS);
+  const marked = open.length === 0 ? 0 : classAMarkedReview({ ...book, open, scored: [] }).marks.reduce((sum, mark) => sum + mark.markedPnl, 0);
+  return { pnlUsd: realized + marked, closedTrades: closed.length };
+}
+
 export function emptyClassAPaperView(): ClassAPaperView {
   return {
     specSha256: CLASS_A_SPEC_SHA256,
@@ -1171,9 +1187,9 @@ export function classAPaperView(book: ClassABook, asOfMs = Date.now()): ClassAPa
   for (const row of book.rows) {
     if (!row || typeof row !== "object") continue;
     if (row.fill === "fill") fills += 1;
-    // errata 001 item 27. Maker orders placed are the rows that passed every check.
-    // cap_full was placed, then rejected when the fill would have broken a cap.
-    if (row.fill === "fill" || row.skipReason === "skip_nofill" || row.skipReason === "cap_full") placed += 1;
+    // errata 001 item 27. Placed means a maker order that was sent: a fill, or a window that ended with no fill.
+    // skip_cap was not placed. A cap rejection is out of the fill-rate denominator.
+    if (row.fill === "fill" || row.skipReason === "skip_nofill") placed += 1;
     if (!row.skipReason || !(CLASS_A_SKIP_REASONS as readonly string[]).includes(row.skipReason)) continue;
     skips[row.skipReason] = (skips[row.skipReason] ?? 0) + 1;
   }
@@ -1478,17 +1494,19 @@ function armOrDefer(book: ClassABook, row: ClassARow, nextHourOpen: number | nul
 }
 
 /**
- * The 15m bar that starts at the signal close is the next 1h open.
+ * The entry is the open of the 15m bar that starts one hour after the signal, and the entry time is that same start.
  * A positive open at that start arms the counterfactual. Chase still applies.
  * A null or non-positive open at that start, or any later bar for the pair while that bar never arrived, is no_next_bar.
- * There is no clock limit. A bar before the hour open leaves the wait in place.
+ * There is no clock limit. A bar before signal+1h leaves the wait in place.
  */
 export function armClassAHourOpen(book: ClassABook, pair: string, barStartMs: number, open: number | null): void {
   if (!Number.isFinite(barStartMs)) return;
   for (const row of book.rows) {
     if (row.awaitHourOpen !== true || row.pair !== pair || barStartMs < row.signalMs) continue;
+    const entryMs = row.signalMs + 3_600_000;
+    if (barStartMs < entryMs) continue;
     row.awaitHourOpen = false;
-    if (barStartMs === row.signalMs && open != null && open > 0) {
+    if (barStartMs === entryMs && open != null && open > 0) {
       const signalClose = row.signalClose ?? open;
       row.counterfactual = counterfactualOf(open, signalClose, row.atr ?? 0);
       liveShadow(book, row, open, row.sBps ?? takerSpreadBps(null), row.shadowPrior ?? []);
@@ -1715,14 +1733,21 @@ function openMaker(book: ClassABook, row: ClassARow, pair: string, limit: number
 
 /**
  * Spec A4. A pending maker order fills on a print, or on an intrabar low, inside [close, close+4h).
+ * The window is half-open: the close is inside, and close+4h is outside. A fill still needs a trade at least one tick through the limit.
  * nofill is recorded only once that window has ended with neither.
  * Orders that can fill in one pass are taken by placement time (signalMs), then pair, then row id.
- * Each fill rechecks the open-count cap and the open-risk cap. A reject is nofill cap_full.
+ * Each fill rechecks the open-count cap and the open-risk cap. A reject is nofill skip_cap, and it was not placed.
  */
 export function resolveClassAResting(
   book: ClassABook,
   nowMs: number,
-  event: { pair?: string; prints?: readonly { tsMs: number; price: number }[]; bar?: { startMs: number; endMs: number; low: number } } = {},
+  event: {
+    pair?: string;
+    prints?: readonly { tsMs: number; price: number }[];
+    bar?: { startMs: number; endMs: number; low: number };
+    /** Every pair in one 15m bucket. Absent means the single pair, prints, and bar above. */
+    events?: readonly { pair?: string; prints?: readonly { tsMs: number; price: number }[]; bar?: { startMs: number; endMs: number; low: number } }[];
+  } = {},
 ): void {
   const resting = book.resting ?? [];
   book.resting = resting;
@@ -1741,16 +1766,20 @@ export function resolveClassAResting(
       continue;
     }
     let fillMs: number | null = null;
-    if (event.pair == null || event.pair === order.pair) {
-      const print = (event.prints ?? []).find((item) => item.tsMs >= order.signalMs && item.tsMs < order.windowEndMs && item.tsMs <= nowMs && item.price <= order.limit - order.tick);
+    const events = event.events ?? [event];
+    for (const source of events) {
+      if (source.pair != null && source.pair !== order.pair) continue;
+      const print = (source.prints ?? []).find((item) => item.tsMs >= order.signalMs && item.tsMs < order.windowEndMs && item.tsMs <= nowMs && item.price <= order.limit - order.tick);
       if (print) {
         fillMs = print.tsMs;
         row.measured = print.price;
+        break;
       }
-      const bar = event.bar;
-      if (fillMs == null && bar && bar.startMs >= order.signalMs && bar.startMs < order.windowEndMs && bar.low <= order.limit - order.tick) {
+      const bar = source.bar;
+      if (bar && bar.startMs >= order.signalMs && bar.startMs < order.windowEndMs && bar.low <= order.limit - order.tick) {
         fillMs = bar.startMs;
         row.measured = bar.low;
+        break;
       }
     }
     if (fillMs != null) {
@@ -1758,7 +1787,7 @@ export function resolveClassAResting(
       const orderRisk = order.limit > 0 ? (order.notionalUsd * (order.limit - order.stop)) / order.limit : Number.POSITIVE_INFINITY;
       if (book.open.length >= CLASS_A_MAX_OPEN || openRisk + orderRisk > CLASS_A_MAX_OPEN_RISK_USD) {
         row.fill = "nofill";
-        row.skipReason = "cap_full";
+        row.skipReason = "skip_cap";
         row.check = "cap";
         row.notionalUsd = null;
         row.feesUsd = null;

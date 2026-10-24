@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { CLASS_A_PAPER_START_MS, emptyClassABook, type ClassABook } from "./class-a-paper";
-import { stepClassAFromHost, type ClassALiveHost } from "./class-a-live";
+import { classAMinOrderBase, classAMinSizeOf, stepClassAFromHost, type ClassALiveHost } from "./class-a-live";
 import { captureHot, loadSplit, persistSplit } from "./hot-store";
 import { acceptRestBar, startPaperHost } from "./paper-host";
 import { decodeLease, LEASE_KEY, memoryKv, tryAcquire } from "./relay";
@@ -244,4 +244,12 @@ test("a live bar stops an open position when the low trades through the stop", (
   });
   expect(paper.open).toHaveLength(0);
   expect(paper.scored).toHaveLength(1);
+});
+
+test("the order minimum uses base_min_size, then base_increment, and an unknown pair is null", () => {
+  expect(classAMinSizeOf({ base_min_size: "0.001", base_increment: "0.01" })).toBe(0.001);
+  expect(classAMinSizeOf({ base_increment: "0.01" })).toBe(0.01);
+  expect(classAMinSizeOf({ base_min_size: 0, base_increment: "0.0001" })).toBe(0.0001);
+  expect(classAMinSizeOf({})).toBeNull();
+  expect(classAMinOrderBase("NOT-A-REAL-PAIR")).toBeNull();
 });

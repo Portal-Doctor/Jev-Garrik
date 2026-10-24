@@ -321,7 +321,7 @@ export default async function P6DashboardPage({
             <div className={styles.equityValue}>{equity == null ? "—" : formatUsd(equity)}</div>
             <div className={styles.equityDelta}>
               <span className={tone(deltaHero.kind)}>{deltaHero.text}</span>
-              {deltaPct == null ? "" : ` (${signedPct(deltaPct)})`} vs ${start} start
+              {deltaPct == null ? "" : ` (${signedPct(deltaPct)})`} engine P/L vs ${start} start
             </div>
           </div>
           <SystemCost cost={view.systemCost} />
@@ -745,13 +745,47 @@ function moneyR(value: number | null | undefined): string {
   return formatCostR(value);
 }
 
-/** The monthly total is an estimate when a line item says so, even if its note was scrubbed. */
+/**
+ * The monthly line is the span whose rates sum to the current month.
+ * Before the cutover that is the estimated Vercel and Redis span, not the open-ended $0 line.
+ * The estimate flag stays on the item even when its note was scrubbed.
+ */
 function monthlyCostText(hurdle: SystemCostHurdle): string {
   const amount = moneyOrDash(hurdle.monthlyUsd);
-  const open = hurdle.items?.filter((item) => item.until == null) ?? [];
-  const pool = open.length > 0 ? open : (hurdle.items ?? []);
+  const items = hurdle.items ?? [];
+  const first = items[0];
+  const keys = first ? [`${first.from ?? ""}|${first.until ?? ""}`] : [];
+  const pools = first ? [[first]] : [];
+  for (const item of items.slice(1)) {
+    const key = `${item.from ?? ""}|${item.until ?? ""}`;
+    const index = keys.indexOf(key);
+    if (index < 0) {
+      keys.push(key);
+      pools.push([item]);
+    } else {
+      pools[index]?.push(item);
+    }
+  }
+  let pool = items;
+  if (typeof hurdle.monthlyUsd === "number") {
+    for (const group of pools) {
+      const sum = group.reduce((total, item) => total + item.monthlyUsd, 0);
+      if (Math.abs(sum - hurdle.monthlyUsd) < 1e-9) {
+        pool = group;
+        break;
+      }
+    }
+  }
   const estimated = pool.some((item) => item.estimate === true) === true;
   if (estimated && amount !== "—") return `~${amount}/mo (est.)`;
+  return amount;
+}
+
+/** Sunk history is estimated when a pre-cutover line says so. The open-ended $0 line is not that history. */
+function sunkHistoryText(hurdle: SystemCostHurdle): string {
+  const amount = moneyOrDash(hurdle.sunkUsd);
+  const estimated = (hurdle.items ?? []).some((item) => item.estimate === true && item.until != null) === true;
+  if (estimated && amount !== "—") return `~${amount} (est.)`;
   return amount;
 }
 
@@ -764,11 +798,11 @@ function SystemCost({ cost }: { cost: SystemCostHurdle | undefined }) {
   const net = known && typeof hurdle.netUsd === "number" ? hero(hurdle.netUsd) : null;
   const rule =
     light === "green"
-      ? "At least one closed trade, and P/L minus cost since the forward start is above zero."
+      ? "At least one class A close since the forward start, and class A book P/L minus cost since that start is above zero."
       : light === "red"
-        ? "At least one closed trade, and P/L minus cost since the forward start is below zero."
+        ? "At least one class A close since the forward start, and class A book P/L minus cost since that start is below zero."
         : light === "amber"
-          ? "No closed trade yet, or P/L minus cost since the forward start is zero. Cost before the forward start is sunk history and is not in this light."
+          ? "No class A close since the forward start, or class A book P/L minus cost since that start is zero. Class A book P/L is realized plus open marks. Cost before the forward start is sunk history and is not in this light. The engine equity P/L is a separate figure."
           : "System cost could not be read, or P/L is missing.";
   return (
     <div className={styles.cost} id="system-cost" aria-label="System cost hurdle">
@@ -785,13 +819,16 @@ function SystemCost({ cost }: { cost: SystemCostHurdle | undefined }) {
             {typeof hurdle.netR === "number" ? ` · ${formatSignedR(hurdle.netR)}` : ""}
           </div>
           <div className={styles.costLine}>
+            Class A book P/L {moneyOrDash(hurdle.classAPnlUsd, true)} · realized plus open marks since the forward start
+          </div>
+          <div className={styles.costLine}>
             Monthly {monthlyCostText(hurdle)} · {moneyR(hurdle.monthlyR)}
           </div>
           <div className={styles.costLine}>
             Accrued {moneyOrDash(hurdle.accruedUsd)} · {moneyR(hurdle.accruedR)}
           </div>
           <div className={styles.costLine}>
-            Sunk history {moneyOrDash(hurdle.sunkUsd)} · {moneyR(hurdle.sunkR)}
+            Sunk history {sunkHistoryText(hurdle)} · {moneyR(hurdle.sunkR)}
           </div>
           {hurdle.items?.map((item) => (
             <div key={`${item.name}:${item.from ?? ""}:${item.until ?? ""}`} className={styles.hint}>
