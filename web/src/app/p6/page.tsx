@@ -1,4 +1,5 @@
 import { monthCommands, commandBudget, formatP6Public, openDashboardKv, projectionTone, readP6Page, redactP6View, summaryFreshness } from "../../../../research/src/p6/dashboard-read";
+import { formatCostR, formatSignedR, type SystemCostHurdle } from "../../../../research/src/p6/system-cost";
 import {
   closedNote,
   concentrationText,
@@ -309,13 +310,16 @@ export default async function P6DashboardPage({
           <h1 className={styles.title}>Paper (P6) · Summary</h1>
           <p className={styles.crumb}>Paper books / Paper (P6) / Summary</p>
         </div>
-        <div className={styles.equity}>
-          <div className={styles.equityLabel}>Equity</div>
-          <div className={styles.equityValue}>{equity == null ? "—" : formatUsd(equity)}</div>
-          <div className={styles.equityDelta}>
-            <span className={tone(deltaHero.kind)}>{deltaHero.text}</span>
-            {deltaPct == null ? "" : ` (${signedPct(deltaPct)})`} vs ${start} start
+        <div className={styles.plCluster}>
+          <div className={styles.equity}>
+            <div className={styles.equityLabel}>Equity</div>
+            <div className={styles.equityValue}>{equity == null ? "—" : formatUsd(equity)}</div>
+            <div className={styles.equityDelta}>
+              <span className={tone(deltaHero.kind)}>{deltaHero.text}</span>
+              {deltaPct == null ? "" : ` (${signedPct(deltaPct)})`} vs ${start} start
+            </div>
           </div>
+          <SystemCost cost={view.systemCost} />
         </div>
       </div>
 
@@ -683,6 +687,60 @@ export default async function P6DashboardPage({
         )}
       </Fold>
     </main>
+  );
+}
+
+function moneyR(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return formatCostR(value);
+}
+
+/** Display only. The light does not pause or kill a class. */
+function SystemCost({ cost }: { cost: SystemCostHurdle | undefined }) {
+  const hurdle = cost ?? { status: "unavailable" as const, light: "unavailable" as const };
+  const light = hurdle.light;
+  const dot = light === "green" ? styles.dot : light === "amber" ? styles.dotAmber : light === "red" ? styles.dotErr : styles.dotOff;
+  const known = hurdle.status === "ok";
+  const net = known && typeof hurdle.netUsd === "number" ? hero(hurdle.netUsd) : null;
+  const rule =
+    light === "green"
+      ? "Net P/L after system costs is above zero."
+      : light === "red"
+        ? "Net P/L after system costs is at or below minus one month of system cost."
+        : light === "amber"
+          ? "Net P/L after system costs is not above zero, and it is above minus one month of system cost."
+          : "System cost could not be read, or P/L is missing.";
+  return (
+    <div className={styles.cost} id="system-cost" aria-label="System cost hurdle">
+      <div className={styles.equityLabel}>
+        <span className={styles.health} title={rule}>
+          <span className={`${styles.dot} ${dot}`} aria-hidden="true" />
+          {known ? `Hurdle ${light}` : "System cost unavailable"}
+        </span>
+      </div>
+      {known ? (
+        <>
+          <div className={styles.costNet}>
+            Net after system cost {net ? <span className={tone(net.kind)}>{net.text}</span> : "—"}
+            {typeof hurdle.netR === "number" ? ` · ${formatSignedR(hurdle.netR)}` : ""}
+          </div>
+          <div className={styles.costLine}>
+            Monthly {moneyOrDash(hurdle.monthlyUsd)} · {moneyR(hurdle.monthlyR)}
+          </div>
+          <div className={styles.costLine}>
+            Accrued {moneyOrDash(hurdle.accruedUsd)} · {moneyR(hurdle.accruedR)}
+          </div>
+          {hurdle.items?.map((item) => (
+            <div key={item.name} className={styles.hint}>
+              {item.name}
+              {item.note ? ` · ${item.note}` : ""}
+            </div>
+          ))}
+        </>
+      ) : (
+        <div className={styles.costLine}>The cost file could not be read.</div>
+      )}
+    </div>
   );
 }
 
