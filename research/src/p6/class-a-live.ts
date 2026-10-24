@@ -5,6 +5,7 @@
  * A maker entry placed at that close stays pending until a later bar or print inside [close, close+4h), or the window ends.
  */
 
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { ema, wilderAtr } from "../p2/indicators";
 import { isDayCloseBar } from "../p5/book";
@@ -188,9 +189,9 @@ function loadClassAMinSizes(): Map<string, number> {
   }
   if (map.size === 0) {
     try {
-      const proc = Bun.spawnSync(["curl", "-fsS", "--max-time", "8", "https://api.exchange.coinbase.com/products"], { stdout: "pipe", stderr: "ignore" });
-      if (proc.exitCode === 0) {
-        const body = JSON.parse(new TextDecoder().decode(proc.stdout)) as { id?: string; base_min_size?: unknown; base_increment?: unknown }[];
+      const proc = spawnSync("curl", ["-fsS", "--max-time", "8", "https://api.exchange.coinbase.com/products"], { encoding: "utf8" });
+      if (proc.status === 0 && proc.stdout) {
+        const body = JSON.parse(proc.stdout) as { id?: string; base_min_size?: unknown; base_increment?: unknown }[];
         if (Array.isArray(body)) {
           for (const row of body) {
             const min = sizeOf(row);
