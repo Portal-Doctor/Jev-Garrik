@@ -695,6 +695,14 @@ function moneyR(value: number | null | undefined): string {
   return formatCostR(value);
 }
 
+/** The monthly total is an estimate when a line item says so, even if its note was scrubbed. */
+function monthlyCostText(hurdle: SystemCostHurdle): string {
+  const amount = moneyOrDash(hurdle.monthlyUsd);
+  const estimated = hurdle.items?.some((item) => item.estimate === true) === true;
+  if (estimated && amount !== "—") return `~${amount}/mo (est.)`;
+  return amount;
+}
+
 /** Display only. The light does not pause or kill a class. */
 function SystemCost({ cost }: { cost: SystemCostHurdle | undefined }) {
   const hurdle = cost ?? { status: "unavailable" as const, light: "unavailable" as const };
@@ -725,7 +733,7 @@ function SystemCost({ cost }: { cost: SystemCostHurdle | undefined }) {
             {typeof hurdle.netR === "number" ? ` · ${formatSignedR(hurdle.netR)}` : ""}
           </div>
           <div className={styles.costLine}>
-            Monthly {moneyOrDash(hurdle.monthlyUsd)} · {moneyR(hurdle.monthlyR)}
+            Monthly {monthlyCostText(hurdle)} · {moneyR(hurdle.monthlyR)}
           </div>
           <div className={styles.costLine}>
             Accrued {moneyOrDash(hurdle.accruedUsd)} · {moneyR(hurdle.accruedR)}

@@ -470,7 +470,10 @@ export function redactP6View(view: DashboardView): DashboardView {
 
 const COST_TEXT = /^[A-Za-z0-9 $.,;()':-]{1,240}$/;
 
-/** Prose from the committed cost file. A host, a URL, or any other shape is dropped. */
+/**
+ * Prose from the committed cost file. A host, a URL, or any other shape is dropped.
+ * Whether a line is an estimate is the boolean `estimate` field, not this prose.
+ */
 function publicCostText(value: unknown): string | undefined {
   if (typeof value !== "string" || !COST_TEXT.test(value)) return undefined;
   if (/\.[A-Za-z]{2,}/.test(value)) return undefined;
@@ -528,7 +531,8 @@ function publicSystemCost(raw: unknown): SystemCostHurdle {
       const itemMonthly = finiteCost(source.monthlyUsd);
       if (!name || itemMonthly == null || itemMonthly < 0) continue;
       const note = publicCostText(source.note);
-      items.push({ name, monthlyUsd: itemMonthly, ...(note ? { note } : {}) });
+      const estimate = source.estimate === true;
+      items.push({ name, monthlyUsd: itemMonthly, ...(note ? { note } : {}), ...(estimate ? { estimate: true } : {}) });
     }
     if (items.length > 0) out.items = items;
   }

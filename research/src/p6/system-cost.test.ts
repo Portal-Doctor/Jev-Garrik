@@ -34,7 +34,7 @@ const MONTHLY_USD = 115.25;
 const committed: SystemCostConfig = {
   lastUpdated: "2026-10-24",
   items: [
-    { name: "Vercel Pro", monthlyUsd: 110, note: VERCEL_NOTE },
+    { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE },
     { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
   ],
 };
@@ -155,6 +155,7 @@ test("a bad config is unavailable and does not throw", () => {
     { lastUpdated: "2026-10-24", items: [{ name: "Vercel Pro", monthlyUsd: Number.NaN }] },
     { lastUpdated: "2026-10-24", items: [{ name: "", monthlyUsd: 1 }] },
     { lastUpdated: "2026-10-24", items: [{ name: "Vercel Pro", monthlyUsd: 110, note: 12 }] },
+    { lastUpdated: "2026-10-24", items: [{ name: "Vercel Pro", monthlyUsd: 110, estimate: "yes" }] },
     { lastUpdated: "2026-10-24", items: "Vercel Pro" },
     { lastUpdated: "2026-10-24", items: [null] },
   ];
@@ -187,8 +188,15 @@ test("the committed file totals $115.25 a month and was updated 2026-10-24", () 
   expect(hurdle.elapsedDays).toBe(days);
   expect(hurdle.accruedUsd).toBeCloseTo((MONTHLY_USD * 12) / 365.25 * days, 8);
   expect(hurdle.items?.[0]?.monthlyUsd).toBe(110);
+  expect(hurdle.items?.[0]?.estimate).toBe(true);
   expect(hurdle.items?.[0]?.note).toBe(VERCEL_NOTE);
   expect(hurdle.items?.[1]).toEqual({ name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE });
+  expect(hurdle.items?.[1]?.estimate).toBeUndefined();
+  const confirmed = parseSystemCostConfig({
+    lastUpdated: "2026-10-24",
+    items: [{ name: "Redis Cloud", monthlyUsd: 5.25, estimate: false, note: REDIS_NOTE }],
+  });
+  expect(confirmed?.items[0]?.estimate).toBeUndefined();
 });
 
 test("the scrubber keeps the system-cost fields and drops a planted host", () => {
@@ -208,7 +216,7 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
     since: SYSTEM_COST_START_ISO,
     elapsedDays: 14,
     items: [
-      { name: "Vercel Pro", monthlyUsd: 110, note: VERCEL_NOTE },
+      { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE },
       { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
       { name: host, monthlyUsd: 1, note: host },
     ],
@@ -230,7 +238,7 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
   expect(shown.systemCost?.since).toBe(SYSTEM_COST_START_ISO);
   expect(shown.systemCost?.elapsedDays).toBe(14);
   expect(shown.systemCost?.items).toEqual([
-    { name: "Vercel Pro", monthlyUsd: 110, note: VERCEL_NOTE },
+    { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE },
     { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
   ]);
   const output = JSON.stringify(shown);
@@ -263,7 +271,7 @@ test("health.json is the scrubbed hurdle", () => {
         since: SYSTEM_COST_START_ISO,
         elapsedDays: 1,
         items: [
-          { name: "Vercel Pro", monthlyUsd: 110, note: VERCEL_NOTE },
+          { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE },
           { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
         ],
         secret: host,
@@ -278,13 +286,84 @@ test("health.json is the scrubbed hurdle", () => {
   expect(body.systemCost.monthlyR).toBe(5.7625);
   expect(body.systemCost.netUsd).toBe(19);
   expect(body.systemCost.items).toEqual([
-    { name: "Vercel Pro", monthlyUsd: 110, note: VERCEL_NOTE },
+    { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE },
     { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
   ]);
   const output = JSON.stringify(body);
   expect(output.includes("PASSWORD")).toBe(false);
   expect(output.includes("6379")).toBe(false);
   expect(p6HealthJson(view(), "Error").systemCost).toEqual({ status: "unavailable", light: "unavailable" });
+});
+
+function scrubbedCost(item: { name: string; monthlyUsd: number; note?: string; estimate?: unknown }) {
+  const raw = { ...view(), systemCost: { status: "ok", light: "amber", items: [item] } };
+  return redactP6View(raw as Parameters<typeof redactP6View>[0]).systemCost;
+}
+
+test("a secret marker in a cost name or note is dropped", () => {
+  for (const marker of ["upstash", "password", "token", "secret", "//"]) {
+    const byName = scrubbedCost({ name: `Vendor ${marker} line`, monthlyUsd: 1, note: "plain note" });
+    expect(JSON.stringify(byName ?? {}).includes(marker), `name ${marker}`).toBe(false);
+    expect(byName?.items, `name ${marker}`).toBeUndefined();
+    const byNote = scrubbedCost({ name: "Redis Cloud", monthlyUsd: 5.25, note: `invoice ${marker} ref` });
+    expect(JSON.stringify(byNote ?? {}).includes(marker), `note ${marker}`).toBe(false);
+    expect(byNote?.items, `note ${marker}`).toEqual([{ name: "Redis Cloud", monthlyUsd: 5.25 }]);
+  }
+});
+
+test("a host in a cost note is dropped", () => {
+  const host = "redis-12345.c1.us-east-1-2.ec2.redns.redis-cloud.com";
+  const shown = scrubbedCost({ name: "Redis Cloud", monthlyUsd: 5.25, note: `db at ${host} port 12345` });
+  expect(JSON.stringify(shown ?? {}).includes("redis-cloud.com")).toBe(false);
+  expect(shown?.items).toEqual([{ name: "Redis Cloud", monthlyUsd: 5.25 }]);
+  const named = scrubbedCost({ name: "redis-cloud.com", monthlyUsd: 1 });
+  expect(named?.items).toBeUndefined();
+  expect(JSON.stringify(named ?? {}).includes("redis-cloud.com")).toBe(false);
+});
+
+test("a non-finite P/L leaves the light unavailable", () => {
+  for (const pnlUsd of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    const hurdle = systemCostHurdle({ config: committed, pnlUsd, nowMs: SYSTEM_COST_START_MS });
+    expect(hurdle.status).toBe("ok");
+    expect(hurdle.light).toBe("unavailable");
+    expect(hurdle.pnlUsd).toBeNull();
+    expect(hurdle.netUsd).toBeNull();
+    expect(hurdle.monthlyUsd).toBe(MONTHLY_USD);
+  }
+  expect(readSystemCostHurdle(Number.NaN, SYSTEM_COST_START_MS).light).toBe("unavailable");
+});
+
+test("a planted light outside the hurdle enum is unavailable", () => {
+  const planted = redactP6View({ ...view(), systemCost: { status: "ok", light: "<script>", monthlyUsd: 1 } } as unknown as Parameters<typeof redactP6View>[0]);
+  expect(planted.systemCost?.status).toBe("ok");
+  expect(planted.systemCost?.light).toBe("unavailable");
+  expect(JSON.stringify(planted).includes("<script>")).toBe(false);
+  for (const light of ["green", "amber", "red", "unavailable"] as const) {
+    expect(redactP6View(view({ systemCost: { status: "ok", light } })).systemCost?.light).toBe(light);
+  }
+});
+
+test("the estimate flag stays after the note is scrubbed", () => {
+  const shown = redactP6View({
+    ...view(),
+    systemCost: {
+      status: "ok",
+      light: "amber",
+      monthlyUsd: MONTHLY_USD,
+      items: [
+        { name: "Vercel Pro", monthlyUsd: 110, note: "redis-cloud.com", estimate: true },
+        { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE, estimate: "<script>" },
+      ],
+    },
+  } as Parameters<typeof redactP6View>[0]);
+  expect(shown.systemCost?.items).toEqual([
+    { name: "Vercel Pro", monthlyUsd: 110, estimate: true },
+    { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
+  ]);
+  const output = JSON.stringify(shown);
+  expect(output.includes("redis-cloud.com")).toBe(false);
+  expect(output.includes("<script>")).toBe(false);
+  expect(output.includes("estimate")).toBe(true);
 });
 
 test("a page read puts the hurdle on the view from the displayed equity P/L", async () => {
@@ -305,6 +384,7 @@ test("a page read puts the hurdle on the view from the displayed equity P/L", as
   expect(loaded.systemCost?.monthlyUsd).toBe(MONTHLY_USD);
   expect(loaded.systemCost?.monthlyR).toBe(5.7625);
   expect(loaded.systemCost?.items?.[0]?.note).toBe(VERCEL_NOTE);
+  expect(loaded.systemCost?.items?.[0]?.estimate).toBe(true);
   expect(loaded.systemCost?.items?.[1]).toEqual({ name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE });
   expect(loaded.systemCost?.netUsd).toBeCloseTo(120 - (loaded.systemCost?.accruedUsd ?? 0), 8);
   const shown = redactP6View(loaded);
@@ -319,6 +399,9 @@ test("a page read puts the hurdle on the view from the displayed equity P/L", as
   const route = readFileSync(join(root, "web/src/app/p6/health.json/route.ts"), "utf8");
   expect(page.includes("Net after system cost")).toBe(true);
   expect(page.includes("view.systemCost")).toBe(true);
+  expect(page.includes("item.estimate === true")).toBe(true);
+  expect(page.includes("(est.)")).toBe(true);
+  expect(shown.systemCost?.items?.[0]?.estimate).toBe(true);
   expect(route.includes("p6HealthJson(")).toBe(true);
   expect(route.includes("DASHBOARD_TOKEN")).toBe(false);
   expect(readSystemCostHurdle(null, now).pnlUsd).toBeNull();

@@ -4,6 +4,7 @@
     {
       "name": "Vercel Pro",
       "monthlyUsd": 110,
+      "estimate": true,
       "note": "$110 is an estimate: projected $110-125 for the Oct 18-Nov 18 cycle, with $25.04 billed so far."
     },
     {

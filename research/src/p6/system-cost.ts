@@ -31,6 +31,8 @@ export interface SystemCostItem {
   name: string;
   monthlyUsd: number;
   note?: string;
+  /** True when this line's monthly amount is an estimate. Display only. */
+  estimate?: boolean;
 }
 
 export interface SystemCostConfig {
@@ -93,8 +95,10 @@ export function parseSystemCostConfig(raw: unknown): SystemCostConfig | null {
     if (typeof item.name !== "string" || item.name.trim() === "") return null;
     if (!nonNegativeFinite(item.monthlyUsd)) return null;
     if (item.note != null && typeof item.note !== "string") return null;
+    if (item.estimate != null && typeof item.estimate !== "boolean") return null;
     const parsed: SystemCostItem = { name: item.name.trim(), monthlyUsd: item.monthlyUsd };
     if (typeof item.note === "string" && item.note.trim() !== "") parsed.note = item.note;
+    if (item.estimate === true) parsed.estimate = true;
     items.push(parsed);
   }
   return { lastUpdated: body.lastUpdated, items };
