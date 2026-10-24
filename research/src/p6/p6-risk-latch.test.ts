@@ -729,7 +729,9 @@ test("the mismatch dedupe key survives a reload with gzip writes off and on", as
       await persistSplit(kv2, loaded);
       const againText = decodeStored(HOT_KEY, peekStored(kv2, HOT_KEY)) ?? "";
       expect(againText.includes(token)).toBe(false);
-      expect(againText).toContain(loaded.book.latchMismatchSeen);
+      const seen = loaded.book.latchMismatchSeen ?? "";
+      expect(seen).toMatch(/^[0-9a-f]{64}$/);
+      expect(againText).toContain(seen);
 
       const next = startPaperHost(["BTC-USD"], {});
       next.clock = () => at;
