@@ -22,6 +22,7 @@ import {
   type PnlBlock,
 } from "./pnl-block";
 import { closedNow, fetchRestBids, type MarkNow, type MarkPosition, type MarkQuote } from "./mark-now";
+import { scrubClassAPaper, type ClassAPaperView } from "./class-a-paper";
 import { isIsoDate, readSystemCostHurdle, type SystemCostHurdle, type SystemCostItem } from "./system-cost";
 import { classMeanNetR, classStress, execCostWord, modelledShare, quoteMissStats, type ClassStress, type ExecWord, type StressGrade, type StressTrade } from "./x1-fill";
 
@@ -463,6 +464,7 @@ export function redactP6View(view: DashboardView): DashboardView {
     fills: publicFills(view.fills ?? []),
     systemCost: publicSystemCost(view.systemCost),
     runLabel: publicEnum(view.runLabel, RUN_LABEL) === "non-X1" ? "non-X1" : publicEnum(view.runLabel, RUN_LABEL) === "X1" ? "X1" : undefined,
+    classAPaper: scrubClassAPaper(view.classAPaper),
   };
   delete shown.markInputs;
   return shown;
@@ -598,6 +600,7 @@ function publicClosed(row: DashboardView["closed"][number]): DashboardView["clos
     ...(shadowFillKind ? { shadowFillKind } : {}),
     ...(mfeBasis ? { mfeBasis } : {}),
     ...(maeBasis ? { maeBasis } : {}),
+    ...(row.scoreClass === "A_x1_unscored" ? { scoreClass: "A_x1_unscored" as const } : {}),
   };
 }
 
@@ -807,6 +810,8 @@ export interface DashboardClosed {
   shadowNetR?: number;
   shadowFillPx?: number;
   shadowFillKind?: string;
+  /** errata 001 item 3. Present only for a live X1 class A close. */
+  scoreClass?: "A_x1_unscored";
 }
 
 export interface DashboardView {
@@ -843,6 +848,8 @@ export interface DashboardView {
   unreadable: boolean;
   /** True when p6:lastRun was present and could not be decoded. Missing lastRun stays false. */
   lastUnreadable: boolean;
+  /** Class A forward paper. Absent on the hot read until redact fills the public shape. */
+  classAPaper?: ClassAPaperView;
   /** Display-only system-cost hurdle. Absent only before the page read fills it. */
   systemCost?: SystemCostHurdle;
 }
@@ -909,7 +916,7 @@ export async function readP6Dashboard(kv: Pick<Kv, "readMany">): Promise<Dashboa
     );
     const stress: ClassStress = classStress(mine, classId);
     const mean = classMeanNetR(
-      stressRows.map((row) => ({ classId: row.classId, netR: row.netR ?? 0, fillSrc: row.fillSrc, anchorMissing: row.anchorMissing })),
+      stressRows.map((row) => ({ classId: row.classId, netR: row.netR ?? 0, fillSrc: row.fillSrc, anchorMissing: row.anchorMissing, scoreClass: row.scoreClass })),
       classId,
     );
     const misses = quoteMissStats(
@@ -958,6 +965,7 @@ export async function readP6Dashboard(kv: Pick<Kv, "readMany">): Promise<Dashboa
     markInputs: { positions: markPositions, quotes, disconnected: hot.feedLive === false },
     unreadable,
     lastUnreadable,
+    classAPaper: hot.classAPaper as ClassAPaperView | undefined,
   };
 }
 
@@ -1001,6 +1009,7 @@ function stressTrades(closed: DashboardView["closed"]): StressTrade[] {
       anchorMissing: source.anchorMissing === true,
       gap: source.gap === true,
       gapSlippageBps: num("gapSlippageBps"),
+      ...(source.scoreClass === "A_x1_unscored" ? { scoreClass: "A_x1_unscored" as const } : {}),
     };
   });
 }
