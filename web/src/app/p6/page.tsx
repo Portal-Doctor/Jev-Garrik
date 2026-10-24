@@ -336,6 +336,32 @@ export default async function P6DashboardPage({
         </span>
       </div>
 
+      <section className={styles.card} aria-label="Class A paper">
+        <h2>Class A paper</h2>
+        <p className={styles.sub}>
+          {`A55-k3 · ${
+            view.classAPaper?.status === "running"
+              ? "Running"
+              : view.classAPaper?.status === "killed"
+                ? "Interim kill"
+                : view.classAPaper?.status === "redacted"
+                  ? "Redacted"
+                  : view.classAPaper?.status === "pending"
+                    ? "Pending"
+                    : "Awaiting start"
+          } · n ${view.classAPaper?.n ?? 0} · net ${moneyOrDash(view.classAPaper?.cumNetUsd, true)}`}
+          {view.classAPaper?.promotion === "blocked" ? " · promotion blocked" : view.classAPaper?.promotion === "unresolved" ? " · promotion unresolved" : view.classAPaper?.promotion === "pass" ? " · promotion pass" : ""}
+          {view.classAPaper?.fillRate != null ? ` · maker fill ${Math.round(view.classAPaper.fillRate * 100)}%` : ""}
+          {(view.classAPaper?.healthDue.length ?? 0) > 0 ? ` · health ${view.classAPaper?.healthDue.join(" ")}` : ""}
+          {` · minsize unknown ${view.classAPaper?.skips.skip_minsize_unknown ?? 0}`}
+        </p>
+        <p className={styles.sub}>
+          {`Intro sensitivity (50/90, bar 290, does not gate): net ${moneyOrDash(view.classAPaper?.introSensitivity.netUsd, true)} · mean net ${view.classAPaper?.introSensitivity.meanNetBps == null ? "—" : view.classAPaper.introSensitivity.meanNetBps.toFixed(1)} bps · bar test ${view.classAPaper?.introSensitivity.aboveBar ? "above 290" : "not above 290"}`}
+          {view.classAPaper?.sHeadroom.barBps != null ? ` · s headroom bar ${view.classAPaper.sHeadroom.barBps.toFixed(1)} bps (median s ${view.classAPaper.sHeadroom.medianSBps?.toFixed(1)} )` : " · s headroom —"}
+        </p>
+        <p className={styles.sub}>{view.classAPaper?.promotionPrecondition}</p>
+      </section>
+
       <div className={`${styles.card} ${styles.risk}`} aria-label="Risk status">
         <span className={styles.riskItem}>
           <span>

@@ -47,5 +47,6 @@ jobs:
       - name: fail if cb differs from main
         run: |
           git fetch origin main
-          git branch -f main FETCH_HEAD
-          git diff --exit-code main -- cb/
+          git ls-tree -d FETCH_HEAD cb | grep -q .
+          git ls-tree -d HEAD cb | grep -q .
+          git diff --exit-code FETCH_HEAD -- cb/

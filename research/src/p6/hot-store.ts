@@ -290,6 +290,10 @@ interface HotBody {
   clearedLatchIds?: string[];
   latchRearm?: LatchRearm;
   dEntryNotBeforeMs?: number;
+  /** sha256 of the last latch_clear_mismatch dedupe key. Absent until one is logged. */
+  latchMismatchSeen?: string;
+  /** Class A forward paper. Absent until a start exists. */
+  classAPaper?: PaperHost["classAPaper"];
 }
 
 export function captureHot(host: PaperHost): HotBody {
@@ -375,6 +379,7 @@ export function captureHot(host: PaperHost): HotBody {
     csBarSec: book.csBarSec,
     feedLive: host.status === "live",
     ...latchHotFields(book),
+    ...(host.classAPaper ? { classAPaper: host.classAPaper } : {}),
   };
 }
 
