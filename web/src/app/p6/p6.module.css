@@ -142,6 +142,39 @@
   background: var(--sell-ink);
 }
 
+.dotAmber {
+  background: var(--late-ink);
+}
+
+.dotOff {
+  background: var(--link-muted);
+}
+
+.plCluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 32px;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.cost {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  max-width: 420px;
+}
+
+.costNet {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.costLine {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
 .clock {
   display: inline-flex;
   align-items: center;

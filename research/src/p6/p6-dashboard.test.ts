@@ -268,7 +268,7 @@ test("the proxy matcher covers /p6 and every subpath", () => {
   expect(proxy.includes('matcher: ["/p6", "/p6/:path*"]')).toBe(true);
   const token = "view-token";
   const cookie = `${P6_COOKIE_NAME}=${dashboardCookieValue(token)}`;
-  const routes = ["/p6", "/p6/positions", "/p6/trades", "/p6/gates", "/p6/jev", "/p6/health"];
+  const routes = ["/p6", "/p6/positions", "/p6/trades", "/p6/gates", "/p6/jev", "/p6/health", "/p6/health.json"];
   for (const route of routes) {
     expect(applyDashboardProxy(new Request(`https://example.test${route}`, { method: "GET" }), token).status, route).toBe(200);
     expect(applyDashboardProxy(new Request(`https://example.test${route}`, { method: "POST" }), token).status, route).toBe(401);
