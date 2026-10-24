@@ -4,7 +4,12 @@
     {
       "name": "Vercel Pro",
       "monthlyUsd": 110,
-      "note": "Launchie's estimate, range $100-120 (about $85 CPU, $24 memory, $1 other; the $20 credit offsets the $20 fee)."
+      "note": "$110 is an estimate: projected $110-125 for the Oct 18-Nov 18 cycle, with $25.04 billed so far."
+    },
+    {
+      "name": "Redis Cloud",
+      "monthlyUsd": 5.25,
+      "note": "confirmed from invoices"
     }
   ]
 }

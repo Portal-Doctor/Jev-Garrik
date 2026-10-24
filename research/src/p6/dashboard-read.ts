@@ -468,13 +468,13 @@ export function redactP6View(view: DashboardView): DashboardView {
   return shown;
 }
 
-const COST_TEXT = /^[A-Za-z0-9 $.,;()'-]{1,240}$/;
+const COST_TEXT = /^[A-Za-z0-9 $.,;()':-]{1,240}$/;
 
 /** Prose from the committed cost file. A host, a URL, or any other shape is dropped. */
 function publicCostText(value: unknown): string | undefined {
   if (typeof value !== "string" || !COST_TEXT.test(value)) return undefined;
   if (/\.[A-Za-z]{2,}/.test(value)) return undefined;
-  if (/upstash|redis|password|token|secret|\/\//i.test(value)) return undefined;
+  if (/upstash|password|token|secret|\/\//i.test(value)) return undefined;
   return value;
 }
 

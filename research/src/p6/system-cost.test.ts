@@ -27,15 +27,20 @@ import {
 } from "./system-cost";
 
 const DAY_MS = 86_400_000;
-const NOTE = "Launchie's estimate, range $100-120 (about $85 CPU, $24 memory, $1 other; the $20 credit offsets the $20 fee).";
+const VERCEL_NOTE = "$110 is an estimate: projected $110-125 for the Oct 18-Nov 18 cycle, with $25.04 billed so far.";
+const REDIS_NOTE = "confirmed from invoices";
+const MONTHLY_USD = 115.25;
 
-const vercel: SystemCostConfig = {
+const committed: SystemCostConfig = {
   lastUpdated: "2026-10-24",
-  items: [{ name: "Vercel Pro", monthlyUsd: 110, note: NOTE }],
+  items: [
+    { name: "Vercel Pro", monthlyUsd: 110, note: VERCEL_NOTE },
+    { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
+  ],
 };
 
 function atStart(pnlUsd: number | null, nowMs = SYSTEM_COST_START_MS) {
-  return systemCostHurdle({ config: vercel, pnlUsd, nowMs });
+  return systemCostHurdle({ config: committed, pnlUsd, nowMs });
 }
 
 function view(over: { systemCost?: SystemCostHurdle & Record<string, unknown> } = {}) {
@@ -74,6 +79,7 @@ test("a day is monthly times 12/365.25 and a 365.25-day year is twelve months", 
 test("$20 is 1R and net P/L is the existing P/L minus accrued cost", () => {
   expect(usdToR(20)).toBe(1);
   expect(usdToR(110)).toBe(5.5);
+  expect(usdToR(MONTHLY_USD)).toBe(5.7625);
   expect(usdToR(0)).toBe(0);
   expect(netAfterSystemCost(100, 12.5)).toBe(87.5);
   expect(usdToR(netAfterSystemCost(100, 12.5))).toBe(4.375);
@@ -84,6 +90,7 @@ test("$20 is 1R and net P/L is the existing P/L minus accrued cost", () => {
   expect(displayedPnlUsd(null)).toBeNull();
   expect(displayedPnlUsd(Number.NaN)).toBeNull();
   expect(formatCostR(5.5)).toBe("5.50R");
+  expect(formatCostR(usdToR(MONTHLY_USD))).toBe("5.76R");
   expect(formatSignedR(4.375)).toBe("+4.38R");
   expect(formatSignedR(-0.5)).toBe("-0.50R");
   expect(formatSignedR(0)).toBe("0.00R");
@@ -107,25 +114,25 @@ test("red begins at minus one month of system cost", () => {
   expect(systemCostLight(-110, 110)).toBe("red");
   expect(systemCostLight(-110 + 1e-9, 110)).toBe("amber");
   expect(systemCostLight(-110 - 1e-9, 110)).toBe("red");
-  expect(atStart(-110).light).toBe("red");
-  expect(atStart(-109.99).light).toBe("amber");
-  expect(atStart(-110.01).light).toBe("red");
+  expect(atStart(-MONTHLY_USD).light).toBe("red");
+  expect(atStart(-MONTHLY_USD + 0.01).light).toBe("amber");
+  expect(atStart(-MONTHLY_USD - 0.01).light).toBe("red");
   expect(systemCostLight(0, 0)).toBe("red");
   const later = atStart(0, SYSTEM_COST_START_MS + DAY_MS);
   expect(later.accruedUsd).toBeGreaterThan(0);
   expect(later.netUsd).toBeCloseTo(-later.accruedUsd!, 10);
   expect(later.light).toBe("amber");
-  expect(later.monthlyR).toBe(5.5);
+  expect(later.monthlyR).toBe(5.7625);
   expect(later.accruedR).toBeCloseTo(usdToR(later.accruedUsd!), 10);
   const year = atStart(0, SYSTEM_COST_START_MS + 365.25 * DAY_MS);
-  expect(year.accruedUsd).toBeCloseTo(1320, 6);
+  expect(year.accruedUsd).toBeCloseTo(MONTHLY_USD * 12, 6);
   expect(year.light).toBe("red");
 });
 
 test("a missing P/L leaves the cost numbers and an unavailable light", () => {
   const hurdle = atStart(null, SYSTEM_COST_START_MS + DAY_MS);
   expect(hurdle.status).toBe("ok");
-  expect(hurdle.monthlyUsd).toBe(110);
+  expect(hurdle.monthlyUsd).toBe(MONTHLY_USD);
   expect(hurdle.accruedUsd).toBeGreaterThan(0);
   expect(hurdle.pnlUsd).toBeNull();
   expect(hurdle.netUsd).toBeNull();
@@ -167,19 +174,21 @@ test("a bad config is unavailable and does not throw", () => {
   expect(systemCostHurdle({ config: null, pnlUsd: 10, nowMs: Number.NaN }).status).toBe("unavailable");
 });
 
-test("the committed file is Vercel Pro at $110 with lastUpdated 2026-10-24", () => {
+test("the committed file totals $115.25 a month and was updated 2026-10-24", () => {
   const config = loadSystemCostConfig();
-  expect(config).toEqual(vercel);
+  expect(config).toEqual(committed);
   const now = Date.parse("2026-10-24T00:00:00.000Z");
   const hurdle = systemCostHurdle({ config, pnlUsd: 0, nowMs: now });
   expect(hurdle.status).toBe("ok");
-  expect(hurdle.monthlyUsd).toBe(110);
-  expect(hurdle.monthlyR).toBe(5.5);
+  expect(hurdle.monthlyUsd).toBe(MONTHLY_USD);
+  expect(hurdle.monthlyR).toBe(5.7625);
   expect(hurdle.since).toBe(SYSTEM_COST_START_ISO);
   const days = (now - SYSTEM_COST_START_MS) / DAY_MS;
   expect(hurdle.elapsedDays).toBe(days);
-  expect(hurdle.accruedUsd).toBeCloseTo((110 * 12) / 365.25 * days, 8);
-  expect(hurdle.items?.[0]?.note).toBe(NOTE);
+  expect(hurdle.accruedUsd).toBeCloseTo((MONTHLY_USD * 12) / 365.25 * days, 8);
+  expect(hurdle.items?.[0]?.monthlyUsd).toBe(110);
+  expect(hurdle.items?.[0]?.note).toBe(VERCEL_NOTE);
+  expect(hurdle.items?.[1]).toEqual({ name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE });
 });
 
 test("the scrubber keeps the system-cost fields and drops a planted host", () => {
@@ -188,8 +197,8 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
     status: "ok" as const,
     light: "amber" as const,
     lastUpdated: "2026-10-24",
-    monthlyUsd: 110,
-    monthlyR: 5.5,
+    monthlyUsd: MONTHLY_USD,
+    monthlyR: 5.7625,
     accruedUsd: 42,
     accruedR: 2.1,
     pnlUsd: 32,
@@ -199,7 +208,8 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
     since: SYSTEM_COST_START_ISO,
     elapsedDays: 14,
     items: [
-      { name: "Vercel Pro", monthlyUsd: 110, note: NOTE },
+      { name: "Vercel Pro", monthlyUsd: 110, note: VERCEL_NOTE },
+      { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
       { name: host, monthlyUsd: 1, note: host },
     ],
     token: host,
@@ -209,8 +219,8 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
   expect(shown.systemCost?.status).toBe("ok");
   expect(shown.systemCost?.light).toBe("amber");
   expect(shown.systemCost?.lastUpdated).toBe("2026-10-24");
-  expect(shown.systemCost?.monthlyUsd).toBe(110);
-  expect(shown.systemCost?.monthlyR).toBe(5.5);
+  expect(shown.systemCost?.monthlyUsd).toBe(MONTHLY_USD);
+  expect(shown.systemCost?.monthlyR).toBe(5.7625);
   expect(shown.systemCost?.accruedUsd).toBe(42);
   expect(shown.systemCost?.accruedR).toBe(2.1);
   expect(shown.systemCost?.pnlUsd).toBe(32);
@@ -219,8 +229,13 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
   expect(shown.systemCost?.netR).toBe(-0.5);
   expect(shown.systemCost?.since).toBe(SYSTEM_COST_START_ISO);
   expect(shown.systemCost?.elapsedDays).toBe(14);
-  expect(shown.systemCost?.items).toEqual([{ name: "Vercel Pro", monthlyUsd: 110, note: NOTE }]);
+  expect(shown.systemCost?.items).toEqual([
+    { name: "Vercel Pro", monthlyUsd: 110, note: VERCEL_NOTE },
+    { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
+  ]);
   const output = JSON.stringify(shown);
+  expect(output.includes("Redis Cloud")).toBe(true);
+  expect(output.includes(REDIS_NOTE)).toBe(true);
   expect(output.includes(host)).toBe(false);
   expect(output.includes("upstash")).toBe(false);
   expect(output.includes("token")).toBe(false);
@@ -237,8 +252,8 @@ test("health.json is the scrubbed hurdle", () => {
         status: "ok",
         light: "green",
         lastUpdated: "2026-10-24",
-        monthlyUsd: 110,
-        monthlyR: 5.5,
+        monthlyUsd: MONTHLY_USD,
+        monthlyR: 5.7625,
         accruedUsd: 1,
         accruedR: 0.05,
         pnlUsd: 20,
@@ -247,7 +262,10 @@ test("health.json is the scrubbed hurdle", () => {
         netR: 0.95,
         since: SYSTEM_COST_START_ISO,
         elapsedDays: 1,
-        items: [{ name: "Vercel Pro", monthlyUsd: 110, note: NOTE }],
+        items: [
+          { name: "Vercel Pro", monthlyUsd: 110, note: VERCEL_NOTE },
+          { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
+        ],
         secret: host,
       },
     }),
@@ -256,9 +274,13 @@ test("health.json is the scrubbed hurdle", () => {
   expect(body.health).toBe("Healthy");
   expect(body.systemCost.status).toBe("ok");
   expect(body.systemCost.light).toBe("green");
-  expect(body.systemCost.monthlyUsd).toBe(110);
+  expect(body.systemCost.monthlyUsd).toBe(MONTHLY_USD);
+  expect(body.systemCost.monthlyR).toBe(5.7625);
   expect(body.systemCost.netUsd).toBe(19);
-  expect(body.systemCost.items?.[0]?.note).toBe(NOTE);
+  expect(body.systemCost.items).toEqual([
+    { name: "Vercel Pro", monthlyUsd: 110, note: VERCEL_NOTE },
+    { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
+  ]);
   const output = JSON.stringify(body);
   expect(output.includes("PASSWORD")).toBe(false);
   expect(output.includes("6379")).toBe(false);
@@ -280,8 +302,10 @@ test("a page read puts the hurdle on the view from the displayed equity P/L", as
   const { view: loaded } = await readP6Page(kv, now);
   expect(loaded.systemCost?.status).toBe("ok");
   expect(loaded.systemCost?.pnlUsd).toBe(120);
-  expect(loaded.systemCost?.monthlyUsd).toBe(110);
-  expect(loaded.systemCost?.monthlyR).toBe(5.5);
+  expect(loaded.systemCost?.monthlyUsd).toBe(MONTHLY_USD);
+  expect(loaded.systemCost?.monthlyR).toBe(5.7625);
+  expect(loaded.systemCost?.items?.[0]?.note).toBe(VERCEL_NOTE);
+  expect(loaded.systemCost?.items?.[1]).toEqual({ name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE });
   expect(loaded.systemCost?.netUsd).toBeCloseTo(120 - (loaded.systemCost?.accruedUsd ?? 0), 8);
   const shown = redactP6View(loaded);
   expect(shown.systemCost?.pnlUsd).toBe(120);
