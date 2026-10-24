@@ -831,7 +831,7 @@ export async function readP6Dashboard(kv: Pick<Kv, "readMany">): Promise<Dashboa
     );
     const stress: ClassStress = classStress(mine, classId);
     const mean = classMeanNetR(
-      stressRows.map((row) => ({ classId: row.classId, netR: row.netR ?? 0, fillSrc: row.fillSrc, anchorMissing: row.anchorMissing })),
+      stressRows.map((row) => ({ classId: row.classId, netR: row.netR ?? 0, fillSrc: row.fillSrc, anchorMissing: row.anchorMissing, scoreClass: row.scoreClass })),
       classId,
     );
     const misses = quoteMissStats(
@@ -924,6 +924,7 @@ function stressTrades(closed: DashboardView["closed"]): StressTrade[] {
       anchorMissing: source.anchorMissing === true,
       gap: source.gap === true,
       gapSlippageBps: num("gapSlippageBps"),
+      ...(source.scoreClass === "A_x1_unscored" ? { scoreClass: "A_x1_unscored" as const } : {}),
     };
   });
 }

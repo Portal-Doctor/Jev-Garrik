@@ -755,3 +755,21 @@ test("the mismatch dedupe key survives a reload with gzip writes off and on", as
     else process.env.P6_CLEAR_LATCH = clear;
   }
 });
+
+test("a leading zero that is also the id suffix stays a generic mismatch", () => {
+  const at = Date.parse("2026-10-21T12:00:00.000Z");
+  const book = boot(at);
+  book.latches = { book: { id: "book-0123", tripAt: 123, drawdownUsd: -1_600, peakEquityUsd: 0 } };
+  const token = "book:book-0123:0123";
+  const next = withClear(token, () => applyForward(book, { kind: "clock", tsMs: at + 1 }));
+  expect(next.latches?.book?.id).toBe("book-0123");
+  expect(next.incidents.filter((line) => line === "latch_clear_mismatch")).toEqual(["latch_clear_mismatch"]);
+  expect(next.incidents.some((line) => line.startsWith("latch_cleared"))).toBe(false);
+});
+
+test("two different bad clear tokens write the generic mismatch once", () => {
+  const at = Date.parse("2026-10-21T13:00:00.000Z");
+  let book = withClear("not-a-token", () => applyForward(boot(at), { kind: "clock", tsMs: at + 1 }));
+  book = withClear("still-not", () => applyForward(book, { kind: "clock", tsMs: at + 2 }));
+  expect(book.incidents.filter((line) => line === "latch_clear_mismatch")).toHaveLength(1);
+});

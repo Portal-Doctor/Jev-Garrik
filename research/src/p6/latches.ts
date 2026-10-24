@@ -71,7 +71,7 @@ export interface LatchBook {
   day: string | null;
   config: { parity?: unknown };
   classes: Record<ClassId, { peakUsd: number; cumUsd: number }>;
-  closed: readonly { id: string; classId: ClassId }[];
+  closed: readonly { id: string; classId: ClassId; scoreClass?: "A_x1_unscored" }[];
   incidents: string[];
   latches?: RiskLatches;
   clearedLatchIds?: string[];
@@ -231,7 +231,8 @@ function relaxRearm(book: LatchBook, equity: LatchEquity): void {
 function lastTradeId(book: LatchBook, classId: ClassId): string {
   for (let i = book.closed.length - 1; i >= 0; i -= 1) {
     const trade = book.closed[i];
-    if (trade?.classId === classId) return trade.id;
+    // errata 002 item 3. An unscored X1 class A trade does not bind a clear.
+    if (trade?.classId === classId && trade.scoreClass !== "A_x1_unscored") return trade.id;
   }
   return "none";
 }

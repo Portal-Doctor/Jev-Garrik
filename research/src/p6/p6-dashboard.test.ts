@@ -344,7 +344,7 @@ test("a no-cookie GET /p6 returns 200 and the public output is redacted", () => 
 
 test("class A paper on the public view is allowlisted", () => {
   const idle = redactP6View(publicView());
-  expect(idle.classAPaper?.status).toBe("running");
+  expect(idle.classAPaper?.status).toBe("pending");
   expect(idle.classAPaper?.start).toBe("2026-10-26T00:00:00.000Z");
   expect(idle.classAPaper?.config).toBe("A55-k3");
   expect(idle.classAPaper?.paper).toBe(true);

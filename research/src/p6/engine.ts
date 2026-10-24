@@ -459,6 +459,8 @@ export type ForwardEvent =
       riskUsd: number;
       entryDate: string;
       exitTs: number;
+      /** errata 002 item 3. Injected rows can carry the live X1 tag. The tape keeps them and the kill stats do not. */
+      scoreClass?: "A_x1_unscored";
     }
   | { kind: "pair-enable"; productId: string; tsMs: number; who: string; why: string };
 
@@ -1081,6 +1083,8 @@ function lastExitTs(book: Book, productId: string): number | null {
 
 function pushClosed(book: Book, trade: ClosedTrade): void {
   book.closed.push(trade);
+  // errata 002 item 3. The row stays on the tape. It does not move realized equity or the class curve, so it cannot trip or clear a kill.
+  if (trade.scoreClass === "A_x1_unscored") return;
   book.realizedUsd += trade.netUsd;
   const minSize = trade.riskUsd <= PAPER_MINIMUM_USD;
   book.classes[trade.classId] = stepClass(book.classes[trade.classId], trade.netR, trade.netUsd, minSize);
@@ -1770,6 +1774,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       entryDate: event.entryDate,
       exitTs: event.exitTs,
       exitKind: "realize",
+      ...(event.scoreClass === "A_x1_unscored" ? { scoreClass: "A_x1_unscored" as const } : {}),
     });
     reviewPair(book, event.productId, event.exitTs);
     return book;

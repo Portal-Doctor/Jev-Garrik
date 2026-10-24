@@ -21,6 +21,7 @@ import { readPairMonth } from "../data/store";
 import { readDailyHistory } from "./daily";
 import { applyForward, freshBook, forwardBookPanel, noteMemberDay, resolvePendingFills, type Book } from "./engine";
 import { restoreClassABook, type ClassABook } from "./class-a-paper";
+import { stepClassAFromHost } from "./class-a-live";
 import { adoptLatchState, latchHotFields, type LatchRearm, type RiskLatches } from "./latches";
 import { restoreExtremes } from "./extremes";
 import { parsePublicMessage, type PublicEvent } from "./feed";
@@ -1597,6 +1598,7 @@ function pushBar(host: PaperHost, bar: OhlcvBar): void {
   applyForward(host.book, { ...fields, phase: "gap" });
   applyForward(host.book, { ...fields, phase: "rest" });
   kickDurable(host);
+  stepClassAFromHost(host, bar);
   boundHost(host);
 }
 

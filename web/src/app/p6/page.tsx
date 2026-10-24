@@ -342,7 +342,9 @@ export default async function P6DashboardPage({
                 ? "Interim kill"
                 : view.classAPaper?.status === "redacted"
                   ? "Redacted"
-                  : "Awaiting start"
+                  : view.classAPaper?.status === "pending"
+                    ? "Pending"
+                    : "Awaiting start"
           } · n ${view.classAPaper?.n ?? 0} · net ${moneyOrDash(view.classAPaper?.cumNetUsd, true)}`}
           {view.classAPaper?.promotion === "blocked" ? " · promotion blocked" : view.classAPaper?.promotion === "unresolved" ? " · promotion unresolved" : view.classAPaper?.promotion === "pass" ? " · promotion pass" : ""}
           {view.classAPaper?.fillRate != null ? ` · maker fill ${Math.round(view.classAPaper.fillRate * 100)}%` : ""}

@@ -5,15 +5,22 @@ import { captureHot, loadSplit, persistSplit } from "./hot-store";
 import { installPaperState, startPaperHost } from "./paper-host";
 import { decodeStored } from "./redis-gzip";
 import { decodeLease, HOT_KEY, LEASE_KEY, memoryKv, peekStored, tryAcquire } from "./relay";
+import { countsInClassMean, classMeanNetR } from "./x1-fill";
 import {
+  CLASS_A_BOOTSTRAP_REPS,
+  CLASS_A_BOOTSTRAP_SEED,
+  CLASS_A_HOLM_FAMILY,
   CLASS_A_KILL_USD,
+  CLASS_A_LOOKBACK,
   CLASS_A_PAPER_START_MS,
   CLASS_A_SPEC_SHA256,
+  classABuyHoldSeries,
   classARuleExit,
   classAStartMs,
   concentrationOf,
   deployedFraction,
   emptyClassABook,
+  ensureClassAPaper,
   equalWeightBuyHold,
   evaluateSignal,
   evaluateSignals,
@@ -27,6 +34,7 @@ import {
   orderClassASignals,
   promotionOf,
   regimeOf,
+  restoreClassABook,
   scrubClassAPaper,
   sizedOrder,
   signalCloseMs,
@@ -63,12 +71,12 @@ function signal(over: Partial<ClassASignal> = {}): ClassASignal {
   return {
     pair: "SOL-USD",
     listedDays: 120,
-    btcClose: null,
-    btcEma50: null,
-    btcDailyMove: null,
-    btcSma200: null,
-    btcSma50: null,
-    btcSma50TenAgo: null,
+    btcClose: 110,
+    btcEma50: 90,
+    btcDailyMove: 0,
+    btcSma200: 100,
+    btcSma50: 90,
+    btcSma50TenAgo: 80,
     spreadBps: 1,
     depthCostBps: 1,
     quoteAgeMs: 100,
@@ -97,7 +105,7 @@ test("a null start records nothing", () => {
   const idle = emptyClassABook(null);
   expect(evaluateSignal(idle, signal())).toBeNull();
   expect(idle.rows).toHaveLength(0);
-  expect(scrubClassAPaper(undefined).status).toBe("running");
+  expect(scrubClassAPaper(undefined).status).toBe("pending");
   expect(scrubClassAPaper(undefined).start).toBe("2026-10-26T00:00:00.000Z");
   expect(CLASS_A_SPEC_SHA256).toBe("56fb7543d69a80b536d7ae4d9f9d9240ebde33f1500fde45e6b5235e70a753d0");
 });
@@ -126,7 +134,7 @@ test("the volume floor is the 30 completed days before the signal day", () => {
   expect(row?.medianVolumeUsd).toBeGreaterThanOrEqual(5_000_000);
 });
 
-test("the BTC veto is strict on both sides and does not block the maker when it is off", () => {
+test("the BTC veto is strict on both sides and missing BTC fails closed", () => {
   const vetoed = evaluateSignal(book(), signal({ btcClose: 100, btcEma50: 101, btcDailyMove: -0.03 }));
   expect(vetoed?.skipReason).toBe("skip_btcveto");
   expect(vetoed?.counterfactual).toBeNull();
@@ -135,6 +143,17 @@ test("the BTC veto is strict on both sides and does not block the maker when it 
   expect(softer?.skipReason).not.toBe("skip_btcveto");
   const touch = evaluateSignal(book(), signal({ btcClose: 101, btcEma50: 101, btcDailyMove: -0.05 }));
   expect(touch?.btcVeto).toBe(false);
+  for (const missing of [
+    { btcClose: null, btcEma50: 90, btcDailyMove: 0 },
+    { btcClose: 100, btcEma50: null, btcDailyMove: 0 },
+    { btcClose: 100, btcEma50: 90, btcDailyMove: null },
+  ] as const) {
+    const paper = book();
+    const row = evaluateSignal(paper, signal(missing));
+    expect(row?.skipReason).toBe("skip_btcveto");
+    expect(row?.counterfactual).toBeNull();
+    expect(paper.open).toHaveLength(0);
+  }
 });
 
 test("live checks use a strict greater-than and the first failure wins", () => {
@@ -230,7 +249,11 @@ test("the fourth open slot is skip_cap and open risk above $60 is skip_cap", () 
 test("one position per pair, and the 24h re-entry block follows a stop only", () => {
   const paper = book();
   expect(evaluateSignal(paper, signal())?.fill).toBe("fill");
-  expect(evaluateSignal(paper, signal())?.skipReason).toBe("skip_pair");
+  const held = book();
+  evaluateSignal(held, signal());
+  const next = daysOf();
+  next.push({ date: addDays(next[69]!.date, 1), high: 151, low: 149, close: 150, baseVolume: 100_000 });
+  expect(evaluateSignal(held, signal({ days: next, index: 70 }))?.skipReason).toBe("skip_pair");
   const entryMs = paper.open[0]!.entryMs;
   onIntrabar(paper, { pair: "SOL-USD", tsMs: entryMs - 1, open: 1, low: 1, hourAtr: 1 });
   expect(paper.open).toHaveLength(1);
@@ -546,7 +569,8 @@ test("errata 001 promotion uses Holm and buy-and-hold, and the exclusion preflig
     regime: "CHOP",
   });
   const strong = Array.from({ length: 30 }, (_, i) => row(`N${i}-USD`, 10, 400));
-  const passed = promotionOf(strong, { bhReturn: 0.04, deployedFraction: [2] });
+  const holm = CLASS_A_HOLM_FAMILY.map((id) => ({ id, p: id === "A" ? 1 : 0.9 }));
+  const passed = promotionOf(strong, { bhReturn: 0.04, deployedFraction: [2], family: holm });
   expect(passed.status).toBe("pass");
   expect(passed.tP).toBe(0);
   expect(passed.holmP).toBe(0);
@@ -554,10 +578,15 @@ test("errata 001 promotion uses Holm and buy-and-hold, and the exclusion preflig
   expect(passed.bookReturn).toBeCloseTo(0.05, 8);
   expect(passed.beatsBh).toBe(true);
   expect(passed.exposureAdjustedReturn).toBeLessThan(0.04);
-  expect(promotionOf(strong, { bhReturn: 0.05 }).status).toBe("blocked");
+  expect(promotionOf(strong, { bhReturn: 0.05, family: holm }).status).toBe("blocked");
   expect(promotionOf(strong).status).toBe("unresolved");
+  expect(promotionOf(strong, { bhReturn: 0.04 }).status).toBe("unresolved");
+  expect(promotionOf(strong, { bhReturn: 0.04, family: [] }).status).toBe("unresolved");
+  expect(promotionOf(strong, { bhReturn: 0.04, family: [{ id: "A", p: 0 }] }).status).toBe("unresolved");
   expect(promotionOf(strong, { bhReturn: 0.05 }).bhReturn).toBe(0.05);
   const flatHold = promotionOf(strong, {
+    bhReturn: undefined,
+    family: holm,
     bhDays: [
       { members: ["SOL-USD"], close: { "SOL-USD": 10 } },
       { members: ["SOL-USD"], close: { "SOL-USD": 10 } },
@@ -570,15 +599,15 @@ test("errata 001 promotion uses Holm and buy-and-hold, and the exclusion preflig
     ...Array.from({ length: 10 }, (_, i) => row(`H${i}-USD`, 1, 481)),
   ];
   const alone = promotionOf(borderline, { bhReturn: -1 });
-  const family = promotionOf(borderline, { bhReturn: -1, family: [{ id: "B", p: 0.9 }] });
-  expect(alone.holmP).toBeLessThan(0.05);
-  expect(alone.status).toBe("pass");
+  const family = promotionOf(borderline, { bhReturn: -1, family: holm });
+  expect(alone.status).toBe("unresolved");
   expect(family.holmP).toBeGreaterThanOrEqual(0.05);
   expect(family.status).toBe("blocked");
   expect(family.bootstrapP).not.toBeNull();
   const level = Array.from({ length: 30 }, (_, i) => row(`E${i}-USD`, 1, 290));
-  expect(promotionOf(level, { bhReturn: -1 }).status).toBe("blocked");
-  expect(promotionOf(level, { bhReturn: -1 }).tP).toBe(1);
+  expect(promotionOf(level, { bhReturn: -1, family: holm }).status).toBe("blocked");
+  expect(promotionOf(level, { bhReturn: -1, family: holm }).tP).toBe(1);
+  expect(promotionOf(level, { bhReturn: -1, family: holm }).bootstrapP).toBe(1);
 
   expect(exclusionPreflight().ok).toBe(true);
   expect(exclusionPreflight([]).reason).toBe("empty");
@@ -639,4 +668,56 @@ test("errata 001 live X1 class A is tagged and still class A", () => {
   applyForward(other, { ...entry, id: "live-c", classId: "C" });
   expect(other.positions.find((row) => row.id === "live-c")?.classId).toBe("C");
   expect(other.positions.find((row) => row.id === "live-c")?.scoreClass).toBeUndefined();
+  const scoredOnly = freshBook({ members: ["ETH-USD"] });
+  applyForward(scoredOnly, {
+    kind: "realize",
+    id: "scored-a",
+    classId: "A",
+    productId: "ETH-USD",
+    netR: 1,
+    netUsd: 20,
+    riskUsd: 20,
+    entryDate: "2026-10-15",
+    exitTs: ts,
+  });
+  const quietTape = applyForward(freshBook({ members: ["ETH-USD"] }), {
+    kind: "realize",
+    id: "x1-a",
+    classId: "A",
+    productId: "ETH-USD",
+    netR: -2,
+    netUsd: -40,
+    riskUsd: 20,
+    entryDate: "2026-10-15",
+    exitTs: ts,
+    scoreClass: "A_x1_unscored",
+  });
+  expect(quietTape.closed[0]?.scoreClass).toBe("A_x1_unscored");
+  expect(quietTape.realizedUsd).toBe(0);
+  expect(quietTape.classes.A.cumUsd).toBe(0);
+  expect(quietTape.latches?.class?.A).toBeUndefined();
+  expect(countsInClassMean({ fillSrc: "l2", scoreClass: "A_x1_unscored" })).toBe(false);
+  expect(countsInClassMean({ fillSrc: "l2" })).toBe(true);
+  const mixed = [
+    ...Array.from({ length: 10 }, () => ({ classId: "A", netR: 1, fillSrc: "l2" })),
+    { classId: "A", netR: -5, fillSrc: "l2", scoreClass: "A_x1_unscored" as const },
+  ];
+  expect(classMeanNetR(mixed, "A")).toEqual({ n: 10, meanNetR: 1 });
+  const tripped = applyForward(scoredOnly, {
+    kind: "realize",
+    id: "x1-later",
+    classId: "A",
+    productId: "ETH-USD",
+    netR: -80,
+    netUsd: -1_600,
+    riskUsd: 20,
+    entryDate: "2026-10-15",
+    exitTs: ts + 1,
+    scoreClass: "A_x1_unscored",
+  });
+  expect(tripped.latches?.class?.A).toBeUndefined();
+  tripped.classes.A.peakUsd = 0;
+  tripped.classes.A.cumUsd = -1_600;
+  const bound = applyForward(tripped, { kind: "clock", tsMs: ts + 2 });
+  expect(bound.latches?.class?.A?.tradeId).toBe("scored-a");
 });

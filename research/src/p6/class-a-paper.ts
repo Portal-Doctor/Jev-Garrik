@@ -15,6 +15,14 @@
  * - errata 001 item 16: counterfactuals on veto, cap, pair, reentry, and kill skips are not built.
  * - errata 001 item 22: fewer than three winning trades still enter the top-share check.
  * - errata 001 item 27: fill rate is fills divided by maker orders placed.
+ *
+ * Errata 002 (sha256 c28ec8a69938bdf97d7d69cbdbbedb7fcded5a5eeb401adb1c9b1db508651c54).
+ * - errata 002 item 1: the Holm family is an input of eight running forward-paper hypotheses. Missing or empty stays unresolved.
+ * - errata 002 item 2: the 5 bps stop slip is off the stop price. The shared design-rule stop fill stays unchanged.
+ * - errata 002 item 3: A_x1_unscored rows stay class A and are out of Kelly, the class mean, and the kill statistics now.
+ * - errata 002 item 4: bootstrap seed 20261011 and 10,000 resamples are fixed.
+ * - errata 002 item 5: the start close and a signal at exactly startMs are included.
+ * - errata 002 item 6: the benchmark is the drifted buy-and-hold series below. Drift versus daily rebalancing, and zero rebalance fees, are fixed readings. They are not switches. A change waits on errata 003.
  */
 
 import { classATrigger, type DailyBar } from "../p3/classes";
@@ -47,8 +55,15 @@ export const CLASS_A_NO_REENTRY_MS = 24 * 60 * 60 * 1000;
 export const CLASS_A_PAPER_START_MS = Date.parse("2026-10-26T00:00:00.000Z");
 /** errata 001 item 2a. Holm family-wise alpha. Equality does not pass. */
 export const CLASS_A_HOLM_ALPHA = 0.05;
-/** errata 001 item 2a. Reported beside the t-test. Not the gate. Seed is the house bootstrap seed. */
+/** errata 001 item 2a and errata 002 item 4. Reported beside the t-test. Not the gate. Neither constant may change after start. */
 export const CLASS_A_BOOTSTRAP_REPS = 10_000;
+/** errata 002 item 4. The house bootstrap seed. Fixed. */
+export const CLASS_A_BOOTSTRAP_SEED = BOOTSTRAP_SEED;
+/**
+ * errata 002 item 1. Every preregistered forward-paper hypothesis whose tracker is running on A's review date.
+ * The five ETF-venue ids are not named in the errata or this repo. These placeholders fail closed until a review record names them.
+ */
+export const CLASS_A_HOLM_FAMILY = ["A", "capitulation", "access-event", "etf-venue-1", "etf-venue-2", "etf-venue-3", "etf-venue-4", "etf-venue-5"] as const;
 /** errata 001 item 12. Spread samples required inside the 30 days before the signal. */
 export const CLASS_A_SPREAD_MIN_DAYS = 20;
 const DAY_MS = 86_400_000;
@@ -142,9 +157,13 @@ export interface ClassARow {
   netBps: number | null;
   grossR: number | null;
   netR: number | null;
+  /** Spec A11. Null on a skip or a no-fill. Entry fee while open, entry plus exit once closed. */
+  feesUsd: number | null;
   counterfactual: ClassACounterfactual | null;
   /** errata 001 item 11. True when a stop exit fills at the bar open. */
   gap?: boolean;
+  /** Out of timestamp order, or the same pair and signal time again. Not applied. Not a skip reason. */
+  signalOrder?: "out-of-order" | "duplicate";
 }
 
 interface Sim {
@@ -186,6 +205,10 @@ export interface ClassABook {
   scored: ClassAScored[];
   /** errata 001 item 13. False blocks recording. Absent on an old snapshot means the check had not been stored. */
   exclusionOk?: boolean;
+  /** Latest applied signal close. An older close is flagged and not applied. Absent on an old snapshot means none. */
+  lastSignalMs?: number | null;
+  /** Quoted spread bps at prior day closes, per pair. The signal day is not in this list. */
+  spreadLog?: Record<string, number[]>;
 }
 
 export interface ClassAPaperView {
@@ -194,7 +217,7 @@ export interface ClassAPaperView {
   lookback: 55;
   k: 3;
   start: string | null;
-  status: "awaiting-start" | "running" | "killed" | "redacted";
+  status: "awaiting-start" | "pending" | "running" | "killed" | "redacted";
   paper: true;
   n: number;
   fills: number;
@@ -250,8 +273,7 @@ export function exclusionPreflight(entries: readonly ExclusionEntry[] = AGREED_E
   return { ok: true, reason: null };
 }
 
-export function emptyClassABook(startMs: number | null = null): ClassABook {
-  const preflight = exclusionPreflight();
+export function emptyClassABook(startMs: number | null = null, preflight: { ok: boolean; reason: string | null } = exclusionPreflight()): ClassABook {
   return {
     startMs: preflight.ok ? startMs : null,
     killed: false,
@@ -262,6 +284,8 @@ export function emptyClassABook(startMs: number | null = null): ClassABook {
     rows: [],
     scored: [],
     exclusionOk: preflight.ok,
+    lastSignalMs: null,
+    spreadLog: {},
   };
 }
 
@@ -330,8 +354,8 @@ export function signalCloseMs(openDated: string): number {
 }
 
 /**
- * errata 001 item 11. Spec formula is stop − max(5 bps, 0.1 × 1h ATR), or the open on a gap.
- * The 5 bps term is taken off the stop. The shared design-rule stop fill, which uses s_bt of the entry, is unchanged.
+ * errata 001 item 11 and errata 002 item 2. Spec formula is stop − max(5 bps, 0.1 × 1h ATR), or the open on a gap.
+ * The 5 bps term is measured off the stop. The shared design-rule stop fill, which uses s_bt of the entry, is unchanged.
  */
 export function stopFillPx(stop: number, hourAtr: number, open: number): number {
   if (open <= stop) return open;
@@ -369,7 +393,10 @@ export interface BhDay {
   close: Readonly<Record<string, number>>;
 }
 
-/** Equal-weight buy and hold, rebalanced to equal weight when the member set changes. Return is the fraction. */
+/**
+ * Equal-weight buy and hold on a caller-built member list, rebalanced when that list changes.
+ * The promotion benchmark uses classABuyHoldSeries (errata 002 item 6). This helper stays for the older day interface.
+ */
 export function equalWeightBuyHold(days: readonly BhDay[]): number | null {
   if (days.length < 2 || days[0]!.members.length === 0) return null;
   const key = (members: readonly string[]) => members.slice().sort().join(",");
@@ -398,6 +425,104 @@ export function equalWeightBuyHold(days: readonly BhDay[]): number | null {
     held = new Map([...next.entries()].map(([id, weight]) => [id, weight / sum]));
   }
   return value - 1;
+}
+
+export interface ClassABhPair {
+  pair: string;
+  /** Index of the listing day. Membership needs t - listedIndex >= 90. */
+  listedIndex: number;
+  closes: readonly (number | null)[];
+  /** Base volume. USD volume is close times this. */
+  volumes: readonly (number | null)[];
+}
+
+export interface ClassABhInput {
+  /** First window close, inclusive. */
+  t0: number;
+  /** Review close, inclusive. */
+  t1: number;
+  excluded: readonly string[];
+  candles: readonly ClassABhPair[];
+}
+
+export interface ClassABhPoint {
+  t: number;
+  V: number;
+  members: string[];
+}
+
+/**
+ * errata 002 item 6. Equal-weight buy-and-hold of the A2 eligible set.
+ * Weights reset to 1/N at the first window close and when membership changes, and drift with price in between.
+ * No rebalance fee. A missing candle carries the last positive close (a 0% day).
+ * medianVolumeUsd drops a pair when a window day is missing or the close is not positive. Python's median would keep a zero. That is the only gap.
+ */
+export function classABuyHoldSeries(input: ClassABhInput): ClassABhPoint[] {
+  const excluded = new Set(input.excluded);
+  const carried = (values: readonly (number | null)[], index: number): number | null => {
+    for (let i = index; i >= 0; i -= 1) {
+      const value = values[i];
+      if (value != null && Number.isFinite(value) && value > 0) return value;
+    }
+    return null;
+  };
+  const membership = (t: number): string[] => {
+    const names: string[] = [];
+    for (const candle of input.candles) {
+      if (excluded.has(candle.pair) || t - candle.listedIndex < 90 || t < 30) continue;
+      const days = candle.closes.map((close, index) => ({
+        close: close != null && Number.isFinite(close) ? close : 0,
+        baseVolume: candle.volumes[index] != null && Number.isFinite(candle.volumes[index]!) ? candle.volumes[index]! : -1,
+      }));
+      const usd = medianVolumeUsd(days, t);
+      if (usd != null && usd >= CLASS_A_VOLUME_FLOOR_USD) names.push(candle.pair);
+    }
+    names.sort();
+    return names;
+  };
+  const byPair = new Map(input.candles.map((candle) => [candle.pair, candle]));
+  const ratio = (pair: string, t: number): number => {
+    const candle = byPair.get(pair);
+    if (!candle) return 1;
+    const now = carried(candle.closes, t);
+    const prev = carried(candle.closes, t - 1);
+    if (now == null || prev == null || !(prev > 0)) return 1;
+    return now / prev;
+  };
+  const out: ClassABhPoint[] = [];
+  if (!(input.t1 >= input.t0)) return out;
+  let mem = membership(input.t0);
+  let weights = new Map(mem.map((pair) => [pair, mem.length > 0 ? 1 / mem.length : 0]));
+  let value = 1;
+  out.push({ t: input.t0, V: value, members: mem });
+  for (let t = input.t0 + 1; t <= input.t1; t += 1) {
+    let growth = 0;
+    if (weights.size === 0) growth = 1;
+    else {
+      for (const [pair, weight] of weights) growth += weight * ratio(pair, t);
+    }
+    if (!(growth > 0)) growth = 1;
+    value *= growth;
+    if (weights.size > 0) {
+      const next = new Map<string, number>();
+      for (const [pair, weight] of weights) next.set(pair, (weight * ratio(pair, t)) / growth);
+      weights = next;
+    }
+    const nextMem = membership(t);
+    if (nextMem.join(",") !== mem.join(",")) {
+      mem = nextMem;
+      weights = new Map(mem.map((pair) => [pair, mem.length > 0 ? 1 / mem.length : 0]));
+    }
+    out.push({ t, V: value, members: mem.slice() });
+  }
+  return out;
+}
+
+/** V at the review close, minus 1. Null when the window is empty. errata 002 item 6. */
+export function classABuyHoldReturn(input: ClassABhInput): number | null {
+  const series = classABuyHoldSeries(input);
+  const last = series[series.length - 1];
+  return last ? last.V - 1 : null;
 }
 
 /** Book return divided by the average fraction of the $6,000 book that was deployed. */
@@ -467,11 +592,16 @@ export interface ClassAPromotion {
 }
 
 export interface PromotionOpts {
-  /** Sibling forward-paper classes live at the review. Class A is added. Omitted means the family is A alone. errata 001 item 2a. */
+  /**
+   * errata 002 item 1. Every name in CLASS_A_HOLM_FAMILY, each with a finite p in [0, 1].
+   * A's p in this list is ignored. The gate uses the computed one-sided t. Missing or empty stays unresolved.
+   */
   family?: readonly { id: string; p: number }[];
-  /** Precomputed equal-weight buy-and-hold return. errata 001 item 2b. */
+  /** Precomputed buy-and-hold return, V_review − 1. errata 001 item 2b. */
   bhReturn?: number | null;
-  /** Built with equalWeightBuyHold when bhReturn is omitted. */
+  /** errata 002 item 6. The drifted series. Used when bhReturn is omitted. */
+  bhCandles?: ClassABhInput;
+  /** Older day interface. Used only when bhReturn and bhCandles are omitted. */
   bhDays?: readonly BhDay[];
   /** Average deployed fraction series. Reported only. errata 001 item 2b. */
   deployedFraction?: readonly number[];
@@ -518,30 +648,52 @@ function bootstrapMeanP(values: readonly number[], bar: number, reps: number, se
   return atOrBelow / reps;
 }
 
+/** errata 002 item 1. Null when any of the eight names is missing or its p is not a probability. A's listed p is replaced. */
+function holmFamily(rows: readonly { id: string; p: number }[] | undefined, tP: number | null): { id: string; p: number }[] | null {
+  if (!rows || rows.length === 0 || tP == null) return null;
+  const byId = new Map<string, number>();
+  for (const row of rows) {
+    if (!Number.isFinite(row.p) || row.p < 0 || row.p > 1) return null;
+    byId.set(row.id, row.p);
+  }
+  const family: { id: string; p: number }[] = [];
+  for (const id of CLASS_A_HOLM_FAMILY) {
+    if (id === "A") {
+      family.push({ id, p: tP });
+      continue;
+    }
+    const p = byId.get(id);
+    if (p == null) return null;
+    family.push({ id, p });
+  }
+  return family;
+}
+
 /**
- * errata 001 item 2a and item 2b.
+ * errata 001 item 2a and item 2b, errata 002 item 1 and item 6.
  * Pass means the numeric gates cleared. It does not change live trading.
- * The default Holm family is class A alone until a review doc names the other live classes.
+ * A missing family or a missing buy-and-hold series stays unresolved. The family does not default to class A alone.
  */
 export function promotionOf(scored: readonly ClassAScored[], opts: PromotionOpts = {}): ClassAPromotion {
   const grossValues = scored.map((row) => row.grossBps);
   const gross = mean(grossValues);
   const bookReturn = scored.length > 0 ? scored.reduce((total, row) => total + row.netUsd, 0) / CLASS_A_BOOK_USD : null;
   const tP = meanAboveBarP(grossValues, CLASS_A_PROMOTE_GROSS_BPS);
-  const bootstrapP = bootstrapMeanP(grossValues, CLASS_A_PROMOTE_GROSS_BPS, CLASS_A_BOOTSTRAP_REPS, BOOTSTRAP_SEED);
-  const siblings = (opts.family ?? []).filter((row) => row.id !== "A" && Number.isFinite(row.p) && row.p >= 0 && row.p <= 1);
+  const bootstrapP = bootstrapMeanP(grossValues, CLASS_A_PROMOTE_GROSS_BPS, CLASS_A_BOOTSTRAP_REPS, CLASS_A_BOOTSTRAP_SEED);
+  const family = holmFamily(opts.family, tP);
   let holmP: number | null = null;
-  if (tP != null) {
-    const adjusted = holmAdjusted([{ id: "A", p: tP }, ...siblings]);
+  if (family) {
+    const adjusted = holmAdjusted(family);
     holmP = adjusted.find((row) => row.id === "A")?.adjusted ?? null;
   }
-  const bhReturn = opts.bhReturn != null ? opts.bhReturn : opts.bhDays != null ? equalWeightBuyHold(opts.bhDays) : null;
+  const bhReturn = opts.bhReturn != null && Number.isFinite(opts.bhReturn) ? opts.bhReturn : opts.bhCandles != null ? classABuyHoldReturn(opts.bhCandles) : opts.bhDays != null ? equalWeightBuyHold(opts.bhDays) : null;
   const beatsBh = bookReturn != null && bhReturn != null ? bookReturn > bhReturn : null;
   const exposureAdjustedReturn = bookReturn != null && opts.deployedFraction != null ? exposureAdjusted(bookReturn, opts.deployedFraction) : null;
   const report: ClassAPromotion = { status: "unresolved", holmP, tP, bootstrapP, bookReturn, bhReturn, beatsBh, exposureAdjustedReturn };
   if (scored.length < CLASS_A_PROMOTE_MIN_N) return { ...report, status: "not-considered" };
   const concentration = concentrationOf(scored);
   if (gross == null || gross < CLASS_A_PROMOTE_GROSS_BPS || concentration.top3Kill || concentration.pairKill) return { ...report, status: "blocked" };
+  if (!family) return { ...report, status: "unresolved" };
   if (holmP == null || !(holmP < CLASS_A_HOLM_ALPHA)) return { ...report, status: "blocked" };
   if (bhReturn == null || bookReturn == null) return { ...report, status: "unresolved" };
   if (!(bookReturn > bhReturn)) return { ...report, status: "blocked" };
@@ -563,7 +715,7 @@ export function emptyClassAPaperView(): ClassAPaperView {
     lookback: 55,
     k: 3,
     start: new Date(CLASS_A_PAPER_START_MS).toISOString(),
-    status: "running",
+    status: Date.now() < CLASS_A_PAPER_START_MS ? "pending" : "running",
     paper: true,
     n: 0,
     fills: 0,
@@ -589,7 +741,7 @@ export function emptyClassAPaperView(): ClassAPaperView {
   };
 }
 
-export function classAPaperView(book: ClassABook, asOfMs = 0): ClassAPaperView {
+export function classAPaperView(book: ClassABook, asOfMs = Date.now()): ClassAPaperView {
   const skips: ClassAPaperView["skips"] = {};
   let fills = 0;
   let placed = 0;
@@ -612,7 +764,7 @@ export function classAPaperView(book: ClassABook, asOfMs = 0): ClassAPaperView {
     lookback: 55,
     k: CLASS_A_K,
     start: book.startMs == null ? null : new Date(book.startMs).toISOString(),
-    status: book.startMs == null ? "awaiting-start" : book.killed ? "killed" : "running",
+    status: book.startMs == null ? "awaiting-start" : book.killed ? "killed" : asOfMs < book.startMs ? "pending" : "running",
     paper: true,
     n: book.scored.length,
     fills,
@@ -669,7 +821,7 @@ function scrubClassAView(value: unknown): ClassAPaperView {
   if (Array.isArray(row.healthDue)) {
     for (const item of row.healthDue) if ((item === "90d" || item === "6m") && !healthDue.includes(item)) healthDue.push(item);
   }
-  const status = row.status === "awaiting-start" || row.status === "running" || row.status === "killed" ? row.status : "redacted";
+  const status = row.status === "awaiting-start" || row.status === "pending" || row.status === "running" || row.status === "killed" ? row.status : "redacted";
   const promotion = row.promotion === "not-considered" || row.promotion === "blocked" || row.promotion === "unresolved" || row.promotion === "pass" ? row.promotion : "redacted";
   const beatsBh = row.beatsBh === true ? true : row.beatsBh === false ? false : null;
   const start = typeof row.start === "string" && /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}\.\d{3}Z)?$/.test(row.start) ? row.start : null;
@@ -754,7 +906,41 @@ function skipRow(book: ClassABook, input: ClassASignal, signalMs: number, close:
     netBps: null,
     grossR: null,
     netR: null,
+    feesUsd: null,
     counterfactual,
+  };
+  pushRow(book, row);
+  if (book.lastSignalMs == null || signalMs >= book.lastSignalMs) book.lastSignalMs = signalMs;
+  return row;
+}
+
+function orderRow(book: ClassABook, input: ClassASignal, signalMs: number, close: number, atr: number, order: "out-of-order" | "duplicate"): ClassARow {
+  const row: ClassARow = {
+    id: `${input.pair}:${signalMs}:${order}`,
+    signalMs,
+    pair: input.pair,
+    medianVolumeUsd: medianVolumeUsd(input.days, input.index),
+    signalClose: close,
+    atr,
+    stop: null,
+    notionalUsd: null,
+    fill: "skip",
+    skipReason: null,
+    check: "order",
+    measured: signalMs,
+    threshold: book.lastSignalMs ?? null,
+    regime: regimeOf(input.btcClose, input.btcSma200, input.btcSma50, input.btcSma50TenAgo),
+    btcVeto: false,
+    exitReason: null,
+    exitMs: null,
+    exitPrice: null,
+    grossBps: null,
+    netBps: null,
+    grossR: null,
+    netR: null,
+    feesUsd: null,
+    counterfactual: null,
+    signalOrder: order,
   };
   pushRow(book, row);
   return row;
@@ -821,11 +1007,14 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
   if (!triggered) return null;
   const atr = atrAt(input.days, input.index);
   if (atr == null) return null;
+  if (book.lastSignalMs != null && signalMs < book.lastSignalMs) return orderRow(book, input, signalMs, day.close, atr, "out-of-order");
+  if (book.rows.some((row) => row.pair === input.pair && row.signalMs === signalMs)) return orderRow(book, input, signalMs, day.close, atr, "duplicate");
   const volume = medianVolumeUsd(input.days, input.index);
   const regime = regimeOf(input.btcClose, input.btcSma200, input.btcSma50, input.btcSma50TenAgo);
   if (volume == null || volume < CLASS_A_VOLUME_FLOOR_USD) {
     return skipRow(book, input, signalMs, day.close, atr, "skip_volume", "volume", volume, CLASS_A_VOLUME_FLOOR_USD, false, null);
   }
+  const btcKnown = input.btcClose != null && Number.isFinite(input.btcClose) && input.btcEma50 != null && Number.isFinite(input.btcEma50) && input.btcDailyMove != null && Number.isFinite(input.btcDailyMove);
   const vetoDay: BtcDay = {
     date: day.date,
     close: input.btcClose ?? Number.NaN,
@@ -833,31 +1022,38 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
     dailyMove: input.btcDailyMove,
     below4hEma: false,
   };
-  const veto = input.btcClose != null && btcVeto(vetoDay);
-  // errata 001 item 16. A counterfactual on this skip is optional and is not built.
+  const veto = !btcKnown || btcVeto(vetoDay);
+  // errata 001 item 16. A counterfactual on a veto skip is optional and is not built. Missing BTC fails closed the same way.
   if (veto) return skipRow(book, input, signalMs, day.close, atr, "skip_btcveto", "btc", input.btcDailyMove, -0.03, true, null);
   const counterfactual = counterfactualOf(input.nextHourOpen, day.close, atr);
   if (book.killed) return skipRow(book, input, signalMs, day.close, atr, "skip_kill", "kill", book.cumNetUsd, CLASS_A_KILL_USD, false, null);
   const spreadSamples = (input.spreadSamples ?? []).filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0);
+  const sBps = takerSpreadBps(median(spreadSamples));
+  const prior = input.days.slice(Math.max(0, input.index - 9), input.index + 1).map((item) => item.close);
+  const liveSkip = (reason: ClassASkip, check: string, measured: number | null, threshold: number | null): ClassARow => {
+    const row = skipRow(book, input, signalMs, day.close, atr, reason, check, measured, threshold, false, counterfactual);
+    // Spec A4 and A5. A live-check skip still runs the counterfactual taker. errata 001 item 16 does not cover these four.
+    liveShadow(book, row, input, input.nextHourOpen ?? day.close, sBps, prior);
+    return row;
+  };
   // errata 001 item 12. Twenty of the thirty days before the signal. Nineteen skips. The 5 bps floor is not used.
   if (spreadSamples.length < CLASS_A_SPREAD_MIN_DAYS) {
-    return skipRow(book, input, signalMs, day.close, atr, "skip_spread", "spread-days", spreadSamples.length, CLASS_A_SPREAD_MIN_DAYS, false, counterfactual);
+    return liveSkip("skip_spread", "spread-days", spreadSamples.length, CLASS_A_SPREAD_MIN_DAYS);
   }
-  const sBps = takerSpreadBps(median(spreadSamples));
   const spreadLimit = volume > CLASS_A_VOLUME_TIGHT_USD ? 5 : 10;
   if (input.spreadBps == null || input.spreadBps > spreadLimit) {
-    return skipRow(book, input, signalMs, day.close, atr, "skip_spread", "spread", input.spreadBps, spreadLimit, false, counterfactual);
+    return liveSkip("skip_spread", "spread", input.spreadBps, spreadLimit);
   }
   if (input.depthCostBps == null || input.depthCostBps > 15) {
-    return skipRow(book, input, signalMs, day.close, atr, "skip_depth", "depth", input.depthCostBps, 15, false, counterfactual);
+    return liveSkip("skip_depth", "depth", input.depthCostBps, 15);
   }
   if (input.quoteAgeMs == null || input.quoteAgeMs > CLASS_A_STALE_MS) {
-    return skipRow(book, input, signalMs, day.close, atr, "skip_stale", "quote", input.quoteAgeMs, CLASS_A_STALE_MS, false, counterfactual);
+    return liveSkip("skip_stale", "quote", input.quoteAgeMs, CLASS_A_STALE_MS);
   }
   const sized = sizedOrder(day.close, atr);
   if (!sized) return null;
   if (input.minOrderBase == null || sized.units < input.minOrderBase) {
-    return skipRow(book, input, signalMs, day.close, atr, "skip_minsize", "minsize", sized.units, input.minOrderBase, false, counterfactual);
+    return liveSkip("skip_minsize", "minsize", sized.units, input.minOrderBase);
   }
   if (book.open.some((sim) => sim.pair === input.pair)) {
     return skipRow(book, input, signalMs, day.close, atr, "skip_pair", "pair", 1, 1, false, null);
@@ -871,7 +1067,6 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
   const window = { startMs: signalMs, endMs: signalMs + CLASS_A_FILL_WINDOW_MS };
   const tick = input.tick;
   const through = tick != null && tick > 0 ? input.prints.find((print) => print.tsMs >= window.startMs && print.tsMs < window.endMs && print.price <= day.close - tick) : undefined;
-  const prior = input.days.slice(Math.max(0, input.index - 9), input.index + 1).map((item) => item.close);
   const row: ClassARow = {
     id: `${input.pair}:${signalMs}`,
     signalMs,
@@ -895,6 +1090,7 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
     netBps: null,
     grossR: null,
     netR: null,
+    feesUsd: through ? (sized.notionalUsd * CLASS_A_MAKER_FEE_BPS) / 10_000 : null,
     counterfactual,
   };
   if (through) {
@@ -918,6 +1114,7 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
   }
   liveShadow(book, row, input, input.nextHourOpen ?? day.close, sBps, prior);
   pushRow(book, row);
+  if (book.lastSignalMs == null || signalMs >= book.lastSignalMs) book.lastSignalMs = signalMs;
   return row;
 }
 
@@ -956,6 +1153,7 @@ function closeSim(book: ClassABook, sim: Sim, exitMs: number, exitPx: number, re
       row.netBps = pnl.netBps;
       row.grossR = pnl.grossR;
       row.netR = pnl.netR;
+      row.feesUsd = (sim.notionalUsd * sim.feeEntryBps) / 10_000 + (sim.units * exitPx * (CLASS_A_TAKER_FEE_BPS + sim.sBps)) / 10_000;
       if (gap) row.gap = true;
     }
     return;
@@ -1035,5 +1233,18 @@ export function restoreClassABook(value: unknown): ClassABook | null {
     scored: row.scored.filter((item): item is ClassAScored => !!item && typeof item.pair === "string" && typeof item.netUsd === "number"),
     // errata 001 item 13. An old snapshot without the flag keeps trading. An explicit false stays false.
     exclusionOk: row.exclusionOk === false ? false : true,
+    lastSignalMs: typeof row.lastSignalMs === "number" && Number.isFinite(row.lastSignalMs) ? row.lastSignalMs : null,
+    spreadLog: spreadLogOf(row.spreadLog),
   };
+}
+
+function spreadLogOf(value: unknown): Record<string, number[]> {
+  const out: Record<string, number[]> = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [pair, samples] of Object.entries(value as Record<string, unknown>)) {
+    if (!/^[A-Z0-9]{2,12}-[A-Z]{2,5}$/.test(pair) || !Array.isArray(samples)) continue;
+    const nums = samples.filter((item): item is number => typeof item === "number" && Number.isFinite(item) && item >= 0).slice(-30);
+    if (nums.length > 0) out[pair] = nums;
+  }
+  return out;
 }
