@@ -188,6 +188,8 @@ export interface StressTrade {
   parity?: boolean;
   gap?: boolean;
   gapSlippageBps?: number | null;
+  /** errata 002 item 3. Kept on the tape. Dropped from the class mean. */
+  scoreClass?: "A_x1_unscored";
 }
 
 export interface ClassStress {
@@ -207,16 +209,17 @@ export function stressGrade(n: number): StressGrade {
   return "decision-grade";
 }
 
-/** Modelled, stale-quote, entry-stale, missing-anchor, and pre-fix rows stay out of the class mean, the review, and Kelly. */
-export function countsInClassMean(row: { fillSrc?: string | null; anchorMissing?: boolean }): boolean {
+/** Modelled, stale-quote, entry-stale, missing-anchor, pre-fix, and unscored X1 class A rows stay out of the class mean, the review, and Kelly. errata 002 item 3. */
+export function countsInClassMean(row: { fillSrc?: string | null; anchorMissing?: boolean; scoreClass?: string | null }): boolean {
   if (row.anchorMissing === true) return false;
+  if (row.scoreClass === "A_x1_unscored") return false;
   return row.fillSrc !== "modelled" && row.fillSrc !== STALE_QUOTE_FILL_SRC && row.fillSrc !== ENTRY_STALE_FILL_SRC && row.fillSrc !== PRE_FIX_FILL_SRC;
 }
 
 /**
  * Per-trade mean of net R inside one class. Eligible rows only. Null below n = 10.
  */
-export function classMeanNetR(rows: readonly { classId: string; netR: number; fillSrc?: string | null; anchorMissing?: boolean }[], classId: string): { n: number; meanNetR: number | null } {
+export function classMeanNetR(rows: readonly { classId: string; netR: number; fillSrc?: string | null; anchorMissing?: boolean; scoreClass?: string | null }[], classId: string): { n: number; meanNetR: number | null } {
   const mine = rows.filter((row) => row.classId === classId && countsInClassMean(row) && Number.isFinite(row.netR));
   if (mine.length < 10) return { n: mine.length, meanNetR: null };
   return { n: mine.length, meanNetR: mine.reduce((sum, row) => sum + row.netR, 0) / mine.length };

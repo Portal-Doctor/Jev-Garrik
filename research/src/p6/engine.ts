@@ -66,6 +66,7 @@ import {
   armDFreshFloor,
   classLatchOn,
   dEntryBeforeFresh,
+  finishClearEcho,
   haltLatchOn,
   syncRiskLatches,
   type LatchEquity,
@@ -175,6 +176,8 @@ export interface Position {
   fillAnchorOpen?: number;
   entryFillSrc?: FillSrc;
   anchorMissing?: boolean;
+  /** errata 001 item 3. Live X1 class A stays classId A and is never the scored paper record. */
+  scoreClass?: "A_x1_unscored";
 }
 
 export interface ClosedTrade {
@@ -205,6 +208,8 @@ export interface ClosedTrade {
   execCostBps?: number | null;
   driftBps?: number | null;
   anchorMissing?: boolean;
+  /** errata 001 item 3. Copied from the open position. classId stays A. */
+  scoreClass?: "A_x1_unscored";
   /** Stop exit whose first fresh bid was below the stop. exitKind stays "stop". */
   gap?: boolean;
   /** (stop − fill) / stop × 1e4. Reported on its own line. Not part of the execution light. */
@@ -338,6 +343,8 @@ export interface Book {
   latchRearm?: LatchRearm;
   /** A cancelled class-D entry is not replaced before the next 4h evaluation. */
   dEntryNotBeforeMs?: number;
+  /** sha256 of the last mismatch dedupe key. The clear token is not stored. */
+  latchMismatchSeen?: string;
 }
 
 export type ForwardEvent =
@@ -452,6 +459,8 @@ export type ForwardEvent =
       riskUsd: number;
       entryDate: string;
       exitTs: number;
+      /** errata 002 item 3. Injected rows can carry the live X1 tag. The tape keeps them and the kill stats do not. */
+      scoreClass?: "A_x1_unscored";
     }
   | { kind: "pair-enable"; productId: string; tsMs: number; who: string; why: string };
 
@@ -912,6 +921,7 @@ function finishLatchPass(book: Book, event: ForwardEvent): void {
   const tsMs = stampOf(event, book);
   syncLatches(book, tsMs);
   releaseBlockedD(book, tsMs);
+  finishClearEcho(book);
 }
 
 function reviewDue(book: Book, tsMs: number): boolean {
@@ -1073,6 +1083,8 @@ function lastExitTs(book: Book, productId: string): number | null {
 
 function pushClosed(book: Book, trade: ClosedTrade): void {
   book.closed.push(trade);
+  // errata 002 item 3. The row stays on the tape. It does not move realized equity or the class curve, so it cannot trip or clear a kill.
+  if (trade.scoreClass === "A_x1_unscored") return;
   book.realizedUsd += trade.netUsd;
   const minSize = trade.riskUsd <= PAPER_MINIMUM_USD;
   book.classes[trade.classId] = stepClass(book.classes[trade.classId], trade.netR, trade.netUsd, minSize);
@@ -1236,6 +1248,8 @@ function tryEnter(book: Book, opts: {
     ...(anchor != null ? { fillAnchorOpen: anchor } : {}),
     ...(opts.fillSrc ? { entryFillSrc: opts.fillSrc } : {}),
     ...(anchorMissing ? { anchorMissing: true } : {}),
+    // errata 001 item 3. Tag only the live X1 stream. The frozen Kelly path still reads classId.
+    ...(opts.classId === "A" && x1TakerOn(book.config) ? { scoreClass: "A_x1_unscored" as const } : {}),
   });
   book.submittedByClass[opts.classId] += 1;
   return true;
@@ -1352,6 +1366,7 @@ function closePosition(
     maeBasis,
     exitNotionalUsd: exitNotional,
     ...(position.entryFillSrc ? { fillSrc: position.entryFillSrc } : {}),
+    ...(position.scoreClass === "A_x1_unscored" ? { scoreClass: "A_x1_unscored" as const } : {}),
     ...(sideFill ? { exitFillSrc: sideFill } : {}),
     ...(anchorMissing ? { anchorMissing: true } : {}),
     ...(gap ? { gap: true, gapSlippageBps } : {}),
@@ -1759,6 +1774,7 @@ export function applyForward(book: Book, event: ForwardEvent): Book {
       entryDate: event.entryDate,
       exitTs: event.exitTs,
       exitKind: "realize",
+      ...(event.scoreClass === "A_x1_unscored" ? { scoreClass: "A_x1_unscored" as const } : {}),
     });
     reviewPair(book, event.productId, event.exitTs);
     return book;

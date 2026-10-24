@@ -6,6 +6,7 @@
  * Exits do not read these flags.
  */
 
+import { createHash } from "node:crypto";
 import { BOOK_HALT_USD, DAILY_HALT_USD, WEEKLY_HALT_USD } from "../p3/design-rules";
 import type { ClassId } from "../p3/portfolio";
 import { CLASS_DOLLAR_BACKSTOP_USD } from "../p5/risk";
@@ -70,13 +71,18 @@ export interface LatchBook {
   day: string | null;
   config: { parity?: unknown };
   classes: Record<ClassId, { peakUsd: number; cumUsd: number }>;
-  closed: readonly { id: string; classId: ClassId }[];
+  closed: readonly { id: string; classId: ClassId; scoreClass?: "A_x1_unscored" }[];
   incidents: string[];
   latches?: RiskLatches;
   clearedLatchIds?: string[];
   latchRearm?: LatchRearm;
   /** D entries placed before this are not put back. The next 4h bar is a new signal. */
   dEntryNotBeforeMs?: number;
+  /**
+   * sha256 of the last latch_clear_mismatch dedupe key (`token`, current latch id).
+   * The clear token itself is not stored.
+   */
+  latchMismatchSeen?: string;
 }
 
 interface ClearRequest {
@@ -87,6 +93,18 @@ interface ClearRequest {
 }
 
 const clearSeen = new WeakMap<LatchBook, string>();
+/** Token digest of a clear that landed earlier in this same event. Not persisted. */
+const clearEcho = new WeakMap<LatchBook, string>();
+const SEEN_DIGEST = /^[0-9a-f]{64}$/;
+
+export function latchSeenDigest(seenKey: string): string {
+  return createHash("sha256").update(seenKey).digest("hex");
+}
+
+/** Drop the in-event echo after the last latch sync of that event. */
+export function finishClearEcho(book: LatchBook): void {
+  clearEcho.delete(book);
+}
 
 /** ISO week of a UTC day, `YYYY-Www`. The week rolls on Monday, with the registered book week. */
 export function isoWeekWindow(day: string): string {
@@ -157,6 +175,7 @@ function dropClassLatch(book: LatchBook, classId: ClassId): void {
  * Bound manual clear. The token is scope:latchId:tripAtMs.
  * A match removes that book or class latch. A mismatch, a stale token, or a token whose id was already cleared is one incident and changes nothing. The same line is not written again.
  * The raw token is not written onto the book.
+ * A second sync in the event that just cleared does not also write a mismatch. The next event still does, once.
  */
 function applyClear(book: LatchBook, token: string | undefined): void {
   if (!token) return;
@@ -164,22 +183,28 @@ function applyClear(book: LatchBook, token: string | undefined): void {
   const scope = parsed?.scope ?? "";
   const current = scope ? currentLatch(book, scope) : null;
   const seenKey = `${token}\0${current?.id ?? ""}`;
-  if (clearSeen.get(book) === seenKey) return;
-  clearSeen.set(book, seenKey);
+  const digest = latchSeenDigest(seenKey);
+  if (clearSeen.get(book) === seenKey || book.latchMismatchSeen === digest) return;
   const tripText = String(current?.tripAt ?? "");
-  if (!parsed || !current || current.id !== parsed.latchId || tripText !== parsed.tripText) {
-    const line = parsed ? `latch_clear_mismatch scope=${parsed.scope} id=${parsed.latchId}` : "latch_clear_mismatch";
-    if (!book.incidents.includes(line)) book.incidents.push(line);
+  const matches = parsed != null && current != null && current.id === parsed.latchId && tripText === parsed.tripText;
+  if (matches && parsed) {
+    clearSeen.set(book, seenKey);
+    clearEcho.set(book, latchSeenDigest(token));
+    if (parsed.scope === "book") dropBookLatch(book);
+    else {
+      const classId = classIdOf(parsed.scope);
+      if (!classId) return;
+      dropClassLatch(book, classId);
+    }
+    rememberCleared(book, parsed.latchId);
+    book.incidents.push(`latch_cleared who=brian scope=${parsed.scope} id=${parsed.latchId}`);
     return;
   }
-  if (parsed.scope === "book") dropBookLatch(book);
-  else {
-    const classId = classIdOf(parsed.scope);
-    if (!classId) return;
-    dropClassLatch(book, classId);
-  }
-  rememberCleared(book, parsed.latchId);
-  book.incidents.push(`latch_cleared who=brian scope=${parsed.scope} id=${parsed.latchId}`);
+  if (clearEcho.get(book) === latchSeenDigest(token)) return;
+  clearSeen.set(book, seenKey);
+  book.latchMismatchSeen = digest;
+  const line = parsed ? `latch_clear_mismatch scope=${parsed.scope} id=${parsed.latchId}` : "latch_clear_mismatch";
+  if (!book.incidents.includes(line)) book.incidents.push(line);
 }
 
 function expireWindows(book: LatchBook): void {
@@ -206,7 +231,8 @@ function relaxRearm(book: LatchBook, equity: LatchEquity): void {
 function lastTradeId(book: LatchBook, classId: ClassId): string {
   for (let i = book.closed.length - 1; i >= 0; i -= 1) {
     const trade = book.closed[i];
-    if (trade?.classId === classId) return trade.id;
+    // errata 002 item 3. An unscored X1 class A trade does not bind a clear.
+    if (trade?.classId === classId && trade.scoreClass !== "A_x1_unscored") return trade.id;
   }
   return "none";
 }
@@ -365,26 +391,34 @@ function sanitizeCleared(value: unknown): string[] | undefined {
   return ids.slice(-CLEARED_CAP);
 }
 
+function sanitizeSeen(value: unknown): string | undefined {
+  return typeof value === "string" && SEEN_DIGEST.test(value) ? value : undefined;
+}
+
 /** Fields that ride the existing hot flush. Absent when nothing is latched. */
 export function latchHotFields(book: LatchBook): {
   latches?: RiskLatches;
   clearedLatchIds?: string[];
   latchRearm?: LatchRearm;
   dEntryNotBeforeMs?: number;
+  latchMismatchSeen?: string;
 } {
   const latches = sanitizeLatches(book.latches);
   const clearedLatchIds = sanitizeCleared(book.clearedLatchIds);
   const latchRearm = sanitizeRearm(book.latchRearm);
+  const latchMismatchSeen = sanitizeSeen(book.latchMismatchSeen);
   const out: {
     latches?: RiskLatches;
     clearedLatchIds?: string[];
     latchRearm?: LatchRearm;
     dEntryNotBeforeMs?: number;
+    latchMismatchSeen?: string;
   } = {};
   if (latches) out.latches = latches;
   if (clearedLatchIds) out.clearedLatchIds = clearedLatchIds;
   if (latchRearm) out.latchRearm = latchRearm;
   if (finite(book.dEntryNotBeforeMs)) out.dEntryNotBeforeMs = book.dEntryNotBeforeMs;
+  if (latchMismatchSeen) out.latchMismatchSeen = latchMismatchSeen;
   return out;
 }
 
@@ -400,10 +434,11 @@ export function adoptLatchState(
     clearedLatchIds?: unknown;
     latchRearm?: unknown;
     dEntryNotBeforeMs?: unknown;
+    latchMismatchSeen?: unknown;
   },
 ): void {
   const full = body.positions !== undefined;
-  const touched = full || "latches" in body || "clearedLatchIds" in body || "latchRearm" in body || "dEntryNotBeforeMs" in body;
+  const touched = full || "latches" in body || "clearedLatchIds" in body || "latchRearm" in body || "dEntryNotBeforeMs" in body || "latchMismatchSeen" in body;
   if (!touched) return;
   if (full || "latches" in body) {
     const latches = sanitizeLatches(body.latches);
@@ -423,5 +458,10 @@ export function adoptLatchState(
   if (full || "dEntryNotBeforeMs" in body) {
     if (finite(body.dEntryNotBeforeMs)) book.dEntryNotBeforeMs = body.dEntryNotBeforeMs;
     else delete book.dEntryNotBeforeMs;
+  }
+  if (full || "latchMismatchSeen" in body) {
+    const seen = sanitizeSeen(body.latchMismatchSeen);
+    if (seen) book.latchMismatchSeen = seen;
+    else delete book.latchMismatchSeen;
   }
 }

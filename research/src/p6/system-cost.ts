@@ -17,6 +17,13 @@ export const SYSTEM_COST_START_ISO = "2026-10-10T00:00:00.000Z";
 export const SYSTEM_COST_START_MS = Date.parse(SYSTEM_COST_START_ISO);
 
 /**
+ * Hosting cutover to a local Docker server at no charge.
+ * The committed file bills the prior Vercel and Redis lines up to this instant and $0 after it.
+ * The date is the commit calendar day at 00:00Z. Brian still needs to confirm it.
+ */
+export const SYSTEM_COST_CUTOVER_ISO = "2026-10-24T00:00:00.000Z";
+
+/**
  * Display conversion. $20 is 1R, the unpromoted paper risk.
  * system-cost.test.ts locks this to PAPER_MINIMUM_USD.
  * It does not size a trade.
@@ -33,11 +40,28 @@ export interface SystemCostItem {
   note?: string;
   /** True when this line's monthly amount is an estimate. Display only. */
   estimate?: boolean;
+  /** ISO date the line starts, inclusive, when the file is effective-dated. */
+  from?: string;
+  /** ISO date the line ends, exclusive, when the file is effective-dated. */
+  until?: string;
+}
+
+export interface SystemCostSpan {
+  /** ISO date, inclusive. 00:00Z. */
+  from: string;
+  /** ISO date, exclusive. 00:00Z. Absent on the open-ended span. */
+  until?: string;
+  items: SystemCostItem[];
 }
 
 export interface SystemCostConfig {
   lastUpdated: string;
+  /** Legacy single rate, or the open-ended span when the file is effective-dated. */
   items: SystemCostItem[];
+  /** Effective-dated rates. Accrual integrates these. Absent on a legacy file. */
+  spans?: SystemCostSpan[];
+  /** ISO date of the hosting cutover. Display only. Brian must confirm it. */
+  cutover?: string;
 }
 
 export type SystemCostStatus = "ok" | "unavailable";
@@ -78,18 +102,10 @@ function nonNegativeFinite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-/**
- * A config is accepted only when lastUpdated is a real ISO date and every
- * line item has a name and a non-negative finite monthlyUsd. One bad item
- * rejects the file. There is no partial sum.
- */
-export function parseSystemCostConfig(raw: unknown): SystemCostConfig | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const body = raw as Record<string, unknown>;
-  if (typeof body.lastUpdated !== "string" || !isIsoDate(body.lastUpdated)) return null;
-  if (!Array.isArray(body.items)) return null;
+function parseItems(raw: unknown): SystemCostItem[] | null {
+  if (!Array.isArray(raw)) return null;
   const items: SystemCostItem[] = [];
-  for (const row of body.items) {
+  for (const row of raw) {
     if (!row || typeof row !== "object" || Array.isArray(row)) return null;
     const item = row as Record<string, unknown>;
     if (typeof item.name !== "string" || item.name.trim() === "") return null;
@@ -101,6 +117,44 @@ export function parseSystemCostConfig(raw: unknown): SystemCostConfig | null {
     if (item.estimate === true) parsed.estimate = true;
     items.push(parsed);
   }
+  return items;
+}
+
+function dateMs(isoDate: string): number {
+  return Date.parse(`${isoDate}T00:00:00.000Z`);
+}
+
+/**
+ * A config is accepted only when lastUpdated is a real ISO date and every
+ * line item has a name and a non-negative finite monthlyUsd. One bad item
+ * rejects the file. There is no partial sum.
+ * A legacy file is `{ lastUpdated, items }` and accrues that one rate.
+ * An effective-dated file is `{ lastUpdated, spans }` and integrates each span.
+ */
+export function parseSystemCostConfig(raw: unknown): SystemCostConfig | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const body = raw as Record<string, unknown>;
+  if (typeof body.lastUpdated !== "string" || !isIsoDate(body.lastUpdated)) return null;
+  if (body.cutover != null && (typeof body.cutover !== "string" || !isIsoDate(body.cutover))) return null;
+  if (body.spans != null) {
+    if (!Array.isArray(body.spans) || body.spans.length === 0) return null;
+    const spans: SystemCostSpan[] = [];
+    for (const row of body.spans) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+      const span = row as Record<string, unknown>;
+      if (typeof span.from !== "string" || !isIsoDate(span.from)) return null;
+      if (span.until != null && (typeof span.until !== "string" || !isIsoDate(span.until))) return null;
+      if (span.until != null && dateMs(span.until) <= dateMs(span.from)) return null;
+      const items = parseItems(span.items);
+      if (!items) return null;
+      spans.push({ from: span.from, ...(typeof span.until === "string" ? { until: span.until } : {}), items });
+    }
+    const open = spans.filter((span) => span.until == null);
+    const items = (open.length === 1 ? open[0] : spans[spans.length - 1])!.items.map((item) => ({ ...item }));
+    return { lastUpdated: body.lastUpdated, items, spans, ...(typeof body.cutover === "string" ? { cutover: body.cutover } : {}) };
+  }
+  const items = parseItems(body.items);
+  if (!items) return null;
   return { lastUpdated: body.lastUpdated, items };
 }
 
@@ -214,9 +268,28 @@ export function systemCostHurdle(input: {
     if (!config || !Number.isFinite(input.nowMs)) return SYSTEM_COST_UNAVAILABLE;
     const startMs = input.startMs ?? SYSTEM_COST_START_MS;
     if (!Number.isFinite(startMs)) return SYSTEM_COST_UNAVAILABLE;
-    const monthlyUsd = config.items.reduce((sum, item) => sum + item.monthlyUsd, 0);
-    if (!nonNegativeFinite(monthlyUsd)) return SYSTEM_COST_UNAVAILABLE;
-    const accruedUsd = accruedSystemCostUsd(monthlyUsd, startMs, input.nowMs);
+    const spans = config.spans ?? [];
+    let monthlyUsd = config.items.reduce((sum, item) => sum + item.monthlyUsd, 0);
+    let accruedUsd = accruedSystemCostUsd(monthlyUsd, startMs, input.nowMs);
+    let items = config.items.map((item) => ({ ...item }));
+    if (spans.length > 0) {
+      monthlyUsd = 0;
+      accruedUsd = 0;
+      items = [];
+      for (const span of spans) {
+        const fromMs = dateMs(span.from);
+        const untilMs = span.until == null ? Number.POSITIVE_INFINITY : dateMs(span.until);
+        const spanMonthly = span.items.reduce((sum, item) => sum + item.monthlyUsd, 0);
+        if (input.nowMs >= fromMs && input.nowMs < untilMs) monthlyUsd += spanMonthly;
+        const overlapStart = Math.max(startMs, fromMs);
+        const overlapEnd = Math.min(input.nowMs, untilMs);
+        if (overlapEnd > overlapStart) accruedUsd += accruedSystemCostUsd(spanMonthly, overlapStart, overlapEnd);
+        for (const item of span.items) {
+          items.push({ ...item, from: span.from, ...(span.until ? { until: span.until } : {}) });
+        }
+      }
+    }
+    if (!nonNegativeFinite(monthlyUsd) || !nonNegativeFinite(accruedUsd)) return SYSTEM_COST_UNAVAILABLE;
     const elapsedDays = Math.max(0, input.nowMs - startMs) / MS_PER_DAY;
     if (!Number.isFinite(accruedUsd) || !Number.isFinite(elapsedDays)) return SYSTEM_COST_UNAVAILABLE;
     const pnlUsd = input.pnlUsd != null && Number.isFinite(input.pnlUsd) ? input.pnlUsd : null;
@@ -236,7 +309,7 @@ export function systemCostHurdle(input: {
       netR: netUsd == null ? null : usdToR(netUsd),
       since: new Date(startMs).toISOString(),
       elapsedDays,
-      items: config.items.map((item) => ({ ...item })),
+      items,
     };
   } catch {
     return SYSTEM_COST_UNAVAILABLE;

@@ -43,6 +43,11 @@ function finite(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function ratioOrDash(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return value.toFixed(4);
+}
+
 function moneyOrDash(value: number | null | undefined, signed = false): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return signed ? signedUsd(value) : formatUsd(value);
@@ -335,6 +340,51 @@ export default async function P6DashboardPage({
           <RunClock overdue={fresh.stale} />
         </span>
       </div>
+
+      <section className={styles.card} aria-label="Class A paper">
+        <h2>Class A paper</h2>
+        <p className={styles.sub}>
+          {`A55-k3 · ${
+            view.classAPaper?.status === "running"
+              ? "Running"
+              : view.classAPaper?.status === "killed"
+                ? "Interim kill"
+                : view.classAPaper?.status === "redacted"
+                  ? "Redacted"
+                  : view.classAPaper?.status === "pending"
+                    ? "Pending"
+                    : "Awaiting start"
+          } · n ${view.classAPaper?.n ?? 0} · net ${moneyOrDash(view.classAPaper?.cumNetUsd, true)}`}
+          {view.classAPaper?.promotion === "blocked" ? " · promotion blocked" : view.classAPaper?.promotion === "unresolved" ? " · promotion unresolved" : view.classAPaper?.promotion === "pass" ? " · promotion pass" : ""}
+          {view.classAPaper?.fillRate != null ? ` · maker fill ${Math.round(view.classAPaper.fillRate * 100)}%` : ""}
+          {(view.classAPaper?.healthDue.length ?? 0) > 0 ? ` · health ${view.classAPaper?.healthDue.join(" ")}` : ""}
+          {` · minsize unknown ${view.classAPaper?.skips.skip_minsize_unknown ?? 0}`}
+        </p>
+        <p className={styles.sub}>
+          {`Intro sensitivity (50/90, bar 290, does not gate): net ${moneyOrDash(view.classAPaper?.introSensitivity.netUsd, true)} · mean net ${view.classAPaper?.introSensitivity.meanNetBps == null ? "—" : view.classAPaper.introSensitivity.meanNetBps.toFixed(1)} bps · bar test ${view.classAPaper?.introSensitivity.aboveBar ? "above 290" : "not above 290"}`}
+          {view.classAPaper?.sHeadroom.barBps != null ? ` · s headroom bar ${view.classAPaper.sHeadroom.barBps.toFixed(1)} bps (median s ${view.classAPaper.sHeadroom.medianSBps?.toFixed(1)} )` : " · s headroom —"}
+        </p>
+        <p className={styles.sub}>{view.classAPaper?.promotionPrecondition}</p>
+        <p className={styles.sub}>{view.classAPaper?.spreadWarmupNote}</p>
+        <p className={styles.sub}>
+          {`Listing age estimated ${view.classAPaper?.listedDaysEstimated ?? 0}`}
+          {` · fee-charged B&H ${ratioOrDash(view.classAPaper?.bhFeeReturn)}`}
+          {` · membership changes ${view.classAPaper?.bhMembershipChanges ?? "—"}`}
+          {` · turnover ${ratioOrDash(view.classAPaper?.bhTurnover)}`}
+          {` · taker sensitivity ${ratioOrDash(view.classAPaper?.bhTakerReturn)}`}
+          {` · B&H with exit fee ${ratioOrDash(view.classAPaper?.bhFeeExitReturn)}`}
+          {` · B&H concentration ${ratioOrDash(view.classAPaper?.bhConcentration)}`}
+          {` · A mark-to-market ${ratioOrDash(view.classAPaper?.aMtmNoExit)}`}
+          {` · A marked ${ratioOrDash(view.classAPaper?.aMarked)}`}
+          {` · A marked gross ${ratioOrDash(view.classAPaper?.aMarkedGross)}`}
+          {` · resting ${view.classAPaper?.resting.length ?? 0}`}
+        </p>
+        {view.classAPaper?.marks.map((mark) => (
+          <p key={`${mark.pair}:${mark.entryMs}`} className={styles.sub}>
+            {`${mark.pair} entry ${mark.entryMs} px ${mark.entry} qty ${mark.qty} C ${mark.cReview} entry fee ${mark.entryFeeUsd} exit fee ${mark.exitFeeUsd} s ${mark.sBps} bps (${mark.sUsd}) marked ${mark.markedPnl}`}
+          </p>
+        ))}
+      </section>
 
       <div className={`${styles.card} ${styles.risk}`} aria-label="Risk status">
         <span className={styles.riskItem}>
@@ -698,7 +748,9 @@ function moneyR(value: number | null | undefined): string {
 /** The monthly total is an estimate when a line item says so, even if its note was scrubbed. */
 function monthlyCostText(hurdle: SystemCostHurdle): string {
   const amount = moneyOrDash(hurdle.monthlyUsd);
-  const estimated = hurdle.items?.some((item) => item.estimate === true) === true;
+  const open = hurdle.items?.filter((item) => item.until == null) ?? [];
+  const pool = open.length > 0 ? open : (hurdle.items ?? []);
+  const estimated = pool.some((item) => item.estimate === true) === true;
   if (estimated && amount !== "—") return `~${amount}/mo (est.)`;
   return amount;
 }
@@ -739,8 +791,10 @@ function SystemCost({ cost }: { cost: SystemCostHurdle | undefined }) {
             Accrued {moneyOrDash(hurdle.accruedUsd)} · {moneyR(hurdle.accruedR)}
           </div>
           {hurdle.items?.map((item) => (
-            <div key={item.name} className={styles.hint}>
+            <div key={`${item.name}:${item.from ?? ""}:${item.until ?? ""}`} className={styles.hint}>
               {item.name}
+              {item.from ? ` from ${item.from}` : ""}
+              {item.until ? ` until ${item.until}` : ""}
               {item.note ? ` · ${item.note}` : ""}
             </div>
           ))}

@@ -4,6 +4,7 @@
  */
 
 import type { SourceDay } from "../p3/bar-access";
+import { ensureClassAPaper } from "./class-a-paper";
 import { loadSplit, noteKvRead, persistSplit, reloadSplit, warmReadyCount, warmupKey } from "./hot-store";
 import { decodeStored } from "./redis-gzip";
 import { acceptRestBar, applyRestCold, attachMemberCloses, attachRestLease, backfillTapeIfNeeded, catchUpHistory, coldResetEnabled, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, seedRetryList, stageColdReset, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
@@ -71,6 +72,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
     async warm() {
       const saved = await loadSplit(kv, host);
       if (saved) installPaperState(host, saved);
+      ensureClassAPaper(host);
       await loadWarmup(kv, host);
       rememberPersistedBars(host);
       attachMemberCloses(host);
@@ -90,6 +92,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
         const saved = await reloadSplit(kv, host);
         if (!saved) return;
         installPaperState(host, saved);
+        ensureClassAPaper(host);
         rememberPersistedBars(host);
         attachMemberCloses(host);
       } finally {
