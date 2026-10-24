@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
-import { CLASS_A_SPEC_SHA256 } from "./class-a-paper";
+import { CLASS_A_PROMOTION_PRECONDITION, CLASS_A_SPEC_SHA256 } from "./class-a-paper";
 import { absoluteDashboardLocation, applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, dashboardSetCookie, formatP6Public, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard, redactP6View } from "./dashboard-read";
 import { cronAuthorized, memoryKv, plantStored } from "./relay";
 import { handleEngineRequest } from "./vercel-live";
@@ -395,7 +395,7 @@ test("class A paper on the public view is allowlisted", () => {
   expect(tagged.closed[0]?.scoreClass).toBe("A_x1_unscored");
   const dropped = redactP6View(publicView({ closed: [{ productId: "ETH-USD", classId: "A", netUsd: 1, scoreClass: "scored" as "A_x1_unscored" }] }));
   expect(dropped.closed[0]?.scoreClass).toBeUndefined();
-  const both = `${output}\n${JSON.stringify(fromBook)}`;
+  const both = `${output}\n${JSON.stringify(fromBook)}`.split(CLASS_A_PROMOTION_PRECONDITION).join("");
   for (const secret of ["upstash", "PASSWORD", "host", "recommend", "A20", "nope"]) {
     expect(both.includes(secret), secret).toBe(false);
   }

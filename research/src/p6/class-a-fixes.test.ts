@@ -212,13 +212,13 @@ test("fees are the maker entry until the exit, then both legs", () => {
   const paper = emptyClassABook(START);
   const row = evaluateSignal(paper, signal());
   expect(row?.fill).toBe("fill");
-  expect(row?.feesUsd).toBeCloseTo((2_000 * 50) / 10_000, 8);
+  expect(row?.feesUsd).toBeCloseTo((2_000 * 35) / 10_000, 8);
   const sim = paper.open[0]!;
   onIntrabar(paper, { pair: "SOL-USD", tsMs: sim.entryMs + 1_000, open: sim.stop, low: sim.stop - 1, hourAtr: 0.2 });
   expect(row?.gap).toBe(true);
   expect(row?.exitPrice).toBe(sim.stop);
-  const exitFee = (sim.units * sim.stop * (90 + sim.sBps)) / 10_000;
-  expect(row?.feesUsd).toBeCloseTo((2_000 * 50) / 10_000 + exitFee, 8);
+  const exitFee = (sim.units * sim.stop * (75 + sim.sBps)) / 10_000;
+  expect(row?.feesUsd).toBeCloseTo((2_000 * 35) / 10_000 + exitFee, 8);
   const touch = emptyClassABook(START);
   evaluateSignal(touch, signal());
   const openSim = touch.open[0]!;

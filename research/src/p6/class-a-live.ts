@@ -2,14 +2,17 @@
  * Production step for the class A paper book.
  * Called from the live 15m bar path. Public candles, quotes, and prints only. No orders.
  * errata 002 item 5: a signal whose close is exactly the book start is evaluated.
+ * A maker entry placed at that close stays pending until a later bar or print inside [close, close+4h), or the window ends.
  */
 
+import { readFileSync } from "node:fs";
 import { ema, wilderAtr } from "../p2/indicators";
 import { isDayCloseBar } from "../p5/book";
 import {
   evaluateSignal,
   onDaily,
   onIntrabar,
+  resolveClassAResting,
   signalCloseMs,
   sizedOrder,
   walkCostBps,
@@ -17,6 +20,7 @@ import {
   type ClassADay,
 } from "./class-a-paper";
 import { hourAtrAt } from "./generate";
+import { dataFile } from "./live-data";
 
 interface Ohlc {
   ts: number;
@@ -67,12 +71,19 @@ function quotedSpreadBps(bid: number, ask: number): number | null {
 }
 
 /**
- * One accepted 15m bar. Intrabar stops run on every bar. The day-close bar (23:45Z) updates the daily rule and, when that close is the signal time, evaluates the pair.
+ * One accepted 15m bar. Resting maker orders resolve on every bar. Intrabar stops run on every bar.
+ * The day-close bar (23:45Z) updates the daily rule and, when that close is the signal time, evaluates the pair.
  */
 export function stepClassAFromHost(host: ClassALiveHost, bar: { productId: string; startSec: number; open: number; high: number; low: number; close: number }): void {
   const book = host.classAPaper;
   if (!book || book.exclusionOk === false || book.startMs == null) return;
   const closeMs = (bar.startSec + 900) * 1000;
+  const nowMs = Math.max(closeMs, host.clock());
+  resolveClassAResting(book, nowMs, {
+    pair: bar.productId,
+    prints: printsOf(host, bar.productId),
+    bar: { startMs: bar.startSec * 1000, endMs: closeMs, low: bar.low },
+  });
   const hourAtr = hourAtrAt(host.hourWarm.get(bar.productId) ?? [], closeMs / 1000);
   onIntrabar(book, { pair: bar.productId, tsMs: closeMs, open: bar.open, low: bar.low, hourAtr });
   if (!isDayCloseBar(bar.startSec)) return;
@@ -125,13 +136,72 @@ export function stepClassAFromHost(host: ClassALiveHost, bar: { productId: strin
     spreadBps: spread,
     depthCostBps: depth,
     quoteAgeMs: quote ? host.clock() - quote.tsMs : null,
-    minOrderBase: null,
+    minOrderBase: classAMinOrderBase(bar.productId),
     tick: host.ticks.get(bar.productId) ?? null,
     medianSpreadBps: null,
     spreadSamples: samples,
     nextHourOpen: null,
     hourAtr14: hourAtr > 0 ? hourAtr : null,
-    prints: host.trades.filter((trade) => trade.productId === bar.productId).map((trade) => ({ tsMs: trade.tsSec * 1000, price: trade.price })),
+    prints: printsOf(host, bar.productId),
+    asOfMs: nowMs,
   });
   if (spread != null && Number.isFinite(spread) && spread >= 0) log[bar.productId] = [...(log[bar.productId] ?? []), spread].slice(-30);
+}
+
+function printsOf(host: ClassALiveHost, productId: string): { tsMs: number; price: number }[] {
+  return host.trades.filter((trade) => trade.productId === productId).map((trade) => ({ tsMs: trade.tsSec * 1000, price: trade.price }));
+}
+
+let minSizes: Map<string, number> | null = null;
+
+function sizeOf(row: { base_min_size?: unknown; base_increment?: unknown }): number | null {
+  const minSize = Number(row.base_min_size);
+  if (minSize > 0) return minSize;
+  const increment = Number(row.base_increment);
+  return increment > 0 ? increment : null;
+}
+
+/**
+ * Coinbase minimum base size. base_min_size when the payload has it, otherwise base_increment.
+ * The snapshot the repo already stores is the public products list. If that file is missing, the public unauthenticated products endpoint is read once. No key and no environment variable.
+ */
+export function classAMinOrderBase(productId: string): number | null {
+  return loadClassAMinSizes().get(productId) ?? null;
+}
+
+function loadClassAMinSizes(): Map<string, number> {
+  if (minSizes) return minSizes;
+  const map = new Map<string, number>();
+  const path = dataFile("products", "exchange-products.raw.json");
+  if (path) {
+    try {
+      const body = JSON.parse(readFileSync(path, "utf8")) as { id?: string; base_min_size?: unknown; base_increment?: unknown }[];
+      if (Array.isArray(body)) {
+        for (const row of body) {
+          const min = sizeOf(row);
+          if (row.id && min != null) map.set(row.id, min);
+        }
+      }
+    } catch {
+      map.clear();
+    }
+  }
+  if (map.size === 0) {
+    try {
+      const proc = Bun.spawnSync(["curl", "-fsS", "--max-time", "8", "https://api.exchange.coinbase.com/products"], { stdout: "pipe", stderr: "ignore" });
+      if (proc.exitCode === 0) {
+        const body = JSON.parse(new TextDecoder().decode(proc.stdout)) as { id?: string; base_min_size?: unknown; base_increment?: unknown }[];
+        if (Array.isArray(body)) {
+          for (const row of body) {
+            const min = sizeOf(row);
+            if (row.id && min != null) map.set(row.id, min);
+          }
+        }
+      }
+    } catch {
+      /* The minimum stays unknown. The entry fails closed. */
+    }
+  }
+  minSizes = map;
+  return map;
 }

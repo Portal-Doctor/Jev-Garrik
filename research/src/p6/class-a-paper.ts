@@ -6,7 +6,8 @@
  * Errata 001 (sha256 31cba546e426e7c0054202d21e9b3c491d9e4510102d2da0d821336ac6128969) settles the open questions.
  * Spec text still governs where it already answered. Paper only.
  * - errata 001 item 1: start is CLASS_A_PAPER_START_MS, or the first 00:00Z close at or after deploy, whichever is later. No backfill.
- * - errata 001 item 2a/2b: promotion reports a one-sided t against 290 bps, Holm at family alpha 0.05, a 10k bootstrap p, and a buy-and-hold gate.
+ * - errata 001 item 2a/2b: promotion reports a one-sided t against the fee-derived bar, Holm at family alpha 0.05, a 10k bootstrap p, and a buy-and-hold gate.
+ * - errata 005 (sha256 31c1e06585d84dba3a8aa0492488e7fa90863c8fef1483be0df01d75cfca6824) sets that bar at 230 bps. Advanced 1 fees apply from the start. Intro 50/90 and bar 290 stay on the sensitivity line only.
  * - errata 001 item 3: this maker book is the scored A record. Live X1 rows are tagged elsewhere and are not scored here.
  * - errata 001 item 5 and item 9: 30-day volume excludes the signal day, and that median then the pair symbol orders same-timestamp signals.
  * - errata 001 item 11: a stop fills at stop − max(5 bps of the stop, 0.1 × 1h ATR), or at the open on a gap.
@@ -43,12 +44,34 @@ export const CLASS_A_MAX_OPEN_RISK_USD = 60;
 export const CLASS_A_BOOK_USD = 6_000;
 export const CLASS_A_VOLUME_FLOOR_USD = 5_000_000;
 export const CLASS_A_VOLUME_TIGHT_USD = 20_000_000;
-export const CLASS_A_MAKER_FEE_BPS = 50;
-export const CLASS_A_TAKER_FEE_BPS = 90;
+/**
+ * errata 005 item 1. Coinbase Advanced 1, fixed for the whole test.
+ * sha256 31c1e06585d84dba3a8aa0492488e7fa90863c8fef1483be0df01d75cfca6824.
+ */
+export const CLASS_A_ERRATA_005_SHA256 = "31c1e06585d84dba3a8aa0492488e7fa90863c8fef1483be0df01d75cfca6824";
+export const CLASS_A_MAKER_FEE_BPS = 35;
+export const CLASS_A_TAKER_FEE_BPS = 75;
 export const CLASS_A_FILL_WINDOW_MS = 4 * 60 * 60 * 1000;
 export const CLASS_A_STALE_MS = 2_000;
 export const CLASS_A_KILL_USD = -400;
-export const CLASS_A_PROMOTE_GROSS_BPS = 290;
+/** errata 005 item 4. 2 × (maker 35 + taker 75 + s floor 5) = 230. Errata 001 H0 is mean gross <= this. */
+export const CLASS_A_PROMOTE_GROSS_BPS = 2 * (CLASS_A_MAKER_FEE_BPS + CLASS_A_TAKER_FEE_BPS + 5);
+/** errata 005 item 7. Intro schedule. The sensitivity line only. It does not gate. */
+export const CLASS_A_INTRO_MAKER_FEE_BPS = 50;
+export const CLASS_A_INTRO_TAKER_FEE_BPS = 90;
+export const CLASS_A_INTRO_PROMOTE_GROSS_BPS = 2 * (CLASS_A_INTRO_MAKER_FEE_BPS + CLASS_A_INTRO_TAKER_FEE_BPS + 5);
+/**
+ * errata 005 items 5 and 6. Shared with errata 003 (#2 maker, #4 taker + s, #5b exit) and errata 004 row 1.
+ * Those reports are not built here. The rates are the Advanced 1 schedule so the next run does not fork them.
+ */
+export const CLASS_A_BH_FEE_MAKER_BPS = CLASS_A_MAKER_FEE_BPS;
+export const CLASS_A_BH_FEE_TAKER_BPS = CLASS_A_TAKER_FEE_BPS;
+export const CLASS_A_BH_EXIT_FEE_BPS = CLASS_A_MAKER_FEE_BPS;
+export const CLASS_A_MARKED_ENTRY_FEE_BPS = CLASS_A_MAKER_FEE_BPS;
+export const CLASS_A_MARKED_EXIT_FEE_BPS = CLASS_A_TAKER_FEE_BPS;
+/** errata 005 item 8. Stated with every promotion recommendation. It does not choose the tier. */
+export const CLASS_A_PROMOTION_PRECONDITION =
+  "Any promotion recommendation states Brian's actual Coinbase tier at that time and how he qualifies (30-day spot volume, derivatives volume, or USDC balance), and that the qualification does not depend on A's own volume (A alone produces well under $10K per 30 days). If live A would be his only spot volume, or his tier is below Advanced 1, the recommendation is evaluated at that tier's bar (Intro: 290 bps) using the Intro sensitivity line.";
 export const CLASS_A_PROMOTE_MIN_N = 30;
 export const CLASS_A_NO_REENTRY_MS = 24 * 60 * 60 * 1000;
 /** errata 001 item 1. Committed daily close. Not an environment variable. */
@@ -78,6 +101,7 @@ export const CLASS_A_SKIP_REASONS = [
   "skip_depth",
   "skip_stale",
   "skip_minsize",
+  "skip_minsize_unknown",
   "skip_cap",
   "skip_pair",
   "skip_reentry",
@@ -123,6 +147,11 @@ export interface ClassASignal {
   nextHourOpen: number | null;
   hourAtr14: number | null;
   prints: readonly { tsMs: number; price: number }[];
+  /**
+   * Clock at evaluation. Inside [close, close+4h) with no through-print yet, the maker order stays pending.
+   * Omitted means the print list already covers the window, so a miss is nofill.
+   */
+  asOfMs?: number;
 }
 
 export interface ClassACounterfactual {
@@ -143,7 +172,7 @@ export interface ClassARow {
   atr: number | null;
   stop: number | null;
   notionalUsd: number | null;
-  fill: "fill" | "nofill" | "skip";
+  fill: "fill" | "nofill" | "pending" | "skip";
   skipReason: ClassASkip | null;
   check: string | null;
   measured: number | null;
@@ -157,8 +186,10 @@ export interface ClassARow {
   netBps: number | null;
   grossR: number | null;
   netR: number | null;
-  /** Spec A11. Null on a skip or a no-fill. Entry fee while open, entry plus exit once closed. */
+  /** Spec A11. Null on a skip, a no-fill, or a maker order that is still pending. Entry fee while open, entry plus exit once closed. */
   feesUsd: number | null;
+  /** s = max(5 bps, 0.5 × median quoted spread), frozen when the maker order is placed. */
+  sBps?: number;
   counterfactual: ClassACounterfactual | null;
   /** errata 001 item 11. True when a stop exit fills at the bar open. */
   gap?: boolean;
@@ -194,6 +225,22 @@ export interface ClassAScored {
   regime: ClassARegime;
 }
 
+/** A maker order placed at the signal close and not yet filled or expired. Spec A4. Persists with the book. */
+export interface ClassAResting {
+  rowId: string;
+  pair: string;
+  signalMs: number;
+  windowEndMs: number;
+  limit: number;
+  tick: number;
+  notionalUsd: number;
+  units: number;
+  stop: number;
+  sBps: number;
+  priorCloses: number[];
+  entryDate: string;
+}
+
 export interface ClassABook {
   startMs: number | null;
   killed: boolean;
@@ -209,6 +256,28 @@ export interface ClassABook {
   lastSignalMs?: number | null;
   /** Quoted spread bps at prior day closes, per pair. The signal day is not in this list. */
   spreadLog?: Record<string, number[]>;
+  /** Maker orders waiting on [close, close+4h). Absent on a snapshot from before pending orders means none. */
+  resting?: ClassAResting[];
+}
+
+export interface ClassAIntroSensitivity {
+  /** Net USD rebilled at Intro maker 50 / taker 90. */
+  netUsd: number | null;
+  meanNetBps: number | null;
+  /** Intro bar. 2 × (50 + 90 + 5) = 290. */
+  barBps: typeof CLASS_A_INTRO_PROMOTE_GROSS_BPS;
+  meanGrossBps: number | null;
+  /** One-sided p that mean gross is above 290. Null when fewer than two closes. */
+  tP: number | null;
+  /** True when mean gross is above 290. Does not gate. */
+  aboveBar: boolean;
+}
+
+export interface ClassASHeadroom {
+  /** Median s charged on scored closes. Null when none have closed. */
+  medianSBps: number | null;
+  /** 2 × (35 + 75 + median s). Null when median s is unknown. Does not gate. */
+  barBps: number | null;
 }
 
 export interface ClassAPaperView {
@@ -245,6 +314,12 @@ export interface ClassAPaperView {
   exposureAdjustedReturn: number | null;
   regimes: Record<ClassARegime, number>;
   healthDue: ("90d" | "6m")[];
+  /** errata 005 item 7. At every health check and review. Does not gate. */
+  introSensitivity: ClassAIntroSensitivity;
+  /** errata 005 item 10. Beside the fixed 230 bps bar. Does not gate. */
+  sHeadroom: ClassASHeadroom;
+  /** errata 005 item 8. */
+  promotionPrecondition: string;
 }
 
 /**
@@ -286,6 +361,7 @@ export function emptyClassABook(startMs: number | null = null, preflight: { ok: 
     exclusionOk: preflight.ok,
     lastSignalMs: null,
     spreadLog: {},
+    resting: [],
   };
 }
 
@@ -454,8 +530,8 @@ export interface ClassABhPoint {
 /**
  * errata 002 item 6. Equal-weight buy-and-hold of the A2 eligible set.
  * Weights reset to 1/N at the first window close and when membership changes, and drift with price in between.
- * No rebalance fee. A missing candle carries the last positive close (a 0% day).
- * medianVolumeUsd drops a pair when a window day is missing or the close is not positive. Python's median would keep a zero. That is the only gap.
+ * No rebalance fee. A missing candle carries the last positive close (a 0% day) and counts 0 volume.
+ * The pair stays until the 30-day median of those carried days falls below $5M. A zero-volume day is a day, not a hole.
  */
 export function classABuyHoldSeries(input: ClassABhInput): ClassABhPoint[] {
   const excluded = new Set(input.excluded);
@@ -470,10 +546,14 @@ export function classABuyHoldSeries(input: ClassABhInput): ClassABhPoint[] {
     const names: string[] = [];
     for (const candle of input.candles) {
       if (excluded.has(candle.pair) || t - candle.listedIndex < 90 || t < 30) continue;
-      const days = candle.closes.map((close, index) => ({
-        close: close != null && Number.isFinite(close) ? close : 0,
-        baseVolume: candle.volumes[index] != null && Number.isFinite(candle.volumes[index]!) ? candle.volumes[index]! : -1,
-      }));
+      const days = candle.closes.map((close, index) => {
+        const quoted = close != null && Number.isFinite(close) && close > 0 ? close : carried(candle.closes, index);
+        const volume = candle.volumes[index];
+        return {
+          close: quoted != null && quoted > 0 ? quoted : 0,
+          baseVolume: volume != null && Number.isFinite(volume) && volume >= 0 ? volume : 0,
+        };
+      });
       const usd = medianVolumeUsd(days, t);
       if (usd != null && usd >= CLASS_A_VOLUME_FLOOR_USD) names.push(candle.pair);
     }
@@ -708,6 +788,52 @@ function finiteOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function emptyIntroSensitivity(): ClassAIntroSensitivity {
+  return { netUsd: null, meanNetBps: null, barBps: CLASS_A_INTRO_PROMOTE_GROSS_BPS, meanGrossBps: null, tP: null, aboveBar: false };
+}
+
+function emptySHeadroom(): ClassASHeadroom {
+  return { medianSBps: null, barBps: null };
+}
+
+/** errata 005 item 7. Rebills each scored close at Intro 50/90. Gross is unchanged, so the 290 bar test uses the same gross. */
+export function introSensitivityOf(rows: readonly ClassARow[]): ClassAIntroSensitivity {
+  const closed = rows.filter((row) => row.fill === "fill" && row.exitPrice != null && row.notionalUsd != null && row.signalClose != null && row.grossBps != null && row.sBps != null && row.notionalUsd > 0 && row.signalClose > 0);
+  if (closed.length === 0) return emptyIntroSensitivity();
+  let netUsd = 0;
+  const netBps: number[] = [];
+  const grossBps: number[] = [];
+  for (const row of closed) {
+    const notional = row.notionalUsd!;
+    const entry = row.signalClose!;
+    const units = notional / entry;
+    const grossUsd = (row.grossBps! / 10_000) * notional;
+    const entryFee = (notional * CLASS_A_INTRO_MAKER_FEE_BPS) / 10_000;
+    const exitFee = (units * row.exitPrice! * (CLASS_A_INTRO_TAKER_FEE_BPS + row.sBps!)) / 10_000;
+    const net = grossUsd - entryFee - exitFee;
+    netUsd += net;
+    netBps.push((net / notional) * 10_000);
+    grossBps.push(row.grossBps!);
+  }
+  const meanGross = mean(grossBps);
+  return {
+    netUsd,
+    meanNetBps: mean(netBps),
+    barBps: CLASS_A_INTRO_PROMOTE_GROSS_BPS,
+    meanGrossBps: meanGross,
+    tP: meanAboveBarP(grossBps, CLASS_A_INTRO_PROMOTE_GROSS_BPS),
+    aboveBar: meanGross != null && meanGross > CLASS_A_INTRO_PROMOTE_GROSS_BPS,
+  };
+}
+
+/** errata 005 item 10. Median s on scored closes. The fixed bar still uses s = 5. */
+export function sHeadroomOf(rows: readonly ClassARow[]): ClassASHeadroom {
+  const samples = rows.filter((row) => row.fill === "fill" && row.exitPrice != null && row.sBps != null && row.sBps >= 0).map((row) => row.sBps!);
+  const medianSBps = median(samples);
+  if (medianSBps == null) return emptySHeadroom();
+  return { medianSBps, barBps: 2 * (CLASS_A_MAKER_FEE_BPS + CLASS_A_TAKER_FEE_BPS + medianSBps) };
+}
+
 export function emptyClassAPaperView(): ClassAPaperView {
   return {
     specSha256: CLASS_A_SPEC_SHA256,
@@ -738,6 +864,9 @@ export function emptyClassAPaperView(): ClassAPaperView {
     exposureAdjustedReturn: null,
     regimes: { BULL: 0, BEAR: 0, CHOP: 0 },
     healthDue: [],
+    introSensitivity: emptyIntroSensitivity(),
+    sHeadroom: emptySHeadroom(),
+    promotionPrecondition: CLASS_A_PROMOTION_PRECONDITION,
   };
 }
 
@@ -787,6 +916,9 @@ export function classAPaperView(book: ClassABook, asOfMs = Date.now()): ClassAPa
     exposureAdjustedReturn: promotion.exposureAdjustedReturn,
     regimes,
     healthDue: healthCheckpoints(book.startMs, asOfMs),
+    introSensitivity: introSensitivityOf(book.rows),
+    sHeadroom: sHeadroomOf(book.rows),
+    promotionPrecondition: CLASS_A_PROMOTION_PRECONDITION,
   };
 }
 
@@ -851,7 +983,33 @@ function scrubClassAView(value: unknown): ClassAPaperView {
     exposureAdjustedReturn: finiteOrNull(row.exposureAdjustedReturn),
     regimes,
     healthDue,
+    introSensitivity: scrubIntro(row.introSensitivity),
+    sHeadroom: scrubHeadroom(row.sHeadroom),
+    promotionPrecondition: CLASS_A_PROMOTION_PRECONDITION,
   };
+}
+
+function scrubIntro(value: unknown): ClassAIntroSensitivity {
+  const empty = emptyIntroSensitivity();
+  if (!value || typeof value !== "object" || Array.isArray(value)) return empty;
+  const row = value as Record<string, unknown>;
+  if (row.barBps !== CLASS_A_INTRO_PROMOTE_GROSS_BPS) return empty;
+  return {
+    netUsd: finiteOrNull(row.netUsd),
+    meanNetBps: finiteOrNull(row.meanNetBps),
+    barBps: CLASS_A_INTRO_PROMOTE_GROSS_BPS,
+    meanGrossBps: finiteOrNull(row.meanGrossBps),
+    tP: finiteOrNull(row.tP),
+    aboveBar: row.aboveBar === true,
+  };
+}
+
+function scrubHeadroom(value: unknown): ClassASHeadroom {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return emptySHeadroom();
+  const row = value as Record<string, unknown>;
+  const medianSBps = finiteOrNull(row.medianSBps);
+  if (medianSBps == null || medianSBps < 0) return emptySHeadroom();
+  return { medianSBps, barBps: 2 * (CLASS_A_MAKER_FEE_BPS + CLASS_A_TAKER_FEE_BPS + medianSBps) };
 }
 
 function barsOf(days: readonly ClassADay[]): DailyBar[] {
@@ -1052,7 +1210,10 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
   }
   const sized = sizedOrder(day.close, atr);
   if (!sized) return null;
-  if (input.minOrderBase == null || sized.units < input.minOrderBase) {
+  if (input.minOrderBase == null) {
+    return liveSkip("skip_minsize_unknown", "minsize", sized.units, null);
+  }
+  if (sized.units < input.minOrderBase) {
     return liveSkip("skip_minsize", "minsize", sized.units, input.minOrderBase);
   }
   if (book.open.some((sim) => sim.pair === input.pair)) {
@@ -1066,7 +1227,10 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
   }
   const window = { startMs: signalMs, endMs: signalMs + CLASS_A_FILL_WINDOW_MS };
   const tick = input.tick;
-  const through = tick != null && tick > 0 ? input.prints.find((print) => print.tsMs >= window.startMs && print.tsMs < window.endMs && print.price <= day.close - tick) : undefined;
+  const seen = input.asOfMs == null ? input.prints : input.prints.filter((print) => print.tsMs <= input.asOfMs!);
+  const through = tick != null && tick > 0 ? seen.find((print) => print.tsMs >= window.startMs && print.tsMs < window.endMs && print.price <= day.close - tick) : undefined;
+  const observed = input.asOfMs == null || input.asOfMs >= window.endMs;
+  const pending = !through && !observed && tick != null && tick > 0;
   const row: ClassARow = {
     id: `${input.pair}:${signalMs}`,
     signalMs,
@@ -1075,10 +1239,10 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
     signalClose: day.close,
     atr,
     stop: sized.stop,
-    notionalUsd: through ? sized.notionalUsd : null,
-    fill: through ? "fill" : "nofill",
-    skipReason: through ? null : "skip_nofill",
-    check: through ? null : "fill",
+    notionalUsd: through || pending ? sized.notionalUsd : null,
+    fill: through ? "fill" : pending ? "pending" : "nofill",
+    skipReason: through || pending ? null : "skip_nofill",
+    check: through || pending ? null : "fill",
     measured: through ? through.price : null,
     threshold: tick != null && tick > 0 ? day.close - tick : null,
     regime,
@@ -1091,31 +1255,106 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
     grossR: null,
     netR: null,
     feesUsd: through ? (sized.notionalUsd * CLASS_A_MAKER_FEE_BPS) / 10_000 : null,
+    sBps,
     counterfactual,
   };
-  if (through) {
-    book.open.push({
+  if (through) openMaker(book, row, input.pair, day.close, through.tsMs, addDays(day.date, 1), sized, sBps, prior, through.price);
+  if (pending) {
+    const resting = book.resting ?? [];
+    book.resting = resting;
+    resting.push({
       rowId: row.id,
       pair: input.pair,
-      scored: true,
-      entry: day.close,
-      entryMs: through.tsMs,
-      entryDate: addDays(day.date, 1),
-      stop: sized.stop,
-      initialStop: sized.stop,
+      signalMs,
+      windowEndMs: window.endMs,
+      limit: day.close,
+      tick,
       notionalUsd: sized.notionalUsd,
       units: sized.units,
-      feeEntryBps: CLASS_A_MAKER_FEE_BPS,
+      stop: sized.stop,
       sBps,
-      highestClose: day.close,
       priorCloses: prior,
-      pending: null,
+      entryDate: addDays(day.date, 1),
     });
   }
   liveShadow(book, row, input, input.nextHourOpen ?? day.close, sBps, prior);
   pushRow(book, row);
   if (book.lastSignalMs == null || signalMs >= book.lastSignalMs) book.lastSignalMs = signalMs;
   return row;
+}
+
+function openMaker(book: ClassABook, row: ClassARow, pair: string, limit: number, fillMs: number, entryDate: string, sized: { notionalUsd: number; units: number; stop: number }, sBps: number, prior: number[], measured: number): void {
+  row.fill = "fill";
+  row.skipReason = null;
+  row.check = null;
+  row.notionalUsd = sized.notionalUsd;
+  row.stop = sized.stop;
+  row.feesUsd = (sized.notionalUsd * CLASS_A_MAKER_FEE_BPS) / 10_000;
+  row.measured = measured;
+  book.open.push({
+    rowId: row.id,
+    pair,
+    scored: true,
+    entry: limit,
+    entryMs: fillMs,
+    entryDate,
+    stop: sized.stop,
+    initialStop: sized.stop,
+    notionalUsd: sized.notionalUsd,
+    units: sized.units,
+    feeEntryBps: CLASS_A_MAKER_FEE_BPS,
+    sBps,
+    highestClose: limit,
+    priorCloses: prior,
+    pending: null,
+  });
+}
+
+/**
+ * Spec A4. A pending maker order fills on a print, or on an intrabar low, inside [close, close+4h).
+ * nofill is recorded only once that window has ended with neither.
+ */
+export function resolveClassAResting(
+  book: ClassABook,
+  nowMs: number,
+  event: { pair?: string; prints?: readonly { tsMs: number; price: number }[]; bar?: { startMs: number; endMs: number; low: number } } = {},
+): void {
+  const resting = book.resting ?? [];
+  book.resting = resting;
+  if (!Number.isFinite(nowMs)) return;
+  for (const order of [...resting]) {
+    const row = book.rows.find((item) => item.id === order.rowId && item.fill === "pending");
+    if (!row) {
+      book.resting = resting.filter((item) => item !== order);
+      continue;
+    }
+    let fillMs: number | null = null;
+    if (event.pair == null || event.pair === order.pair) {
+      const print = (event.prints ?? []).find((item) => item.tsMs >= order.signalMs && item.tsMs < order.windowEndMs && item.tsMs <= nowMs && item.price <= order.limit - order.tick);
+      if (print) {
+        fillMs = print.tsMs;
+        row.measured = print.price;
+      }
+      const bar = event.bar;
+      if (fillMs == null && bar && bar.startMs >= order.signalMs && bar.startMs < order.windowEndMs && bar.low <= order.limit - order.tick) {
+        fillMs = bar.startMs;
+        row.measured = bar.low;
+      }
+    }
+    if (fillMs != null) {
+      openMaker(book, row, order.pair, order.limit, fillMs, order.entryDate, order, order.sBps, order.priorCloses, row.measured ?? order.limit);
+      book.resting = (book.resting ?? []).filter((item) => item !== order);
+      continue;
+    }
+    if (nowMs >= order.windowEndMs) {
+      row.fill = "nofill";
+      row.skipReason = "skip_nofill";
+      row.check = "fill";
+      row.notionalUsd = null;
+      row.feesUsd = null;
+      book.resting = (book.resting ?? []).filter((item) => item !== order);
+    }
+  }
 }
 
 function pnlOf(sim: Sim, exitPx: number): { grossUsd: number; netUsd: number; grossBps: number; netBps: number; grossR: number; netR: number } {
@@ -1235,7 +1474,32 @@ export function restoreClassABook(value: unknown): ClassABook | null {
     exclusionOk: row.exclusionOk === false ? false : true,
     lastSignalMs: typeof row.lastSignalMs === "number" && Number.isFinite(row.lastSignalMs) ? row.lastSignalMs : null,
     spreadLog: spreadLogOf(row.spreadLog),
+    resting: Array.isArray(row.resting) ? row.resting.filter(restingOk) : [],
   };
+}
+
+function restingOk(value: unknown): value is ClassAResting {
+  if (!value || typeof value !== "object") return false;
+  const row = value as ClassAResting;
+  return typeof row.rowId === "string"
+    && typeof row.pair === "string"
+    && typeof row.signalMs === "number"
+    && Number.isFinite(row.signalMs)
+    && typeof row.windowEndMs === "number"
+    && row.windowEndMs > row.signalMs
+    && typeof row.limit === "number"
+    && row.limit > 0
+    && typeof row.tick === "number"
+    && row.tick > 0
+    && typeof row.notionalUsd === "number"
+    && row.notionalUsd > 0
+    && typeof row.units === "number"
+    && row.units > 0
+    && typeof row.stop === "number"
+    && typeof row.sBps === "number"
+    && row.sBps >= 0
+    && Array.isArray(row.priorCloses)
+    && typeof row.entryDate === "string";
 }
 
 function spreadLogOf(value: unknown): Record<string, number[]> {

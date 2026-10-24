@@ -7,14 +7,26 @@ import { decodeStored } from "./redis-gzip";
 import { decodeLease, HOT_KEY, LEASE_KEY, memoryKv, peekStored, tryAcquire } from "./relay";
 import { countsInClassMean, classMeanNetR } from "./x1-fill";
 import {
+  CLASS_A_BH_EXIT_FEE_BPS,
+  CLASS_A_BH_FEE_MAKER_BPS,
+  CLASS_A_BH_FEE_TAKER_BPS,
   CLASS_A_BOOTSTRAP_REPS,
   CLASS_A_BOOTSTRAP_SEED,
+  CLASS_A_ERRATA_005_SHA256,
   CLASS_A_HOLM_FAMILY,
+  CLASS_A_INTRO_PROMOTE_GROSS_BPS,
   CLASS_A_KILL_USD,
   CLASS_A_LOOKBACK,
+  CLASS_A_MAKER_FEE_BPS,
+  CLASS_A_MARKED_ENTRY_FEE_BPS,
+  CLASS_A_MARKED_EXIT_FEE_BPS,
   CLASS_A_PAPER_START_MS,
+  CLASS_A_PROMOTE_GROSS_BPS,
+  CLASS_A_PROMOTION_PRECONDITION,
   CLASS_A_SPEC_SHA256,
+  CLASS_A_TAKER_FEE_BPS,
   classABuyHoldSeries,
+  classAPaperView,
   classARuleExit,
   classAStartMs,
   concentrationOf,
@@ -34,6 +46,7 @@ import {
   orderClassASignals,
   promotionOf,
   regimeOf,
+  resolveClassAResting,
   restoreClassABook,
   scrubClassAPaper,
   sizedOrder,
@@ -181,7 +194,7 @@ test("a maker fill needs a trade at least one tick through the limit inside the 
   expect(row?.exitPrice).toBeNull();
   expect(row?.signalClose).toBe(100.05);
   expect(paper.open[0]?.entry).toBe(100.05);
-  expect(paper.open[0]?.feeEntryBps).toBe(50);
+  expect(paper.open[0]?.feeEntryBps).toBe(35);
   expect(row?.notionalUsd).toBe(2_000);
   expect(paper.open[0]?.units).toBeCloseTo(2_000 / 100.05, 8);
   const days = daysOf();
@@ -368,8 +381,8 @@ test("a counterfactual loss does not change the scored book", () => {
   const date = addDays(exit.open[0]!.entryDate, 1);
   onDaily(exit, { pair: "SOL-USD", date, open: 100.05, low: 100, close: 100.05, atr: 0.1, hourAtr: 0.2 });
   const closed = exit.rows[0]!;
-  expect(closed.netBps).toBeCloseTo(-145, 6);
-  expect(closed.counterfactual?.netBps).toBeCloseTo(-190, 6);
+  expect(closed.netBps).toBeCloseTo(-115, 6);
+  expect(closed.counterfactual?.netBps).toBeCloseTo(-160, 6);
 });
 
 test("regime tags are descriptive and promotion never recommends", () => {
@@ -595,8 +608,8 @@ test("errata 001 promotion uses Holm and buy-and-hold, and the exclusion preflig
   expect(flatHold.bhReturn).toBeCloseTo(0, 8);
   expect(flatHold.status).toBe("pass");
   const borderline = [
-    ...Array.from({ length: 20 }, (_, i) => row(`L${i}-USD`, 1, 250)),
-    ...Array.from({ length: 10 }, (_, i) => row(`H${i}-USD`, 1, 481)),
+    ...Array.from({ length: 20 }, (_, i) => row(`L${i}-USD`, 1, 190)),
+    ...Array.from({ length: 10 }, (_, i) => row(`H${i}-USD`, 1, 421)),
   ];
   const alone = promotionOf(borderline, { bhReturn: -1 });
   const family = promotionOf(borderline, { bhReturn: -1, family: holm });
@@ -604,10 +617,12 @@ test("errata 001 promotion uses Holm and buy-and-hold, and the exclusion preflig
   expect(family.holmP).toBeGreaterThanOrEqual(0.05);
   expect(family.status).toBe("blocked");
   expect(family.bootstrapP).not.toBeNull();
-  const level = Array.from({ length: 30 }, (_, i) => row(`E${i}-USD`, 1, 290));
+  const level = Array.from({ length: 30 }, (_, i) => row(`E${i}-USD`, 1, 230));
   expect(promotionOf(level, { bhReturn: -1, family: holm }).status).toBe("blocked");
   expect(promotionOf(level, { bhReturn: -1, family: holm }).tP).toBe(1);
   expect(promotionOf(level, { bhReturn: -1, family: holm }).bootstrapP).toBe(1);
+  const between = Array.from({ length: 30 }, (_, i) => row(`I${i}-USD`, 1, 250));
+  expect(promotionOf(between, { bhReturn: -1, family: holm }).status).toBe("pass");
 
   expect(exclusionPreflight().ok).toBe(true);
   expect(exclusionPreflight([]).reason).toBe("empty");
@@ -720,4 +735,97 @@ test("errata 001 live X1 class A is tagged and still class A", () => {
   tripped.classes.A.cumUsd = -1_600;
   const bound = applyForward(tripped, { kind: "clock", tsMs: ts + 2 });
   expect(bound.latches?.class?.A?.tradeId).toBe("scored-a");
+});
+
+test("a maker order stays pending through the four hour window and survives a restore", () => {
+  const days = daysOf();
+  const close = days[69]!.close;
+  const at = signalCloseMs(days[69]!.date);
+  const paper = book();
+  const row = evaluateSignal(paper, signal({ days, prints: [], asOfMs: at }));
+  expect(row?.fill).toBe("pending");
+  expect(row?.skipReason).toBeNull();
+  expect(row?.feesUsd).toBeNull();
+  expect(paper.open).toHaveLength(0);
+  expect(paper.resting).toHaveLength(1);
+  resolveClassAResting(paper, at + 60_000, { pair: "SOL-USD", prints: [{ tsMs: at + 60_000, price: close - 0.01 }] });
+  expect(row?.fill).toBe("fill");
+  expect(row?.feesUsd).toBeCloseTo((2_000 * 35) / 10_000, 8);
+  expect(paper.open).toHaveLength(1);
+  expect(paper.open[0]?.entry).toBe(close);
+  expect(paper.open[0]?.feeEntryBps).toBe(35);
+  expect(paper.resting).toHaveLength(0);
+
+  const waiting = book();
+  evaluateSignal(waiting, signal({ days, prints: [], asOfMs: at }));
+  const restored = restoreClassABook(JSON.parse(JSON.stringify(waiting)));
+  expect(restored?.resting).toHaveLength(1);
+  expect(restored?.rows[0]?.fill).toBe("pending");
+  resolveClassAResting(restored!, at + 4 * 60 * 60 * 1000 - 1, {
+    pair: "SOL-USD",
+    bar: { startMs: at + 3 * 60 * 60 * 1000, endMs: at + 3 * 60 * 60 * 1000 + 900_000, low: close },
+  });
+  expect(restored?.rows[0]?.fill).toBe("pending");
+  resolveClassAResting(restored!, at + 4 * 60 * 60 * 1000, {
+    pair: "SOL-USD",
+    bar: { startMs: at + 4 * 60 * 60 * 1000 - 900_000, endMs: at + 4 * 60 * 60 * 1000, low: close },
+  });
+  expect(restored?.rows[0]?.skipReason).toBe("skip_nofill");
+  expect(restored?.resting).toHaveLength(0);
+
+  const viaBar = book();
+  evaluateSignal(viaBar, signal({ days, prints: [], asOfMs: at }));
+  resolveClassAResting(viaBar, at + 900_000, { pair: "SOL-USD", bar: { startMs: at, endMs: at + 900_000, low: close - 0.02 } });
+  expect(viaBar.rows[0]?.fill).toBe("fill");
+  expect(viaBar.open[0]?.entryMs).toBe(at);
+});
+
+test("an unknown minimum is skip_minsize_unknown and the dashboard count survives the scrub", () => {
+  const row = evaluateSignal(book(), signal({ minOrderBase: null }));
+  expect(row?.skipReason).toBe("skip_minsize_unknown");
+  expect(row?.skipReason).not.toBe("skip_minsize");
+  const paper = book();
+  evaluateSignal(paper, signal({ minOrderBase: null }));
+  expect(classAPaperView(paper).skips.skip_minsize_unknown).toBe(1);
+  const scrubbed = scrubClassAPaper(classAPaperView(paper));
+  expect(scrubbed.skips.skip_minsize_unknown).toBe(1);
+  const hostile = scrubClassAPaper({
+    status: "running",
+    skips: { skip_minsize_unknown: 2, leak: 9 },
+    introSensitivity: { barBps: 1, netUsd: "user:PASSWORD@x.upstash.io" },
+    sHeadroom: { medianSBps: 8, barBps: 1 },
+    promotionPrecondition: "user:PASSWORD@x.upstash.io",
+  });
+  expect(hostile.skips).toEqual({ skip_minsize_unknown: 2 });
+  expect(hostile.introSensitivity.barBps).toBe(290);
+  expect(hostile.introSensitivity.netUsd).toBeNull();
+  expect(hostile.sHeadroom).toEqual({ medianSBps: 8, barBps: 2 * (35 + 75 + 8) });
+  expect(hostile.promotionPrecondition).toBe(CLASS_A_PROMOTION_PRECONDITION);
+  expect(hostile.promotionPrecondition.includes("PASSWORD")).toBe(false);
+});
+
+test("errata 005 bills Advanced 1 and keeps Intro on the sensitivity line", () => {
+  expect(CLASS_A_ERRATA_005_SHA256).toBe("31c1e06585d84dba3a8aa0492488e7fa90863c8fef1483be0df01d75cfca6824");
+  expect(CLASS_A_MAKER_FEE_BPS).toBe(35);
+  expect(CLASS_A_TAKER_FEE_BPS).toBe(75);
+  expect(CLASS_A_PROMOTE_GROSS_BPS).toBe(230);
+  expect(CLASS_A_INTRO_PROMOTE_GROSS_BPS).toBe(290);
+  expect(CLASS_A_BH_FEE_MAKER_BPS).toBe(35);
+  expect(CLASS_A_BH_FEE_TAKER_BPS).toBe(75);
+  expect(CLASS_A_BH_EXIT_FEE_BPS).toBe(35);
+  expect(CLASS_A_MARKED_ENTRY_FEE_BPS).toBe(35);
+  expect(CLASS_A_MARKED_EXIT_FEE_BPS).toBe(75);
+  const paper = book();
+  const row = evaluateSignal(paper, signal());
+  const sim = paper.open[0]!;
+  onIntrabar(paper, { pair: "SOL-USD", tsMs: sim.entryMs + 1_000, open: sim.stop + 1, low: sim.stop - 0.01, hourAtr: 0.2 });
+  const view = classAPaperView(paper);
+  expect(view.introSensitivity.barBps).toBe(290);
+  expect(view.introSensitivity.netUsd).not.toBeNull();
+  expect(view.introSensitivity.netUsd!).toBeLessThan(view.cumNetUsd);
+  expect(view.introSensitivity.aboveBar).toBe(false);
+  expect(view.sHeadroom.medianSBps).toBe(row?.sBps ?? null);
+  expect(view.sHeadroom.barBps).toBe(2 * (35 + 75 + (row?.sBps ?? 0)));
+  expect(view.promotionPrecondition).toBe(CLASS_A_PROMOTION_PRECONDITION);
+  expect(view.promotion).not.toBe("pass");
 });
