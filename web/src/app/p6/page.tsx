@@ -332,6 +332,23 @@ export default async function P6DashboardPage({
         </span>
       </div>
 
+      <section className={styles.card} aria-label="Class A paper">
+        <h2>Class A paper</h2>
+        <p className={styles.sub}>
+          {`A55-k3 · ${
+            view.classAPaper?.status === "running"
+              ? "Running"
+              : view.classAPaper?.status === "killed"
+                ? "Interim kill"
+                : view.classAPaper?.status === "redacted"
+                  ? "Redacted"
+                  : "Awaiting start"
+          } · n ${view.classAPaper?.n ?? 0} · net ${moneyOrDash(view.classAPaper?.cumNetUsd, true)}`}
+          {view.classAPaper?.promotion === "blocked" ? " · promotion blocked" : view.classAPaper?.promotion === "unresolved" ? " · promotion unresolved" : ""}
+          {(view.classAPaper?.healthDue.length ?? 0) > 0 ? ` · health ${view.classAPaper?.healthDue.join(" ")}` : ""}
+        </p>
+      </section>
+
       <div className={`${styles.card} ${styles.risk}`} aria-label="Risk status">
         <span className={styles.riskItem}>
           <span>

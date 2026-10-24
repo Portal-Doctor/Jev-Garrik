@@ -20,6 +20,7 @@ import { assertSafeToStart } from "../safety";
 import { readPairMonth } from "../data/store";
 import { readDailyHistory } from "./daily";
 import { applyForward, freshBook, forwardBookPanel, noteMemberDay, resolvePendingFills, type Book } from "./engine";
+import { restoreClassABook, type ClassABook } from "./class-a-paper";
 import { adoptLatchState, latchHotFields, type LatchRearm, type RiskLatches } from "./latches";
 import { restoreExtremes } from "./extremes";
 import { parsePublicMessage, type PublicEvent } from "./feed";
@@ -265,6 +266,8 @@ export interface PaperHost {
   feedCut: FeedCut | null;
   /** True when a buffered event is timestamped before feedCut.atMs. It does not change coverage. */
   overlapSeen: boolean;
+  /** Class A forward paper. Absent until a start exists. The live X1 stream does not step this book. */
+  classAPaper?: ClassABook;
   /** One append at a time for each product. A second save of the same product waits. */
   productLocks: Map<string, Promise<void>>;
   /** Commands this process sent to store the book. */
@@ -1810,6 +1813,7 @@ export interface PaperStateBody {
   latchRearm?: LatchRearm;
   dEntryNotBeforeMs?: number;
   latchMismatchSeen?: string;
+  classAPaper?: ClassABook;
 }
 
 /** Persistence for the book and the last processed bar. The driver does not choose the store. */
@@ -1950,6 +1954,7 @@ export function capturePaperState(host: PaperHost): PaperStateBody {
     fourSeedThrough: [...host.fourSeedThrough.entries()],
     overlapSeen: host.overlapSeen,
     ...latchHotFields(host.book),
+    ...(host.classAPaper ? { classAPaper: host.classAPaper } : {}),
   };
 }
 
@@ -2060,6 +2065,11 @@ export function installPaperState(host: PaperHost, body: Partial<PaperStateBody>
   if (body.ema200) host.ema200 = new Map(body.ema200);
   if (body.fourSeedThrough) host.fourSeedThrough = new Map(body.fourSeedThrough);
   if (body.overlapSeen != null) host.overlapSeen = body.overlapSeen;
+  if ("classAPaper" in body) {
+    const restored = restoreClassABook(body.classAPaper);
+    if (restored) host.classAPaper = restored;
+    else delete host.classAPaper;
+  }
   if (body.appliedThrough) {
     for (const productId of host.products) {
       const resumed = resumeRestCursor(host.restCursor.get(productId), host.appliedThrough.get(productId));

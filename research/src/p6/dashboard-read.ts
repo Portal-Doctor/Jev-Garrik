@@ -22,6 +22,7 @@ import {
   type PnlBlock,
 } from "./pnl-block";
 import { closedNow, fetchRestBids, type MarkNow, type MarkPosition, type MarkQuote } from "./mark-now";
+import { scrubClassAPaper, type ClassAPaperView } from "./class-a-paper";
 import { classMeanNetR, classStress, execCostWord, modelledShare, quoteMissStats, type ClassStress, type ExecWord, type StressGrade, type StressTrade } from "./x1-fill";
 
 export { type PnlBlock };
@@ -460,6 +461,7 @@ export function redactP6View(view: DashboardView): DashboardView {
     mark: publicMark(view.mark),
     fills: publicFills(view.fills ?? []),
     runLabel: publicEnum(view.runLabel, RUN_LABEL) === "non-X1" ? "non-X1" : publicEnum(view.runLabel, RUN_LABEL) === "X1" ? "X1" : undefined,
+    classAPaper: scrubClassAPaper(view.classAPaper),
   };
   delete shown.markInputs;
   return shown;
@@ -760,6 +762,8 @@ export interface DashboardView {
   unreadable: boolean;
   /** True when p6:lastRun was present and could not be decoded. Missing lastRun stays false. */
   lastUnreadable: boolean;
+  /** Class A forward paper. Absent on the hot read until redact fills the public shape. */
+  classAPaper?: ClassAPaperView;
 }
 
 function leaseOf(raw: string | null): DashboardLease | null {
@@ -873,6 +877,7 @@ export async function readP6Dashboard(kv: Pick<Kv, "readMany">): Promise<Dashboa
     markInputs: { positions: markPositions, quotes, disconnected: hot.feedLive === false },
     unreadable,
     lastUnreadable,
+    classAPaper: hot.classAPaper as ClassAPaperView | undefined,
   };
 }
 

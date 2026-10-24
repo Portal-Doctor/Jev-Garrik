@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
+import { CLASS_A_SPEC_SHA256 } from "./class-a-paper";
 import { absoluteDashboardLocation, applyDashboardProxy, dashboardAuthorized, dashboardCookieValue, dashboardSetCookie, formatP6Public, openDashboardKv, P6_COOKIE_NAME, readP6Dashboard, redactP6View } from "./dashboard-read";
 import { cronAuthorized, memoryKv, plantStored } from "./relay";
 import { handleEngineRequest } from "./vercel-live";
@@ -337,6 +338,62 @@ test("a no-cookie GET /p6 returns 200 and the public output is redacted", () => 
   expect(page.includes("loaded.view.incidents")).toBe(false);
   expect(page.includes("JSON.stringify(last)")).toBe(false);
   expect(page.includes("JSON.stringify(view.lastRun)")).toBe(false);
+  expect(page.includes("Class A paper")).toBe(true);
+  expect(page.includes("Awaiting start")).toBe(true);
+});
+
+test("class A paper on the public view is allowlisted", () => {
+  const idle = redactP6View(publicView());
+  expect(idle.classAPaper?.status).toBe("awaiting-start");
+  expect(idle.classAPaper?.config).toBe("A55-k3");
+  expect(idle.classAPaper?.paper).toBe(true);
+  expect(idle.classAPaper?.specSha256).toBe(CLASS_A_SPEC_SHA256);
+  const hostile = {
+    specSha256: "nope",
+    config: "A20-k2",
+    lookback: 20,
+    k: 2,
+    status: "recommend",
+    start: "https://user:PASSWORD@x.upstash.io/secret",
+    promotion: "recommend",
+    paper: false,
+    n: 4,
+    cumNetUsd: 12,
+    skips: { skip_volume: 2, leak: "user:PASSWORD@host" },
+    note: "x.upstash.io",
+  };
+  const scrubbed = redactP6View(publicView({ classAPaper: hostile as never }));
+  const output = JSON.stringify(scrubbed);
+  expect(scrubbed.classAPaper?.status).toBe("redacted");
+  expect(scrubbed.classAPaper?.specSha256).toBe("redacted");
+  expect(scrubbed.classAPaper?.config).toBe("A55-k3");
+  expect(scrubbed.classAPaper?.lookback).toBe(55);
+  expect(scrubbed.classAPaper?.k).toBe(3);
+  expect(scrubbed.classAPaper?.paper).toBe(true);
+  expect(scrubbed.classAPaper?.promotion).toBe("redacted");
+  expect(scrubbed.classAPaper?.start).toBeNull();
+  expect(scrubbed.classAPaper?.skips).toEqual({ skip_volume: 2 });
+  expect(scrubbed.classAPaper?.n).toBe(4);
+  expect(scrubbed.classAPaper?.cumNetUsd).toBe(12);
+  const stored = {
+    startMs: Date.parse("2026-01-01T00:00:00.000Z"),
+    killed: false,
+    cumNetUsd: 0,
+    open: [],
+    shadows: [],
+    reentryUntil: {},
+    rows: [{ skipReason: "skip_spread", fill: "skip", leak: "user:PASSWORD@x.upstash.io" }],
+    scored: [],
+    note: "https://user:PASSWORD@x.upstash.io/secret",
+  };
+  const fromBook = redactP6View(publicView({ classAPaper: stored as never }));
+  expect(fromBook.classAPaper?.status).toBe("running");
+  expect(fromBook.classAPaper?.specSha256).toBe(CLASS_A_SPEC_SHA256);
+  expect(fromBook.classAPaper?.skips).toEqual({ skip_spread: 1 });
+  const both = `${output}\n${JSON.stringify(fromBook)}`;
+  for (const secret of ["upstash", "PASSWORD", "host", "recommend", "A20", "nope"]) {
+    expect(both.includes(secret), secret).toBe(false);
+  }
 });
 
 function publicView(over: Partial<ReturnType<typeof redactP6View>> = {}) {
