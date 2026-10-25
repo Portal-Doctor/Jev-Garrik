@@ -5,6 +5,7 @@
 
 import type { SourceDay } from "../p3/bar-access";
 import { ensureClassAPaper } from "./class-a-paper";
+import { ensureClassAMinSizes } from "./class-a-live";
 import { loadSplit, noteKvRead, persistSplit, reloadSplit, warmReadyCount, warmupKey } from "./hot-store";
 import { decodeStored } from "./redis-gzip";
 import { acceptRestBar, applyRestCold, attachMemberCloses, attachRestLease, backfillTapeIfNeeded, catchUpHistory, coldResetEnabled, driveHost, installPaperState, markOrdersBeforeTape, releaseForDeadline, replayHandover, resyncBooksFromRest, retainFifteens, seedRetryList, stageColdReset, startPaperHost, warmSeriesFromRest, type PaperHost } from "./paper-host";
@@ -136,6 +137,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
     },
     async applyDueBars() {
       if (host.entriesHeld) return [];
+      await ensureClassAMinSizes();
       const applied: string[] = [];
       for (const bar of bars) {
         const before = host.fifteen.length;
@@ -195,6 +197,7 @@ export function hostHolder(host: PaperHost, kv: Kv, bars: readonly OhlcvBar[] = 
       return ok;
     },
     async sampleUntil(untilMs: number) {
+      await ensureClassAMinSizes();
       if (!host.stopped) {
         const lease = decodeLease(await kv.get(LEASE_KEY));
         if (lease?.token && self != null && lease.holder === self) {

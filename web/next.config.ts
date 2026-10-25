@@ -13,12 +13,16 @@ const nextConfig: NextConfig = {
   },
   outputFileTracingIncludes: {
     "/p6": ["../research/src/p6/system-cost.json"],
-    "/p6/health.json": ["../research/src/p6/system-cost.json"],
+    "/p6/health.json": [
+      "../research/src/p6/system-cost.json",
+      "../research/data/products/exchange-products.raw.json",
+    ],
     "/api/engine": [
       "../research/data/reports/p4-registration.json",
       "../research/data/reports/universe-membership.json",
       "../research/data/reports/product-stats.json",
       "../research/data/products/usd-spot.json",
+      "../research/data/products/exchange-products.raw.json",
       "../research/data/reports/p6-jev-spend.json",
       "../research/data/reports/p6-forward-a.json",
       "../research/data/reports/p6-forward-a.sha256",
