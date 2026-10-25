@@ -169,6 +169,11 @@ export interface ClassASignal {
    * Omitted means the print list already covers the window, so a miss is nofill.
    */
   asOfMs?: number;
+  /**
+   * Live bucket only. A through-print is recorded as a resting order, not opened here.
+   * resolveClassAResting is the one cap for that order and every other resting order in the bucket.
+   */
+  deferEntry?: boolean;
 }
 
 export interface ClassACounterfactual {
@@ -306,7 +311,7 @@ export interface ClassABucketBar {
 
 /**
  * One signal check, saved when that pair's bar first arrives.
- * A later push or a restart copies this back after the pair's exits and does not call the check again.
+ * A later push or a restart copies the row and the resting order back. It does not call the check again, and it does not copy an open.
  */
 export interface ClassASignalDecision {
   productId: string;
@@ -314,9 +319,9 @@ export interface ClassASignalDecision {
   rows: ClassARow[];
   /** Closed rows the check's retention cap dropped. */
   droppedRowIds: string[];
-  /** Resting orders the check placed. */
+  /** Resting orders the check placed. A through-print is one of these until the bucket resolver runs. */
   resting: ClassAResting[];
-  /** Positions the check opened. An immediate fill is one of these. */
+  /** Positions the check opened. Replay does not copy these. The resolver is the only open. */
   open: Sim[];
   /** Counterfactual shadows the check armed. */
   shadows: Sim[];
@@ -1707,11 +1712,13 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
   const through = tick != null && tick > 0 ? seen.find((print) => print.tsMs >= window.startMs && print.tsMs < window.endMs && print.price <= day.close - tick) : undefined;
   // Binding A7 check at fill. Quant ruling: implementation correction within frozen spec 56fb7543, not an erratum.
   // A resting order is not a position (errata 004 #9), so the cap is not applied until the fill.
-  if (through && classAFillCapped(book, through.tsMs, sized.riskUsd)) {
+  // deferEntry keeps a through-print on that same path. The live bucket resolves every resting order once.
+  const immediate = input.deferEntry === true ? undefined : through;
+  if (immediate && classAFillCapped(book, immediate.tsMs, sized.riskUsd)) {
     return skipRow(book, input, signalMs, day.close, atr, "skip_cap", "cap", book.open.length, CLASS_A_MAX_OPEN, false, null);
   }
   const observed = input.asOfMs == null || input.asOfMs >= window.endMs;
-  const pending = !through && !observed && tick != null && tick > 0;
+  const pending = (input.deferEntry === true && through != null && tick != null && tick > 0) || (!through && !observed && tick != null && tick > 0);
   const row: ClassARow = {
     id: `${input.pair}:${signalMs}`,
     signalMs,
@@ -1720,11 +1727,11 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
     signalClose: day.close,
     atr,
     stop: sized.stop,
-    notionalUsd: through || pending ? sized.notionalUsd : null,
-    fill: through ? "fill" : pending ? "pending" : "nofill",
-    skipReason: through || pending ? null : "skip_nofill",
-    check: through || pending ? null : "fill",
-    measured: through ? through.price : null,
+    notionalUsd: immediate || pending ? sized.notionalUsd : null,
+    fill: immediate ? "fill" : pending ? "pending" : "nofill",
+    skipReason: immediate || pending ? null : "skip_nofill",
+    check: immediate || pending ? null : "fill",
+    measured: immediate ? immediate.price : null,
     threshold: tick != null && tick > 0 ? day.close - tick : null,
     regime,
     btcVeto: false,
@@ -1735,12 +1742,12 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
     netBps: null,
     grossR: null,
     netR: null,
-    feesUsd: through ? (sized.notionalUsd * CLASS_A_MAKER_FEE_BPS) / 10_000 : null,
+    feesUsd: immediate ? (sized.notionalUsd * CLASS_A_MAKER_FEE_BPS) / 10_000 : null,
     sBps,
     counterfactual,
   };
-  if (through) openMaker(book, row, input.pair, day.close, through.tsMs, addDays(day.date, 1), sized, sBps, prior, through.price);
-  if (pending) {
+  if (immediate) openMaker(book, row, input.pair, day.close, immediate.tsMs, addDays(day.date, 1), sized, sBps, prior, immediate.price);
+  if (pending && tick != null && tick > 0) {
     const resting = book.resting ?? [];
     book.resting = resting;
     resting.push({
@@ -2104,7 +2111,7 @@ function addedById<T>(before: readonly T[], after: readonly T[], idOf: (item: T)
   return after.filter((item) => !known.has(idOf(item)));
 }
 
-/** Copies a stored signal check back onto the book. Does not read the host, and does not rewrite rows the check did not create. */
+/** Copies a stored signal check back onto the book. An open on the decision is not applied. The resting resolver is the only open. */
 export function applyStoredClassASignal(book: ClassABook, productId: string): void {
   const decision = book.bucket?.decisions?.find((item) => item.productId === productId);
   if (!decision) return;
@@ -2114,9 +2121,6 @@ export function applyStoredClassASignal(book: ClassABook, productId: string): vo
   }
   for (const row of decision.rows) {
     if (!book.rows.some((item) => item.id === row.id)) book.rows.push(cloneDecision(row));
-  }
-  for (const sim of decision.open) {
-    if (!book.open.some((item) => item.rowId === sim.rowId)) book.open.push(cloneDecision(sim));
   }
   for (const sim of decision.shadows) {
     if (!book.shadows.some((item) => item.rowId === sim.rowId)) book.shadows.push(cloneDecision(sim));

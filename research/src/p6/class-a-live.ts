@@ -2,7 +2,8 @@
  * Production step for the class A paper book.
  * Called from the live 15m bar path. Public candles, quotes, and prints only. No orders.
  * errata 002 item 5: a signal whose close is exactly the book start is evaluated.
- * A maker entry placed at that close stays pending until a later bar or print inside [close, close+4h), or the window ends.
+ * A maker entry placed at that close is a resting order. A print already in [close, close+4h) does not open it.
+ * The bucket replay resolves every resting order once, then applies the cap, then runs stops.
  */
 
 import { spawnSync } from "node:child_process";
@@ -97,10 +98,12 @@ function applySnapshot(book: ClassABook, image: ClassABook): void {
 }
 
 /**
- * One accepted 15m bar. The bucket is replayed from its saved pre-image: fills for every pair first, then stops and day-closes.
- * A later push restores that image, so a stop cannot survive on a fill the cap rejects.
- * The signal check runs once, when that pair's own day-close bar arrives, and the row plus its resting order are stored on the bucket.
- * Replay copies that decision back after the pair's exits. It does not read the quote, the book, or the clock for the check again.
+ * One accepted 15m bar. The bucket is replayed from its saved pre-image.
+ * Stored decisions are the signal and the resting order. They do not open a position.
+ * One resolve then applies the 3-slot and $60 caps to every resting order, including a print that was already in the window.
+ * Stops run after that resolve, so a rejected fill is not scored.
+ * The signal check runs once, when that pair's own day-close bar arrives.
+ * Replay copies the stored intent. It does not read the quote, the book, or the clock for the check again.
  */
 export function stepClassAFromHost(host: ClassALiveHost, bar: ClassABucketBar): void {
   const book = host.classAPaper;
@@ -126,7 +129,7 @@ export function stepClassAFromHost(host: ClassALiveHost, bar: ClassABucketBar): 
   replayClassABucket(host, book);
 }
 
-/** Fills, then each pair's exits, then that pair's stored signal. `pauseAtProduct` stops after that pair's exits so the caller can decide it once. */
+/** `pauseAtProduct` stops after that pair's exits, before later pairs, so the one-time check sees those exits. The final replay applies every stored intent, resolves the cap once, then runs exits. */
 function replayClassABucket(host: ClassALiveHost, book: ClassABook, pauseAtProduct?: string): void {
   const bucket = host.classABucket ?? book.bucket;
   if (!bucket) return;
@@ -134,6 +137,16 @@ function replayClassABucket(host: ClassALiveHost, book: ClassABook, pauseAtProdu
   book.bucket = bucket;
   host.classABucket = bucket;
   if (bucket.bars.length === 0) return;
+  const ordered = bucket.bars.slice().sort((a, b) => (a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0));
+  if (pauseAtProduct != null) {
+    for (const item of ordered) {
+      applyClassAExits(host, book, item);
+      if (pauseAtProduct != null && item.productId === pauseAtProduct) return;
+      applyStoredClassASignal(book, item.productId);
+    }
+    return;
+  }
+  for (const item of ordered) applyStoredClassASignal(book, item.productId);
   const closeOf = (item: ClassABucketBar) => (item.startSec + 900) * 1000;
   const nowMs = Math.max(closeOf(bucket.bars[bucket.bars.length - 1]!), host.clock());
   resolveClassAResting(book, nowMs, {
@@ -143,12 +156,7 @@ function replayClassABucket(host: ClassALiveHost, book: ClassABook, pauseAtProdu
       bar: { startMs: item.startSec * 1000, endMs: (item.startSec + 900) * 1000, low: item.low },
     })),
   });
-  const ordered = bucket.bars.slice().sort((a, b) => (a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0));
-  for (const item of ordered) {
-    applyClassAExits(host, book, item);
-    if (pauseAtProduct != null && item.productId === pauseAtProduct) return;
-    applyStoredClassASignal(book, item.productId);
-  }
+  for (const item of ordered) applyClassAExits(host, book, item);
 }
 
 function applyClassAExits(host: ClassALiveHost, book: ClassABook, bar: ClassABucketBar): void {
@@ -236,6 +244,7 @@ function applyClassASignal(host: ClassALiveHost, book: ClassABook, bar: ClassABu
     hourAtr14: hourAtr > 0 ? hourAtr : null,
     prints: printsOf(host, bar.productId),
     asOfMs: nowMs,
+    deferEntry: true,
   });
   if (spread != null && Number.isFinite(spread) && spread >= 0) log[bar.productId] = [...(log[bar.productId] ?? []), spread].slice(-30);
 }
