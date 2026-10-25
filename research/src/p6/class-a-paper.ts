@@ -218,6 +218,8 @@ export interface ClassARow {
   awaitHourOpen?: boolean;
   /** Closes carried until the next 1h open is known. */
   shadowPrior?: number[];
+  /** Fill time. Occupancy starts at the 15m bar that contains this instant. */
+  entryMs?: number | null;
 }
 
 interface Sim {
@@ -262,6 +264,8 @@ export interface ClassAResting {
   sBps: number;
   priorCloses: number[];
   entryDate: string;
+  /** Frozen 30-day median USD volume from the signal. Higher volume wins a same-bar tie. */
+  medianVolumeUsd?: number | null;
 }
 
 export interface ClassABook {
@@ -283,6 +287,28 @@ export interface ClassABook {
   resting?: ClassAResting[];
   /** Last daily close per pair. The review mark uses this price and does not invent one. */
   lastClose?: Record<string, number>;
+  /**
+   * The 15m bucket in progress. The image is the book before any bar in the bucket.
+   * A restart restores the image and replays the bars, so push order does not choose the fills.
+   */
+  bucket?: ClassABucketState;
+}
+
+/** One 15m bar inside a bucket. Public candles only. */
+export interface ClassABucketBar {
+  productId: string;
+  startSec: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+/** Persisted with the book. Not part of the public paper view. */
+export interface ClassABucketState {
+  startSec: number;
+  bars: ClassABucketBar[];
+  image: ClassABook;
 }
 
 export interface ClassAIntroSensitivity {
@@ -1502,8 +1528,16 @@ function armOrDefer(book: ClassABook, row: ClassARow, nextHourOpen: number | nul
 export function armClassAHourOpen(book: ClassABook, pair: string, barStartMs: number, open: number | null): void {
   if (!Number.isFinite(barStartMs)) return;
   for (const row of book.rows) {
-    if (row.awaitHourOpen !== true || row.pair !== pair || barStartMs < row.signalMs) continue;
+    if (row.awaitHourOpen !== true || row.pair !== pair) continue;
+    // A bar before the signal close is not the signal+1h open. The wait stays.
+    if (barStartMs < row.signalMs) continue;
     const entryMs = row.signalMs + 3_600_000;
+    // Reached only when the gate above lets a pre-signal bar through. That bar is not an entry.
+    if (barStartMs < row.signalMs) {
+      row.awaitHourOpen = false;
+      row.counterfactual = { status: "no_next_bar", entry: null, grossBps: null, netBps: null, netR: null, exitReason: "no_next_bar" };
+      continue;
+    }
     if (barStartMs < entryMs) continue;
     row.awaitHourOpen = false;
     if (barStartMs === entryMs && open != null && open > 0) {
@@ -1642,14 +1676,15 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
   }
   const until = book.reentryUntil[input.pair];
   if (until != null && signalMs < until) return skipRow(book, input, signalMs, day.close, atr, "skip_reentry", "reentry", signalMs, until, false, null);
-  const openRisk = book.open.reduce((total, sim) => total + sim.notionalUsd * ((sim.entry - sim.initialStop) / sim.entry), 0);
-  if (book.open.length >= CLASS_A_MAX_OPEN || openRisk + sized.riskUsd > CLASS_A_MAX_OPEN_RISK_USD) {
-    return skipRow(book, input, signalMs, day.close, atr, "skip_cap", "cap", book.open.length, CLASS_A_MAX_OPEN, false, null);
-  }
   const window = { startMs: signalMs, endMs: signalMs + CLASS_A_FILL_WINDOW_MS };
   const tick = input.tick;
   const seen = input.asOfMs == null ? input.prints : input.prints.filter((print) => print.tsMs <= input.asOfMs!);
   const through = tick != null && tick > 0 ? seen.find((print) => print.tsMs >= window.startMs && print.tsMs < window.endMs && print.price <= day.close - tick) : undefined;
+  // Binding A7 check at fill. Quant ruling: implementation correction within frozen spec 56fb7543, not an erratum.
+  // A resting order is not a position (errata 004 #9), so the cap is not applied until the fill.
+  if (through && classAFillCapped(book, through.tsMs, sized.riskUsd)) {
+    return skipRow(book, input, signalMs, day.close, atr, "skip_cap", "cap", book.open.length, CLASS_A_MAX_OPEN, false, null);
+  }
   const observed = input.asOfMs == null || input.asOfMs >= window.endMs;
   const pending = !through && !observed && tick != null && tick > 0;
   const row: ClassARow = {
@@ -1696,6 +1731,7 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
       sBps,
       priorCloses: prior,
       entryDate: addDays(day.date, 1),
+      medianVolumeUsd: volume,
     });
   }
   armOrDefer(book, row, input.nextHourOpen, sBps, prior);
@@ -1710,7 +1746,7 @@ function openMaker(book: ClassABook, row: ClassARow, pair: string, limit: number
   row.check = null;
   row.notionalUsd = sized.notionalUsd;
   row.stop = sized.stop;
-  row.feesUsd = (sized.notionalUsd * CLASS_A_MAKER_FEE_BPS) / 10_000;
+  row.entryMs = fillMs;
   row.measured = measured;
   book.open.push({
     rowId: row.id,
@@ -1731,12 +1767,89 @@ function openMaker(book: ClassABook, row: ClassARow, pair: string, limit: number
   });
 }
 
+/** 15m bar length. Fill and exit bars are aligned to the UTC epoch. */
+export const CLASS_A_BAR_MS = 900_000;
+
+export function classABarStartMs(ms: number): number {
+  return Math.floor(ms / CLASS_A_BAR_MS) * CLASS_A_BAR_MS;
+}
+
+/** A close stamped on a 15m boundary is the end of the bar that just closed, not the start of the next one. */
+export function classAExitBarEndMs(exitMs: number): number {
+  if (exitMs % CLASS_A_BAR_MS === 0) return exitMs;
+  return classABarStartMs(exitMs) + CLASS_A_BAR_MS;
+}
+
+/**
+ * A7 occupancy. Quant ruling: an implementation correction within frozen spec 56fb7543, not an erratum.
+ * A position holds its slot and its $20 open risk from the start of its fill bar through the end of its exit bar.
+ * The interval is half-open [fillBarStart, exitBarEnd). A stop inside the fill bar frees the slot only after T+15m,
+ * never at processing time, because freeing a slot on an intrabar exit is lookahead.
+ * An open position has no exit yet, so it occupies every bar start at or after its fill bar.
+ * One function so a later ruling is a one-spot change.
+ */
+export function classAOccupiesAt(entryMs: number, exitMs: number | null, atMs: number): boolean {
+  if (!Number.isFinite(entryMs) || !Number.isFinite(atMs)) return false;
+  const start = classABarStartMs(entryMs);
+  const end = exitMs == null || !Number.isFinite(exitMs) ? Number.POSITIVE_INFINITY : classAExitBarEndMs(exitMs);
+  return atMs >= start && atMs < end;
+}
+
+function positionRiskUsd(notionalUsd: number, entry: number, stop: number): number {
+  if (!(entry > 0) || !Number.isFinite(notionalUsd) || !Number.isFinite(stop)) return Number.POSITIVE_INFINITY;
+  return (notionalUsd * (entry - stop)) / entry;
+}
+
+/**
+ * Binding A7 check at fill. Counts every position whose occupancy contains the candidate fill's bar start.
+ * Applies to the 3-slot cap and the $60 open-risk cap. A resting order is not a position (errata 004 #9).
+ */
+export function classAFillCapped(book: ClassABook, fillMs: number, orderRiskUsd: number): boolean {
+  const atMs = classABarStartMs(fillMs);
+  let count = 0;
+  let risk = 0;
+  const seen = new Set<string>();
+  for (const sim of book.open) {
+    if (!classAOccupiesAt(sim.entryMs, null, atMs)) continue;
+    seen.add(sim.rowId);
+    count += 1;
+    risk += positionRiskUsd(sim.notionalUsd, sim.entry, sim.initialStop);
+  }
+  for (const row of book.rows) {
+    if (row.fill !== "fill" || row.exitMs == null || row.entryMs == null || seen.has(row.id)) continue;
+    if (!classAOccupiesAt(row.entryMs, row.exitMs, atMs)) continue;
+    if (row.signalClose == null || row.stop == null || row.notionalUsd == null) continue;
+    count += 1;
+    risk += positionRiskUsd(row.notionalUsd, row.signalClose, row.stop);
+  }
+  return count >= CLASS_A_MAX_OPEN || risk + orderRiskUsd > CLASS_A_MAX_OPEN_RISK_USD;
+}
+
+/**
+ * Competing fills. Quant ruling: an implementation correction within frozen spec 56fb7543, not an erratum.
+ * Signal timestamp, then higher 30-day median USD volume (errata 001 #9 and #5), then pair A→Z, then row id.
+ * The volume is the one already computed for the signal. Placement time is the first key only when it is that signal timestamp.
+ */
+export function compareClassAFills(
+  a: { signalMs: number; medianVolumeUsd?: number | null; pair: string; rowId: string },
+  b: { signalMs: number; medianVolumeUsd?: number | null; pair: string; rowId: string },
+): number {
+  if (a.signalMs !== b.signalMs) return a.signalMs - b.signalMs;
+  const av = a.medianVolumeUsd != null && Number.isFinite(a.medianVolumeUsd) ? a.medianVolumeUsd : Number.NEGATIVE_INFINITY;
+  const bv = b.medianVolumeUsd != null && Number.isFinite(b.medianVolumeUsd) ? b.medianVolumeUsd : Number.NEGATIVE_INFINITY;
+  if (av !== bv) return bv - av;
+  if (a.pair !== b.pair) return a.pair < b.pair ? -1 : 1;
+  if (a.rowId !== b.rowId) return a.rowId < b.rowId ? -1 : 1;
+  return 0;
+}
+
 /**
  * Spec A4. A pending maker order fills on a print, or on an intrabar low, inside [close, close+4h).
  * The window is half-open: the close is inside, and close+4h is outside. A fill still needs a trade at least one tick through the limit.
  * nofill is recorded only once that window has ended with neither.
- * Orders that can fill in one pass are taken by placement time (signalMs), then pair, then row id.
- * Each fill rechecks the open-count cap and the open-risk cap. A reject is nofill skip_cap, and it was not placed.
+ * Competing fills in one bar follow compareClassAFills: signal timestamp, then higher 30-day median volume, then pair A→Z, then row id.
+ * Quant ruling, frozen spec 56fb7543, not an erratum. Submission latency is not a key.
+ * Each fill rechecks A7 occupancy at the fill bar's start. A reject is nofill skip_cap, and it was not placed.
  */
 export function resolveClassAResting(
   book: ClassABook,
@@ -1752,12 +1865,14 @@ export function resolveClassAResting(
   const resting = book.resting ?? [];
   book.resting = resting;
   if (!Number.isFinite(nowMs)) return;
-  // Placement time, then symbol, then id. Array order is not the fill order.
+  // Signal time, then higher frozen volume, then pair A→Z, then row id. Array order is not the fill order.
   const ordered = [...resting].sort((a, b) => {
-    if (a.signalMs !== b.signalMs) return a.signalMs - b.signalMs;
-    if (a.pair !== b.pair) return a.pair < b.pair ? -1 : 1;
-    if (a.rowId !== b.rowId) return a.rowId < b.rowId ? -1 : 1;
-    return 0;
+    const aRow = book.rows.find((item) => item.id === a.rowId);
+    const bRow = book.rows.find((item) => item.id === b.rowId);
+    return compareClassAFills(
+      { signalMs: a.signalMs, medianVolumeUsd: a.medianVolumeUsd ?? aRow?.medianVolumeUsd ?? null, pair: a.pair, rowId: a.rowId },
+      { signalMs: b.signalMs, medianVolumeUsd: b.medianVolumeUsd ?? bRow?.medianVolumeUsd ?? null, pair: b.pair, rowId: b.rowId },
+    );
   });
   for (const order of ordered) {
     const row = book.rows.find((item) => item.id === order.rowId && item.fill === "pending");
@@ -1783,17 +1898,24 @@ export function resolveClassAResting(
       }
     }
     if (fillMs != null) {
-      const openRisk = book.open.reduce((total, sim) => total + sim.notionalUsd * ((sim.entry - sim.initialStop) / sim.entry), 0);
       const orderRisk = order.limit > 0 ? (order.notionalUsd * (order.limit - order.stop)) / order.limit : Number.POSITIVE_INFINITY;
-      if (book.open.length >= CLASS_A_MAX_OPEN || openRisk + orderRisk > CLASS_A_MAX_OPEN_RISK_USD) {
+      if (classAFillCapped(book, fillMs, orderRisk)) {
         row.fill = "nofill";
         row.skipReason = "skip_cap";
         row.check = "cap";
         row.notionalUsd = null;
         row.feesUsd = null;
+        row.exitReason = null;
+        row.exitMs = null;
+        row.exitPrice = null;
+        row.grossBps = null;
+        row.netBps = null;
+        row.grossR = null;
+        row.netR = null;
         book.resting = (book.resting ?? []).filter((item) => item !== order);
         continue;
       }
+      row.feesUsd = (order.notionalUsd * CLASS_A_MAKER_FEE_BPS) / 10_000;
       openMaker(book, row, order.pair, order.limit, fillMs, order.entryDate, order, order.sBps, order.priorCloses, row.measured ?? order.limit);
       book.resting = (book.resting ?? []).filter((item) => item !== order);
       continue;
@@ -1916,7 +2038,7 @@ export function restoreClassABook(value: unknown): ClassABook | null {
       if (/^[A-Z0-9]{2,12}-[A-Z]{2,5}$/.test(pair) && typeof until === "number" && Number.isFinite(until)) reentry[pair] = until;
     }
   }
-  return {
+  const restored: ClassABook = {
     startMs: row.startMs ?? null,
     killed: row.killed,
     cumNetUsd: row.cumNetUsd,
@@ -1932,6 +2054,29 @@ export function restoreClassABook(value: unknown): ClassABook | null {
     resting: Array.isArray(row.resting) ? row.resting.filter(restingOk) : [],
     lastClose: lastCloseOf(row.lastClose),
   };
+  const bucket = restoreBucket(row.bucket);
+  if (bucket) restored.bucket = bucket;
+  return restored;
+}
+
+function restoreBucket(value: unknown): ClassABucketState | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as { startSec?: unknown; bars?: unknown; image?: unknown };
+  if (typeof row.startSec !== "number" || !Number.isFinite(row.startSec) || !Array.isArray(row.bars)) return undefined;
+  if (!row.image || typeof row.image !== "object" || Array.isArray(row.image)) return undefined;
+  const imageRaw = { ...(row.image as ClassABook) };
+  delete imageRaw.bucket;
+  const image = restoreClassABook(imageRaw);
+  if (!image) return undefined;
+  const bars: ClassABucketBar[] = [];
+  for (const bar of row.bars) {
+    if (!bar || typeof bar !== "object") continue;
+    const item = bar as ClassABucketBar;
+    if (typeof item.productId !== "string" || typeof item.startSec !== "number" || !Number.isFinite(item.startSec)) continue;
+    if (![item.open, item.high, item.low, item.close].every((price) => typeof price === "number" && Number.isFinite(price))) continue;
+    bars.push({ productId: item.productId, startSec: item.startSec, open: item.open, high: item.high, low: item.low, close: item.close });
+  }
+  return { startSec: row.startSec, bars, image };
 }
 
 function lastCloseOf(value: unknown): Record<string, number> {

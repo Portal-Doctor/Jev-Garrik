@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { PAPER_MINIMUM_USD } from "../p3/design-rules";
 import { CLASS_A_PAPER_START_MS } from "./class-a-paper";
+import { CLASS_A_PRODUCTS_FILE, readClassAProductsSnapshot } from "./class-a-products";
 import { p6HealthJson, readP6Page, redactP6View } from "./dashboard-read";
+import { dataFile } from "./live-data";
 import { PNL_START_USD, signedUsd } from "./pnl-block";
 import { formatUsd } from "./positions-view";
 import { memoryKv } from "./relay";
@@ -104,6 +107,7 @@ test("the light is amber with no closed trade or with net exactly zero, red belo
   expect(systemCostLight(-10, 0)).toBe("amber");
   expect(systemCostLight(0, 0)).toBe("amber");
   expect(systemCostLight(0, 1)).toBe("amber");
+  expect(systemCostLight(Number.NaN, 1)).toBe("amber");
   expect(systemCostLight(-1e-9, 1)).toBe("red");
   expect(systemCostLight(1e-9, 1)).toBe("green");
   const none = systemCostHurdle({ config: committed, pnlUsd: 10, nowMs: SYSTEM_COST_START_MS, closedTrades: 0 });
@@ -453,7 +457,7 @@ test("health.json is the scrubbed hurdle", () => {
         since: SYSTEM_COST_START_ISO,
         elapsedDays: 1,
         items: [
-          { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE },
+          { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE, until: "2026-10-26" },
           { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
         ],
         secret: host,
@@ -468,7 +472,7 @@ test("health.json is the scrubbed hurdle", () => {
   expect(body.systemCost.monthlyR).toBe(5.7625);
   expect(body.systemCost.netUsd).toBe(19);
   expect(body.systemCost.items).toEqual([
-    { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE },
+    { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE, until: "2026-10-26" },
     { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
   ]);
   const output = JSON.stringify(body);
@@ -607,6 +611,7 @@ test("a page read puts the hurdle on the view from the displayed equity P/L", as
   expect(texts.sunkHistoryText(after).includes("(est.)")).toBe(true);
   expect(shown.systemCost?.items?.[0]?.estimate).toBe(true);
   expect(route.includes("p6HealthJson(")).toBe(true);
+  expect(route.includes("productsSnapshot")).toBe(true);
   expect(route.includes("DASHBOARD_TOKEN")).toBe(false);
   expect(readSystemCostHurdle(null, now).pnlUsd).toBeNull();
   expect(readSystemCostHurdle(null, now).light).toBe("unavailable");
@@ -724,4 +729,155 @@ test("a missing or non-finite closed count stays amber even when net is not zero
   expect(headerOnly.netUsd).toBe(120);
   expect(headerOnly.light).toBe("amber");
   expect(readSystemCostHurdle(null, SYSTEM_COST_START_MS).light).toBe("unavailable");
+});
+
+test("the light uses the class A close count when it disagrees with the engine", async () => {
+  const now = Date.parse("2026-10-24T00:00:00.000Z");
+  const closedBook = {
+    killed: false,
+    cumNetUsd: 20,
+    open: [],
+    shadows: [],
+    rows: [
+      {
+        id: "SOL-USD:1",
+        pair: "SOL-USD",
+        signalMs: CLASS_A_PAPER_START_MS,
+        medianVolumeUsd: 1,
+        signalClose: 100,
+        atr: 1,
+        stop: 90,
+        notionalUsd: 2_000,
+        fill: "fill",
+        skipReason: null,
+        check: null,
+        measured: 100,
+        threshold: null,
+        regime: "CHOP",
+        btcVeto: false,
+        exitReason: "rule",
+        exitMs: CLASS_A_PAPER_START_MS + DAY_MS,
+        exitPrice: 101,
+        grossBps: 100,
+        netBps: 100,
+        grossR: 1,
+        netR: 1,
+        feesUsd: 1,
+        counterfactual: null,
+      },
+    ],
+    scored: [{ pair: "SOL-USD", grossUsd: 20, netUsd: 20, grossBps: 100, netBps: 100, netR: 1, regime: "CHOP" }],
+    reentryUntil: {},
+  };
+  const read = async (hot: Record<string, unknown>) => {
+    const kv = memoryKv();
+    await kv.set(
+      "p6:lastRun",
+      JSON.stringify({ outcome: "handover", end: now, pnl: { equityUsd: 8120, realizedUsd: 0, unrealizedUsd: 0, feesUsd: 0, spreadSlipUsd: 0 } }),
+    );
+    await kv.set("p6:hot", JSON.stringify(hot));
+    return readP6Page(kv, now);
+  };
+  const classAOnly = await read({ positions: [], closed: [], classAPaper: closedBook });
+  expect(classAOnly.view.closed).toHaveLength(0);
+  expect(classAOnly.view.systemCost?.classAPnlUsd).toBe(20);
+  expect(classAOnly.view.systemCost?.light).toBe("green");
+  const markedOpen = await read({
+    positions: [],
+    closed: [{ productId: "ETH-USD", classId: "B", netUsd: -50 }],
+    classAPaper: {
+      killed: false,
+      cumNetUsd: 0,
+      open: [
+        {
+          rowId: "SOL-USD:open",
+          pair: "SOL-USD",
+          scored: true,
+          entry: 100,
+          entryMs: CLASS_A_PAPER_START_MS,
+          entryDate: "2026-10-26",
+          stop: 90,
+          initialStop: 90,
+          notionalUsd: 100,
+          units: 1,
+          feeEntryBps: 0,
+          sBps: 0,
+          highestClose: 100,
+          priorCloses: [],
+          pending: null,
+        },
+      ],
+      shadows: [],
+      rows: [],
+      scored: [],
+      reentryUntil: {},
+      lastClose: { "SOL-USD": 150 },
+    },
+  });
+  expect(markedOpen.view.closed).toHaveLength(1);
+  expect(markedOpen.view.systemCost?.classAPnlUsd).toBeGreaterThan(0);
+  expect(markedOpen.view.systemCost?.light).toBe("amber");
+});
+
+test("a non-finite class A light P/L stays unavailable", () => {
+  const hurdle = systemCostHurdle({
+    config: committed,
+    pnlUsd: 10,
+    lightPnlUsd: Number.NaN,
+    nowMs: SYSTEM_COST_START_MS,
+    closedTrades: 1,
+  });
+  expect(hurdle.light).toBe("unavailable");
+  expect(hurdle.netUsd).toBeNull();
+  expect(hurdle.classAPnlUsd).toBeNull();
+});
+
+test("the products snapshot logs the repo-relative file and health.json keeps that field", () => {
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    lines.push(args.map((item) => String(item)).join(" "));
+  };
+  let found: ReturnType<typeof readClassAProductsSnapshot>;
+  try {
+    const missing = readClassAProductsSnapshot(null);
+    expect(missing).toEqual({ file: CLASS_A_PRODUCTS_FILE, found: false, pairs: 0, sha256: null });
+    const path = dataFile("products", "exchange-products.raw.json");
+    if (!path) throw new Error("products file missing");
+    const bytes = readFileSync(path);
+    const body = JSON.parse(bytes.toString("utf8")) as { id?: unknown }[];
+    const pairs = Array.isArray(body) ? body.filter((row) => row && typeof row.id === "string" && row.id.length > 0).length : 0;
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    found = readClassAProductsSnapshot(path);
+    expect(found).toEqual({ file: CLASS_A_PRODUCTS_FILE, found: true, pairs, sha256 });
+  } finally {
+    console.log = original;
+  }
+  expect(lines).toContain(`class-a products file=${CLASS_A_PRODUCTS_FILE} found=no pairs=0 sha256=none`);
+  expect(lines.some((line) => line === `class-a products file=${CLASS_A_PRODUCTS_FILE} found=yes pairs=${found!.pairs} sha256=${found!.sha256}`)).toBe(true);
+  for (const line of lines) {
+    expect(line.startsWith(`class-a products file=${CLASS_A_PRODUCTS_FILE} `)).toBe(true);
+    expect(line.includes("/workspace")).toBe(false);
+    expect(line.includes("research/data")).toBe(false);
+  }
+  const health = p6HealthJson(
+    { ...view(), productsSnapshot: found! } as Parameters<typeof p6HealthJson>[0],
+    "Healthy",
+  );
+  expect(health.productsSnapshot).toEqual(found!);
+  const hostile = p6HealthJson(
+    {
+      ...view(),
+      productsSnapshot: { file: "/etc/passwd", found: true, pairs: 1, sha256: null },
+    } as unknown as Parameters<typeof p6HealthJson>[0],
+    "Error",
+  );
+  expect(JSON.stringify(hostile).includes("/etc/passwd")).toBe(false);
+  expect(hostile.productsSnapshot.file).toBe(CLASS_A_PRODUCTS_FILE);
+  expect(hostile.productsSnapshot.found).toBe(true);
+  const absent = p6HealthJson(
+    { ...view(), productsSnapshot: { file: CLASS_A_PRODUCTS_FILE, found: false, pairs: 0, sha256: null } } as Parameters<typeof p6HealthJson>[0],
+    "Error",
+  );
+  expect(absent.productsSnapshot).toEqual({ file: CLASS_A_PRODUCTS_FILE, found: false, pairs: 0, sha256: null });
 });

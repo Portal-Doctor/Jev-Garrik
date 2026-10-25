@@ -139,8 +139,9 @@ test("the production bar path keeps a pending maker order across a reload, fills
           close: 100.05,
           volume: 1,
         })).toBe("accepted");
-        expect(rested?.fill).toBe("fill");
-        expect(rested?.skipReason).toBeNull();
+        const filled = loaded.classAPaper?.rows.find((item) => item.pair === "SOL-USD" && item.signalMs === CLASS_A_PAPER_START_MS);
+        expect(filled?.fill).toBe("fill");
+        expect(filled?.skipReason).toBeNull();
         expect(loaded.classAPaper?.open).toHaveLength(1);
         expect(loaded.classAPaper?.open[0]?.entry).toBe(100.05);
         expect(loaded.classAPaper?.open[0]?.feeEntryBps).toBe(35);
@@ -155,8 +156,9 @@ test("the production bar path keeps a pending maker order across a reload, fills
           close: 100.05,
           volume: 1,
         })).toBe("accepted");
-        expect(rested?.fill).toBe("nofill");
-        expect(rested?.skipReason).toBe("skip_nofill");
+        const expired = loaded.classAPaper?.rows.find((item) => item.pair === "SOL-USD" && item.signalMs === CLASS_A_PAPER_START_MS);
+        expect(expired?.fill).toBe("nofill");
+        expect(expired?.skipReason).toBe("skip_nofill");
         expect(loaded.classAPaper?.open).toHaveLength(0);
         expect(loaded.classAPaper?.resting).toHaveLength(0);
       }

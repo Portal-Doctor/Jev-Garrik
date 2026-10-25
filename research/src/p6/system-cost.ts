@@ -293,10 +293,11 @@ export function netAfterSystemCost(pnlUsd: number, accruedUsd: number): number {
  * A missing closed count is no data and stays amber.
  */
 export function systemCostLight(netUsd: number, closedTrades: number): Exclude<SystemCostLight, "unavailable"> {
-  if (!(closedTrades > 0) || netUsd === 0) return "amber";
+  if (!(closedTrades > 0)) return "amber";
   if (netUsd < 0) return "red";
   if (netUsd > 0) return "green";
-  return "amber";
+  if (!(closedTrades > 0) || netUsd === 0) return "amber";
+  return Number.isFinite(netUsd) ? "green" : "amber";
 }
 
 /** The P/L the header already shows: equity minus the paper start capital. Missing equity stays null. */

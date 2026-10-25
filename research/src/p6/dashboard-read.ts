@@ -23,6 +23,7 @@ import {
 } from "./pnl-block";
 import { closedNow, fetchRestBids, type MarkNow, type MarkPosition, type MarkQuote } from "./mark-now";
 import { classALightBasis, restoreClassABook, scrubClassAPaper, type ClassAPaperView } from "./class-a-paper";
+import { classAProductsSnapshot, CLASS_A_PRODUCTS_FILE, type ClassAProductsSnapshot } from "./class-a-products";
 import { isIsoDate, readSystemCostHurdle, type SystemCostHurdle, type SystemCostItem } from "./system-cost";
 import { classMeanNetR, classStress, execCostWord, modelledShare, quoteMissStats, type ClassStress, type ExecWord, type StressGrade, type StressTrade } from "./x1-fill";
 
@@ -463,6 +464,7 @@ export function redactP6View(view: DashboardView): DashboardView {
     mark: publicMark(view.mark),
     fills: publicFills(view.fills ?? []),
     systemCost: publicSystemCost(view.systemCost),
+    productsSnapshot: publicProductsSnapshot(view.productsSnapshot),
     runLabel: publicEnum(view.runLabel, RUN_LABEL) === "non-X1" ? "non-X1" : publicEnum(view.runLabel, RUN_LABEL) === "X1" ? "X1" : undefined,
     classAPaper: scrubClassAPaper(view.classAPaper),
   };
@@ -558,13 +560,28 @@ function publicSystemCost(raw: unknown): SystemCostHurdle {
   return out;
 }
 
-/** /p6/health.json. The hurdle is the scrubbed view, not the raw read. */
+/** Public products snapshot. Only the repo-relative name, the found flag, the pair count, and the content hash. */
+export function publicProductsSnapshot(raw: unknown): ClassAProductsSnapshot | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const row = raw as Record<string, unknown>;
+  if (row.file !== CLASS_A_PRODUCTS_FILE || typeof row.found !== "boolean") return undefined;
+  if (typeof row.pairs !== "number" || !Number.isInteger(row.pairs) || row.pairs < 0 || row.pairs > 100_000) return undefined;
+  const sha = row.sha256;
+  if (sha != null && (typeof sha !== "string" || !/^[0-9a-f]{64}$/.test(sha))) return undefined;
+  return { file: CLASS_A_PRODUCTS_FILE, found: row.found, pairs: row.pairs, sha256: sha == null ? null : sha };
+}
+
+/** /p6/health.json. The hurdle and the products snapshot are the scrubbed view, not the raw read. */
 export function p6HealthJson(
   view: DashboardView,
   health: "Healthy" | "Stale" | "Error",
-): { health: "Healthy" | "Stale" | "Error"; systemCost: SystemCostHurdle } {
+): { health: "Healthy" | "Stale" | "Error"; systemCost: SystemCostHurdle; productsSnapshot: ClassAProductsSnapshot } {
   const safe = redactP6View(view);
-  return { health, systemCost: safe.systemCost ?? { status: "unavailable", light: "unavailable" } };
+  return {
+    health,
+    systemCost: safe.systemCost ?? { status: "unavailable", light: "unavailable" },
+    productsSnapshot: safe.productsSnapshot ?? classAProductsSnapshot(),
+  };
 }
 
 const BASIS = new Set(["bid1m", "mid-half-spread", "bar15-high", "bar15-low"]);
@@ -869,6 +886,8 @@ export interface DashboardView {
   classAPaper?: ClassAPaperView;
   /** Display-only system-cost hurdle. Absent only before the page read fills it. */
   systemCost?: SystemCostHurdle;
+  /** Products snapshot load. Repo-relative name, pair count, and content hash. */
+  productsSnapshot?: ClassAProductsSnapshot;
 }
 
 function leaseOf(raw: string | null): DashboardLease | null {

@@ -7,6 +7,7 @@
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { classAProductsSnapshot } from "./class-a-products";
 import { ema, wilderAtr } from "../p2/indicators";
 import { isDayCloseBar } from "../p5/book";
 import {
@@ -20,9 +21,9 @@ import {
   sizedOrder,
   walkCostBps,
   type ClassABook,
+  type ClassABucketBar,
+  type ClassABucketState,
   type ClassADay,
-  type ClassAResting,
-  type ClassARow,
 } from "./class-a-paper";
 import { hourAtrAt } from "./generate";
 import { dataFile } from "./live-data";
@@ -50,34 +51,8 @@ export interface ClassALiveHost {
    * When this map is set, the coverage file is not consulted.
    */
   listingFirstMs?: Readonly<Record<string, number | null>>;
-  /** Bars of the 15m bucket currently being settled together. Not part of the saved book. */
-  classABucket?: ClassABucket;
-}
-
-interface ClassABucketBar {
-  productId: string;
-  startSec: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-}
-
-interface ClassARowSnap {
-  fill: ClassARow["fill"];
-  skipReason: ClassARow["skipReason"];
-  check: string | null;
-  notionalUsd: number | null;
-  feesUsd: number | null;
-  measured: number | null;
-  stop: number | null;
-}
-
-interface ClassABucket {
-  startSec: number;
-  bars: ClassABucketBar[];
-  resting: ClassAResting[];
-  rows: Map<string, ClassARowSnap>;
+  /** Mirrors book.bucket. A restart rebuilds it from the saved book. */
+  classABucket?: ClassABucketState;
 }
 
 function asDays(bars: readonly Ohlc[]): { days: ClassADay[]; opens: number[] } {
@@ -108,59 +83,48 @@ function quotedSpreadBps(bid: number, ask: number): number | null {
   return ((ask - bid) / mid) * 10_000;
 }
 
-function cloneResting(orders: readonly ClassAResting[]): ClassAResting[] {
-  return orders.map((order) => ({ ...order, priorCloses: order.priorCloses.slice() }));
+function snapshotClassABook(book: ClassABook): ClassABook {
+  const { bucket: _bucket, ...rest } = book;
+  return JSON.parse(JSON.stringify(rest)) as ClassABook;
 }
 
-function snapshotBucket(book: ClassABook, startSec: number): ClassABucket {
-  const rows = new Map<string, ClassARowSnap>();
-  for (const order of book.resting ?? []) {
-    const row = book.rows.find((item) => item.id === order.rowId);
-    if (!row) continue;
-    rows.set(row.id, {
-      fill: row.fill,
-      skipReason: row.skipReason,
-      check: row.check,
-      notionalUsd: row.notionalUsd,
-      feesUsd: row.feesUsd,
-      measured: row.measured,
-      stop: row.stop,
-    });
-  }
-  return { startSec, bars: [], resting: cloneResting(book.resting ?? []), rows };
-}
-
-/** Put this bucket's cap and fill decisions back, so a later pair in the same 15m bar can be ordered with the rest. */
-function revertBucket(book: ClassABook, snap: ClassABucket): void {
-  const ids = new Set(snap.rows.keys());
-  book.open = book.open.filter((sim) => !ids.has(sim.rowId));
-  for (const row of book.rows) {
-    const saved = snap.rows.get(row.id);
-    if (!saved) continue;
-    row.fill = saved.fill;
-    row.skipReason = saved.skipReason;
-    row.check = saved.check;
-    row.notionalUsd = saved.notionalUsd;
-    row.feesUsd = saved.feesUsd;
-    row.measured = saved.measured;
-    row.stop = saved.stop;
-  }
-  const added = (book.resting ?? []).filter((order) => !ids.has(order.rowId));
-  book.resting = [...cloneResting(snap.resting), ...added];
+function applySnapshot(book: ClassABook, image: ClassABook): void {
+  const next = JSON.parse(JSON.stringify(image)) as ClassABook;
+  for (const key of Object.keys(book)) delete book[key as keyof ClassABook];
+  Object.assign(book, next);
 }
 
 /**
- * One 15m bucket, all pairs together. Placement time, then pair A→Z, then row id.
- * Push order does not choose which orders fill.
+ * One accepted 15m bar. The whole bucket is replayed from its saved pre-image: fills for every pair first,
+ * then stops and day-closes. A later push restores that image, so a stop cannot survive on a fill the cap rejects.
+ * Exits run only after the fills for the bars seen so far. Push order does not choose the book.
  */
-function settleClassABucket(host: ClassALiveHost, bar: ClassABucketBar): void {
+export function stepClassAFromHost(host: ClassALiveHost, bar: ClassABucketBar): void {
   const book = host.classAPaper;
-  if (!book) return;
-  if (!host.classABucket || host.classABucket.startSec !== bar.startSec) host.classABucket = snapshotBucket(book, bar.startSec);
-  else revertBucket(book, host.classABucket);
-  host.classABucket.bars.push(bar);
-  const closeMs = (bar.startSec + 900) * 1000;
-  const nowMs = Math.max(closeMs, host.clock());
+  if (!book || book.exclusionOk === false || book.startMs == null) return;
+  if (book.bucket && host.classABucket !== book.bucket) host.classABucket = book.bucket;
+  if (!host.classABucket || host.classABucket.startSec !== bar.startSec) {
+    const image = snapshotClassABook(book);
+    const bucket: ClassABucketState = { startSec: bar.startSec, bars: [], image };
+    book.bucket = bucket;
+    host.classABucket = bucket;
+  }
+  const bucket = host.classABucket;
+  if (!bucket.bars.some((item) => item.productId === bar.productId && item.startSec === bar.startSec)) {
+    bucket.bars.push({ productId: bar.productId, startSec: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
+  }
+  replayClassABucket(host, book);
+}
+
+function replayClassABucket(host: ClassALiveHost, book: ClassABook): void {
+  const bucket = host.classABucket ?? book.bucket;
+  if (!bucket) return;
+  applySnapshot(book, bucket.image);
+  book.bucket = bucket;
+  host.classABucket = bucket;
+  if (bucket.bars.length === 0) return;
+  const closeOf = (item: ClassABucketBar) => (item.startSec + 900) * 1000;
+  const nowMs = Math.max(closeOf(bucket.bars[bucket.bars.length - 1]!), host.clock());
   resolveClassAResting(book, nowMs, {
     events: host.classABucket.bars.map((item) => ({
       pair: item.productId,
@@ -168,18 +132,13 @@ function settleClassABucket(host: ClassALiveHost, bar: ClassABucketBar): void {
       bar: { startMs: item.startSec * 1000, endMs: (item.startSec + 900) * 1000, low: item.low },
     })),
   });
+  const ordered = bucket.bars.slice().sort((a, b) => (a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0));
+  for (const item of ordered) applyClassABar(host, book, item);
 }
 
-/**
- * One accepted 15m bar. Resting maker orders for that 15m bucket resolve together, not one pair per push.
- * Intrabar stops run on every bar. The day-close bar (23:45Z) updates the daily rule and, when that close is the signal time, evaluates the pair.
- */
-export function stepClassAFromHost(host: ClassALiveHost, bar: { productId: string; startSec: number; open: number; high: number; low: number; close: number }): void {
-  const book = host.classAPaper;
-  if (!book || book.exclusionOk === false || book.startMs == null) return;
+function applyClassABar(host: ClassALiveHost, book: ClassABook, bar: ClassABucketBar): void {
   const closeMs = (bar.startSec + 900) * 1000;
   const nowMs = Math.max(closeMs, host.clock());
-  settleClassABucket(host, bar);
   const hourAtr = hourAtrAt(host.hourWarm.get(bar.productId) ?? [], closeMs / 1000);
   armClassAHourOpen(book, bar.productId, bar.startSec * 1000, bar.open);
   onIntrabar(book, { pair: bar.productId, tsMs: closeMs, open: bar.open, low: bar.low, hourAtr });
@@ -198,6 +157,7 @@ export function stepClassAFromHost(host: ClassALiveHost, bar: { productId: strin
   const atr = atrSeries[index] ?? 0;
   onDaily(book, { pair: bar.productId, date: day.date, open: series.opens[index] ?? day.close, low: day.low, close: day.close, atr: atr > 0 ? atr : 0, hourAtr });
   const signalMs = signalCloseMs(day.date);
+  if (book.startMs == null) return;
   if (signalMs !== closeMs || signalMs < book.startMs) return;
   const btcDays = asDays(host.dailyBars.get("BTC-USD") ?? []).days;
   const btcIndex = btcDays.length - 1;
@@ -302,6 +262,7 @@ export function classAMinOrderBase(productId: string): number | null {
 
 function loadClassAMinSizes(): Map<string, number> {
   if (minSizes) return minSizes;
+  classAProductsSnapshot();
   const map = new Map<string, number>();
   const path = dataFile("products", "exchange-products.raw.json");
   if (path) {
