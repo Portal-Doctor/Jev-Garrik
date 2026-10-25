@@ -340,6 +340,8 @@ test("a no-cookie GET /p6 returns 200 and the public output is redacted", () => 
   expect(page.includes("JSON.stringify(view.lastRun)")).toBe(false);
   expect(page.includes("Class A paper")).toBe(true);
   expect(page.includes("Awaiting start")).toBe(true);
+  expect(page.includes("spreadWarmupNote")).toBe(true);
+  expect(page.includes("Listing age estimated")).toBe(true);
 });
 
 test("class A paper on the public view is allowlisted", () => {

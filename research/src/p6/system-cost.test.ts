@@ -1,9 +1,14 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { PAPER_MINIMUM_USD } from "../p3/design-rules";
+import { CLASS_A_PAPER_START_MS } from "./class-a-paper";
+import { CLASS_A_PRODUCTS_FILE, readClassAProductsSnapshot } from "./class-a-products";
 import { p6HealthJson, readP6Page, redactP6View } from "./dashboard-read";
-import { PNL_START_USD } from "./pnl-block";
+import { dataFile } from "./live-data";
+import { PNL_START_USD, signedUsd } from "./pnl-block";
+import { formatUsd } from "./positions-view";
 import { memoryKv } from "./relay";
 import { FORWARD_BAR_1 } from "./select";
 import {
@@ -16,6 +21,7 @@ import {
   netAfterSystemCost,
   parseSystemCostConfig,
   readSystemCostHurdle,
+  SYSTEM_COST_CUTOVER_MS,
   SYSTEM_COST_R_USD,
   SYSTEM_COST_START_ISO,
   SYSTEM_COST_START_MS,
@@ -96,37 +102,57 @@ test("$20 is 1R and net P/L is the existing P/L minus accrued cost", () => {
   expect(formatSignedR(0)).toBe("0.00R");
 });
 
-test("the light is amber at exactly zero net, green just above, and amber just below", () => {
-  expect(systemCostLight(0, 110)).toBe("amber");
-  expect(systemCostLight(1e-9, 110)).toBe("green");
-  expect(systemCostLight(-1e-9, 110)).toBe("amber");
+test("the light is amber with no closed trade or with net exactly zero, red below zero, and green above zero", () => {
+  expect(systemCostLight(10, 0)).toBe("amber");
+  expect(systemCostLight(-10, 0)).toBe("amber");
+  expect(systemCostLight(0, 0)).toBe("amber");
+  expect(systemCostLight(0, 1)).toBe("amber");
+  expect(systemCostLight(Number.NaN, 1)).toBe("amber");
+  expect(systemCostLight(-1e-9, 1)).toBe("red");
+  expect(systemCostLight(1e-9, 1)).toBe("green");
+  const none = systemCostHurdle({ config: committed, pnlUsd: 10, nowMs: SYSTEM_COST_START_MS, closedTrades: 0 });
+  expect(none.netUsd).toBe(10);
+  expect(none.light).toBe("amber");
+  const openLoss = systemCostHurdle({ config: committed, pnlUsd: -10, nowMs: SYSTEM_COST_START_MS, closedTrades: 0 });
+  expect(openLoss.netUsd).toBe(-10);
+  expect(openLoss.light).toBe("amber");
+  const closed = (pnlUsd: number) => systemCostHurdle({ config: committed, pnlUsd, nowMs: SYSTEM_COST_START_MS, closedTrades: 1 });
   expect(atStart(0).accruedUsd).toBe(0);
+  expect(atStart(0).sunkUsd).toBe(0);
   expect(atStart(0).netUsd).toBe(0);
   expect(atStart(0).netR).toBe(0);
   expect(atStart(0).light).toBe("amber");
-  expect(atStart(0.01).netUsd).toBe(0.01);
-  expect(atStart(0.01).light).toBe("green");
-  expect(atStart(-0.01).netUsd).toBe(-0.01);
-  expect(atStart(-0.01).light).toBe("amber");
+  expect(closed(0).netUsd).toBe(0);
+  expect(closed(0).light).toBe("amber");
+  expect(closed(0.01).netUsd).toBe(0.01);
+  expect(closed(0.01).light).toBe("green");
+  expect(closed(-0.01).netUsd).toBe(-0.01);
+  expect(closed(-0.01).light).toBe("red");
 });
 
-test("red begins at minus one month of system cost", () => {
-  expect(systemCostLight(-110, 110)).toBe("red");
-  expect(systemCostLight(-110 + 1e-9, 110)).toBe("amber");
-  expect(systemCostLight(-110 - 1e-9, 110)).toBe("red");
-  expect(atStart(-MONTHLY_USD).light).toBe("red");
-  expect(atStart(-MONTHLY_USD + 0.01).light).toBe("amber");
-  expect(atStart(-MONTHLY_USD - 0.01).light).toBe("red");
-  expect(systemCostLight(0, 0)).toBe("red");
+test("a full year still accrues twelve months, and only the part after the forward start is in the light", () => {
   const later = atStart(0, SYSTEM_COST_START_MS + DAY_MS);
   expect(later.accruedUsd).toBeGreaterThan(0);
-  expect(later.netUsd).toBeCloseTo(-later.accruedUsd!, 10);
+  expect(later.sunkUsd).toBeCloseTo(later.accruedUsd!, 10);
+  expect(later.netUsd).toBe(0);
   expect(later.light).toBe("amber");
   expect(later.monthlyR).toBe(5.7625);
   expect(later.accruedR).toBeCloseTo(usdToR(later.accruedUsd!), 10);
-  const year = atStart(0, SYSTEM_COST_START_MS + 365.25 * DAY_MS);
+  const year = systemCostHurdle({
+    config: committed,
+    pnlUsd: 0,
+    nowMs: SYSTEM_COST_START_MS + 365.25 * DAY_MS,
+    closedTrades: 1,
+  });
   expect(year.accruedUsd).toBeCloseTo(MONTHLY_USD * 12, 6);
+  const sunk = accruedSystemCostUsd(MONTHLY_USD, SYSTEM_COST_START_MS, SYSTEM_COST_CUTOVER_MS);
+  expect(year.sunkUsd).toBeCloseTo(sunk, 6);
+  expect(year.netUsd).toBeCloseTo(-(year.accruedUsd! - year.sunkUsd!), 6);
+  expect(year.netUsd!).toBeLessThan(0);
   expect(year.light).toBe("red");
+  const waiting = systemCostHurdle({ config: committed, pnlUsd: 0, nowMs: SYSTEM_COST_START_MS + 365.25 * DAY_MS, closedTrades: 0 });
+  expect(waiting.netUsd).toBeCloseTo(year.netUsd!, 6);
+  expect(waiting.light).toBe("amber");
 });
 
 test("a missing P/L leaves the cost numbers and an unavailable light", () => {
@@ -175,28 +201,163 @@ test("a bad config is unavailable and does not throw", () => {
   expect(systemCostHurdle({ config: null, pnlUsd: 10, nowMs: Number.NaN }).status).toBe("unavailable");
 });
 
-test("the committed file totals $115.25 a month and was updated 2026-10-24", () => {
+test("the committed file freezes the $115.25 history at the 2026-10-26 cutover and bills $0 after it", () => {
   const config = loadSystemCostConfig();
-  expect(config).toEqual(committed);
-  const now = Date.parse("2026-10-24T00:00:00.000Z");
+  const dockerNote = "Brian's local Docker server, no charge after the cutover";
+  expect(config?.lastUpdated).toBe("2026-10-24");
+  expect(config?.cutover).toBe("2026-10-26");
+  expect(config?.spans).toEqual([
+    {
+      from: "2026-10-10",
+      until: "2026-10-26",
+      items: [
+        { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE },
+        { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
+      ],
+    },
+    { from: "2026-10-26", items: [{ name: "Local Docker", monthlyUsd: 0, note: dockerNote }] },
+  ]);
+  expect(config?.items).toEqual([{ name: "Local Docker", monthlyUsd: 0, note: dockerNote }]);
+  const now = Date.parse("2026-10-26T00:00:00.000Z");
+  const days = (now - SYSTEM_COST_START_MS) / DAY_MS;
+  const frozen = (MONTHLY_USD * 12) / 365.25 * days;
   const hurdle = systemCostHurdle({ config, pnlUsd: 0, nowMs: now });
   expect(hurdle.status).toBe("ok");
-  expect(hurdle.monthlyUsd).toBe(MONTHLY_USD);
-  expect(hurdle.monthlyR).toBe(5.7625);
+  expect(hurdle.monthlyUsd).toBe(0);
+  expect(hurdle.monthlyR).toBe(0);
   expect(hurdle.since).toBe(SYSTEM_COST_START_ISO);
-  const days = (now - SYSTEM_COST_START_MS) / DAY_MS;
   expect(hurdle.elapsedDays).toBe(days);
-  expect(hurdle.accruedUsd).toBeCloseTo((MONTHLY_USD * 12) / 365.25 * days, 8);
-  expect(hurdle.items?.[0]?.monthlyUsd).toBe(110);
-  expect(hurdle.items?.[0]?.estimate).toBe(true);
-  expect(hurdle.items?.[0]?.note).toBe(VERCEL_NOTE);
-  expect(hurdle.items?.[1]).toEqual({ name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE });
-  expect(hurdle.items?.[1]?.estimate).toBeUndefined();
+  expect(hurdle.accruedUsd).toBeCloseTo(frozen, 8);
+  expect(hurdle.sunkUsd).toBeCloseTo(frozen, 8);
+  expect(hurdle.sunkR).toBeCloseTo(usdToR(frozen), 8);
+  expect(hurdle.netUsd).toBe(0);
+  expect(hurdle.light).toBe("amber");
+  const closedAtZero = systemCostHurdle({ config, pnlUsd: 0, nowMs: now, closedTrades: 1 });
+  expect(closedAtZero.netUsd).toBe(0);
+  expect(closedAtZero.light).toBe("amber");
+  expect(hurdle.items?.[0]).toEqual({ name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE, from: "2026-10-10", until: "2026-10-26" });
+  expect(hurdle.items?.[1]).toEqual({ name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE, from: "2026-10-10", until: "2026-10-26" });
+  expect(hurdle.items?.[2]).toEqual({ name: "Local Docker", monthlyUsd: 0, note: dockerNote, from: "2026-10-26" });
+  const before = systemCostHurdle({ config, pnlUsd: 0, nowMs: now - 1 });
+  expect(before.monthlyUsd).toBe(MONTHLY_USD);
+  expect(before.accruedUsd).toBeLessThan(frozen);
+  expect(before.sunkUsd).toBeCloseTo(before.accruedUsd!, 8);
+  expect(before.netUsd).toBe(0);
+  const later = systemCostHurdle({ config, pnlUsd: 0, nowMs: now + 30 * DAY_MS });
+  expect(later.monthlyUsd).toBe(0);
+  expect(later.accruedUsd).toBeCloseTo(frozen, 8);
+  expect(later.sunkUsd).toBeCloseTo(frozen, 8);
+  expect(later.netUsd).toBe(0);
+  expect(later.elapsedDays).toBe(days + 30);
   const confirmed = parseSystemCostConfig({
     lastUpdated: "2026-10-24",
     items: [{ name: "Redis Cloud", monthlyUsd: 5.25, estimate: false, note: REDIS_NOTE }],
   });
   expect(confirmed?.items[0]?.estimate).toBeUndefined();
+  expect(confirmed?.spans).toBeUndefined();
+  expect(parseSystemCostConfig({ lastUpdated: "2026-10-24", spans: [] })).toBeNull();
+  expect(parseSystemCostConfig({ lastUpdated: "2026-10-24", spans: [{ from: "2026-10-24", until: "2026-10-10", items: [] }] })).toBeNull();
+});
+
+test("overlapping cost spans are rejected and contiguous spans are billed once", () => {
+  const item = (name: string, monthlyUsd: number) => [{ name, monthlyUsd }];
+  const overlap = {
+    lastUpdated: "2026-10-24",
+    spans: [
+      { from: "2026-10-10", until: "2026-10-26", items: item("Vercel Pro", 110) },
+      { from: "2026-10-20", until: "2026-11-01", items: item("Redis Cloud", 5.25) },
+    ],
+  };
+  expect(() => parseSystemCostConfig(overlap)).toThrow("overlapping system cost spans: 2026-10-10..2026-10-26 and 2026-10-20..2026-11-01");
+  expect(() => loadSystemCostConfig(JSON.stringify(overlap))).toThrow("overlapping system cost spans");
+  const doubled = systemCostHurdle({
+    config: {
+      lastUpdated: "2026-10-24",
+      items: [],
+      spans: [
+        { from: "2026-10-10", until: "2026-10-26", items: item("Vercel Pro", 100) },
+        { from: "2026-10-10", until: "2026-10-26", items: item("Redis Cloud", 100) },
+      ],
+    },
+    pnlUsd: 0,
+    nowMs: Date.parse("2026-10-26T00:00:00.000Z"),
+  });
+  expect(doubled.status).toBe("unavailable");
+  expect(doubled.accruedUsd).toBeUndefined();
+  const contiguous = parseSystemCostConfig({
+    lastUpdated: "2026-10-24",
+    spans: [
+      { from: "2026-10-10", until: "2026-10-26", items: item("Vercel Pro", 110) },
+      { from: "2026-10-26", items: item("Local Docker", 0) },
+    ],
+  });
+  expect(contiguous?.spans).toHaveLength(2);
+  const now = Date.parse("2026-10-26T00:00:00.000Z");
+  const once = accruedSystemCostUsd(110, SYSTEM_COST_START_MS, now);
+  const hurdle = systemCostHurdle({ config: contiguous, pnlUsd: 0, nowMs: now + 10 * DAY_MS });
+  expect(hurdle.status).toBe("ok");
+  expect(hurdle.monthlyUsd).toBe(0);
+  expect(hurdle.accruedUsd).toBeCloseTo(once, 8);
+  expect(hurdle.sunkUsd).toBeCloseTo(once, 8);
+  expect(hurdle.netUsd).toBe(0);
+  expect(hurdle.accruedUsd).not.toBeCloseTo(once * 2, 8);
+});
+
+test("pre-cutover cost is excluded from the light and shown as sunk history, including the exact forward-start boundary", () => {
+  const config = loadSystemCostConfig();
+  const now = Date.parse("2026-10-24T00:00:00.000Z");
+  const cutover = SYSTEM_COST_CUTOVER_MS;
+  expect(cutover).toBe(Date.parse("2026-10-26T00:00:00.000Z"));
+  const sunk = (MONTHLY_USD * 12) / 365.25 * ((now - SYSTEM_COST_START_MS) / DAY_MS);
+  const green = systemCostHurdle({ config, pnlUsd: 1, nowMs: now, closedTrades: 1 });
+  expect(green.sunkUsd).toBeCloseTo(sunk, 8);
+  expect(green.accruedUsd).toBeCloseTo(sunk, 8);
+  expect(green.netUsd).toBeCloseTo(1, 8);
+  expect(green.netUsd).not.toBeCloseTo(1 - sunk, 2);
+  expect(green.light).toBe("green");
+  const red = systemCostHurdle({ config, pnlUsd: -1, nowMs: now, closedTrades: 1 });
+  expect(red.netUsd).toBeCloseTo(-1, 8);
+  expect(red.light).toBe("red");
+  const waiting = systemCostHurdle({ config, pnlUsd: 50, nowMs: now, closedTrades: 0 });
+  expect(waiting.netUsd).toBeCloseTo(50, 8);
+  expect(waiting.sunkUsd).toBeCloseTo(sunk, 8);
+  expect(waiting.light).toBe("amber");
+  const frozen = (MONTHLY_USD * 12) / 365.25 * ((cutover - SYSTEM_COST_START_MS) / DAY_MS);
+  const at = systemCostHurdle({ config, pnlUsd: 0, nowMs: cutover, closedTrades: 1 });
+  expect(at.monthlyUsd).toBe(0);
+  expect(at.sunkUsd).toBeCloseTo(frozen, 8);
+  expect(at.accruedUsd).toBeCloseTo(frozen, 8);
+  expect(at.netUsd).toBe(0);
+  expect(at.light).toBe("amber");
+  const justBefore = systemCostHurdle({ config, pnlUsd: 0, nowMs: cutover - 1, closedTrades: 1 });
+  expect(justBefore.monthlyUsd).toBe(MONTHLY_USD);
+  expect(justBefore.sunkUsd).toBeLessThan(frozen);
+  expect(justBefore.sunkUsd).toBeCloseTo(justBefore.accruedUsd!, 8);
+  expect(justBefore.netUsd).toBe(0);
+  expect(justBefore.light).toBe("amber");
+  const justAfter = systemCostHurdle({ config, pnlUsd: 5, nowMs: cutover + 1, closedTrades: 1 });
+  expect(justAfter.sunkUsd).toBeCloseTo(frozen, 8);
+  expect(justAfter.accruedUsd).toBeCloseTo(frozen, 8);
+  expect(justAfter.netUsd).toBeCloseTo(5, 8);
+  expect(justAfter.light).toBe("green");
+  const paidAfter = parseSystemCostConfig({
+    lastUpdated: "2026-10-24",
+    spans: [
+      { from: "2026-10-10", until: "2026-10-26", items: [{ name: "Vercel Pro", monthlyUsd: 110 }] },
+      { from: "2026-10-26", items: [{ name: "Local Docker", monthlyUsd: 30 }] },
+    ],
+  });
+  const postNow = cutover + 30 * DAY_MS;
+  const pre = accruedSystemCostUsd(110, SYSTEM_COST_START_MS, cutover);
+  const post = accruedSystemCostUsd(30, cutover, postNow);
+  const billed = systemCostHurdle({ config: paidAfter, pnlUsd: 0, nowMs: postNow, closedTrades: 1 });
+  expect(billed.sunkUsd).toBeCloseTo(pre, 8);
+  expect(billed.accruedUsd).toBeCloseTo(pre + post, 8);
+  expect(billed.netUsd).toBeCloseTo(-post, 8);
+  expect(billed.light).toBe("red");
+  const stillOpen = systemCostHurdle({ config: paidAfter, pnlUsd: 0, nowMs: postNow, closedTrades: 0 });
+  expect(stillOpen.netUsd).toBeCloseTo(-post, 8);
+  expect(stillOpen.light).toBe("amber");
 });
 
 test("the scrubber keeps the system-cost fields and drops a planted host", () => {
@@ -209,8 +370,12 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
     monthlyR: 5.7625,
     accruedUsd: 42,
     accruedR: 2.1,
+    sunkUsd: 53.1,
+    sunkR: 2.655,
     pnlUsd: 32,
     pnlR: 1.6,
+    classAPnlUsd: 7,
+    classAPnlR: 0.35,
     netUsd: -10,
     netR: -0.5,
     since: SYSTEM_COST_START_ISO,
@@ -231,8 +396,12 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
   expect(shown.systemCost?.monthlyR).toBe(5.7625);
   expect(shown.systemCost?.accruedUsd).toBe(42);
   expect(shown.systemCost?.accruedR).toBe(2.1);
+  expect(shown.systemCost?.sunkUsd).toBe(53.1);
+  expect(shown.systemCost?.sunkR).toBe(2.655);
   expect(shown.systemCost?.pnlUsd).toBe(32);
   expect(shown.systemCost?.pnlR).toBe(1.6);
+  expect(shown.systemCost?.classAPnlUsd).toBe(7);
+  expect(shown.systemCost?.classAPnlR).toBe(0.35);
   expect(shown.systemCost?.netUsd).toBe(-10);
   expect(shown.systemCost?.netR).toBe(-0.5);
   expect(shown.systemCost?.since).toBe(SYSTEM_COST_START_ISO);
@@ -250,6 +419,23 @@ test("the scrubber keeps the system-cost fields and drops a planted host", () =>
   expect(output.includes("holder")).toBe(false);
   const again = redactP6View(shown);
   expect(again.systemCost).toEqual(shown.systemCost);
+  const hostile = redactP6View(
+    view({
+      systemCost: {
+        status: "ok",
+        light: "amber",
+        sunkUsd: Number.NaN,
+        sunkR: "53" as unknown as number,
+        classAPnlUsd: "20" as unknown as number,
+        sunkNote: host,
+      },
+    }),
+  );
+  expect(hostile.systemCost?.sunkUsd).toBeUndefined();
+  expect(hostile.systemCost?.sunkR).toBeUndefined();
+  expect(hostile.systemCost?.classAPnlUsd).toBeUndefined();
+  expect(JSON.stringify(hostile).includes(host)).toBe(false);
+  expect(JSON.stringify(hostile).includes("sunkNote")).toBe(false);
 });
 
 test("health.json is the scrubbed hurdle", () => {
@@ -271,7 +457,7 @@ test("health.json is the scrubbed hurdle", () => {
         since: SYSTEM_COST_START_ISO,
         elapsedDays: 1,
         items: [
-          { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE },
+          { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE, until: "2026-10-26" },
           { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
         ],
         secret: host,
@@ -286,7 +472,7 @@ test("health.json is the scrubbed hurdle", () => {
   expect(body.systemCost.monthlyR).toBe(5.7625);
   expect(body.systemCost.netUsd).toBe(19);
   expect(body.systemCost.items).toEqual([
-    { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE },
+    { name: "Vercel Pro", monthlyUsd: 110, estimate: true, note: VERCEL_NOTE, until: "2026-10-26" },
     { name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE },
   ]);
   const output = JSON.stringify(body);
@@ -385,10 +571,20 @@ test("a page read puts the hurdle on the view from the displayed equity P/L", as
   expect(loaded.systemCost?.monthlyR).toBe(5.7625);
   expect(loaded.systemCost?.items?.[0]?.note).toBe(VERCEL_NOTE);
   expect(loaded.systemCost?.items?.[0]?.estimate).toBe(true);
-  expect(loaded.systemCost?.items?.[1]).toEqual({ name: "Redis Cloud", monthlyUsd: 5.25, note: REDIS_NOTE });
-  expect(loaded.systemCost?.netUsd).toBeCloseTo(120 - (loaded.systemCost?.accruedUsd ?? 0), 8);
+  expect(loaded.systemCost?.items?.[1]?.name).toBe("Redis Cloud");
+  expect(loaded.systemCost?.items?.[1]?.monthlyUsd).toBe(5.25);
+  expect(loaded.systemCost?.items?.[2]?.name).toBe("Local Docker");
+  expect(loaded.systemCost?.items?.[2]?.monthlyUsd).toBe(0);
+  const frozen = (MONTHLY_USD * 12) / 365.25 * ((now - SYSTEM_COST_START_MS) / DAY_MS);
+  expect(loaded.systemCost?.accruedUsd).toBeCloseTo(frozen, 8);
+  expect(loaded.systemCost?.sunkUsd).toBeCloseTo(frozen, 8);
+  expect(loaded.systemCost?.classAPnlUsd).toBe(0);
+  expect(loaded.systemCost?.netUsd).toBe(0);
+  expect(loaded.systemCost?.light).toBe("amber");
   const shown = redactP6View(loaded);
   expect(shown.systemCost?.pnlUsd).toBe(120);
+  expect(shown.systemCost?.classAPnlUsd).toBe(0);
+  expect(shown.systemCost?.sunkUsd).toBeCloseTo(frozen, 8);
   expect(shown.systemCost?.light).toBe(loaded.systemCost?.light);
   const body = p6HealthJson(loaded, "Healthy");
   const cost = shown.systemCost;
@@ -398,12 +594,290 @@ test("a page read puts the hurdle on the view from the displayed equity P/L", as
   const page = readFileSync(join(root, "web/src/app/p6/page.tsx"), "utf8");
   const route = readFileSync(join(root, "web/src/app/p6/health.json/route.ts"), "utf8");
   expect(page.includes("Net after system cost")).toBe(true);
+  expect(page.includes("Sunk history")).toBe(true);
+  expect(page.includes("Class A book P/L")).toBe(true);
+  expect(page.includes("engine P/L")).toBe(true);
+  expect(page.includes("realized plus open marks")).toBe(true);
   expect(page.includes("view.systemCost")).toBe(true);
   expect(page.includes("item.estimate === true")).toBe(true);
   expect(page.includes("(est.)")).toBe(true);
+  const texts = pageCostTexts(page);
+  const hurdle = loaded.systemCost;
+  if (hurdle == null) throw new Error("system cost missing");
+  expect(texts.monthlyCostText(hurdle)).toBe(`~${formatUsd(MONTHLY_USD)}/mo (est.)`);
+  expect(texts.sunkHistoryText(hurdle)).toBe(`~${formatUsd(hurdle.sunkUsd ?? 0)} (est.)`);
+  const after = systemCostHurdle({ config: loadSystemCostConfig(), pnlUsd: 0, lightPnlUsd: 0, nowMs: SYSTEM_COST_CUTOVER_MS, closedTrades: 0 });
+  expect(texts.monthlyCostText(after)).toBe(formatUsd(0));
+  expect(texts.sunkHistoryText(after).includes("(est.)")).toBe(true);
   expect(shown.systemCost?.items?.[0]?.estimate).toBe(true);
   expect(route.includes("p6HealthJson(")).toBe(true);
+  expect(route.includes("productsSnapshot")).toBe(true);
   expect(route.includes("DASHBOARD_TOKEN")).toBe(false);
   expect(readSystemCostHurdle(null, now).pnlUsd).toBeNull();
+  expect(readSystemCostHurdle(null, now).light).toBe("unavailable");
   expect(readSystemCostHurdle(8120, now).pnlUsd).toBe(120);
+});
+
+function extractFunction(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}(`);
+  if (start < 0) throw new Error(name);
+  let depth = 0;
+  let seen = false;
+  for (let index = start; index < source.length; index += 1) {
+    const ch = source[index];
+    if (ch === "{") {
+      depth += 1;
+      seen = true;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (seen && depth === 0) {
+        return source.slice(start, index + 1).replace(/\(([^)]*)\)/, (_match, args: string) => {
+          const plain = args
+            .split(",")
+            .map((part) => {
+              const [left, right] = part.split("=");
+              const param = (left ?? "").split(":")[0]?.trim() ?? "";
+              return right == null ? param : `${param} = ${right.trim()}`;
+            })
+            .filter((part) => part !== "")
+            .join(", ");
+          return `(${plain})`;
+        }).replace(/:\s*string/g, "");
+      }
+    }
+  }
+  throw new Error(name);
+}
+
+function pageCostTexts(source: string): {
+  monthlyCostText: (hurdle: SystemCostHurdle) => string;
+  sunkHistoryText: (hurdle: SystemCostHurdle) => string;
+} {
+  const body = `${extractFunction(source, "moneyOrDash")}\n${extractFunction(source, "monthlyCostText")}\n${extractFunction(source, "sunkHistoryText")}\nreturn { monthlyCostText, sunkHistoryText };`;
+  return new Function("formatUsd", "signedUsd", body)(formatUsd, signedUsd);
+}
+
+test("the page wires class A closes into the light, and a zero class A net with a close stays amber", async () => {
+  const now = Date.parse("2026-10-24T00:00:00.000Z");
+  const bookFor = (netBps: number) => ({
+    killed: false,
+    cumNetUsd: (netBps / 10_000) * 2_000,
+    open: [],
+    shadows: [],
+    rows: [
+      {
+        id: "SOL-USD:1",
+        pair: "SOL-USD",
+        signalMs: CLASS_A_PAPER_START_MS,
+        medianVolumeUsd: 1,
+        signalClose: 100,
+        atr: 1,
+        stop: 90,
+        notionalUsd: 2_000,
+        fill: "fill",
+        skipReason: null,
+        check: null,
+        measured: 100,
+        threshold: null,
+        regime: "CHOP",
+        btcVeto: false,
+        exitReason: "rule",
+        exitMs: CLASS_A_PAPER_START_MS + DAY_MS,
+        exitPrice: 101,
+        grossBps: netBps,
+        netBps,
+        grossR: 1,
+        netR: 1,
+        feesUsd: 1,
+        counterfactual: null,
+      },
+    ],
+    scored: [{ pair: "SOL-USD", grossUsd: 1, netUsd: (netBps / 10_000) * 2_000, grossBps: netBps, netBps, netR: 1, regime: "CHOP" }],
+    reentryUntil: {},
+  });
+  const read = async (netBps: number) => {
+    const kv = memoryKv();
+    await kv.set(
+      "p6:lastRun",
+      JSON.stringify({ outcome: "handover", end: now, pnl: { equityUsd: 8120, realizedUsd: 0, unrealizedUsd: 0, feesUsd: 0, spreadSlipUsd: 0 } }),
+    );
+    await kv.set("p6:hot", JSON.stringify({ positions: [], closed: [{ productId: "ETH-USD", classId: "B", netUsd: -50 }], classAPaper: bookFor(netBps) }));
+    return readP6Page(kv, now);
+  };
+  const green = await read(100);
+  expect(green.view.closed).toHaveLength(1);
+  expect(green.view.systemCost?.pnlUsd).toBe(120);
+  expect(green.view.systemCost?.classAPnlUsd).toBe(20);
+  expect(green.view.systemCost?.netUsd).toBe(20);
+  expect(green.view.systemCost?.light).toBe("green");
+  expect(redactP6View(green.view).systemCost?.classAPnlUsd).toBe(20);
+  const amber = await read(0);
+  expect(amber.view.systemCost?.classAPnlUsd).toBe(0);
+  expect(amber.view.systemCost?.netUsd).toBe(0);
+  expect(amber.view.systemCost?.light).toBe("amber");
+});
+
+test("a missing or non-finite closed count stays amber even when net is not zero", () => {
+  const omitted = systemCostHurdle({ config: committed, pnlUsd: 10, nowMs: SYSTEM_COST_START_MS });
+  expect(omitted.netUsd).toBe(10);
+  expect(omitted.light).toBe("amber");
+  const nan = systemCostHurdle({ config: committed, pnlUsd: 10, nowMs: SYSTEM_COST_START_MS, closedTrades: Number.NaN });
+  expect(nan.light).toBe("amber");
+  const headerOnly = readSystemCostHurdle(8120, SYSTEM_COST_START_MS);
+  expect(headerOnly.pnlUsd).toBe(120);
+  expect(headerOnly.classAPnlUsd).toBeUndefined();
+  expect(headerOnly.netUsd).toBe(120);
+  expect(headerOnly.light).toBe("amber");
+  expect(readSystemCostHurdle(null, SYSTEM_COST_START_MS).light).toBe("unavailable");
+});
+
+test("the light uses the class A close count when it disagrees with the engine", async () => {
+  const now = Date.parse("2026-10-24T00:00:00.000Z");
+  const closedBook = {
+    killed: false,
+    cumNetUsd: 20,
+    open: [],
+    shadows: [],
+    rows: [
+      {
+        id: "SOL-USD:1",
+        pair: "SOL-USD",
+        signalMs: CLASS_A_PAPER_START_MS,
+        medianVolumeUsd: 1,
+        signalClose: 100,
+        atr: 1,
+        stop: 90,
+        notionalUsd: 2_000,
+        fill: "fill",
+        skipReason: null,
+        check: null,
+        measured: 100,
+        threshold: null,
+        regime: "CHOP",
+        btcVeto: false,
+        exitReason: "rule",
+        exitMs: CLASS_A_PAPER_START_MS + DAY_MS,
+        exitPrice: 101,
+        grossBps: 100,
+        netBps: 100,
+        grossR: 1,
+        netR: 1,
+        feesUsd: 1,
+        counterfactual: null,
+      },
+    ],
+    scored: [{ pair: "SOL-USD", grossUsd: 20, netUsd: 20, grossBps: 100, netBps: 100, netR: 1, regime: "CHOP" }],
+    reentryUntil: {},
+  };
+  const read = async (hot: Record<string, unknown>) => {
+    const kv = memoryKv();
+    await kv.set(
+      "p6:lastRun",
+      JSON.stringify({ outcome: "handover", end: now, pnl: { equityUsd: 8120, realizedUsd: 0, unrealizedUsd: 0, feesUsd: 0, spreadSlipUsd: 0 } }),
+    );
+    await kv.set("p6:hot", JSON.stringify(hot));
+    return readP6Page(kv, now);
+  };
+  const classAOnly = await read({ positions: [], closed: [], classAPaper: closedBook });
+  expect(classAOnly.view.closed).toHaveLength(0);
+  expect(classAOnly.view.systemCost?.classAPnlUsd).toBe(20);
+  expect(classAOnly.view.systemCost?.light).toBe("green");
+  const markedOpen = await read({
+    positions: [],
+    closed: [{ productId: "ETH-USD", classId: "B", netUsd: -50 }],
+    classAPaper: {
+      killed: false,
+      cumNetUsd: 0,
+      open: [
+        {
+          rowId: "SOL-USD:open",
+          pair: "SOL-USD",
+          scored: true,
+          entry: 100,
+          entryMs: CLASS_A_PAPER_START_MS,
+          entryDate: "2026-10-26",
+          stop: 90,
+          initialStop: 90,
+          notionalUsd: 100,
+          units: 1,
+          feeEntryBps: 0,
+          sBps: 0,
+          highestClose: 100,
+          priorCloses: [],
+          pending: null,
+        },
+      ],
+      shadows: [],
+      rows: [],
+      scored: [],
+      reentryUntil: {},
+      lastClose: { "SOL-USD": 150 },
+    },
+  });
+  expect(markedOpen.view.closed).toHaveLength(1);
+  expect(markedOpen.view.systemCost?.classAPnlUsd).toBeGreaterThan(0);
+  expect(markedOpen.view.systemCost?.light).toBe("amber");
+});
+
+test("a non-finite class A light P/L stays unavailable", () => {
+  const hurdle = systemCostHurdle({
+    config: committed,
+    pnlUsd: 10,
+    lightPnlUsd: Number.NaN,
+    nowMs: SYSTEM_COST_START_MS,
+    closedTrades: 1,
+  });
+  expect(hurdle.light).toBe("unavailable");
+  expect(hurdle.netUsd).toBeNull();
+  expect(hurdle.classAPnlUsd).toBeNull();
+});
+
+test("the products snapshot logs the repo-relative file and health.json keeps that field", () => {
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    lines.push(args.map((item) => String(item)).join(" "));
+  };
+  let found: ReturnType<typeof readClassAProductsSnapshot>;
+  try {
+    const missing = readClassAProductsSnapshot(null);
+    expect(missing).toEqual({ file: CLASS_A_PRODUCTS_FILE, found: false, pairs: 0, sha256: null });
+    const path = dataFile("products", "exchange-products.raw.json");
+    if (!path) throw new Error("products file missing");
+    const bytes = readFileSync(path);
+    const body = JSON.parse(bytes.toString("utf8")) as { id?: unknown }[];
+    const pairs = Array.isArray(body) ? body.filter((row) => row && typeof row.id === "string" && row.id.length > 0).length : 0;
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    found = readClassAProductsSnapshot(path);
+    expect(found).toEqual({ file: CLASS_A_PRODUCTS_FILE, found: true, pairs, sha256 });
+  } finally {
+    console.log = original;
+  }
+  expect(lines).toContain(`class-a products file=${CLASS_A_PRODUCTS_FILE} found=no pairs=0 sha256=none`);
+  expect(lines.some((line) => line === `class-a products file=${CLASS_A_PRODUCTS_FILE} found=yes pairs=${found!.pairs} sha256=${found!.sha256}`)).toBe(true);
+  for (const line of lines) {
+    expect(line.startsWith(`class-a products file=${CLASS_A_PRODUCTS_FILE} `)).toBe(true);
+    expect(line.includes("/workspace")).toBe(false);
+    expect(line.includes("research/data")).toBe(false);
+  }
+  const health = p6HealthJson(
+    { ...view(), productsSnapshot: found! } as Parameters<typeof p6HealthJson>[0],
+    "Healthy",
+  );
+  expect(health.productsSnapshot).toEqual(found!);
+  const hostile = p6HealthJson(
+    {
+      ...view(),
+      productsSnapshot: { file: "/etc/passwd", found: true, pairs: 1, sha256: null },
+    } as unknown as Parameters<typeof p6HealthJson>[0],
+    "Error",
+  );
+  expect(JSON.stringify(hostile).includes("/etc/passwd")).toBe(false);
+  expect(hostile.productsSnapshot.file).toBe(CLASS_A_PRODUCTS_FILE);
+  expect(hostile.productsSnapshot.found).toBe(true);
+  const absent = p6HealthJson(
+    { ...view(), productsSnapshot: { file: CLASS_A_PRODUCTS_FILE, found: false, pairs: 0, sha256: null } } as Parameters<typeof p6HealthJson>[0],
+    "Error",
+  );
+  expect(absent.productsSnapshot).toEqual({ file: CLASS_A_PRODUCTS_FILE, found: false, pairs: 0, sha256: null });
 });

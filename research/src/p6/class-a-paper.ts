@@ -24,6 +24,11 @@
  * - errata 002 item 4: bootstrap seed 20261011 and 10,000 resamples are fixed.
  * - errata 002 item 5: the start close and a signal at exactly startMs are included.
  * - errata 002 item 6: the benchmark is the drifted buy-and-hold series below. Drift versus daily rebalancing, and zero rebalance fees, are fixed readings. They are not switches. A change waits on errata 003.
+ *
+ * Errata 003 (sha256 57e2285efa068cf92e0ed54fc2c43d303bef8cd4b677e61083fc86868477ad7c) is report-only.
+ * Errata 005 items 5 and 6 set its rates: maker 35, taker 75 + s, exit fee 35 bps times V.
+ * Errata 004 (sha256 8291e0b4af55b2592fcbce04da246eab4277fac0ce4d60143eb3b2d87499afa8) is a rule change.
+ * The buy-and-hold gate compares A_marked, with the 005 taker exit, to the gross buy-and-hold return.
  */
 
 import { classATrigger, type DailyBar } from "../p3/classes";
@@ -62,8 +67,11 @@ export const CLASS_A_INTRO_TAKER_FEE_BPS = 90;
 export const CLASS_A_INTRO_PROMOTE_GROSS_BPS = 2 * (CLASS_A_INTRO_MAKER_FEE_BPS + CLASS_A_INTRO_TAKER_FEE_BPS + 5);
 /**
  * errata 005 items 5 and 6. Shared with errata 003 (#2 maker, #4 taker + s, #5b exit) and errata 004 row 1.
- * Those reports are not built here. The rates are the Advanced 1 schedule so the next run does not fork them.
+ * sha256 57e2285efa068cf92e0ed54fc2c43d303bef8cd4b677e61083fc86868477ad7c
+ * sha256 8291e0b4af55b2592fcbce04da246eab4277fac0ce4d60143eb3b2d87499afa8
  */
+export const CLASS_A_ERRATA_003_SHA256 = "57e2285efa068cf92e0ed54fc2c43d303bef8cd4b677e61083fc86868477ad7c";
+export const CLASS_A_ERRATA_004_SHA256 = "8291e0b4af55b2592fcbce04da246eab4277fac0ce4d60143eb3b2d87499afa8";
 export const CLASS_A_BH_FEE_MAKER_BPS = CLASS_A_MAKER_FEE_BPS;
 export const CLASS_A_BH_FEE_TAKER_BPS = CLASS_A_TAKER_FEE_BPS;
 export const CLASS_A_BH_EXIT_FEE_BPS = CLASS_A_MAKER_FEE_BPS;
@@ -87,8 +95,12 @@ export const CLASS_A_BOOTSTRAP_SEED = BOOTSTRAP_SEED;
  * The five ETF-venue ids are not named in the errata or this repo. These placeholders fail closed until a review record names them.
  */
 export const CLASS_A_HOLM_FAMILY = ["A", "capitulation", "access-event", "etf-venue-1", "etf-venue-2", "etf-venue-3", "etf-venue-4", "etf-venue-5"] as const;
-/** errata 001 item 12. Spread samples required inside the 30 days before the signal. */
+/**
+ * errata 001 item 12. Spread samples required inside the 30 days before the signal.
+ * The first 20 day closes are skip_spread until the spread log has 20 samples.
+ */
 export const CLASS_A_SPREAD_MIN_DAYS = 20;
+export const CLASS_A_SPREAD_WARMUP_NOTE = "The first 20 day closes are skip_spread until the spread log has 20 samples.";
 const DAY_MS = 86_400_000;
 const LISTED_DAYS = 90;
 const EXCLUSION_RULES = new Set<ExclusionEntry["rule"]>(["fiat-or-fx", "commodity", "wrapped-or-bridged", "staking-receipt"]);
@@ -97,7 +109,6 @@ export const CLASS_A_SKIP_REASONS = [
   "skip_volume",
   "skip_btcveto",
   "skip_nofill",
-  "cap_full",
   "skip_spread",
   "skip_depth",
   "skip_stale",
@@ -145,6 +156,11 @@ export interface ClassASignal {
    * The signal day is not included. errata 001 item 12.
    */
   spreadSamples?: readonly (number | null)[];
+  /**
+   * True when the listing age is not known from a products snapshot or a first-candle date.
+   * The row is flagged and does not enter. Bars held are not used as the age.
+   */
+  listedDaysEstimated?: boolean;
   nextHourOpen: number | null;
   hourAtr14: number | null;
   prints: readonly { tsMs: number; price: number }[];
@@ -153,10 +169,15 @@ export interface ClassASignal {
    * Omitted means the print list already covers the window, so a miss is nofill.
    */
   asOfMs?: number;
+  /**
+   * Live bucket only. A through-print is recorded as a resting order, not opened here.
+   * resolveClassAResting is the one cap for that order and every other resting order in the bucket.
+   */
+  deferEntry?: boolean;
 }
 
 export interface ClassACounterfactual {
-  status: "chase" | "open" | "closed" | "unavailable";
+  status: "chase" | "open" | "closed" | "unavailable" | "no_next_bar";
   entry: number | null;
   grossBps: number | null;
   netBps: number | null;
@@ -196,9 +217,17 @@ export interface ClassARow {
   gap?: boolean;
   /** Out of timestamp order, or the same pair and signal time again. Not applied. Not a skip reason. */
   signalOrder?: "out-of-order" | "duplicate";
+  /** Listing age was not known. The signal did not enter. The public view counts these rows. */
+  listedDaysEstimated?: boolean;
+  /** The next 1h open is not known yet. The counterfactual waits for that bar. It does not use the signal close. */
+  awaitHourOpen?: boolean;
+  /** Closes carried until the next 1h open is known. */
+  shadowPrior?: number[];
+  /** Fill time. Occupancy starts at the 15m bar that contains this instant. */
+  entryMs?: number | null;
 }
 
-interface Sim {
+export interface Sim {
   rowId: string;
   pair: string;
   scored: boolean;
@@ -240,6 +269,8 @@ export interface ClassAResting {
   sBps: number;
   priorCloses: number[];
   entryDate: string;
+  /** Frozen 30-day median USD volume from the signal. Higher volume wins a same-bar tie. */
+  medianVolumeUsd?: number | null;
 }
 
 export interface ClassABook {
@@ -259,6 +290,55 @@ export interface ClassABook {
   spreadLog?: Record<string, number[]>;
   /** Maker orders waiting on [close, close+4h). Absent on a snapshot from before pending orders means none. */
   resting?: ClassAResting[];
+  /** Last daily close per pair. The review mark uses this price and does not invent one. */
+  lastClose?: Record<string, number>;
+  /**
+   * The 15m bucket in progress. The image is the book before any bar in the bucket.
+   * A restart restores the image and replays fills and exits. The signal row is the stored decision, not a second check.
+   */
+  bucket?: ClassABucketState;
+}
+
+/** One 15m bar inside a bucket. Public candles only. */
+export interface ClassABucketBar {
+  productId: string;
+  startSec: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+/**
+ * One signal check, saved when that pair's bar first arrives.
+ * A later push or a restart copies the row and the resting order back. It does not call the check again, and it does not copy an open.
+ */
+export interface ClassASignalDecision {
+  productId: string;
+  /** Rows the check created. Rows that were already on the book are not copied. */
+  rows: ClassARow[];
+  /** Closed rows the check's retention cap dropped. */
+  droppedRowIds: string[];
+  /** Resting orders the check placed. A through-print is one of these until the bucket resolver runs. */
+  resting: ClassAResting[];
+  /** Positions the check opened. Replay does not copy these. The resolver is the only open. */
+  open: Sim[];
+  /** Counterfactual shadows the check armed. */
+  shadows: Sim[];
+  /** True when the check changed lastSignalMs. The stored value is the one to put back. */
+  touchedLastSignalMs: boolean;
+  lastSignalMs: number | null;
+  /** Quoted spread appended for this check. Null when the check appended none. */
+  spreadBps: number | null;
+}
+
+/** Persisted with the book. Not part of the public paper view. */
+export interface ClassABucketState {
+  startSec: number;
+  bars: ClassABucketBar[];
+  image: ClassABook;
+  /** One entry per pair whose day-close check has already run. Absent on a snapshot from before this field means none. */
+  decisions?: ClassASignalDecision[];
 }
 
 export interface ClassAIntroSensitivity {
@@ -279,6 +359,50 @@ export interface ClassASHeadroom {
   medianSBps: number | null;
   /** 2 × (35 + 75 + median s). Null when median s is unknown. Does not gate. */
   barBps: number | null;
+}
+
+/** errata 004 item 6. One open position marked at the review close. Resting orders are not in this list. */
+export interface ClassAMark {
+  pair: string;
+  entryMs: number;
+  entry: number;
+  qty: number;
+  cReview: number;
+  entryFeeUsd: number;
+  exitFeeUsd: number;
+  sBps: number;
+  sUsd: number;
+  markedPnl: number;
+}
+
+export interface ClassARestingView {
+  pair: string;
+  limit: number;
+  qty: number;
+}
+
+/** errata 003 report lines and the errata 004 review. Null when that input is missing. */
+export interface ClassABhReport {
+  /** errata 003 #2. Maker 35 bps on the initial buy and each rebalance. No exit fee. */
+  feeReturn: number | null;
+  /** errata 003 #3. Membership-change closes, excluding the initial buy. */
+  membershipChanges: number | null;
+  /** errata 003 #3. Sum of turnover, including the initial buy. */
+  turnover: number | null;
+  /** errata 003 #4. Taker 75 bps + s per side, turnover-weighted. */
+  takerReturn: number | null;
+  /** errata 003 #5b. The fee-charged series plus an exit fee of 35 bps times V. */
+  feeExitReturn: number | null;
+  /** errata 003 #6. Share of gross buy-and-hold return from the largest pair. */
+  concentration: number | null;
+  /** errata 003 #5a. Realized net plus open marks with no exit fee, over $6,000. */
+  aMtmNoExit: number | null;
+  /** errata 004 #1. Realized net plus open marks at taker 75 + s, over $6,000. */
+  aMarked: number | null;
+  /** errata 004 #8. Realized gross plus open price P/L, over $6,000. */
+  aMarkedGross: number | null;
+  marks: ClassAMark[];
+  resting: ClassARestingView[];
 }
 
 export interface ClassAPaperView {
@@ -321,6 +445,32 @@ export interface ClassAPaperView {
   sHeadroom: ClassASHeadroom;
   /** errata 005 item 8. */
   promotionPrecondition: string;
+  /** Rows whose listing age was unknown. Bars held are not the age. */
+  listedDaysEstimated: number;
+  /** errata 001 item 12. The first 20 day closes stay skip_spread. */
+  spreadWarmupNote: string;
+  /** errata 004 #1. Null when an open position has no review close. */
+  aMarked: number | null;
+  /** errata 004 #8. Report only. */
+  aMarkedGross: number | null;
+  /** errata 003 #5a. Report only. No exit fee. */
+  aMtmNoExit: number | null;
+  /** errata 003 #2. Report only. Null until a buy-and-hold input is supplied. */
+  bhFeeReturn: number | null;
+  /** errata 003 #3. */
+  bhMembershipChanges: number | null;
+  /** errata 003 #3. */
+  bhTurnover: number | null;
+  /** errata 003 #4. Taker 75 + s. */
+  bhTakerReturn: number | null;
+  /** errata 003 #5b. Fee-charged series plus the 35 bps exit. */
+  bhFeeExitReturn: number | null;
+  /** errata 003 #6. */
+  bhConcentration: number | null;
+  /** errata 004 #6. Open positions only. */
+  marks: ClassAMark[];
+  /** errata 004 #9. Unfilled maker orders. Not positions. */
+  resting: ClassARestingView[];
 }
 
 /**
@@ -363,6 +513,7 @@ export function emptyClassABook(startMs: number | null = null, preflight: { ok: 
     lastSignalMs: null,
     spreadLog: {},
     resting: [],
+    lastClose: {},
   };
 }
 
@@ -424,6 +575,17 @@ export function walkCostBps(mid: number, levels: readonly { price: number; size:
   }
   if (left > 1e-8) return Number.POSITIVE_INFINITY;
   return ((spent / baseNeeded - mid) / mid) * 10_000;
+}
+
+/**
+ * Whole UTC days from the first candle or listing instant to the signal close.
+ * Unknown age is estimated. Callers must not substitute the number of bars held.
+ */
+export function resolveListedDays(firstMs: number | null, signalMs: number): { listedDays: number; estimated: boolean } {
+  if (firstMs == null || !Number.isFinite(firstMs) || !Number.isFinite(signalMs)) return { listedDays: 0, estimated: true };
+  const listedDays = Math.floor((signalMs - firstMs) / DAY_MS);
+  if (!Number.isFinite(listedDays) || listedDays < 0) return { listedDays: 0, estimated: false };
+  return { listedDays, estimated: false };
 }
 
 export function signalCloseMs(openDated: string): number {
@@ -511,6 +673,8 @@ export interface ClassABhPair {
   closes: readonly (number | null)[];
   /** Base volume. USD volume is close times this. */
   volumes: readonly (number | null)[];
+  /** Quoted spread bps. The 30 days before a rebalance, not including that close. errata 003 #4. */
+  spreads?: readonly (number | null)[];
 }
 
 export interface ClassABhInput {
@@ -528,6 +692,43 @@ export interface ClassABhPoint {
   members: string[];
 }
 
+function bhCarried(values: readonly (number | null)[], index: number): number | null {
+  for (let i = index; i >= 0; i -= 1) {
+    const value = values[i];
+    if (value != null && Number.isFinite(value) && value > 0) return value;
+  }
+  return null;
+}
+
+function bhMembership(input: ClassABhInput, t: number): string[] {
+  const excluded = new Set(input.excluded);
+  const names: string[] = [];
+  for (const candle of input.candles) {
+    if (excluded.has(candle.pair) || t - candle.listedIndex < 90 || t < 30) continue;
+    const days = candle.closes.map((close, index) => {
+      const quoted = close != null && Number.isFinite(close) && close > 0 ? close : bhCarried(candle.closes, index);
+      const volume = candle.volumes[index];
+      return {
+        close: quoted != null && quoted > 0 ? quoted : 0,
+        baseVolume: volume != null && Number.isFinite(volume) && volume >= 0 ? volume : 0,
+      };
+    });
+    const usd = medianVolumeUsd(days, t);
+    if (usd != null && usd >= CLASS_A_VOLUME_FLOOR_USD) names.push(candle.pair);
+  }
+  names.sort();
+  return names;
+}
+
+function bhRatio(input: ClassABhInput, pair: string, t: number): number {
+  const candle = input.candles.find((row) => row.pair === pair);
+  if (!candle) return 1;
+  const now = bhCarried(candle.closes, t);
+  const prev = bhCarried(candle.closes, t - 1);
+  if (now == null || prev == null || !(prev > 0)) return 1;
+  return now / prev;
+}
+
 /**
  * errata 002 item 6. Equal-weight buy-and-hold of the A2 eligible set.
  * Weights reset to 1/N at the first window close and when membership changes, and drift with price in between.
@@ -535,44 +736,9 @@ export interface ClassABhPoint {
  * The pair stays until the 30-day median of those carried days falls below $5M. A zero-volume day is a day, not a hole.
  */
 export function classABuyHoldSeries(input: ClassABhInput): ClassABhPoint[] {
-  const excluded = new Set(input.excluded);
-  const carried = (values: readonly (number | null)[], index: number): number | null => {
-    for (let i = index; i >= 0; i -= 1) {
-      const value = values[i];
-      if (value != null && Number.isFinite(value) && value > 0) return value;
-    }
-    return null;
-  };
-  const membership = (t: number): string[] => {
-    const names: string[] = [];
-    for (const candle of input.candles) {
-      if (excluded.has(candle.pair) || t - candle.listedIndex < 90 || t < 30) continue;
-      const days = candle.closes.map((close, index) => {
-        const quoted = close != null && Number.isFinite(close) && close > 0 ? close : carried(candle.closes, index);
-        const volume = candle.volumes[index];
-        return {
-          close: quoted != null && quoted > 0 ? quoted : 0,
-          baseVolume: volume != null && Number.isFinite(volume) && volume >= 0 ? volume : 0,
-        };
-      });
-      const usd = medianVolumeUsd(days, t);
-      if (usd != null && usd >= CLASS_A_VOLUME_FLOOR_USD) names.push(candle.pair);
-    }
-    names.sort();
-    return names;
-  };
-  const byPair = new Map(input.candles.map((candle) => [candle.pair, candle]));
-  const ratio = (pair: string, t: number): number => {
-    const candle = byPair.get(pair);
-    if (!candle) return 1;
-    const now = carried(candle.closes, t);
-    const prev = carried(candle.closes, t - 1);
-    if (now == null || prev == null || !(prev > 0)) return 1;
-    return now / prev;
-  };
   const out: ClassABhPoint[] = [];
   if (!(input.t1 >= input.t0)) return out;
-  let mem = membership(input.t0);
+  let mem = bhMembership(input, input.t0);
   let weights = new Map(mem.map((pair) => [pair, mem.length > 0 ? 1 / mem.length : 0]));
   let value = 1;
   out.push({ t: input.t0, V: value, members: mem });
@@ -580,16 +746,16 @@ export function classABuyHoldSeries(input: ClassABhInput): ClassABhPoint[] {
     let growth = 0;
     if (weights.size === 0) growth = 1;
     else {
-      for (const [pair, weight] of weights) growth += weight * ratio(pair, t);
+      for (const [pair, weight] of weights) growth += weight * bhRatio(input, pair, t);
     }
     if (!(growth > 0)) growth = 1;
     value *= growth;
     if (weights.size > 0) {
       const next = new Map<string, number>();
-      for (const [pair, weight] of weights) next.set(pair, (weight * ratio(pair, t)) / growth);
+      for (const [pair, weight] of weights) next.set(pair, (weight * bhRatio(input, pair, t)) / growth);
       weights = next;
     }
-    const nextMem = membership(t);
+    const nextMem = bhMembership(input, t);
     if (nextMem.join(",") !== mem.join(",")) {
       mem = nextMem;
       weights = new Map(mem.map((pair) => [pair, mem.length > 0 ? 1 / mem.length : 0]));
@@ -604,6 +770,97 @@ export function classABuyHoldReturn(input: ClassABhInput): number | null {
   const series = classABuyHoldSeries(input);
   const last = series[series.length - 1];
   return last ? last.V - 1 : null;
+}
+
+function bhSpreadBps(input: ClassABhInput, pair: string, t: number): number {
+  const candle = input.candles.find((row) => row.pair === pair);
+  const window = (candle?.spreads ?? []).slice(Math.max(0, t - 30), t);
+  const samples = window.filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0);
+  if (samples.length < CLASS_A_SPREAD_MIN_DAYS) return takerSpreadBps(null);
+  return takerSpreadBps(median(samples));
+}
+
+function bhTurnover(input: ClassABhInput, drifted: ReadonlyMap<string, number>, target: ReadonlyMap<string, number>, t: number, taker: boolean): { turnover: number; fraction: number } {
+  const names = new Set<string>([...drifted.keys(), ...target.keys()]);
+  let turnover = 0;
+  let fraction = 0;
+  for (const pair of names) {
+    const delta = Math.abs((target.get(pair) ?? 0) - (drifted.get(pair) ?? 0));
+    if (!(delta > 0)) continue;
+    turnover += delta;
+    const bps = taker ? CLASS_A_BH_FEE_TAKER_BPS + bhSpreadBps(input, pair, t) : CLASS_A_BH_FEE_MAKER_BPS;
+    fraction += (delta * bps) / 10_000;
+  }
+  return { turnover, fraction };
+}
+
+/**
+ * errata 003, at the errata 005 rates. Same membership and drift as the gross series.
+ * Maker 35 bps on the initial buy and each rebalance. Taker sensitivity is 75 bps + s per side.
+ * The exit fee is a separate line. Nothing here gates.
+ */
+export function classABhReport(input: ClassABhInput): Pick<ClassABhReport, "feeReturn" | "membershipChanges" | "turnover" | "takerReturn" | "feeExitReturn" | "concentration"> {
+  const empty = { feeReturn: null, membershipChanges: null, turnover: null, takerReturn: null, feeExitReturn: null, concentration: null };
+  if (!(input.t1 >= input.t0)) return empty;
+  let mem = bhMembership(input, input.t0);
+  let weights = new Map(mem.map((pair) => [pair, mem.length > 0 ? 1 / mem.length : 0]));
+  let gross = 1;
+  let feeV = 1;
+  let takerV = 1;
+  let turnover = 0;
+  let membershipChanges = 0;
+  const contributions = new Map<string, number>();
+  const targetOf = (names: readonly string[]) => new Map(names.map((pair) => [pair, names.length > 0 ? 1 / names.length : 0]));
+  const applyFee = (drifted: Map<string, number>, names: readonly string[], t: number) => {
+    const target = targetOf(names);
+    const maker = bhTurnover(input, drifted, target, t, false);
+    const taker = bhTurnover(input, drifted, target, t, true);
+    turnover += maker.turnover;
+    feeV *= Math.max(0, 1 - maker.fraction);
+    takerV *= Math.max(0, 1 - taker.fraction);
+    weights = new Map(target);
+  };
+  applyFee(new Map(), mem, input.t0);
+  for (let t = input.t0 + 1; t <= input.t1; t += 1) {
+    let growth = 0;
+    if (weights.size === 0) growth = 1;
+    else {
+      for (const [pair, weight] of weights) growth += weight * bhRatio(input, pair, t);
+    }
+    if (!(growth > 0)) growth = 1;
+    const prev = gross;
+    for (const [pair, weight] of weights) {
+      const ret = bhRatio(input, pair, t) - 1;
+      contributions.set(pair, (contributions.get(pair) ?? 0) + weight * ret * prev);
+    }
+    gross *= growth;
+    feeV *= growth;
+    takerV *= growth;
+    if (weights.size > 0) {
+      const next = new Map<string, number>();
+      for (const [pair, weight] of weights) next.set(pair, (weight * bhRatio(input, pair, t)) / growth);
+      weights = next;
+    }
+    const nextMem = bhMembership(input, t);
+    if (nextMem.join(",") !== mem.join(",")) {
+      membershipChanges += 1;
+      mem = nextMem;
+      applyFee(weights, mem, t);
+    }
+  }
+  const grossReturn = gross - 1;
+  let best: number | null = null;
+  for (const value of contributions.values()) if (best == null || value > best) best = value;
+  const concentration = best == null || grossReturn === 0 ? null : best / grossReturn;
+  const exit = Math.max(0, 1 - CLASS_A_BH_EXIT_FEE_BPS / 10_000);
+  return {
+    feeReturn: feeV - 1,
+    membershipChanges,
+    turnover,
+    takerReturn: takerV - 1,
+    feeExitReturn: feeV * exit - 1,
+    concentration,
+  };
 }
 
 /** Book return divided by the average fraction of the $6,000 book that was deployed. */
@@ -670,6 +927,10 @@ export interface ClassAPromotion {
   bhReturn: number | null;
   beatsBh: boolean | null;
   exposureAdjustedReturn: number | null;
+  /** errata 004 #1. Defaults to the realized book return when no open marks are supplied. */
+  aMarked: number | null;
+  /** errata 004 #8. Report only. */
+  aMarkedGross: number | null;
 }
 
 export interface PromotionOpts {
@@ -684,8 +945,16 @@ export interface PromotionOpts {
   bhCandles?: ClassABhInput;
   /** Older day interface. Used only when bhReturn and bhCandles are omitted. */
   bhDays?: readonly BhDay[];
-  /** Average deployed fraction series. Reported only. errata 001 item 2b. */
+  /** Average deployed fraction series. Reported only. errata 001 item 2b and errata 004 #5. Uses A_marked. */
   deployedFraction?: readonly number[];
+  /**
+   * errata 004 #1. Realized net plus open marks, over $6,000.
+   * Omitted means there is nothing open to mark, so A_marked is the realized book return.
+   * Null means a review close is missing and the gate stays unresolved.
+   */
+  aMarked?: number | null;
+  /** errata 004 #8. Report only. */
+  aMarkedGross?: number | null;
 }
 
 /** One-sided p for a mean above `bar`. Null when fewer than two observations. */
@@ -768,16 +1037,20 @@ export function promotionOf(scored: readonly ClassAScored[], opts: PromotionOpts
     holmP = adjusted.find((row) => row.id === "A")?.adjusted ?? null;
   }
   const bhReturn = opts.bhReturn != null && Number.isFinite(opts.bhReturn) ? opts.bhReturn : opts.bhCandles != null ? classABuyHoldReturn(opts.bhCandles) : opts.bhDays != null ? equalWeightBuyHold(opts.bhDays) : null;
-  const beatsBh = bookReturn != null && bhReturn != null ? bookReturn > bhReturn : null;
-  const exposureAdjustedReturn = bookReturn != null && opts.deployedFraction != null ? exposureAdjusted(bookReturn, opts.deployedFraction) : null;
-  const report: ClassAPromotion = { status: "unresolved", holmP, tP, bootstrapP, bookReturn, bhReturn, beatsBh, exposureAdjustedReturn };
+  // errata 004 #1 and #5. No open marks means A_marked is the realized book return. A missing review close stays null.
+  const aMarked = opts.aMarked === undefined ? bookReturn : opts.aMarked;
+  const aMarkedGross = opts.aMarkedGross === undefined ? null : opts.aMarkedGross;
+  const beatsBh = aMarked != null && bhReturn != null ? aMarked > bhReturn : null;
+  const exposureAdjustedReturn = aMarked != null && opts.deployedFraction != null ? exposureAdjusted(aMarked, opts.deployedFraction) : null;
+  const report: ClassAPromotion = { status: "unresolved", holmP, tP, bootstrapP, bookReturn, bhReturn, beatsBh, exposureAdjustedReturn, aMarked, aMarkedGross };
   if (scored.length < CLASS_A_PROMOTE_MIN_N) return { ...report, status: "not-considered" };
   const concentration = concentrationOf(scored);
   if (gross == null || gross < CLASS_A_PROMOTE_GROSS_BPS || concentration.top3Kill || concentration.pairKill) return { ...report, status: "blocked" };
   if (!family) return { ...report, status: "unresolved" };
   if (holmP == null || !(holmP < CLASS_A_HOLM_ALPHA)) return { ...report, status: "blocked" };
   if (bhReturn == null || bookReturn == null) return { ...report, status: "unresolved" };
-  if (!(bookReturn > bhReturn)) return { ...report, status: "blocked" };
+  if (aMarked == null) return { ...report, status: "unresolved" };
+  if (!(aMarked > bhReturn)) return { ...report, status: "blocked" };
   return { ...report, status: "pass" };
 }
 
@@ -835,6 +1108,85 @@ export function sHeadroomOf(rows: readonly ClassARow[]): ClassASHeadroom {
   return { medianSBps, barBps: 2 * (CLASS_A_MAKER_FEE_BPS + CLASS_A_TAKER_FEE_BPS + medianSBps) };
 }
 
+function emptyBhScalars(): Pick<ClassABhReport, "feeReturn" | "membershipChanges" | "turnover" | "takerReturn" | "feeExitReturn" | "concentration" | "aMtmNoExit" | "aMarked" | "aMarkedGross"> {
+  return {
+    feeReturn: null,
+    membershipChanges: null,
+    turnover: null,
+    takerReturn: null,
+    feeExitReturn: null,
+    concentration: null,
+    aMtmNoExit: null,
+    aMarked: null,
+    aMarkedGross: null,
+  };
+}
+
+/**
+ * errata 004 #1 and #6, and errata 003 #5a.
+ * An open position without a stored daily close leaves A_marked unresolved. The price is not invented.
+ * A position whose daily-close exit is pending is still open, so it is marked at C_review, not the next open.
+ * Resting unfilled orders are listed separately and are not marks.
+ */
+export function classAMarkedReview(book: ClassABook): ClassABhReport {
+  const resting = (book.resting ?? []).map((order) => ({ pair: order.pair, limit: order.limit, qty: order.units }));
+  const realizedNet = book.scored.reduce((total, row) => total + row.netUsd, 0);
+  const realizedGross = book.scored.reduce((total, row) => total + row.grossUsd, 0);
+  const base = { ...emptyBhScalars(), marks: [] as ClassAMark[], resting };
+  if (book.scored.length === 0 && book.open.length === 0) return base;
+  const marks: ClassAMark[] = [];
+  for (const sim of book.open) {
+    const cReview = book.lastClose?.[sim.pair];
+    if (cReview == null || !(cReview > 0)) return { ...base, marks };
+    const samples = (book.spreadLog?.[sim.pair] ?? []).slice(-30);
+    const sBps = samples.length >= CLASS_A_SPREAD_MIN_DAYS ? takerSpreadBps(median(samples)) : sim.sBps;
+    const exitNotional = cReview * sim.units;
+    const entryFeeUsd = (sim.notionalUsd * sim.feeEntryBps) / 10_000;
+    const exitFeeUsd = (exitNotional * (CLASS_A_MARKED_EXIT_FEE_BPS + sBps)) / 10_000;
+    const sUsd = (exitNotional * sBps) / 10_000;
+    const grossPnl = (cReview - sim.entry) * sim.units;
+    marks.push({
+      pair: sim.pair,
+      entryMs: sim.entryMs,
+      entry: sim.entry,
+      qty: sim.units,
+      cReview,
+      entryFeeUsd,
+      exitFeeUsd,
+      sBps,
+      sUsd,
+      markedPnl: grossPnl - entryFeeUsd - exitFeeUsd,
+    });
+  }
+  const markedPnlSum = marks.reduce((total, mark) => total + mark.markedPnl, 0);
+  const mtmSum = marks.reduce((total, mark) => total + (mark.markedPnl + mark.exitFeeUsd), 0);
+  const grossOpen = marks.reduce((total, mark) => total + (mark.cReview - mark.entry) * mark.qty, 0);
+  return {
+    ...base,
+    marks,
+    aMarked: (realizedNet + markedPnlSum) / CLASS_A_BOOK_USD,
+    aMarkedGross: (realizedGross + grossOpen) / CLASS_A_BOOK_USD,
+    aMtmNoExit: (realizedNet + mtmSum) / CLASS_A_BOOK_USD,
+  };
+}
+
+/**
+ * Light basis. Class A book P/L is realized net plus open marks, and only the part from the forward start.
+ * The closed count is class A closes since that instant. The engine's closed list is not this count.
+ * A missing book is no data: P/L 0 and no closed trade. A missing review close is not invented.
+ */
+export function classALightBasis(book: ClassABook | null | undefined): { pnlUsd: number; closedTrades: number } {
+  if (!book || !Array.isArray(book.rows) || !Array.isArray(book.open)) return { pnlUsd: 0, closedTrades: 0 };
+  const closed = book.rows.filter((row) => row.fill === "fill" && row.exitMs != null && row.exitMs >= CLASS_A_PAPER_START_MS && row.exitPrice != null);
+  const realized = closed.reduce((sum, row) => {
+    if (row.netBps == null || row.notionalUsd == null) return sum;
+    return sum + (row.netBps / 10_000) * row.notionalUsd;
+  }, 0);
+  const open = book.open.filter((sim) => sim.scored !== false && sim.entryMs >= CLASS_A_PAPER_START_MS);
+  const marked = open.length === 0 ? 0 : classAMarkedReview({ ...book, open, scored: [] }).marks.reduce((sum, mark) => sum + mark.markedPnl, 0);
+  return { pnlUsd: realized + marked, closedTrades: closed.length };
+}
+
 export function emptyClassAPaperView(): ClassAPaperView {
   return {
     specSha256: CLASS_A_SPEC_SHA256,
@@ -868,6 +1220,19 @@ export function emptyClassAPaperView(): ClassAPaperView {
     introSensitivity: emptyIntroSensitivity(),
     sHeadroom: emptySHeadroom(),
     promotionPrecondition: CLASS_A_PROMOTION_PRECONDITION,
+    listedDaysEstimated: 0,
+    spreadWarmupNote: CLASS_A_SPREAD_WARMUP_NOTE,
+    aMarked: null,
+    aMarkedGross: null,
+    aMtmNoExit: null,
+    bhFeeReturn: null,
+    bhMembershipChanges: null,
+    bhTurnover: null,
+    bhTakerReturn: null,
+    bhFeeExitReturn: null,
+    bhConcentration: null,
+    marks: [],
+    resting: [],
   };
 }
 
@@ -878,13 +1243,16 @@ export function classAPaperView(book: ClassABook, asOfMs = Date.now()): ClassAPa
   for (const row of book.rows) {
     if (!row || typeof row !== "object") continue;
     if (row.fill === "fill") fills += 1;
-    // errata 001 item 27. Maker orders placed are the rows that passed every check.
-    // cap_full was placed, then rejected when the fill would have broken a cap.
-    if (row.fill === "fill" || row.skipReason === "skip_nofill" || row.skipReason === "cap_full") placed += 1;
+    // errata 001 item 27. Placed means a maker order that was sent: a fill, or a window that ended with no fill.
+    // skip_cap was not placed. A cap rejection is out of the fill-rate denominator.
+    if (row.fill === "fill" || row.skipReason === "skip_nofill") placed += 1;
     if (!row.skipReason || !(CLASS_A_SKIP_REASONS as readonly string[]).includes(row.skipReason)) continue;
     skips[row.skipReason] = (skips[row.skipReason] ?? 0) + 1;
   }
-  const promotion = promotionOf(book.scored);
+  let listedDaysEstimated = 0;
+  for (const row of book.rows) if (row?.listedDaysEstimated) listedDaysEstimated += 1;
+  const review = classAMarkedReview(book);
+  const promotion = promotionOf(book.scored, { aMarked: review.aMarked, aMarkedGross: review.aMarkedGross });
   const regimes: Record<ClassARegime, number> = { BULL: 0, BEAR: 0, CHOP: 0 };
   for (const row of book.scored) {
     if (row.regime === "BULL" || row.regime === "BEAR" || row.regime === "CHOP") regimes[row.regime] += 1;
@@ -921,6 +1289,19 @@ export function classAPaperView(book: ClassABook, asOfMs = Date.now()): ClassAPa
     introSensitivity: introSensitivityOf(book.rows),
     sHeadroom: sHeadroomOf(book.rows),
     promotionPrecondition: CLASS_A_PROMOTION_PRECONDITION,
+    listedDaysEstimated,
+    spreadWarmupNote: CLASS_A_SPREAD_WARMUP_NOTE,
+    aMarked: review.aMarked,
+    aMarkedGross: review.aMarkedGross,
+    aMtmNoExit: review.aMtmNoExit,
+    bhFeeReturn: null,
+    bhMembershipChanges: null,
+    bhTurnover: null,
+    bhTakerReturn: null,
+    bhFeeExitReturn: null,
+    bhConcentration: null,
+    marks: review.marks,
+    resting: review.resting,
   };
 }
 
@@ -988,7 +1369,59 @@ function scrubClassAView(value: unknown): ClassAPaperView {
     introSensitivity: scrubIntro(row.introSensitivity),
     sHeadroom: scrubHeadroom(row.sHeadroom),
     promotionPrecondition: CLASS_A_PROMOTION_PRECONDITION,
+    listedDaysEstimated: finiteNonNeg(row.listedDaysEstimated) ?? 0,
+    spreadWarmupNote: CLASS_A_SPREAD_WARMUP_NOTE,
+    aMarked: finiteOrNull(row.aMarked),
+    aMarkedGross: finiteOrNull(row.aMarkedGross),
+    aMtmNoExit: finiteOrNull(row.aMtmNoExit),
+    bhFeeReturn: finiteOrNull(row.bhFeeReturn),
+    bhMembershipChanges: finiteOrNull(row.bhMembershipChanges),
+    bhTurnover: finiteOrNull(row.bhTurnover),
+    bhTakerReturn: finiteOrNull(row.bhTakerReturn),
+    bhFeeExitReturn: finiteOrNull(row.bhFeeExitReturn),
+    bhConcentration: finiteOrNull(row.bhConcentration),
+    marks: scrubMarks(row.marks),
+    resting: scrubResting(row.resting),
   };
+}
+
+const PAIR_ID = /^[A-Z0-9]{2,12}-[A-Z]{2,5}$/;
+
+function scrubMarks(value: unknown): ClassAMark[] {
+  if (!Array.isArray(value)) return [];
+  const out: ClassAMark[] = [];
+  for (const item of value.slice(0, 12)) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.pair !== "string" || !PAIR_ID.test(row.pair)) continue;
+    const entryMs = finiteOrNull(row.entryMs);
+    const entry = finiteOrNull(row.entry);
+    const qty = finiteOrNull(row.qty);
+    const cReview = finiteOrNull(row.cReview);
+    const entryFeeUsd = finiteOrNull(row.entryFeeUsd);
+    const exitFeeUsd = finiteOrNull(row.exitFeeUsd);
+    const sBps = finiteOrNull(row.sBps);
+    const sUsd = finiteOrNull(row.sUsd);
+    const markedPnl = finiteOrNull(row.markedPnl);
+    if (entryMs == null || entry == null || qty == null || cReview == null || entryFeeUsd == null || exitFeeUsd == null || sBps == null || sUsd == null || markedPnl == null) continue;
+    out.push({ pair: row.pair, entryMs, entry, qty, cReview, entryFeeUsd, exitFeeUsd, sBps, sUsd, markedPnl });
+  }
+  return out;
+}
+
+function scrubResting(value: unknown): ClassARestingView[] {
+  if (!Array.isArray(value)) return [];
+  const out: ClassARestingView[] = [];
+  for (const item of value.slice(0, 12)) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.pair !== "string" || !PAIR_ID.test(row.pair)) continue;
+    const limit = finiteOrNull(row.limit);
+    const qty = finiteOrNull(row.qty);
+    if (limit == null || qty == null) continue;
+    out.push({ pair: row.pair, limit, qty });
+  }
+  return out;
 }
 
 function scrubIntro(value: unknown): ClassAIntroSensitivity {
@@ -1106,7 +1539,48 @@ function orderRow(book: ClassABook, input: ClassASignal, signalMs: number, close
   return row;
 }
 
-function liveShadow(book: ClassABook, row: ClassARow, input: ClassASignal, entry: number, sBps: number, prior: number[]): void {
+/** Spec A4. A known next-hour open arms the taker shadow. A missing open waits. The signal close is not an entry. */
+function armOrDefer(book: ClassABook, row: ClassARow, nextHourOpen: number | null, sBps: number, prior: number[]): void {
+  if (nextHourOpen != null && nextHourOpen > 0) {
+    liveShadow(book, row, nextHourOpen, sBps, prior);
+    return;
+  }
+  row.awaitHourOpen = true;
+  row.shadowPrior = prior.slice();
+}
+
+/**
+ * The entry is the open of the 15m bar that starts one hour after the signal, and the entry time is that same start.
+ * A positive open at that start arms the counterfactual. Chase still applies.
+ * A null or non-positive open at that start, or any later bar for the pair while that bar never arrived, is no_next_bar.
+ * There is no clock limit. A bar before signal+1h leaves the wait in place.
+ */
+export function armClassAHourOpen(book: ClassABook, pair: string, barStartMs: number, open: number | null): void {
+  if (!Number.isFinite(barStartMs)) return;
+  for (const row of book.rows) {
+    if (row.awaitHourOpen !== true || row.pair !== pair) continue;
+    // A bar before the signal close is not the signal+1h open. The wait stays.
+    if (barStartMs < row.signalMs) continue;
+    const entryMs = row.signalMs + 3_600_000;
+    // Reached only when the gate above lets a pre-signal bar through. That bar is not an entry.
+    if (barStartMs < row.signalMs) {
+      row.awaitHourOpen = false;
+      row.counterfactual = { status: "no_next_bar", entry: null, grossBps: null, netBps: null, netR: null, exitReason: "no_next_bar" };
+      continue;
+    }
+    if (barStartMs < entryMs) continue;
+    row.awaitHourOpen = false;
+    if (barStartMs === entryMs && open != null && open > 0) {
+      const signalClose = row.signalClose ?? open;
+      row.counterfactual = counterfactualOf(open, signalClose, row.atr ?? 0);
+      liveShadow(book, row, open, row.sBps ?? takerSpreadBps(null), row.shadowPrior ?? []);
+      continue;
+    }
+    row.counterfactual = { status: "no_next_bar", entry: null, grossBps: null, netBps: null, netR: null, exitReason: "no_next_bar" };
+  }
+}
+
+function liveShadow(book: ClassABook, row: ClassARow, entry: number, sBps: number, prior: number[]): void {
   if (!row.counterfactual || row.counterfactual.status !== "open") return;
   const sized = sizedOrder(entry, row.atr ?? 0);
   if (!sized) {
@@ -1116,11 +1590,11 @@ function liveShadow(book: ClassABook, row: ClassARow, input: ClassASignal, entry
   const stop = entry - CLASS_A_K * (row.atr ?? 0);
   book.shadows.push({
     rowId: row.id,
-    pair: input.pair,
+    pair: row.pair,
     scored: false,
     entry,
     entryMs: row.signalMs + 3_600_000,
-    entryDate: addDays(input.days[input.index]!.date, 1),
+    entryDate: new Date(row.signalMs).toISOString().slice(0, 10),
     stop,
     initialStop: stop,
     notionalUsd: sized.notionalUsd,
@@ -1161,12 +1635,21 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
   const signalMs = signalCloseMs(day.date);
   // errata 001 item 1 and item 13. A failed exclusion preflight or a start in the future records nothing.
   if (book.exclusionOk === false || book.startMs == null || signalMs < book.startMs) return null;
-  if (EXCLUDED.has(input.pair) || input.listedDays < LISTED_DAYS) return null;
+  if (EXCLUDED.has(input.pair)) return null;
+  if (!input.listedDaysEstimated && input.listedDays < LISTED_DAYS) return null;
   const history = input.index + 1;
   const triggered = classATrigger(barsOf(input.days), input.index, CLASS_A_LOOKBACK, history < 200);
   if (!triggered) return null;
   const atr = atrAt(input.days, input.index);
   if (atr == null) return null;
+  if (input.listedDaysEstimated) {
+    const estimated = skipRow(book, input, signalMs, day.close, atr, "skip_volume", "listed-days", null, LISTED_DAYS, false, null);
+    estimated.skipReason = null;
+    estimated.check = "listed-days";
+    estimated.listedDaysEstimated = true;
+    return estimated;
+  }
+  if (input.listedDays < LISTED_DAYS) return null;
   if (book.lastSignalMs != null && signalMs < book.lastSignalMs) return orderRow(book, input, signalMs, day.close, atr, "out-of-order");
   if (book.rows.some((row) => row.pair === input.pair && row.signalMs === signalMs)) return orderRow(book, input, signalMs, day.close, atr, "duplicate");
   const volume = medianVolumeUsd(input.days, input.index);
@@ -1193,7 +1676,7 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
   const liveSkip = (reason: ClassASkip, check: string, measured: number | null, threshold: number | null): ClassARow => {
     const row = skipRow(book, input, signalMs, day.close, atr, reason, check, measured, threshold, false, counterfactual);
     // Spec A4 and A5. A live-check skip still runs the counterfactual taker. errata 001 item 16 does not cover these four.
-    liveShadow(book, row, input, input.nextHourOpen ?? day.close, sBps, prior);
+    armOrDefer(book, row, input.nextHourOpen, sBps, prior);
     return row;
   };
   // errata 001 item 12. Twenty of the thirty days before the signal. Nineteen skips. The 5 bps floor is not used.
@@ -1223,16 +1706,19 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
   }
   const until = book.reentryUntil[input.pair];
   if (until != null && signalMs < until) return skipRow(book, input, signalMs, day.close, atr, "skip_reentry", "reentry", signalMs, until, false, null);
-  const openRisk = book.open.reduce((total, sim) => total + sim.notionalUsd * ((sim.entry - sim.initialStop) / sim.entry), 0);
-  if (book.open.length >= CLASS_A_MAX_OPEN || openRisk + sized.riskUsd > CLASS_A_MAX_OPEN_RISK_USD) {
-    return skipRow(book, input, signalMs, day.close, atr, "skip_cap", "cap", book.open.length, CLASS_A_MAX_OPEN, false, null);
-  }
   const window = { startMs: signalMs, endMs: signalMs + CLASS_A_FILL_WINDOW_MS };
   const tick = input.tick;
   const seen = input.asOfMs == null ? input.prints : input.prints.filter((print) => print.tsMs <= input.asOfMs!);
   const through = tick != null && tick > 0 ? seen.find((print) => print.tsMs >= window.startMs && print.tsMs < window.endMs && print.price <= day.close - tick) : undefined;
+  // Binding A7 check at fill. Quant ruling: implementation correction within frozen spec 56fb7543, not an erratum.
+  // A resting order is not a position (errata 004 #9), so the cap is not applied until the fill.
+  // deferEntry keeps a through-print on that same path. The live bucket resolves every resting order once.
+  const immediate = input.deferEntry === true ? undefined : through;
+  if (immediate && classAFillCapped(book, immediate.tsMs, sized.riskUsd)) {
+    return skipRow(book, input, signalMs, day.close, atr, "skip_cap", "cap", book.open.length, CLASS_A_MAX_OPEN, false, null);
+  }
   const observed = input.asOfMs == null || input.asOfMs >= window.endMs;
-  const pending = !through && !observed && tick != null && tick > 0;
+  const pending = (input.deferEntry === true && through != null && tick != null && tick > 0) || (!through && !observed && tick != null && tick > 0);
   const row: ClassARow = {
     id: `${input.pair}:${signalMs}`,
     signalMs,
@@ -1241,11 +1727,11 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
     signalClose: day.close,
     atr,
     stop: sized.stop,
-    notionalUsd: through || pending ? sized.notionalUsd : null,
-    fill: through ? "fill" : pending ? "pending" : "nofill",
-    skipReason: through || pending ? null : "skip_nofill",
-    check: through || pending ? null : "fill",
-    measured: through ? through.price : null,
+    notionalUsd: immediate || pending ? sized.notionalUsd : null,
+    fill: immediate ? "fill" : pending ? "pending" : "nofill",
+    skipReason: immediate || pending ? null : "skip_nofill",
+    check: immediate || pending ? null : "fill",
+    measured: immediate ? immediate.price : null,
     threshold: tick != null && tick > 0 ? day.close - tick : null,
     regime,
     btcVeto: false,
@@ -1256,12 +1742,12 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
     netBps: null,
     grossR: null,
     netR: null,
-    feesUsd: through ? (sized.notionalUsd * CLASS_A_MAKER_FEE_BPS) / 10_000 : null,
+    feesUsd: immediate ? (sized.notionalUsd * CLASS_A_MAKER_FEE_BPS) / 10_000 : null,
     sBps,
     counterfactual,
   };
-  if (through) openMaker(book, row, input.pair, day.close, through.tsMs, addDays(day.date, 1), sized, sBps, prior, through.price);
-  if (pending) {
+  if (immediate) openMaker(book, row, input.pair, day.close, immediate.tsMs, addDays(day.date, 1), sized, sBps, prior, immediate.price);
+  if (pending && tick != null && tick > 0) {
     const resting = book.resting ?? [];
     book.resting = resting;
     resting.push({
@@ -1277,9 +1763,10 @@ export function evaluateSignal(book: ClassABook, input: ClassASignal): ClassARow
       sBps,
       priorCloses: prior,
       entryDate: addDays(day.date, 1),
+      medianVolumeUsd: volume,
     });
   }
-  liveShadow(book, row, input, input.nextHourOpen ?? day.close, sBps, prior);
+  armOrDefer(book, row, input.nextHourOpen, sBps, prior);
   pushRow(book, row);
   if (book.lastSignalMs == null || signalMs >= book.lastSignalMs) book.lastSignalMs = signalMs;
   return row;
@@ -1291,7 +1778,7 @@ function openMaker(book: ClassABook, row: ClassARow, pair: string, limit: number
   row.check = null;
   row.notionalUsd = sized.notionalUsd;
   row.stop = sized.stop;
-  row.feesUsd = (sized.notionalUsd * CLASS_A_MAKER_FEE_BPS) / 10_000;
+  row.entryMs = fillMs;
   row.measured = measured;
   book.open.push({
     rowId: row.id,
@@ -1312,26 +1799,112 @@ function openMaker(book: ClassABook, row: ClassARow, pair: string, limit: number
   });
 }
 
+/** 15m bar length. Fill and exit bars are aligned to the UTC epoch. */
+export const CLASS_A_BAR_MS = 900_000;
+
+export function classABarStartMs(ms: number): number {
+  return Math.floor(ms / CLASS_A_BAR_MS) * CLASS_A_BAR_MS;
+}
+
+/** A close stamped on a 15m boundary is the end of the bar that just closed, not the start of the next one. */
+export function classAExitBarEndMs(exitMs: number): number {
+  if (exitMs % CLASS_A_BAR_MS === 0) return exitMs;
+  return classABarStartMs(exitMs) + CLASS_A_BAR_MS;
+}
+
+/**
+ * A7 occupancy. Quant ruling: an implementation correction within frozen spec 56fb7543, not an erratum.
+ * A position holds its slot and its $20 open risk from the start of its fill bar through the end of its exit bar.
+ * The interval is half-open [fillBarStart, exitBarEnd). A stop inside the fill bar frees the slot only after T+15m,
+ * never at processing time, because freeing a slot on an intrabar exit is lookahead.
+ * An open position has no exit yet, so it occupies every bar start at or after its fill bar.
+ * One function so a later ruling is a one-spot change.
+ */
+export function classAOccupiesAt(entryMs: number, exitMs: number | null, atMs: number): boolean {
+  if (!Number.isFinite(entryMs) || !Number.isFinite(atMs)) return false;
+  const start = classABarStartMs(entryMs);
+  const end = exitMs == null || !Number.isFinite(exitMs) ? Number.POSITIVE_INFINITY : classAExitBarEndMs(exitMs);
+  return atMs >= start && atMs < end;
+}
+
+function positionRiskUsd(notionalUsd: number, entry: number, stop: number): number {
+  if (!(entry > 0) || !Number.isFinite(notionalUsd) || !Number.isFinite(stop)) return Number.POSITIVE_INFINITY;
+  return (notionalUsd * (entry - stop)) / entry;
+}
+
+/**
+ * Binding A7 check at fill. Counts every position whose occupancy contains the candidate fill's bar start.
+ * Applies to the 3-slot cap and the $60 open-risk cap. A resting order is not a position (errata 004 #9).
+ */
+export function classAFillCapped(book: ClassABook, fillMs: number, orderRiskUsd: number): boolean {
+  const atMs = classABarStartMs(fillMs);
+  let count = 0;
+  let risk = 0;
+  const seen = new Set<string>();
+  for (const sim of book.open) {
+    if (!classAOccupiesAt(sim.entryMs, null, atMs)) continue;
+    seen.add(sim.rowId);
+    count += 1;
+    risk += positionRiskUsd(sim.notionalUsd, sim.entry, sim.initialStop);
+  }
+  for (const row of book.rows) {
+    if (row.fill !== "fill" || row.exitMs == null || row.entryMs == null || seen.has(row.id)) continue;
+    if (!classAOccupiesAt(row.entryMs, row.exitMs, atMs)) continue;
+    if (row.signalClose == null || row.stop == null || row.notionalUsd == null) continue;
+    count += 1;
+    risk += positionRiskUsd(row.notionalUsd, row.signalClose, row.stop);
+  }
+  return count >= CLASS_A_MAX_OPEN || risk + orderRiskUsd > CLASS_A_MAX_OPEN_RISK_USD;
+}
+
+/**
+ * Competing fills. Quant ruling: an implementation correction within frozen spec 56fb7543, not an erratum.
+ * Signal timestamp, then higher 30-day median USD volume (errata 001 #9 and #5), then pair A→Z, then row id.
+ * The volume is the one already computed for the signal. Placement time is the first key only when it is that signal timestamp.
+ */
+export function compareClassAFills(
+  a: { signalMs: number; medianVolumeUsd?: number | null; pair: string; rowId: string },
+  b: { signalMs: number; medianVolumeUsd?: number | null; pair: string; rowId: string },
+): number {
+  if (a.signalMs !== b.signalMs) return a.signalMs - b.signalMs;
+  const av = a.medianVolumeUsd != null && Number.isFinite(a.medianVolumeUsd) ? a.medianVolumeUsd : Number.NEGATIVE_INFINITY;
+  const bv = b.medianVolumeUsd != null && Number.isFinite(b.medianVolumeUsd) ? b.medianVolumeUsd : Number.NEGATIVE_INFINITY;
+  if (av !== bv) return bv - av;
+  if (a.pair !== b.pair) return a.pair < b.pair ? -1 : 1;
+  if (a.rowId !== b.rowId) return a.rowId < b.rowId ? -1 : 1;
+  return 0;
+}
+
 /**
  * Spec A4. A pending maker order fills on a print, or on an intrabar low, inside [close, close+4h).
+ * The window is half-open: the close is inside, and close+4h is outside. A fill still needs a trade at least one tick through the limit.
  * nofill is recorded only once that window has ended with neither.
- * Orders that can fill in one pass are taken by placement time (signalMs), then pair, then row id.
- * Each fill rechecks the open-count cap and the open-risk cap. A reject is nofill cap_full.
+ * Competing fills in one bar follow compareClassAFills: signal timestamp, then higher 30-day median volume, then pair A→Z, then row id.
+ * Quant ruling, frozen spec 56fb7543, not an erratum. Submission latency is not a key.
+ * Each fill rechecks A7 occupancy at the fill bar's start. A reject is nofill skip_cap, and it was not placed.
  */
 export function resolveClassAResting(
   book: ClassABook,
   nowMs: number,
-  event: { pair?: string; prints?: readonly { tsMs: number; price: number }[]; bar?: { startMs: number; endMs: number; low: number } } = {},
+  event: {
+    pair?: string;
+    prints?: readonly { tsMs: number; price: number }[];
+    bar?: { startMs: number; endMs: number; low: number };
+    /** Every pair in one 15m bucket. Absent means the single pair, prints, and bar above. */
+    events?: readonly { pair?: string; prints?: readonly { tsMs: number; price: number }[]; bar?: { startMs: number; endMs: number; low: number } }[];
+  } = {},
 ): void {
   const resting = book.resting ?? [];
   book.resting = resting;
   if (!Number.isFinite(nowMs)) return;
-  // Placement time, then symbol, then id. Array order is not the fill order.
+  // Signal time, then higher frozen volume, then pair A→Z, then row id. Array order is not the fill order.
   const ordered = [...resting].sort((a, b) => {
-    if (a.signalMs !== b.signalMs) return a.signalMs - b.signalMs;
-    if (a.pair !== b.pair) return a.pair < b.pair ? -1 : 1;
-    if (a.rowId !== b.rowId) return a.rowId < b.rowId ? -1 : 1;
-    return 0;
+    const aRow = book.rows.find((item) => item.id === a.rowId);
+    const bRow = book.rows.find((item) => item.id === b.rowId);
+    return compareClassAFills(
+      { signalMs: a.signalMs, medianVolumeUsd: a.medianVolumeUsd ?? aRow?.medianVolumeUsd ?? null, pair: a.pair, rowId: a.rowId },
+      { signalMs: b.signalMs, medianVolumeUsd: b.medianVolumeUsd ?? bRow?.medianVolumeUsd ?? null, pair: b.pair, rowId: b.rowId },
+    );
   });
   for (const order of ordered) {
     const row = book.rows.find((item) => item.id === order.rowId && item.fill === "pending");
@@ -1340,30 +1913,41 @@ export function resolveClassAResting(
       continue;
     }
     let fillMs: number | null = null;
-    if (event.pair == null || event.pair === order.pair) {
-      const print = (event.prints ?? []).find((item) => item.tsMs >= order.signalMs && item.tsMs < order.windowEndMs && item.tsMs <= nowMs && item.price <= order.limit - order.tick);
+    const events = event.events ?? [event];
+    for (const source of events) {
+      if (source.pair != null && source.pair !== order.pair) continue;
+      const print = (source.prints ?? []).find((item) => item.tsMs >= order.signalMs && item.tsMs < order.windowEndMs && item.tsMs <= nowMs && item.price <= order.limit - order.tick);
       if (print) {
         fillMs = print.tsMs;
         row.measured = print.price;
+        break;
       }
-      const bar = event.bar;
-      if (fillMs == null && bar && bar.startMs >= order.signalMs && bar.startMs < order.windowEndMs && bar.low <= order.limit - order.tick) {
+      const bar = source.bar;
+      if (bar && bar.startMs >= order.signalMs && bar.startMs < order.windowEndMs && bar.low <= order.limit - order.tick) {
         fillMs = bar.startMs;
         row.measured = bar.low;
+        break;
       }
     }
     if (fillMs != null) {
-      const openRisk = book.open.reduce((total, sim) => total + sim.notionalUsd * ((sim.entry - sim.initialStop) / sim.entry), 0);
       const orderRisk = order.limit > 0 ? (order.notionalUsd * (order.limit - order.stop)) / order.limit : Number.POSITIVE_INFINITY;
-      if (book.open.length >= CLASS_A_MAX_OPEN || openRisk + orderRisk > CLASS_A_MAX_OPEN_RISK_USD) {
+      if (classAFillCapped(book, fillMs, orderRisk)) {
         row.fill = "nofill";
-        row.skipReason = "cap_full";
+        row.skipReason = "skip_cap";
         row.check = "cap";
         row.notionalUsd = null;
         row.feesUsd = null;
+        row.exitReason = null;
+        row.exitMs = null;
+        row.exitPrice = null;
+        row.grossBps = null;
+        row.netBps = null;
+        row.grossR = null;
+        row.netR = null;
         book.resting = (book.resting ?? []).filter((item) => item !== order);
         continue;
       }
+      row.feesUsd = (order.notionalUsd * CLASS_A_MAKER_FEE_BPS) / 10_000;
       openMaker(book, row, order.pair, order.limit, fillMs, order.entryDate, order, order.sBps, order.priorCloses, row.measured ?? order.limit);
       book.resting = (book.resting ?? []).filter((item) => item !== order);
       continue;
@@ -1445,6 +2029,9 @@ export function onIntrabar(book: ClassABook, bar: { pair: string; tsMs: number; 
 }
 
 export function onDaily(book: ClassABook, bar: { pair: string; date: string; open: number; low: number; close: number; atr: number; hourAtr: number }): void {
+  const closes = book.lastClose ?? {};
+  book.lastClose = closes;
+  if (bar.close > 0 && Number.isFinite(bar.close)) closes[bar.pair] = bar.close;
   const closeMs = signalCloseMs(bar.date);
   const closeDate = addDays(bar.date, 1);
   for (const sim of [...book.open, ...book.shadows]) {
@@ -1483,7 +2070,7 @@ export function restoreClassABook(value: unknown): ClassABook | null {
       if (/^[A-Z0-9]{2,12}-[A-Z]{2,5}$/.test(pair) && typeof until === "number" && Number.isFinite(until)) reentry[pair] = until;
     }
   }
-  return {
+  const restored: ClassABook = {
     startMs: row.startMs ?? null,
     killed: row.killed,
     cumNetUsd: row.cumNetUsd,
@@ -1497,7 +2084,137 @@ export function restoreClassABook(value: unknown): ClassABook | null {
     lastSignalMs: typeof row.lastSignalMs === "number" && Number.isFinite(row.lastSignalMs) ? row.lastSignalMs : null,
     spreadLog: spreadLogOf(row.spreadLog),
     resting: Array.isArray(row.resting) ? row.resting.filter(restingOk) : [],
+    lastClose: lastCloseOf(row.lastClose),
   };
+  const bucket = restoreBucket(row.bucket);
+  if (bucket) restored.bucket = bucket;
+  return restored;
+}
+
+function cloneDecision<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function appendedSpread(before: readonly number[] | undefined, after: readonly number[] | undefined): number | null {
+  const prev = before ?? [];
+  const next = after ?? [];
+  const last = next[next.length - 1];
+  if (last == null || !Number.isFinite(last)) return null;
+  if (next.length === prev.length + 1 && next.slice(0, -1).every((value, index) => value === prev[index])) return last;
+  if (prev.length < 30 || next.length !== 30) return null;
+  const rolled = [...prev, last].slice(-30);
+  return rolled.every((value, index) => value === next[index]) ? last : null;
+}
+
+function addedById<T>(before: readonly T[], after: readonly T[], idOf: (item: T) => string): T[] {
+  const known = new Set(before.map(idOf));
+  return after.filter((item) => !known.has(idOf(item)));
+}
+
+/** Copies a stored signal check back onto the book. An open on the decision is not applied. The resting resolver is the only open. */
+export function applyStoredClassASignal(book: ClassABook, productId: string): void {
+  const decision = book.bucket?.decisions?.find((item) => item.productId === productId);
+  if (!decision) return;
+  if (decision.droppedRowIds.length > 0) {
+    const drop = new Set(decision.droppedRowIds);
+    book.rows = book.rows.filter((row) => !drop.has(row.id));
+  }
+  for (const row of decision.rows) {
+    if (!book.rows.some((item) => item.id === row.id)) book.rows.push(cloneDecision(row));
+  }
+  for (const sim of decision.shadows) {
+    if (!book.shadows.some((item) => item.rowId === sim.rowId)) book.shadows.push(cloneDecision(sim));
+  }
+  const resting = book.resting ?? [];
+  book.resting = resting;
+  for (const order of decision.resting) {
+    if (!resting.some((item) => item.rowId === order.rowId)) resting.push(cloneDecision(order));
+  }
+  if (decision.touchedLastSignalMs) book.lastSignalMs = decision.lastSignalMs;
+  if (decision.spreadBps != null && Number.isFinite(decision.spreadBps) && decision.spreadBps >= 0) {
+    const log = book.spreadLog ?? {};
+    book.spreadLog = log;
+    log[productId] = [...(log[productId] ?? []), decision.spreadBps].slice(-30);
+  }
+}
+
+/** Records the book delta of one signal check. A second call for the same pair does not replace it. */
+export function storeClassASignalDecision(bucket: ClassABucketState, productId: string, before: ClassABook, after: ClassABook): void {
+  const decisions = bucket.decisions ?? [];
+  bucket.decisions = decisions;
+  if (decisions.some((item) => item.productId === productId)) return;
+  const afterIds = new Set(after.rows.map((row) => row.id));
+  decisions.push({
+    productId,
+    rows: cloneDecision(addedById(before.rows, after.rows, (row) => row.id)),
+    droppedRowIds: before.rows.map((row) => row.id).filter((id) => !afterIds.has(id)),
+    resting: cloneDecision(addedById(before.resting ?? [], after.resting ?? [], (order) => order.rowId)),
+    open: cloneDecision(addedById(before.open, after.open, (sim) => sim.rowId)),
+    shadows: cloneDecision(addedById(before.shadows, after.shadows, (sim) => sim.rowId)),
+    touchedLastSignalMs: (before.lastSignalMs ?? null) !== (after.lastSignalMs ?? null),
+    lastSignalMs: after.lastSignalMs ?? null,
+    spreadBps: appendedSpread(before.spreadLog?.[productId], after.spreadLog?.[productId]),
+  });
+}
+
+function restoreBucket(value: unknown): ClassABucketState | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as { startSec?: unknown; bars?: unknown; image?: unknown; decisions?: unknown };
+  if (typeof row.startSec !== "number" || !Number.isFinite(row.startSec) || !Array.isArray(row.bars)) return undefined;
+  if (!row.image || typeof row.image !== "object" || Array.isArray(row.image)) return undefined;
+  const imageRaw = { ...(row.image as ClassABook) };
+  delete imageRaw.bucket;
+  const image = restoreClassABook(imageRaw);
+  if (!image) return undefined;
+  const bars: ClassABucketBar[] = [];
+  for (const bar of row.bars) {
+    if (!bar || typeof bar !== "object") continue;
+    const item = bar as ClassABucketBar;
+    if (typeof item.productId !== "string" || typeof item.startSec !== "number" || !Number.isFinite(item.startSec)) continue;
+    if (![item.open, item.high, item.low, item.close].every((price) => typeof price === "number" && Number.isFinite(price))) continue;
+    bars.push({ productId: item.productId, startSec: item.startSec, open: item.open, high: item.high, low: item.low, close: item.close });
+  }
+  return { startSec: row.startSec, bars, image, decisions: restoreDecisions(row.decisions) };
+}
+
+function restoreDecisions(value: unknown): ClassASignalDecision[] {
+  if (!Array.isArray(value)) return [];
+  const out: ClassASignalDecision[] = [];
+  for (const item of value) {
+    const decision = restoreDecision(item);
+    if (decision) out.push(decision);
+  }
+  return out;
+}
+
+function restoreDecision(value: unknown): ClassASignalDecision | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Partial<ClassASignalDecision>;
+  if (typeof row.productId !== "string" || !PAIR_ID.test(row.productId)) return undefined;
+  if (!Array.isArray(row.rows) || !Array.isArray(row.droppedRowIds)) return undefined;
+  if (!Array.isArray(row.resting) || !Array.isArray(row.open) || !Array.isArray(row.shadows)) return undefined;
+  const spread = typeof row.spreadBps === "number" && Number.isFinite(row.spreadBps) && row.spreadBps >= 0 ? row.spreadBps : null;
+  return {
+    productId: row.productId,
+    rows: row.rows.filter((item): item is ClassARow => !!item && typeof item === "object" && typeof (item as ClassARow).id === "string"),
+    droppedRowIds: row.droppedRowIds.filter((id): id is string => typeof id === "string"),
+    resting: row.resting.filter(restingOk),
+    open: row.open.filter(simOk),
+    shadows: row.shadows.filter(simOk),
+    touchedLastSignalMs: row.touchedLastSignalMs === true,
+    lastSignalMs: typeof row.lastSignalMs === "number" && Number.isFinite(row.lastSignalMs) ? row.lastSignalMs : null,
+    spreadBps: spread,
+  };
+}
+
+function lastCloseOf(value: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [pair, close] of Object.entries(value as Record<string, unknown>)) {
+    if (!PAIR_ID.test(pair) || typeof close !== "number" || !(close > 0) || !Number.isFinite(close)) continue;
+    out[pair] = close;
+  }
+  return out;
 }
 
 function restingOk(value: unknown): value is ClassAResting {

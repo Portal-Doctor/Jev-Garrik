@@ -1,16 +1,33 @@
 {
   "lastUpdated": "2026-10-24",
-  "items": [
+  "cutover": "2026-10-26",
+  "spans": [
     {
-      "name": "Vercel Pro",
-      "monthlyUsd": 110,
-      "estimate": true,
-      "note": "$110 is an estimate: projected $110-125 for the Oct 18-Nov 18 cycle, with $25.04 billed so far."
+      "from": "2026-10-10",
+      "until": "2026-10-26",
+      "items": [
+        {
+          "name": "Vercel Pro",
+          "monthlyUsd": 110,
+          "estimate": true,
+          "note": "$110 is an estimate: projected $110-125 for the Oct 18-Nov 18 cycle, with $25.04 billed so far."
+        },
+        {
+          "name": "Redis Cloud",
+          "monthlyUsd": 5.25,
+          "note": "confirmed from invoices"
+        }
+      ]
     },
     {
-      "name": "Redis Cloud",
-      "monthlyUsd": 5.25,
-      "note": "confirmed from invoices"
+      "from": "2026-10-26",
+      "items": [
+        {
+          "name": "Local Docker",
+          "monthlyUsd": 0,
+          "note": "Brian's local Docker server, no charge after the cutover"
+        }
+      ]
     }
   ]
 }

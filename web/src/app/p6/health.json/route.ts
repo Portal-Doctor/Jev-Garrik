@@ -1,4 +1,5 @@
 import { openDashboardKv, p6HealthJson, readP6Page, summaryFreshness } from "../../../../../research/src/p6/dashboard-read";
+import { classAProductsSnapshot } from "../../../../../research/src/p6/class-a-products";
 import { readSystemCostHurdle } from "../../../../../research/src/p6/system-cost";
 
 export const dynamic = "force-dynamic";
@@ -44,6 +45,9 @@ export async function GET(): Promise<Response> {
     });
     return Response.json(p6HealthJson(loaded.view, fresh.health), { headers: HEADERS });
   } catch {
-    return Response.json({ health: "Error", systemCost: { status: "unavailable", light: "unavailable" } }, { headers: HEADERS });
+    return Response.json(
+      { health: "Error", systemCost: { status: "unavailable", light: "unavailable" }, productsSnapshot: classAProductsSnapshot() },
+      { headers: HEADERS },
+    );
   }
 }

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { stepClassAFromHost, type ClassALiveHost } from "./class-a-live";
 import { addDays, daysBetween } from "../p5/stats";
 import { applyForward, freshBook } from "./engine";
 import { captureHot, loadSplit, persistSplit } from "./hot-store";
@@ -8,6 +9,9 @@ import { decodeLease, HOT_KEY, LEASE_KEY, memoryKv, peekStored, tryAcquire } fro
 import { countsInClassMean, classMeanNetR } from "./x1-fill";
 import {
   CLASS_A_BH_EXIT_FEE_BPS,
+  CLASS_A_BOOK_USD,
+  CLASS_A_ERRATA_003_SHA256,
+  CLASS_A_ERRATA_004_SHA256,
   CLASS_A_BH_FEE_MAKER_BPS,
   CLASS_A_BH_FEE_TAKER_BPS,
   CLASS_A_BOOTSTRAP_REPS,
@@ -28,7 +32,18 @@ import {
   CLASS_A_SPEC_SHA256,
   CLASS_A_TAKER_FEE_BPS,
   classABuyHoldSeries,
+  classALightBasis,
+  classAFillCapped,
+  classAOccupiesAt,
+  classAExitBarEndMs,
+  compareClassAFills,
+  introSensitivityOf,
+  armClassAHourOpen,
+  classABhReport,
+  classAMarkedReview,
   classAPaperView,
+  CLASS_A_SPREAD_WARMUP_NOTE,
+  resolveListedDays,
   classARuleExit,
   classAStartMs,
   concentrationOf,
@@ -193,6 +208,7 @@ test("a maker fill needs a trade at least one tick through the limit inside the 
   const paper = book();
   const row = evaluateSignal(paper, signal());
   expect(row?.fill).toBe("fill");
+  expect(row?.feesUsd).toBeCloseTo((2_000 * CLASS_A_MAKER_FEE_BPS) / 10_000, 8);
   expect(row?.exitPrice).toBeNull();
   expect(row?.signalClose).toBe(100.05);
   expect(paper.open[0]?.entry).toBe(100.05);
@@ -473,6 +489,7 @@ test("the paper book round-trips through hot storage with gzip writes off and on
       expect("classAPaper" in empty).toBe(false);
       const paper = book();
       evaluateSignal(paper, signal());
+      paper.spreadLog = { "SOL-USD": [1.25, 2.5] };
       host.classAPaper = paper;
       const kv = memoryKv(() => START);
       expect(await tryAcquire(kv, `class-a-${flag}`, START + 86_400_000, START)).toBe(true);
@@ -487,6 +504,7 @@ test("the paper book round-trips through hot storage with gzip writes off and on
       installPaperState(loaded, body!);
       expect(loaded.classAPaper?.open).toHaveLength(1);
       expect(loaded.classAPaper?.rows[0]?.fill).toBe("fill");
+      expect(loaded.classAPaper?.spreadLog?.["SOL-USD"]).toEqual([1.25, 2.5]);
       installPaperState(loaded, { classAPaper: { leak: "user:PASSWORD@x.upstash.io" } as never });
       expect(loaded.classAPaper).toBeUndefined();
       const text = decodeStored(HOT_KEY, stored) ?? "";
@@ -511,6 +529,8 @@ test("errata 001 start is the committed close or the next 00:00Z, with no backfi
   expect(at % 86_400_000).toBe(0);
   expect(evaluateSignal(emptyClassABook(at), signal({ days }))?.fill).toBe("fill");
   expect(evaluateSignal(emptyClassABook(at + 1), signal({ days }))).toBeNull();
+  expect(classAPaperView(emptyClassABook(START + 86_400_000), START).status).toBe("pending");
+  expect(classAPaperView(emptyClassABook(START + 86_400_000), START + 86_400_000).status).toBe("running");
 });
 
 test("errata 001 spread days, volume ties, concentration, and fill rate", () => {
@@ -621,6 +641,10 @@ test("errata 001 promotion uses Holm and buy-and-hold, and the exclusion preflig
   expect(family.bootstrapP).not.toBeNull();
   const level = Array.from({ length: 30 }, (_, i) => row(`E${i}-USD`, 1, 230));
   expect(promotionOf(level, { bhReturn: -1, family: holm }).status).toBe("blocked");
+  const exactGross = Array.from({ length: 30 }, (_, i) => row(i < 15 ? "AAA-USD" : "BBB-USD", 1, 230));
+  expect(concentrationOf(exactGross).top3Kill).toBe(false);
+  expect(concentrationOf(exactGross).pairKill).toBe(false);
+  expect(promotionOf(exactGross).status).toBe("unresolved");
   expect(promotionOf(level, { bhReturn: -1, family: holm }).tP).toBe(1);
   expect(promotionOf(level, { bhReturn: -1, family: holm }).bootstrapP).toBe(1);
   const between = Array.from({ length: 30 }, (_, i) => row(`I${i}-USD`, 1, 250));
@@ -782,12 +806,83 @@ test("a maker order stays pending through the four hour window and survives a re
   expect(viaBar.open[0]?.entryMs).toBe(at);
 });
 
-test("five maker fills at once stop at 3 positions and $60, earlier placement then pair", () => {
+test("a resting fill is inside the half-open window and needs one tick through the limit", () => {
+  const days = daysOf();
+  const close = days[69]!.close;
+  const at = signalCloseMs(days[69]!.date);
+  const tick = 0.01;
+  const end = at + 4 * 60 * 60 * 1000;
+  const plant = () => {
+    const paper = book();
+    expect(evaluateSignal(paper, signal({ days, prints: [], asOfMs: at, tick }))?.fill).toBe("pending");
+    return paper;
+  };
+  const atClose = plant();
+  resolveClassAResting(atClose, at + 1, { pair: "SOL-USD", prints: [{ tsMs: at, price: close - tick }] });
+  expect(atClose.rows[0]?.fill).toBe("fill");
+  const atLimit = plant();
+  resolveClassAResting(atLimit, at + 1, { pair: "SOL-USD", prints: [{ tsMs: at + 1, price: close }] });
+  expect(atLimit.rows[0]?.fill).toBe("pending");
+  const through = plant();
+  resolveClassAResting(through, at + 1, { pair: "SOL-USD", prints: [{ tsMs: at + 1, price: close - tick }] });
+  expect(through.rows[0]?.fill).toBe("fill");
+  const onEnd = plant();
+  resolveClassAResting(onEnd, end, { pair: "SOL-USD", prints: [{ tsMs: end, price: close - tick }] });
+  expect(onEnd.rows[0]?.skipReason).toBe("skip_nofill");
+  const beforePrint = plant();
+  resolveClassAResting(beforePrint, at + 60_000 - 1, { pair: "SOL-USD", prints: [{ tsMs: at + 60_000, price: close - tick }] });
+  expect(beforePrint.rows[0]?.fill).toBe("pending");
+  resolveClassAResting(beforePrint, at + 60_000, { pair: "SOL-USD", prints: [{ tsMs: at + 60_000, price: close - tick }] });
+  expect(beforePrint.rows[0]?.fill).toBe("fill");
+  expect(evaluateSignal(book(), signal({ days, prints: [], asOfMs: end }))?.skipReason).toBe("skip_nofill");
+  const justInside = plant();
+  resolveClassAResting(justInside, end, { pair: "SOL-USD", prints: [{ tsMs: end - 1, price: close - tick }] });
+  expect(justInside.rows[0]?.fill).toBe("fill");
+  const barAtClose = plant();
+  resolveClassAResting(barAtClose, at + 900_000, { pair: "SOL-USD", bar: { startMs: at, endMs: at + 900_000, low: close - tick } });
+  expect(barAtClose.rows[0]?.fill).toBe("fill");
+  const barAtEnd = plant();
+  resolveClassAResting(barAtEnd, end, { pair: "SOL-USD", bar: { startMs: end, endMs: end + 900_000, low: close - tick } });
+  expect(barAtEnd.rows[0]?.skipReason).toBe("skip_nofill");
+});
+
+test("pushing the pairs in reverse order fills the same three orders", () => {
+  const days = daysOf().map((day) => ({ ...day, high: day.close + 5, low: day.close - 5 }));
+  const close = days[69]!.close;
+  const at = signalCloseMs(days[69]!.date);
+  const run = (pairs: string[]) => {
+    const paper = book();
+    for (const pair of ["ETH-USD", "DOGE-USD", "BTC-USD", "SOL-USD", "ADA-USD"]) {
+      expect(evaluateSignal(paper, signal({ pair, days, prints: [], asOfMs: at }))?.fill).toBe("pending");
+    }
+    const host: ClassALiveHost = {
+      classAPaper: paper,
+      clock: () => at + 900_000,
+      dailyBars: new Map(),
+      hourWarm: new Map(),
+      ticks: new Map(),
+      trades: [],
+      books: new Map(),
+      book: { quotes: {} },
+    };
+    for (const pair of pairs) {
+      stepClassAFromHost(host, { productId: pair, startSec: at / 1000, open: close, high: close, low: close - 0.02, close });
+    }
+    return paper.open.map((sim) => sim.pair).sort();
+  };
+  const forward = run(["ADA-USD", "BTC-USD", "DOGE-USD", "ETH-USD", "SOL-USD"]);
+  const reverse = run(["SOL-USD", "ETH-USD", "DOGE-USD", "BTC-USD", "ADA-USD"]);
+  expect(forward).toEqual(["ADA-USD", "BTC-USD", "DOGE-USD"]);
+  expect(reverse).toEqual(forward);
+});
+
+test("five maker fills at once stop at 3 positions and $60, signal time then volume then pair", () => {
   const days = daysOf().map((day) => ({ ...day, high: day.close + 5, low: day.close - 5 }));
   const close = days[69]!.close;
   const at = signalCloseMs(days[69]!.date);
   const paper = book();
-  // Same signal close, inserted out of symbol order. Pair A→Z is the tiebreak.
+  // Same signal close and the same 30-day volume, so pair A→Z is the tie-break.
+  // Quant ruling: signal timestamp, then higher volume, then pair, then row id. Volumes tie here, so the filled names stay ADA, BTC, DOGE.
   for (const pair of ["ETH-USD", "DOGE-USD", "BTC-USD", "SOL-USD", "ADA-USD"]) {
     expect(evaluateSignal(paper, signal({ pair, days, prints: [], asOfMs: at }))?.fill).toBe("pending");
   }
@@ -807,15 +902,19 @@ test("five maker fills at once stop at 3 positions and $60, earlier placement th
   for (const pair of rejected) {
     const row = paper.rows.find((item) => item.pair === pair);
     expect(row?.fill).toBe("nofill");
-    expect(row?.skipReason).toBe("cap_full");
+    expect(row?.skipReason).toBe("skip_cap");
     expect(row?.notionalUsd).toBeNull();
     expect(row?.feesUsd).toBeNull();
   }
   expect(paper.resting).toHaveLength(0);
   const restored = restoreClassABook(JSON.parse(JSON.stringify(paper)));
-  expect(restored?.rows.filter((row) => row.skipReason === "cap_full").map((row) => row.pair).sort()).toEqual(rejected);
+  expect(restored?.rows.filter((row) => row.skipReason === "skip_cap").map((row) => row.pair).sort()).toEqual(rejected);
   expect(restored?.open).toHaveLength(CLASS_A_MAX_OPEN);
-  expect(scrubClassAPaper(paper).skips.cap_full).toBe(rejected.length);
+  expect(scrubClassAPaper(paper).skips.skip_cap).toBe(rejected.length);
+  const rate = classAPaperView(paper);
+  expect(rate.fills).toBe(filled.length);
+  expect(rate.skips.skip_cap).toBe(rejected.length);
+  expect(rate.fillRate).toBe(1);
 
   // One slot left. The earlier signal fills even though its pair sorts after the other.
   const timed = book();
@@ -848,7 +947,7 @@ test("five maker fills at once stop at 3 positions and $60, earlier placement th
   }
   resolveClassAResting(timed, at + 60_000, { bar: { startMs: at, endMs: at + 900_000, low: close - 5 } });
   expect(timed.rows.find((row) => row.pair === "SOL-USD")?.fill).toBe("fill");
-  expect(timed.rows.find((row) => row.pair === "ADA-USD")?.skipReason).toBe("cap_full");
+  expect(timed.rows.find((row) => row.pair === "ADA-USD")?.skipReason).toBe("skip_cap");
   expect(timed.open).toHaveLength(CLASS_A_MAX_OPEN);
 
   // Risk cap rejects while a position slot is still open.
@@ -872,7 +971,7 @@ test("five maker fills at once stop at 3 positions and $60, earlier placement th
     pending: null,
   });
   resolveClassAResting(riskBook, at + 60_000, { bar: { startMs: at, endMs: at + 900_000, low: close - 5 } });
-  expect(riskBook.rows.find((row) => row.pair === "SOL-USD")?.skipReason).toBe("cap_full");
+  expect(riskBook.rows.find((row) => row.pair === "SOL-USD")?.skipReason).toBe("skip_cap");
   expect(riskBook.open).toHaveLength(1);
 
   // Count cap rejects while open risk is still under $60.
@@ -898,7 +997,7 @@ test("five maker fills at once stop at 3 positions and $60, earlier placement th
     });
   }
   resolveClassAResting(countBook, at + 60_000, { bar: { startMs: at, endMs: at + 900_000, low: close - 5 } });
-  expect(countBook.rows.find((row) => row.pair === "SOL-USD")?.skipReason).toBe("cap_full");
+  expect(countBook.rows.find((row) => row.pair === "SOL-USD")?.skipReason).toBe("skip_cap");
   expect(countBook.open).toHaveLength(CLASS_A_MAX_OPEN);
   const countRisk = countBook.open.reduce((total, sim) => total + sim.notionalUsd * ((sim.entry - sim.initialStop) / sim.entry), 0);
   expect(countRisk).toBeLessThan(CLASS_A_MAX_OPEN_RISK_USD);
@@ -947,9 +1046,654 @@ test("errata 005 bills Advanced 1 and keeps Intro on the sensitivity line", () =
   expect(view.introSensitivity.barBps).toBe(290);
   expect(view.introSensitivity.netUsd).not.toBeNull();
   expect(view.introSensitivity.netUsd!).toBeLessThan(view.cumNetUsd);
+  const introRow = (sBps: number) => ({ ...(row as NonNullable<typeof row>), id: `SOL-USD:intro:${sBps}`, sBps, exitPrice: sim.entry + 1, grossBps: 100, notionalUsd: sim.notionalUsd, signalClose: sim.entry });
+  expect(introSensitivityOf([introRow(5)]).netUsd).not.toBe(introSensitivityOf([introRow(40)]).netUsd);
   expect(view.introSensitivity.aboveBar).toBe(false);
   expect(view.sHeadroom.medianSBps).toBe(row?.sBps ?? null);
   expect(view.sHeadroom.barBps).toBe(2 * (35 + 75 + (row?.sBps ?? 0)));
   expect(view.promotionPrecondition).toBe(CLASS_A_PROMOTION_PRECONDITION);
   expect(view.promotion).not.toBe("pass");
+  expect(view.spreadWarmupNote).toBe(CLASS_A_SPREAD_WARMUP_NOTE);
+});
+
+test("Holm equality stays blocked and a missing buy-and-hold stays unresolved", () => {
+  const row = (pair: string, grossBps: number): ClassAScored => ({
+    pair,
+    grossUsd: 1,
+    netUsd: 1,
+    grossBps,
+    netBps: grossBps,
+    netR: 0.05,
+    regime: "CHOP",
+  });
+  const gross = [...Array.from({ length: 27 }, () => 256), ...Array.from({ length: 3 }, () => 825)];
+  const edge = gross.map((bps, index) => row(`P${index}-USD`, bps));
+  const family = CLASS_A_HOLM_FAMILY.map((id) => ({ id, p: id === "access-event" ? 0.00625 : 0.9 }));
+  const holm = promotionOf(edge, { bhReturn: -1, family });
+  expect(holm.tP).toBeGreaterThan(0.00625);
+  expect(holm.tP ?? 1).toBeLessThanOrEqual(0.05 / 7);
+  expect(holm.holmP).toBe(0.05);
+  expect(holm.status).toBe("blocked");
+  const strong = Array.from({ length: 30 }, (_, index) => ({ ...row(`N${index}-USD`, 400), netUsd: 10, grossUsd: 10 }));
+  const openFamily = CLASS_A_HOLM_FAMILY.map((id) => ({ id, p: 0.9 }));
+  expect(promotionOf(strong, { family: openFamily }).status).toBe("unresolved");
+  const marked = promotionOf(strong, { bhReturn: 0.04, family: openFamily, aMarked: 0.01 });
+  expect(marked.status).toBe("blocked");
+  expect(marked.beatsBh).toBe(false);
+  expect(marked.bookReturn).toBeGreaterThan(0.04);
+  const lifted = promotionOf(strong, { bhReturn: 0.04, family: openFamily, aMarked: 0.2, deployedFraction: [2] });
+  expect(lifted.status).toBe("pass");
+  expect(lifted.exposureAdjustedReturn).toBeCloseTo(0.1, 8);
+  expect(promotionOf(strong, { bhReturn: 0.04, family: openFamily, aMarked: null }).status).toBe("unresolved");
+});
+
+test("buy-and-hold keeps a pair whose median volume is exactly $5M", () => {
+  const closes = Array.from({ length: 91 }, () => 1);
+  const volumes = Array.from({ length: 91 }, () => 5_000_000);
+  const held = classABuyHoldSeries({ t0: 90, t1: 90, excluded: [], candles: [{ pair: "SOL-USD", listedIndex: 0, closes, volumes }] });
+  expect(held[0]?.members).toEqual(["SOL-USD"]);
+  const under = classABuyHoldSeries({
+    t0: 90,
+    t1: 90,
+    excluded: [],
+    candles: [{ pair: "SOL-USD", listedIndex: 0, closes, volumes: volumes.map(() => 4_999_999) }],
+  });
+  expect(under[0]?.members).toEqual([]);
+});
+
+test("errata 003 reports the fee-charged buy-and-hold at the 005 rates", () => {
+  expect(CLASS_A_ERRATA_003_SHA256).toBe("57e2285efa068cf92e0ed54fc2c43d303bef8cd4b677e61083fc86868477ad7c");
+  const flat = Array.from({ length: 92 }, () => 1);
+  const volume = Array.from({ length: 92 }, () => 5_000_000);
+  const quiet = classABhReport({
+    t0: 90,
+    t1: 92,
+    excluded: [],
+    candles: [{ pair: "SOL-USD", listedIndex: 0, closes: flat, volumes: volume }],
+  });
+  expect(quiet.membershipChanges).toBe(0);
+  expect(quiet.turnover).toBe(1);
+  expect(quiet.feeReturn).toBeCloseTo(-CLASS_A_BH_FEE_MAKER_BPS / 10_000, 10);
+  expect(quiet.takerReturn).toBeCloseTo(-(CLASS_A_BH_FEE_TAKER_BPS + 5) / 10_000, 10);
+  expect(quiet.feeExitReturn).toBeCloseTo((1 - CLASS_A_BH_FEE_MAKER_BPS / 10_000) * (1 - CLASS_A_BH_EXIT_FEE_BPS / 10_000) - 1, 10);
+  expect(quiet.concentration).toBeNull();
+  const joined = classABhReport({
+    t0: 90,
+    t1: 91,
+    excluded: [],
+    candles: [
+      { pair: "SOL-USD", listedIndex: 0, closes: flat, volumes: volume },
+      { pair: "ADA-USD", listedIndex: 1, closes: flat, volumes: volume },
+    ],
+  });
+  expect(joined.membershipChanges).toBe(1);
+  expect(joined.turnover).toBe(2);
+  const kept = 1 - CLASS_A_BH_FEE_MAKER_BPS / 10_000;
+  expect(joined.feeReturn).toBeCloseTo(kept * kept - 1, 10);
+  const doubled = flat.slice();
+  doubled[91] = 2;
+  const share = classABhReport({
+    t0: 90,
+    t1: 91,
+    excluded: [],
+    candles: [
+      { pair: "SOL-USD", listedIndex: 0, closes: doubled, volumes: volume },
+      { pair: "ADA-USD", listedIndex: 0, closes: flat, volumes: volume },
+    ],
+  });
+  expect(share.concentration).toBeCloseTo(1, 8);
+});
+
+test("errata 004 marks open positions at the review close and leaves resting orders out", () => {
+  expect(CLASS_A_ERRATA_004_SHA256).toBe("8291e0b4af55b2592fcbce04da246eab4277fac0ce4d60143eb3b2d87499afa8");
+  const paper = book();
+  evaluateSignal(paper, signal());
+  const sim = paper.open[0]!;
+  sim.pending = "rule";
+  const cReview = sim.entry * 1.01;
+  paper.lastClose = { "SOL-USD": cReview };
+  paper.spreadLog = { "SOL-USD": Array.from({ length: 20 }, () => 20) };
+  paper.resting = [{
+    rowId: "ADA-USD:1",
+    pair: "ADA-USD",
+    signalMs: 1,
+    windowEndMs: 2,
+    limit: 3,
+    tick: 0.01,
+    notionalUsd: 10,
+    units: 2,
+    stop: 1,
+    sBps: 5,
+    priorCloses: [],
+    entryDate: "2024-01-02",
+  }];
+  const review = classAMarkedReview(paper);
+  const entryFee = (sim.notionalUsd * sim.feeEntryBps) / 10_000;
+  const exitNotional = cReview * sim.units;
+  const exitFee = (exitNotional * (CLASS_A_MARKED_EXIT_FEE_BPS + 10)) / 10_000;
+  const marked = (cReview - sim.entry) * sim.units - entryFee - exitFee;
+  expect(review.marks).toHaveLength(1);
+  expect(review.marks[0]?.pair).toBe("SOL-USD");
+  expect(review.marks[0]?.cReview).toBe(cReview);
+  expect(review.marks[0]?.sBps).toBe(10);
+  expect(review.marks[0]?.sUsd).toBeCloseTo((exitNotional * 10) / 10_000, 8);
+  expect(review.marks[0]?.entryFeeUsd).toBeCloseTo(entryFee, 8);
+  expect(review.marks[0]?.exitFeeUsd).toBeCloseTo(exitFee, 8);
+  expect(review.marks[0]?.markedPnl).toBeCloseTo(marked, 8);
+  expect(review.aMarked).toBeCloseTo(marked / CLASS_A_BOOK_USD, 10);
+  expect(review.aMarkedGross).toBeCloseTo(((cReview - sim.entry) * sim.units) / CLASS_A_BOOK_USD, 10);
+  expect(review.aMtmNoExit).toBeCloseTo(((cReview - sim.entry) * sim.units - entryFee) / CLASS_A_BOOK_USD, 10);
+  expect(review.resting).toEqual([{ pair: "ADA-USD", limit: 3, qty: 2 }]);
+  expect(review.marks.some((mark) => mark.pair === "ADA-USD")).toBe(false);
+  paper.spreadLog = { "SOL-USD": Array.from({ length: 19 }, () => 40) };
+  sim.sBps = 7;
+  expect(classAMarkedReview(paper).marks[0]?.sBps).toBe(7);
+  paper.lastClose = {};
+  expect(classAMarkedReview(paper).aMarked).toBeNull();
+  const shown = scrubClassAPaper({
+    aMarked: 0.02,
+    aMtmNoExit: 0.03,
+    bhFeeReturn: -0.0035,
+    listedDaysEstimated: 2,
+    spreadWarmupNote: "user:PASSWORD@x.upstash.io",
+    marks: [
+      { pair: "SOL-USD", entryMs: 1, entry: 2, qty: 3, cReview: 4, entryFeeUsd: 0.1, exitFeeUsd: 0.2, sBps: 5, sUsd: 0.05, markedPnl: 0.4, note: "user:PASSWORD@x.upstash.io" },
+      { pair: "nope", entry: 1 },
+    ],
+    resting: [{ pair: "ADA-USD", limit: 3, qty: 1, note: "x.upstash.io" }],
+  });
+  expect(shown.spreadWarmupNote).toBe(CLASS_A_SPREAD_WARMUP_NOTE);
+  expect(shown.aMarked).toBe(0.02);
+  expect(shown.bhFeeReturn).toBe(-0.0035);
+  expect(shown.listedDaysEstimated).toBe(2);
+  expect(shown.marks).toHaveLength(1);
+  expect(shown.resting).toEqual([{ pair: "ADA-USD", limit: 3, qty: 1 }]);
+  expect(JSON.stringify(shown).includes("PASSWORD")).toBe(false);
+  expect(JSON.stringify(shown).includes("upstash")).toBe(false);
+});
+
+test("a counterfactual waits for the next 1h open and a young or unknown listing does not enter", () => {
+  const deferred = book();
+  const row = evaluateSignal(deferred, signal({ nextHourOpen: null }));
+  expect(row?.counterfactual?.status).toBe("unavailable");
+  expect(row?.awaitHourOpen).toBe(true);
+  expect(deferred.shadows).toHaveLength(0);
+  const hourOpen = (row?.signalClose ?? 0) + 0.01;
+  const entrySignalMs = row?.signalMs ?? 0;
+  armClassAHourOpen(deferred, "SOL-USD", entrySignalMs, hourOpen);
+  expect(row?.awaitHourOpen).toBe(true);
+  expect(deferred.shadows).toHaveLength(0);
+  armClassAHourOpen(deferred, "SOL-USD", entrySignalMs + 3_600_000, hourOpen);
+  expect(row?.awaitHourOpen).toBe(false);
+  expect(row?.counterfactual?.status).toBe("open");
+  expect(row?.counterfactual?.entry).toBe(hourOpen);
+  expect(deferred.shadows[0]?.entry).toBe(hourOpen);
+  expect(deferred.shadows[0]?.entryMs).toBe(entrySignalMs + 3_600_000);
+  const chased = book();
+  const waiting = evaluateSignal(chased, signal({ nextHourOpen: null }));
+  armClassAHourOpen(chased, "SOL-USD", (waiting?.signalMs ?? 0) + 3_600_000, (waiting?.signalClose ?? 0) + 10);
+  expect(waiting?.counterfactual?.status).toBe("chase");
+  expect(chased.shadows).toHaveLength(0);
+  const days = daysOf();
+  const at = signalCloseMs(days[days.length - 1]!.date);
+  const armed = book();
+  const pending = evaluateSignal(armed, signal({ days, nextHourOpen: null }));
+  armClassAHourOpen(armed, "ETH-USD", at + 3_600_000, (pending?.signalClose ?? 0) + 0.01);
+  armClassAHourOpen(armed, "SOL-USD", at - 900_000, pending?.signalClose ?? 0);
+  armClassAHourOpen(armed, "SOL-USD", at, pending?.signalClose ?? 0);
+  expect(pending?.awaitHourOpen).toBe(true);
+  expect(pending?.counterfactual?.status).toBe("unavailable");
+  const nextOpen = (pending?.signalClose ?? 0) + 0.01;
+  armClassAHourOpen(armed, "SOL-USD", at + 3_600_000, nextOpen);
+  expect(pending?.counterfactual?.status).toBe("open");
+  expect(pending?.counterfactual?.entry).toBe(nextOpen);
+  expect(armed.shadows[0]?.entry).toBe(nextOpen);
+  expect(armed.shadows[0]?.entryMs).toBe(at + 3_600_000);
+  expect(armed.shadows).toHaveLength(1);
+  armClassAHourOpen(armed, "SOL-USD", at + 3_600_000 + 900_000, nextOpen + 1);
+  expect(pending?.counterfactual?.status).toBe("open");
+  expect(pending?.counterfactual?.entry).toBe(nextOpen);
+  const missed = book();
+  const later = evaluateSignal(missed, signal({ days, nextHourOpen: null }));
+  armClassAHourOpen(missed, "ETH-USD", at + 3_600_000 + 900_000, nextOpen);
+  expect(later?.awaitHourOpen).toBe(true);
+  armClassAHourOpen(missed, "SOL-USD", at + 3_600_000 + 900_000, nextOpen);
+  expect(later?.awaitHourOpen).toBe(false);
+  expect(later?.counterfactual?.status).toBe("no_next_bar");
+  expect(later?.counterfactual?.entry).toBeNull();
+  expect(later?.counterfactual?.exitReason).toBe("no_next_bar");
+  expect(missed.shadows).toHaveLength(0);
+  const hole = book();
+  const emptyBar = evaluateSignal(hole, signal({ days, nextHourOpen: null }));
+  armClassAHourOpen(hole, "SOL-USD", at + 3_600_000, null);
+  expect(emptyBar?.counterfactual?.status).toBe("no_next_bar");
+  expect(hole.shadows).toHaveLength(0);
+  const restored = restoreClassABook(JSON.parse(JSON.stringify(missed)));
+  expect(restored?.rows.find((item) => item.pair === "SOL-USD")?.counterfactual?.status).toBe("no_next_bar");
+  const signalMs = signalCloseMs(daysOf()[daysOf().length - 1]!.date);
+  expect(resolveListedDays(signalMs - 10 * 86_400_000, signalMs)).toEqual({ listedDays: 10, estimated: false });
+  expect(resolveListedDays(null, signalMs)).toEqual({ listedDays: 0, estimated: true });
+  expect(evaluateSignal(book(), signal({ listedDays: 10 }))).toBeNull();
+  const unknownBook = book();
+  const unknown = evaluateSignal(unknownBook, signal({ listedDays: 9999, listedDaysEstimated: true }));
+  expect(unknown?.listedDaysEstimated).toBe(true);
+  expect(unknown?.fill).toBe("skip");
+  expect(unknownBook.open).toHaveLength(0);
+  expect(classAPaperView(unknownBook).listedDaysEstimated).toBe(1);
+  expect(classAPaperView(unknownBook).spreadWarmupNote).toBe(CLASS_A_SPREAD_WARMUP_NOTE);
+  expect(CLASS_A_PROMOTION_PRECONDITION.includes("evaluated at that tier's bar (Intro: 290 bps)")).toBe(true);
+  expect(scrubClassAPaper(unknownBook).promotionPrecondition.includes("evaluated at that tier's bar (Intro: 290 bps)")).toBe(true);
+});
+
+test("class A light basis is realized plus open marks from the forward start, and no book is zero", () => {
+  const paper = book();
+  const closed = {
+    id: "SOL-USD:old",
+    pair: "SOL-USD",
+    signalMs: CLASS_A_PAPER_START_MS - 86_400_000,
+    medianVolumeUsd: null,
+    signalClose: 100,
+    atr: 1,
+    stop: 90,
+    notionalUsd: 2_000,
+    fill: "fill" as const,
+    skipReason: null,
+    check: null,
+    measured: 100,
+    threshold: null,
+    regime: "CHOP" as const,
+    btcVeto: false,
+    exitReason: "stop",
+    exitMs: CLASS_A_PAPER_START_MS - 1,
+    exitPrice: 110,
+    grossBps: 500,
+    netBps: 500,
+    grossR: 5,
+    netR: 5,
+    feesUsd: 1,
+    counterfactual: null,
+  };
+  paper.rows.push(closed);
+  expect(classALightBasis(paper)).toEqual({ pnlUsd: 0, closedTrades: 0 });
+  paper.rows.push({ ...closed, id: "SOL-USD:new", signalMs: CLASS_A_PAPER_START_MS, exitMs: CLASS_A_PAPER_START_MS, netBps: 0 });
+  expect(classALightBasis(paper)).toEqual({ pnlUsd: 0, closedTrades: 1 });
+  paper.rows[1]!.netBps = 100;
+  expect(classALightBasis(paper)).toEqual({ pnlUsd: 20, closedTrades: 1 });
+  paper.open.push({
+    rowId: "ETH-USD:open",
+    pair: "ETH-USD",
+    scored: true,
+    entry: 100,
+    entryMs: CLASS_A_PAPER_START_MS,
+    entryDate: "2026-10-26",
+    stop: 90,
+    initialStop: 90,
+    notionalUsd: 100,
+    units: 1,
+    feeEntryBps: 0,
+    sBps: 0,
+    highestClose: 100,
+    priorCloses: [],
+    pending: null,
+  });
+  paper.lastClose = { "ETH-USD": 110, "BTC-USD": 500 };
+  paper.open.push({
+    rowId: "BTC-USD:early",
+    pair: "BTC-USD",
+    scored: true,
+    entry: 100,
+    entryMs: CLASS_A_PAPER_START_MS - 1,
+    entryDate: "2026-10-25",
+    stop: 90,
+    initialStop: 90,
+    notionalUsd: 100,
+    units: 1,
+    feeEntryBps: 0,
+    sBps: 0,
+    highestClose: 100,
+    priorCloses: [],
+    pending: null,
+  });
+  const marked = classALightBasis(paper);
+  expect(marked.closedTrades).toBe(1);
+  expect(marked.pnlUsd).toBeCloseTo(20 + 10 - (110 * 75) / 10_000, 8);
+  expect(classALightBasis(null)).toEqual({ pnlUsd: 0, closedTrades: 0 });
+  const shadow = book();
+  shadow.open.push({
+    rowId: "ETH-USD:shadow",
+    pair: "ETH-USD",
+    scored: false,
+    entry: 100,
+    entryMs: CLASS_A_PAPER_START_MS,
+    entryDate: "2026-10-26",
+    stop: 90,
+    initialStop: 90,
+    notionalUsd: 100,
+    units: 1,
+    feeEntryBps: 0,
+    sBps: 0,
+    highestClose: 100,
+    priorCloses: [],
+    pending: null,
+  });
+  shadow.lastClose = { "ETH-USD": 200 };
+  expect(classALightBasis(shadow)).toEqual({ pnlUsd: 0, closedTrades: 0 });
+});
+
+function wideDays(baseVolume = 100_000): ClassADay[] {
+  return daysOf(baseVolume).map((day) => ({ ...day, high: day.close + 5, low: day.close - 5 }));
+}
+
+function bucketHost(paper: ClassABook, at: number): ClassALiveHost {
+  return {
+    classAPaper: paper,
+    clock: () => at + 900_000,
+    dailyBars: new Map(),
+    hourWarm: new Map(),
+    ticks: new Map(),
+    trades: [],
+    books: new Map(),
+    book: { quotes: {} },
+  };
+}
+
+function plantResting(specs: { pair: string; days: ClassADay[] }[]): { paper: ClassABook; at: number; close: number } {
+  const first = specs[0]?.days;
+  if (!first) throw new Error("no days");
+  const at = signalCloseMs(first[first.length - 1]!.date);
+  const close = first[first.length - 1]!.close;
+  const paper = book();
+  for (const spec of specs) {
+    expect(evaluateSignal(paper, signal({ pair: spec.pair, days: spec.days, prints: [], asOfMs: at, nextHourOpen: null }))?.fill).toBe("pending");
+  }
+  return { paper, at, close };
+}
+
+function pushBucket(host: ClassALiveHost, pairs: string[], at: number, close: number, low: number): void {
+  for (const pair of pairs) {
+    stepClassAFromHost(host, { productId: pair, startSec: at / 1000, open: close, high: close, low, close });
+  }
+}
+
+function fillFingerprint(paper: ClassABook) {
+  return {
+    scored: paper.scored.map((row) => row.pair),
+    fills: paper.rows.filter((row) => row.fill === "fill").map((row) => row.pair).sort(),
+    skip: paper.rows.filter((row) => row.skipReason === "skip_cap").map((row) => row.pair).sort(),
+    skipExit: paper.rows.filter((row) => row.skipReason === "skip_cap").map((row) => [row.exitMs, row.exitPrice, row.exitReason, row.feesUsd]),
+    open: paper.open.map((sim) => sim.pair).sort(),
+    stoppedOpen: paper.open.filter((sim) => paper.rows.some((row) => row.id === sim.rowId && row.exitReason != null)).length,
+    cumNetUsd: paper.cumNetUsd,
+  };
+}
+
+test("same-bar fill and stop scores the first three and skip_cap the rest in every push order", () => {
+  const days = wideDays();
+  const names = ["ADA-USD", "BTC-USD", "DOGE-USD", "ETH-USD", "SOL-USD"];
+  const orders = [
+    [0, 1, 2, 3, 4],
+    [4, 3, 2, 1, 0],
+    [2, 0, 4, 1, 3],
+    [1, 4, 0, 3, 2],
+  ];
+  const at = signalCloseMs(days[days.length - 1]!.date);
+  const close = days[days.length - 1]!.close;
+  const run = (indexes: number[]) => {
+    const planted = plantResting(names.map((pair) => ({ pair, days })));
+    pushBucket(bucketHost(planted.paper, at), indexes.map((index) => names[index]!), at, close, 0.01);
+    return planted.paper;
+  };
+  const books = orders.map(run);
+  const first = books[0]!;
+  const fingerprint = fillFingerprint(first);
+  expect(fingerprint.scored).toEqual(["ADA-USD", "BTC-USD", "DOGE-USD"]);
+  expect(fingerprint.fills).toEqual(["ADA-USD", "BTC-USD", "DOGE-USD"]);
+  expect(fingerprint.skip).toEqual(["ETH-USD", "SOL-USD"]);
+  expect(fingerprint.open).toEqual([]);
+  expect(fingerprint.stoppedOpen).toBe(0);
+  expect(first.scored).toHaveLength(3);
+  expect(first.resting).toHaveLength(0);
+  for (const row of first.rows) {
+    if (row.skipReason !== "skip_cap") continue;
+    expect(row.exitMs).toBeNull();
+    expect(row.exitPrice).toBeNull();
+    expect(row.exitReason).toBeNull();
+    expect(row.feesUsd).toBeNull();
+    expect(row.notionalUsd).toBeNull();
+    expect(first.open.some((sim) => sim.rowId === row.id)).toBe(false);
+  }
+  for (const row of first.rows) {
+    if (row.exitReason === "stop") expect(first.open.some((sim) => sim.rowId === row.id)).toBe(false);
+  }
+  const risk = first.rows.filter((row) => row.fill === "fill").reduce((total, row) => {
+    const entry = row.signalClose ?? 0;
+    return total + ((row.notionalUsd ?? 0) * (entry - (row.stop ?? 0))) / entry;
+  }, 0);
+  expect(risk).toBeCloseTo(CLASS_A_MAX_OPEN_RISK_USD, 6);
+  const filled = first.rows.find((row) => row.pair === "ADA-USD");
+  expect(filled?.entryMs).toBe(at);
+  expect(filled?.exitMs).toBe(at + 900_000);
+  expect(classAOccupiesAt(filled?.entryMs ?? 0, filled?.exitMs ?? null, at + 900_000 - 1)).toBe(true);
+  expect(classAOccupiesAt(filled?.entryMs ?? 0, filled?.exitMs ?? null, at + 900_000)).toBe(false);
+  for (const other of books.slice(1)) expect(fillFingerprint(other)).toEqual(fingerprint);
+});
+
+test("a higher 30-day median volume fills ahead of A→Z and a restart keeps that order", () => {
+  const quiet = wideDays(80_000);
+  const loud = wideDays(300_000);
+  const at = signalCloseMs(quiet[quiet.length - 1]!.date);
+  const close = quiet[quiet.length - 1]!.close;
+  const paper = plantResting([
+    { pair: "A-USD", days: quiet },
+    { pair: "Z-USD", days: loud },
+  ]).paper;
+  const loudOrder = paper.resting?.find((order) => order.pair === "Z-USD");
+  const quietOrder = paper.resting?.find((order) => order.pair === "A-USD");
+  expect(loudOrder?.medianVolumeUsd).toBeGreaterThan(quietOrder?.medianVolumeUsd ?? 0);
+  for (const pair of ["ETH-USD", "DOGE-USD"]) {
+    paper.open.push({
+      rowId: `planted:${pair}`,
+      pair,
+      scored: true,
+      entry: 100,
+      entryMs: START,
+      entryDate: "2024-03-11",
+      stop: 90,
+      initialStop: 90,
+      notionalUsd: 10,
+      units: 0.1,
+      feeEntryBps: 35,
+      sBps: 5,
+      highestClose: 100,
+      priorCloses: [],
+      pending: null,
+    });
+  }
+  resolveClassAResting(paper, at + 60_000, { bar: { startMs: at, endMs: at + 900_000, low: close - 5 } });
+  expect(paper.rows.find((row) => row.pair === "Z-USD")?.fill).toBe("fill");
+  expect(paper.rows.find((row) => row.pair === "A-USD")?.skipReason).toBe("skip_cap");
+  expect(paper.rows.find((row) => row.pair === "A-USD")?.exitMs).toBeNull();
+  expect(compareClassAFills(
+    { signalMs: 1, medianVolumeUsd: 9, pair: "A-USD", rowId: "a" },
+    { signalMs: 1, medianVolumeUsd: 3, pair: "Z-USD", rowId: "z" },
+  )).toBeLessThan(0);
+  expect(compareClassAFills(
+    { signalMs: 1, medianVolumeUsd: 5, pair: "SOL-USD", rowId: "b" },
+    { signalMs: 1, medianVolumeUsd: 5, pair: "SOL-USD", rowId: "a" },
+  )).toBeGreaterThan(0);
+
+  const specs = [
+    { pair: "AAA-USD", days: wideDays(60_000) },
+    { pair: "BBB-USD", days: wideDays(200_000) },
+    { pair: "MMM-USD", days: wideDays(400_000) },
+    { pair: "ZZZ-USD", days: wideDays(300_000) },
+  ];
+  const orders = [
+    ["AAA-USD", "BBB-USD", "MMM-USD", "ZZZ-USD"],
+    ["ZZZ-USD", "MMM-USD", "BBB-USD", "AAA-USD"],
+    ["AAA-USD", "BBB-USD", "ZZZ-USD", "MMM-USD"],
+    ["BBB-USD", "AAA-USD", "ZZZ-USD", "MMM-USD"],
+  ];
+  const winners = ["BBB-USD", "MMM-USD", "ZZZ-USD"];
+  const signalAt = signalCloseMs(specs[0]!.days[specs[0]!.days.length - 1]!.date);
+  const signalClose = specs[0]!.days[specs[0]!.days.length - 1]!.close;
+  const full = (pairs: string[]) => {
+    const planted = plantResting(specs);
+    pushBucket(bucketHost(planted.paper, signalAt), pairs, signalAt, signalClose, 0.01);
+    return planted.paper;
+  };
+  const resumed = (pairs: string[]) => {
+    const planted = plantResting(specs);
+    pushBucket(bucketHost(planted.paper, signalAt), pairs.slice(0, 2), signalAt, signalClose, 0.01);
+    const frozen = planted.paper.bucket?.image.resting?.find((order) => order.pair === "MMM-USD")?.medianVolumeUsd;
+    expect(frozen).toBeGreaterThan(0);
+    expect(frozen).toBe(planted.paper.rows.find((row) => row.pair === "MMM-USD")?.medianVolumeUsd ?? null);
+    const restored = restoreClassABook(JSON.parse(JSON.stringify(planted.paper)));
+    if (!restored?.bucket) throw new Error("bucket missing after restart");
+    expect(restored.bucket.image.resting?.find((order) => order.pair === "MMM-USD")?.medianVolumeUsd).toBe(frozen);
+    const host = bucketHost(restored, signalAt);
+    expect(host.classABucket).toBeUndefined();
+    pushBucket(host, pairs.slice(2), signalAt, signalClose, 0.01);
+    return restored;
+  };
+  const expected = fillFingerprint(full(orders[0]!));
+  expect(expected.fills).toEqual(winners);
+  expect(expected.skip).toEqual(["AAA-USD"]);
+  expect(expected.open).toEqual([]);
+  for (const pairs of orders) {
+    expect(fillFingerprint(full(pairs))).toEqual(expected);
+    expect(fillFingerprint(resumed(pairs))).toEqual(expected);
+  }
+});
+
+test("a same-bar stop holds the slot at T+15m-1ms and frees it at the next bar start", () => {
+  const days = wideDays();
+  const at = signalCloseMs(days[days.length - 1]!.date);
+  const close = days[days.length - 1]!.close;
+  const planted = plantResting([{ pair: "SOL-USD", days }]);
+  pushBucket(bucketHost(planted.paper, at), ["SOL-USD"], at, close, 0.01);
+  const stopped = planted.paper.rows[0]!;
+  expect(stopped.exitReason).toBe("stop");
+  expect(stopped.entryMs).toBe(at);
+  expect(stopped.exitMs).toBe(at + 900_000);
+  const entryMs = stopped.entryMs;
+  const exitMs = stopped.exitMs;
+  if (entryMs == null || exitMs == null) throw new Error("missing occupancy");
+  expect(classAOccupiesAt(entryMs, exitMs, at + 900_000 - 1)).toBe(true);
+  expect(classAOccupiesAt(entryMs, exitMs, at + 900_000)).toBe(false);
+  expect(classAExitBarEndMs(at + 900_000)).toBe(at + 900_000);
+  expect(classAExitBarEndMs(at + 1)).toBe(at + 900_000);
+  expect(classAOccupiesAt(at, at + 900_000 + 1, at + 1_800_000 - 1)).toBe(true);
+  expect(classAOccupiesAt(at, at + 900_000 + 1, at + 1_800_000)).toBe(false);
+  const full = plantResting(["ADA-USD", "BTC-USD", "DOGE-USD"].map((pair) => ({ pair, days })));
+  pushBucket(bucketHost(full.paper, full.at), ["ADA-USD", "BTC-USD", "DOGE-USD"], full.at, full.close, 0.01);
+  expect(classAFillCapped(full.paper, full.at + 900_000 - 1, 20)).toBe(true);
+  expect(classAFillCapped(full.paper, full.at + 900_000, 20)).toBe(false);
+  const saved = JSON.parse(JSON.stringify(full.paper));
+  const savedAt = full.at;
+  const savedClose = full.close;
+  const held = restoreClassABook(JSON.parse(JSON.stringify(saved)));
+  if (!held) throw new Error("restore");
+  expect(evaluateSignal(held, signal({ pair: "ETH-USD", days, prints: [], asOfMs: savedAt, nextHourOpen: null }))?.fill).toBe("pending");
+  resolveClassAResting(held, savedAt + 900_000, { pair: "ETH-USD", prints: [{ tsMs: savedAt + 900_000 - 1, price: savedClose - 0.01 }] });
+  expect(held.rows.find((row) => row.pair === "ETH-USD")?.skipReason).toBe("skip_cap");
+  expect(held.rows.find((row) => row.pair === "ETH-USD")?.exitMs).toBeNull();
+  const freed = restoreClassABook(JSON.parse(JSON.stringify(saved)));
+  if (!freed) throw new Error("restore");
+  expect(evaluateSignal(freed, signal({ pair: "ETH-USD", days, prints: [], asOfMs: savedAt, nextHourOpen: null }))?.fill).toBe("pending");
+  resolveClassAResting(freed, savedAt + 1_800_000, {
+    pair: "ETH-USD",
+    bar: { startMs: savedAt + 900_000, endMs: savedAt + 1_800_000, low: savedClose - 0.02 },
+  });
+  expect(freed.rows.find((row) => row.pair === "ETH-USD")?.fill).toBe("fill");
+  expect(freed.open.map((sim) => sim.pair)).toEqual(["ETH-USD"]);
+});
+
+test("a restart in the middle of the equal-volume bucket still fills ADA, BTC, and DOGE", () => {
+  const days = wideDays();
+  const names = ["ADA-USD", "BTC-USD", "DOGE-USD", "ETH-USD", "SOL-USD"];
+  const orders = [
+    ["ADA-USD", "BTC-USD", "DOGE-USD", "ETH-USD", "SOL-USD"],
+    ["SOL-USD", "ETH-USD", "DOGE-USD", "BTC-USD", "ADA-USD"],
+    ["DOGE-USD", "ADA-USD", "ETH-USD", "BTC-USD", "SOL-USD"],
+    ["BTC-USD", "ETH-USD", "ADA-USD", "SOL-USD", "DOGE-USD"],
+  ];
+  const at = signalCloseMs(days[days.length - 1]!.date);
+  const close = days[days.length - 1]!.close;
+  const resumed = (pairs: string[]) => {
+    const planted = plantResting(names.map((pair) => ({ pair, days })));
+    pushBucket(bucketHost(planted.paper, at), pairs.slice(0, 2), at, close, 0.01);
+    const restored = restoreClassABook(JSON.parse(JSON.stringify(planted.paper)));
+    if (!restored?.bucket) throw new Error("bucket missing after restart");
+    expect(restored.bucket.startSec).toBe(at / 1000);
+    const host = bucketHost(restored, at);
+    expect(host.classABucket).toBeUndefined();
+    pushBucket(host, pairs.slice(2), at, close, 0.01);
+    return fillFingerprint(restored);
+  };
+  const expected = resumed(orders[0]!);
+  expect(expected.fills).toEqual(["ADA-USD", "BTC-USD", "DOGE-USD"]);
+  expect(expected.skip).toEqual(["ETH-USD", "SOL-USD"]);
+  expect(expected.open).toEqual([]);
+  expect(expected.stoppedOpen).toBe(0);
+  for (const pairs of orders.slice(1)) expect(resumed(pairs)).toEqual(expected);
+});
+
+test("the next bucket can fill once the exit bar has ended", () => {
+  const days = wideDays();
+  const names = ["ADA-USD", "BTC-USD", "DOGE-USD", "SOL-USD"];
+  const planted = plantResting(names.map((pair) => ({ pair, days })));
+  const host = bucketHost(planted.paper, planted.at);
+  for (const pair of ["ADA-USD", "BTC-USD", "DOGE-USD"]) {
+    stepClassAFromHost(host, { productId: pair, startSec: planted.at / 1000, open: planted.close, high: planted.close, low: 0.01, close: planted.close });
+  }
+  expect(planted.paper.open).toHaveLength(0);
+  expect(planted.paper.scored.map((row) => row.pair)).toEqual(["ADA-USD", "BTC-USD", "DOGE-USD"]);
+  stepClassAFromHost(host, {
+    productId: "SOL-USD",
+    startSec: planted.at / 1000 + 900,
+    open: planted.close,
+    high: planted.close,
+    low: planted.close - 0.02,
+    close: planted.close,
+  });
+  expect(planted.paper.rows.find((row) => row.pair === "SOL-USD")?.fill).toBe("fill");
+  expect(planted.paper.open.map((sim) => sim.pair)).toEqual(["SOL-USD"]);
+  expect(planted.paper.bucket?.startSec).toBe(planted.at / 1000 + 900);
+});
+
+test("a position already open stops once inside the bucket, in either push order", () => {
+  const days = wideDays();
+  const at = signalCloseMs(days[days.length - 1]!.date);
+  const close = days[days.length - 1]!.close;
+  const run = (pairs: string[]) => {
+    const paper = book();
+    paper.open.push({
+      rowId: "SOL-USD:held",
+      pair: "SOL-USD",
+      scored: true,
+      entry: 100,
+      entryMs: at - 900_000,
+      entryDate: "2024-03-10",
+      stop: 90,
+      initialStop: 90,
+      notionalUsd: 100,
+      units: 1,
+      feeEntryBps: 35,
+      sBps: 5,
+      highestClose: 100,
+      priorCloses: [],
+      pending: null,
+    });
+    pushBucket(bucketHost(paper, at), pairs, at, close, 0.01);
+    return paper;
+  };
+  const forward = run(["SOL-USD", "ADA-USD"]);
+  const reverse = run(["ADA-USD", "SOL-USD"]);
+  expect(forward.scored).toHaveLength(1);
+  expect(forward.open).toHaveLength(0);
+  expect(forward.rows.filter((row) => row.skipReason === "skip_cap")).toHaveLength(0);
+  expect(reverse.scored).toHaveLength(1);
+  expect(reverse.open).toHaveLength(0);
+  expect(reverse.cumNetUsd).toBe(forward.cumNetUsd);
 });

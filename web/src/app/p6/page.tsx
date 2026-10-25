@@ -43,6 +43,11 @@ function finite(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function ratioOrDash(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return value.toFixed(4);
+}
+
 function moneyOrDash(value: number | null | undefined, signed = false): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return signed ? signedUsd(value) : formatUsd(value);
@@ -316,7 +321,7 @@ export default async function P6DashboardPage({
             <div className={styles.equityValue}>{equity == null ? "—" : formatUsd(equity)}</div>
             <div className={styles.equityDelta}>
               <span className={tone(deltaHero.kind)}>{deltaHero.text}</span>
-              {deltaPct == null ? "" : ` (${signedPct(deltaPct)})`} vs ${start} start
+              {deltaPct == null ? "" : ` (${signedPct(deltaPct)})`} engine P/L vs ${start} start
             </div>
           </div>
           <SystemCost cost={view.systemCost} />
@@ -360,6 +365,25 @@ export default async function P6DashboardPage({
           {view.classAPaper?.sHeadroom.barBps != null ? ` · s headroom bar ${view.classAPaper.sHeadroom.barBps.toFixed(1)} bps (median s ${view.classAPaper.sHeadroom.medianSBps?.toFixed(1)} )` : " · s headroom —"}
         </p>
         <p className={styles.sub}>{view.classAPaper?.promotionPrecondition}</p>
+        <p className={styles.sub}>{view.classAPaper?.spreadWarmupNote}</p>
+        <p className={styles.sub}>
+          {`Listing age estimated ${view.classAPaper?.listedDaysEstimated ?? 0}`}
+          {` · fee-charged B&H ${ratioOrDash(view.classAPaper?.bhFeeReturn)}`}
+          {` · membership changes ${view.classAPaper?.bhMembershipChanges ?? "—"}`}
+          {` · turnover ${ratioOrDash(view.classAPaper?.bhTurnover)}`}
+          {` · taker sensitivity ${ratioOrDash(view.classAPaper?.bhTakerReturn)}`}
+          {` · B&H with exit fee ${ratioOrDash(view.classAPaper?.bhFeeExitReturn)}`}
+          {` · B&H concentration ${ratioOrDash(view.classAPaper?.bhConcentration)}`}
+          {` · A mark-to-market ${ratioOrDash(view.classAPaper?.aMtmNoExit)}`}
+          {` · A marked ${ratioOrDash(view.classAPaper?.aMarked)}`}
+          {` · A marked gross ${ratioOrDash(view.classAPaper?.aMarkedGross)}`}
+          {` · resting ${view.classAPaper?.resting.length ?? 0}`}
+        </p>
+        {view.classAPaper?.marks.map((mark) => (
+          <p key={`${mark.pair}:${mark.entryMs}`} className={styles.sub}>
+            {`${mark.pair} entry ${mark.entryMs} px ${mark.entry} qty ${mark.qty} C ${mark.cReview} entry fee ${mark.entryFeeUsd} exit fee ${mark.exitFeeUsd} s ${mark.sBps} bps (${mark.sUsd}) marked ${mark.markedPnl}`}
+          </p>
+        ))}
       </section>
 
       <div className={`${styles.card} ${styles.risk}`} aria-label="Risk status">
@@ -721,11 +745,47 @@ function moneyR(value: number | null | undefined): string {
   return formatCostR(value);
 }
 
-/** The monthly total is an estimate when a line item says so, even if its note was scrubbed. */
+/**
+ * The monthly line is the span whose rates sum to the current month.
+ * Before the cutover that is the estimated Vercel and Redis span, not the open-ended $0 line.
+ * The estimate flag stays on the item even when its note was scrubbed.
+ */
 function monthlyCostText(hurdle: SystemCostHurdle): string {
   const amount = moneyOrDash(hurdle.monthlyUsd);
-  const estimated = hurdle.items?.some((item) => item.estimate === true) === true;
+  const items = hurdle.items ?? [];
+  const first = items[0];
+  const keys = first ? [`${first.from ?? ""}|${first.until ?? ""}`] : [];
+  const pools = first ? [[first]] : [];
+  for (const item of items.slice(1)) {
+    const key = `${item.from ?? ""}|${item.until ?? ""}`;
+    const index = keys.indexOf(key);
+    if (index < 0) {
+      keys.push(key);
+      pools.push([item]);
+    } else {
+      pools[index]?.push(item);
+    }
+  }
+  let pool = items;
+  if (typeof hurdle.monthlyUsd === "number") {
+    for (const group of pools) {
+      const sum = group.reduce((total, item) => total + item.monthlyUsd, 0);
+      if (Math.abs(sum - hurdle.monthlyUsd) < 1e-9) {
+        pool = group;
+        break;
+      }
+    }
+  }
+  const estimated = pool.some((item) => item.estimate === true) === true;
   if (estimated && amount !== "—") return `~${amount}/mo (est.)`;
+  return amount;
+}
+
+/** Sunk history is estimated when a pre-cutover line says so. The open-ended $0 line is not that history. */
+function sunkHistoryText(hurdle: SystemCostHurdle): string {
+  const amount = moneyOrDash(hurdle.sunkUsd);
+  const estimated = (hurdle.items ?? []).some((item) => item.estimate === true && item.until != null) === true;
+  if (estimated && amount !== "—") return `~${amount} (est.)`;
   return amount;
 }
 
@@ -738,11 +798,11 @@ function SystemCost({ cost }: { cost: SystemCostHurdle | undefined }) {
   const net = known && typeof hurdle.netUsd === "number" ? hero(hurdle.netUsd) : null;
   const rule =
     light === "green"
-      ? "Net P/L after system costs is above zero."
+      ? "At least one class A close since the forward start, and class A book P/L minus cost since that start is above zero."
       : light === "red"
-        ? "Net P/L after system costs is at or below minus one month of system cost."
+        ? "At least one class A close since the forward start, and class A book P/L minus cost since that start is below zero."
         : light === "amber"
-          ? "Net P/L after system costs is not above zero, and it is above minus one month of system cost."
+          ? "No class A close since the forward start, or class A book P/L minus cost since that start is zero. Class A book P/L is realized plus open marks. Cost before the forward start is sunk history and is not in this light. The engine equity P/L is a separate figure."
           : "System cost could not be read, or P/L is missing.";
   return (
     <div className={styles.cost} id="system-cost" aria-label="System cost hurdle">
@@ -759,14 +819,22 @@ function SystemCost({ cost }: { cost: SystemCostHurdle | undefined }) {
             {typeof hurdle.netR === "number" ? ` · ${formatSignedR(hurdle.netR)}` : ""}
           </div>
           <div className={styles.costLine}>
+            Class A book P/L {moneyOrDash(hurdle.classAPnlUsd, true)} · realized plus open marks since the forward start
+          </div>
+          <div className={styles.costLine}>
             Monthly {monthlyCostText(hurdle)} · {moneyR(hurdle.monthlyR)}
           </div>
           <div className={styles.costLine}>
             Accrued {moneyOrDash(hurdle.accruedUsd)} · {moneyR(hurdle.accruedR)}
           </div>
+          <div className={styles.costLine}>
+            Sunk history {sunkHistoryText(hurdle)} · {moneyR(hurdle.sunkR)}
+          </div>
           {hurdle.items?.map((item) => (
-            <div key={item.name} className={styles.hint}>
+            <div key={`${item.name}:${item.from ?? ""}:${item.until ?? ""}`} className={styles.hint}>
               {item.name}
+              {item.from ? ` from ${item.from}` : ""}
+              {item.until ? ` until ${item.until}` : ""}
               {item.note ? ` · ${item.note}` : ""}
             </div>
           ))}
