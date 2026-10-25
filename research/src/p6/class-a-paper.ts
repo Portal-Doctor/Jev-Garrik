@@ -222,7 +222,7 @@ export interface ClassARow {
   entryMs?: number | null;
 }
 
-interface Sim {
+export interface Sim {
   rowId: string;
   pair: string;
   scored: boolean;
@@ -289,7 +289,7 @@ export interface ClassABook {
   lastClose?: Record<string, number>;
   /**
    * The 15m bucket in progress. The image is the book before any bar in the bucket.
-   * A restart restores the image and replays the bars, so push order does not choose the fills.
+   * A restart restores the image and replays fills and exits. The signal row is the stored decision, not a second check.
    */
   bucket?: ClassABucketState;
 }
@@ -304,11 +304,36 @@ export interface ClassABucketBar {
   close: number;
 }
 
+/**
+ * One signal check, saved when that pair's bar first arrives.
+ * A later push or a restart copies this back after the pair's exits and does not call the check again.
+ */
+export interface ClassASignalDecision {
+  productId: string;
+  /** Rows the check created. Rows that were already on the book are not copied. */
+  rows: ClassARow[];
+  /** Closed rows the check's retention cap dropped. */
+  droppedRowIds: string[];
+  /** Resting orders the check placed. */
+  resting: ClassAResting[];
+  /** Positions the check opened. An immediate fill is one of these. */
+  open: Sim[];
+  /** Counterfactual shadows the check armed. */
+  shadows: Sim[];
+  /** True when the check changed lastSignalMs. The stored value is the one to put back. */
+  touchedLastSignalMs: boolean;
+  lastSignalMs: number | null;
+  /** Quoted spread appended for this check. Null when the check appended none. */
+  spreadBps: number | null;
+}
+
 /** Persisted with the book. Not part of the public paper view. */
 export interface ClassABucketState {
   startSec: number;
   bars: ClassABucketBar[];
   image: ClassABook;
+  /** One entry per pair whose day-close check has already run. Absent on a snapshot from before this field means none. */
+  decisions?: ClassASignalDecision[];
 }
 
 export interface ClassAIntroSensitivity {
@@ -2059,9 +2084,78 @@ export function restoreClassABook(value: unknown): ClassABook | null {
   return restored;
 }
 
+function cloneDecision<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function appendedSpread(before: readonly number[] | undefined, after: readonly number[] | undefined): number | null {
+  const prev = before ?? [];
+  const next = after ?? [];
+  const last = next[next.length - 1];
+  if (last == null || !Number.isFinite(last)) return null;
+  if (next.length === prev.length + 1 && next.slice(0, -1).every((value, index) => value === prev[index])) return last;
+  if (prev.length < 30 || next.length !== 30) return null;
+  const rolled = [...prev, last].slice(-30);
+  return rolled.every((value, index) => value === next[index]) ? last : null;
+}
+
+function addedById<T>(before: readonly T[], after: readonly T[], idOf: (item: T) => string): T[] {
+  const known = new Set(before.map(idOf));
+  return after.filter((item) => !known.has(idOf(item)));
+}
+
+/** Copies a stored signal check back onto the book. Does not read the host, and does not rewrite rows the check did not create. */
+export function applyStoredClassASignal(book: ClassABook, productId: string): void {
+  const decision = book.bucket?.decisions?.find((item) => item.productId === productId);
+  if (!decision) return;
+  if (decision.droppedRowIds.length > 0) {
+    const drop = new Set(decision.droppedRowIds);
+    book.rows = book.rows.filter((row) => !drop.has(row.id));
+  }
+  for (const row of decision.rows) {
+    if (!book.rows.some((item) => item.id === row.id)) book.rows.push(cloneDecision(row));
+  }
+  for (const sim of decision.open) {
+    if (!book.open.some((item) => item.rowId === sim.rowId)) book.open.push(cloneDecision(sim));
+  }
+  for (const sim of decision.shadows) {
+    if (!book.shadows.some((item) => item.rowId === sim.rowId)) book.shadows.push(cloneDecision(sim));
+  }
+  const resting = book.resting ?? [];
+  book.resting = resting;
+  for (const order of decision.resting) {
+    if (!resting.some((item) => item.rowId === order.rowId)) resting.push(cloneDecision(order));
+  }
+  if (decision.touchedLastSignalMs) book.lastSignalMs = decision.lastSignalMs;
+  if (decision.spreadBps != null && Number.isFinite(decision.spreadBps) && decision.spreadBps >= 0) {
+    const log = book.spreadLog ?? {};
+    book.spreadLog = log;
+    log[productId] = [...(log[productId] ?? []), decision.spreadBps].slice(-30);
+  }
+}
+
+/** Records the book delta of one signal check. A second call for the same pair does not replace it. */
+export function storeClassASignalDecision(bucket: ClassABucketState, productId: string, before: ClassABook, after: ClassABook): void {
+  const decisions = bucket.decisions ?? [];
+  bucket.decisions = decisions;
+  if (decisions.some((item) => item.productId === productId)) return;
+  const afterIds = new Set(after.rows.map((row) => row.id));
+  decisions.push({
+    productId,
+    rows: cloneDecision(addedById(before.rows, after.rows, (row) => row.id)),
+    droppedRowIds: before.rows.map((row) => row.id).filter((id) => !afterIds.has(id)),
+    resting: cloneDecision(addedById(before.resting ?? [], after.resting ?? [], (order) => order.rowId)),
+    open: cloneDecision(addedById(before.open, after.open, (sim) => sim.rowId)),
+    shadows: cloneDecision(addedById(before.shadows, after.shadows, (sim) => sim.rowId)),
+    touchedLastSignalMs: (before.lastSignalMs ?? null) !== (after.lastSignalMs ?? null),
+    lastSignalMs: after.lastSignalMs ?? null,
+    spreadBps: appendedSpread(before.spreadLog?.[productId], after.spreadLog?.[productId]),
+  });
+}
+
 function restoreBucket(value: unknown): ClassABucketState | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const row = value as { startSec?: unknown; bars?: unknown; image?: unknown };
+  const row = value as { startSec?: unknown; bars?: unknown; image?: unknown; decisions?: unknown };
   if (typeof row.startSec !== "number" || !Number.isFinite(row.startSec) || !Array.isArray(row.bars)) return undefined;
   if (!row.image || typeof row.image !== "object" || Array.isArray(row.image)) return undefined;
   const imageRaw = { ...(row.image as ClassABook) };
@@ -2076,7 +2170,37 @@ function restoreBucket(value: unknown): ClassABucketState | undefined {
     if (![item.open, item.high, item.low, item.close].every((price) => typeof price === "number" && Number.isFinite(price))) continue;
     bars.push({ productId: item.productId, startSec: item.startSec, open: item.open, high: item.high, low: item.low, close: item.close });
   }
-  return { startSec: row.startSec, bars, image };
+  return { startSec: row.startSec, bars, image, decisions: restoreDecisions(row.decisions) };
+}
+
+function restoreDecisions(value: unknown): ClassASignalDecision[] {
+  if (!Array.isArray(value)) return [];
+  const out: ClassASignalDecision[] = [];
+  for (const item of value) {
+    const decision = restoreDecision(item);
+    if (decision) out.push(decision);
+  }
+  return out;
+}
+
+function restoreDecision(value: unknown): ClassASignalDecision | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Partial<ClassASignalDecision>;
+  if (typeof row.productId !== "string" || !PAIR_ID.test(row.productId)) return undefined;
+  if (!Array.isArray(row.rows) || !Array.isArray(row.droppedRowIds)) return undefined;
+  if (!Array.isArray(row.resting) || !Array.isArray(row.open) || !Array.isArray(row.shadows)) return undefined;
+  const spread = typeof row.spreadBps === "number" && Number.isFinite(row.spreadBps) && row.spreadBps >= 0 ? row.spreadBps : null;
+  return {
+    productId: row.productId,
+    rows: row.rows.filter((item): item is ClassARow => !!item && typeof item === "object" && typeof (item as ClassARow).id === "string"),
+    droppedRowIds: row.droppedRowIds.filter((id): id is string => typeof id === "string"),
+    resting: row.resting.filter(restingOk),
+    open: row.open.filter(simOk),
+    shadows: row.shadows.filter(simOk),
+    touchedLastSignalMs: row.touchedLastSignalMs === true,
+    lastSignalMs: typeof row.lastSignalMs === "number" && Number.isFinite(row.lastSignalMs) ? row.lastSignalMs : null,
+    spreadBps: spread,
+  };
 }
 
 function lastCloseOf(value: unknown): Record<string, number> {

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { CLASS_A_PAPER_START_MS, emptyClassABook, type ClassABook } from "./class-a-paper";
+import { CLASS_A_PAPER_START_MS, emptyClassABook, restoreClassABook, type ClassABook } from "./class-a-paper";
 import { classAMinOrderBase, classAMinSizeOf, stepClassAFromHost, type ClassALiveHost } from "./class-a-live";
 import { captureHot, loadSplit, persistSplit } from "./hot-store";
 import { acceptRestBar, startPaperHost } from "./paper-host";
@@ -246,6 +246,219 @@ test("a live bar stops an open position when the low trades through the stop", (
   });
   expect(paper.open).toHaveLength(0);
   expect(paper.scored).toHaveLength(1);
+});
+
+const SIGNAL_PAIRS = ["ADA-USD", "ETH-USD", "SOL-USD"] as const;
+const DAY_CLOSE_SEC = CLASS_A_PAPER_START_MS / 1000 - 900;
+
+function permutations(items: readonly string[]): string[][] {
+  if (items.length <= 1) return [items.slice()];
+  return items.flatMap((item, index) => permutations([...items.slice(0, index), ...items.slice(index + 1)]).map((rest) => [item, ...rest]));
+}
+
+function signalCandles(lastClose: number, rising: boolean) {
+  const last = Date.parse("2026-10-25T00:00:00.000Z");
+  return Array.from({ length: 111 }, (_, index) => {
+    const close = rising ? 100 * (1 + 0.002 * index) : index === 110 ? lastClose : 100;
+    return { ts: (last - (110 - index) * DAY_MS) / 1000, open: close, high: close + 0.05, low: close - 0.05, close, volume: 100_000 };
+  });
+}
+
+function dayCloseHost(): { host: ClassALiveHost; now: { ms: number } } {
+  const paper = emptyClassABook(CLASS_A_PAPER_START_MS);
+  paper.spreadLog = Object.fromEntries(SIGNAL_PAIRS.map((pair) => [pair, Array.from({ length: 25 }, () => 2)]));
+  const now = { ms: CLASS_A_PAPER_START_MS };
+  const quotes: ClassALiveHost["book"]["quotes"] = {};
+  const books = new Map<string, { asks: Map<string, number> }>();
+  const ticks = new Map<string, number>();
+  for (const pair of SIGNAL_PAIRS) {
+    quotes[pair] = { bid: 100.04, ask: 100.06, tsMs: now.ms };
+    books.set(pair, { asks: new Map([["100.06", 1_000_000]]) });
+    ticks.set(pair, 0.01);
+  }
+  const dailyBars = new Map<string, ReturnType<typeof signalCandles>>();
+  for (const pair of SIGNAL_PAIRS) dailyBars.set(pair, signalCandles(100.05, false));
+  dailyBars.set("BTC-USD", signalCandles(100, true));
+  return {
+    now,
+    host: liveHost(paper, {
+      clock: () => now.ms,
+      dailyBars,
+      ticks,
+      books,
+      book: { quotes },
+      listingFirstMs: Object.fromEntries(SIGNAL_PAIRS.map((pair) => [pair, Date.parse("2024-01-01T00:00:00.000Z")])),
+    }),
+  };
+}
+
+function dayCloseBar(pair: string) {
+  return { productId: pair, startSec: DAY_CLOSE_SEC, open: 100.05, high: 100.1, low: 100, close: 100.05 };
+}
+
+function askBooks(host: ClassALiveHost): Map<string, { asks: Map<string, number> }> {
+  return host.books as Map<string, { asks: Map<string, number> }>;
+}
+
+function showBook(host: ClassALiveHost, pair: string, nowMs: number): void {
+  askBooks(host).set(pair, { asks: new Map([["100.06", 1_000_000]]) });
+  host.book.quotes[pair] = { bid: 100.04, ask: 100.06, tsMs: nowMs };
+}
+
+function hideBook(host: ClassALiveHost, pair: string): void {
+  askBooks(host).set(pair, { asks: new Map() });
+  const quote = host.book.quotes[pair];
+  if (quote) quote.tsMs = 0;
+}
+
+function heldSnapshot(frozen: ReadonlyMap<string, string>, pair: string): string {
+  const seen = frozen.get(pair);
+  if (seen == null) throw new Error(`missing snapshot ${pair}`);
+  return seen;
+}
+
+function signalSnapshot(book: ClassABook, pair: string): string {
+  const row = book.rows.find((item) => item.pair === pair && item.signalMs === CLASS_A_PAPER_START_MS);
+  const resting = (book.resting ?? []).filter((order) => order.pair === pair);
+  return JSON.stringify({ row, resting });
+}
+
+test("a later day-close push cannot flip an earlier signal, in every order and after a restart", () => {
+  const orders = permutations(SIGNAL_PAIRS);
+  expect(orders).toHaveLength(6);
+  for (const order of orders) {
+    const { host, now } = dayCloseHost();
+    const paper = host.classAPaper;
+    if (!paper) throw new Error("book");
+    const frozen = new Map<string, string>();
+    for (const pair of order) {
+      showBook(host, pair, now.ms);
+      stepClassAFromHost(host, dayCloseBar(pair));
+      const row = paper.rows.find((item) => item.pair === pair && item.signalMs === CLASS_A_PAPER_START_MS);
+      expect(row?.fill).toBe("pending");
+      expect(row?.skipReason).toBeNull();
+      expect(paper.resting?.some((item) => item.rowId === row?.id)).toBe(true);
+      expect(paper.spreadLog?.[pair]).toHaveLength(26);
+      frozen.set(pair, signalSnapshot(paper, pair));
+      for (const earlier of order) {
+        if (!frozen.has(earlier)) continue;
+        expect(signalSnapshot(paper, earlier)).toBe(heldSnapshot(frozen, earlier));
+        expect(paper.spreadLog?.[earlier]).toHaveLength(26);
+      }
+      now.ms += 5_000;
+      hideBook(host, pair);
+    }
+    stepClassAFromHost(host, dayCloseBar(order[order.length - 1]!));
+    expect(paper.resting).toHaveLength(order.length);
+    expect(paper.bucket?.decisions).toHaveLength(order.length);
+    expect(paper.bucket?.image.rows.some((row) => row.signalMs === CLASS_A_PAPER_START_MS)).toBe(false);
+    for (const pair of order) {
+      expect(signalSnapshot(paper, pair)).toBe(heldSnapshot(frozen, pair));
+      expect(paper.rows.find((row) => row.pair === pair)?.fill).toBe("pending");
+    }
+
+    const first = order[0]!;
+    const mid = dayCloseHost();
+    const midPaper = mid.host.classAPaper;
+    if (!midPaper) throw new Error("book");
+    showBook(mid.host, first, mid.now.ms);
+    stepClassAFromHost(mid.host, dayCloseBar(first));
+    const midFrozen = signalSnapshot(midPaper, first);
+    expect(midPaper.rows.find((row) => row.pair === first)?.fill).toBe("pending");
+    const restarted = restoreClassABook(JSON.parse(JSON.stringify(midPaper)));
+    if (!restarted?.bucket) throw new Error("bucket missing after restart");
+    const again = dayCloseHost();
+    again.host.classAPaper = restarted;
+    again.now.ms = mid.now.ms + 5_000;
+    expect(again.host.classABucket).toBeUndefined();
+    hideBook(again.host, first);
+    for (const pair of order.slice(1)) {
+      showBook(again.host, pair, again.now.ms);
+      stepClassAFromHost(again.host, dayCloseBar(pair));
+      expect(signalSnapshot(restarted, first)).toBe(midFrozen);
+      expect(restarted.rows.find((row) => row.pair === first)?.fill).toBe("pending");
+      expect(restarted.rows.find((row) => row.pair === first)?.skipReason).toBeNull();
+      expect(restarted.resting?.some((orderRow) => orderRow.pair === first)).toBe(true);
+      again.now.ms += 5_000;
+      hideBook(again.host, pair);
+    }
+  }
+});
+
+test("SOL stays pending when a later ETH push in the same bucket sees a stale SOL book", async () => {
+  const gzip = process.env.P6_GZIP_WRITES;
+  try {
+    for (const flag of [undefined, "1"] as const) {
+      if (flag === undefined) delete process.env.P6_GZIP_WRITES;
+      else process.env.P6_GZIP_WRITES = flag;
+      for (const order of [["SOL-USD", "ETH-USD"], ["ETH-USD", "SOL-USD"]] as const) {
+        const { host, now } = dayCloseHost();
+        const paper = host.classAPaper;
+        if (!paper) throw new Error("book");
+        showBook(host, order[0]!, now.ms);
+        stepClassAFromHost(host, dayCloseBar(order[0]!));
+        const placed = paper.rows.find((row) => row.pair === order[0]!);
+        expect(placed?.fill).toBe("pending");
+        expect(placed?.skipReason).toBeNull();
+        expect(paper.resting?.some((orderRow) => orderRow.rowId === placed?.id)).toBe(true);
+        const before = signalSnapshot(paper, order[0]!);
+        now.ms += 5_000;
+        hideBook(host, order[0]!);
+        showBook(host, order[1]!, now.ms);
+        stepClassAFromHost(host, dayCloseBar(order[1]!));
+        expect(signalSnapshot(paper, order[0]!)).toBe(before);
+        const sol = paper.rows.find((row) => row.pair === "SOL-USD" && row.signalMs === CLASS_A_PAPER_START_MS);
+        expect(sol?.fill).toBe("pending");
+        expect(sol?.skipReason).toBeNull();
+        expect(paper.resting?.some((orderRow) => orderRow.rowId === sol?.id)).toBe(true);
+        expect(paper.rows.filter((row) => row.skipReason === "skip_depth")).toHaveLength(0);
+      }
+
+      const { host, now } = dayCloseHost();
+      const paper = host.classAPaper;
+      if (!paper) throw new Error("book");
+      showBook(host, "SOL-USD", now.ms);
+      stepClassAFromHost(host, dayCloseBar("SOL-USD"));
+      expect(paper.rows.find((row) => row.pair === "SOL-USD")?.fill).toBe("pending");
+      const kv = memoryKv(() => now.ms);
+      const saved = startPaperHost(["SOL-USD", "ETH-USD", "BTC-USD"], {});
+      saved.clock = () => now.ms;
+      await hostHolder(saved, kv).warm();
+      saved.classAPaper = paper;
+      saved.dailyBars = host.dailyBars as typeof saved.dailyBars;
+      saved.books = new Map([...host.books].map(([id, book]) => [id, { bids: new Map<string, number>(), asks: new Map(book.asks) }]));
+      saved.ticks = new Map(host.ticks);
+      saved.book.quotes = {};
+      for (const [id, quote] of Object.entries(host.book.quotes)) if (quote) saved.book.quotes[id] = { bid: quote.bid, ask: quote.ask, tsMs: quote.tsMs };
+      expect(await tryAcquire(kv, `r1-${flag ?? "unset"}`, now.ms + DAY_MS, now.ms)).toBe(true);
+      saved.leaseToken = decodeLease(await kv.get(LEASE_KEY))?.token ?? null;
+      await persistSplit(kv, saved);
+      const loaded = startPaperHost(["SOL-USD", "ETH-USD", "BTC-USD"], {});
+      loaded.clock = () => now.ms + 5_000;
+      await hostHolder(loaded, kv).warm();
+      const restored = loaded.classAPaper;
+      if (!restored) throw new Error("reloaded book");
+      expect(restored.rows.find((row) => row.pair === "SOL-USD")?.fill).toBe("pending");
+      expect(restored.resting).toHaveLength(1);
+      loaded.dailyBars = host.dailyBars as typeof loaded.dailyBars;
+      loaded.books = new Map([...host.books].map(([id, book]) => [id, { bids: new Map<string, number>(), asks: new Map(book.asks) }]));
+      loaded.ticks = new Map(host.ticks);
+      loaded.book.quotes = {};
+      for (const [id, quote] of Object.entries(host.book.quotes)) if (quote) loaded.book.quotes[id] = { bid: quote.bid, ask: quote.ask, tsMs: quote.tsMs };
+      (loaded as ClassALiveHost).listingFirstMs = host.listingFirstMs;
+      hideBook(loaded, "SOL-USD");
+      showBook(loaded, "ETH-USD", now.ms + 5_000);
+      stepClassAFromHost(loaded, dayCloseBar("ETH-USD"));
+      const sol = restored.rows.find((row) => row.pair === "SOL-USD" && row.signalMs === CLASS_A_PAPER_START_MS);
+      expect(sol?.fill).toBe("pending");
+      expect(sol?.skipReason).toBeNull();
+      expect(restored.resting?.some((orderRow) => orderRow.rowId === sol?.id)).toBe(true);
+      expect(restored.rows.filter((row) => row.skipReason === "skip_depth")).toHaveLength(0);
+    }
+  } finally {
+    if (gzip === undefined) delete process.env.P6_GZIP_WRITES;
+    else process.env.P6_GZIP_WRITES = gzip;
+  }
 });
 
 test("the order minimum uses base_min_size, then base_increment, and an unknown pair is null", () => {

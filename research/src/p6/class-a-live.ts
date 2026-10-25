@@ -11,6 +11,7 @@ import { classAProductsSnapshot } from "./class-a-products";
 import { ema, wilderAtr } from "../p2/indicators";
 import { isDayCloseBar } from "../p5/book";
 import {
+  applyStoredClassASignal,
   armClassAHourOpen,
   evaluateSignal,
   onDaily,
@@ -19,6 +20,7 @@ import {
   resolveListedDays,
   signalCloseMs,
   sizedOrder,
+  storeClassASignalDecision,
   walkCostBps,
   type ClassABook,
   type ClassABucketBar,
@@ -95,9 +97,10 @@ function applySnapshot(book: ClassABook, image: ClassABook): void {
 }
 
 /**
- * One accepted 15m bar. The whole bucket is replayed from its saved pre-image: fills for every pair first,
- * then stops and day-closes. A later push restores that image, so a stop cannot survive on a fill the cap rejects.
- * Exits run only after the fills for the bars seen so far. Push order does not choose the book.
+ * One accepted 15m bar. The bucket is replayed from its saved pre-image: fills for every pair first, then stops and day-closes.
+ * A later push restores that image, so a stop cannot survive on a fill the cap rejects.
+ * The signal check runs once, when that pair's own day-close bar arrives, and the row plus its resting order are stored on the bucket.
+ * Replay copies that decision back after the pair's exits. It does not read the quote, the book, or the clock for the check again.
  */
 export function stepClassAFromHost(host: ClassALiveHost, bar: ClassABucketBar): void {
   const book = host.classAPaper;
@@ -105,7 +108,7 @@ export function stepClassAFromHost(host: ClassALiveHost, bar: ClassABucketBar): 
   if (book.bucket && host.classABucket !== book.bucket) host.classABucket = book.bucket;
   if (!host.classABucket || host.classABucket.startSec !== bar.startSec) {
     const image = snapshotClassABook(book);
-    const bucket: ClassABucketState = { startSec: bar.startSec, bars: [], image };
+    const bucket: ClassABucketState = { startSec: bar.startSec, bars: [], image, decisions: [] };
     book.bucket = bucket;
     host.classABucket = bucket;
   }
@@ -113,10 +116,18 @@ export function stepClassAFromHost(host: ClassALiveHost, bar: ClassABucketBar): 
   if (!bucket.bars.some((item) => item.productId === bar.productId && item.startSec === bar.startSec)) {
     bucket.bars.push({ productId: bar.productId, startSec: bar.startSec, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
   }
+  const decided = bucket.decisions?.some((item) => item.productId === bar.productId) === true;
+  if (isDayCloseBar(bar.startSec) && !decided) {
+    replayClassABucket(host, book, bar.productId);
+    const before = snapshotClassABook(book);
+    applyClassASignal(host, book, bar);
+    storeClassASignalDecision(bucket, bar.productId, before, snapshotClassABook(book));
+  }
   replayClassABucket(host, book);
 }
 
-function replayClassABucket(host: ClassALiveHost, book: ClassABook): void {
+/** Fills, then each pair's exits, then that pair's stored signal. `pauseAtProduct` stops after that pair's exits so the caller can decide it once. */
+function replayClassABucket(host: ClassALiveHost, book: ClassABook, pauseAtProduct?: string): void {
   const bucket = host.classABucket ?? book.bucket;
   if (!bucket) return;
   applySnapshot(book, bucket.image);
@@ -133,12 +144,15 @@ function replayClassABucket(host: ClassALiveHost, book: ClassABook): void {
     })),
   });
   const ordered = bucket.bars.slice().sort((a, b) => (a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0));
-  for (const item of ordered) applyClassABar(host, book, item);
+  for (const item of ordered) {
+    applyClassAExits(host, book, item);
+    if (pauseAtProduct != null && item.productId === pauseAtProduct) return;
+    applyStoredClassASignal(book, item.productId);
+  }
 }
 
-function applyClassABar(host: ClassALiveHost, book: ClassABook, bar: ClassABucketBar): void {
+function applyClassAExits(host: ClassALiveHost, book: ClassABook, bar: ClassABucketBar): void {
   const closeMs = (bar.startSec + 900) * 1000;
-  const nowMs = Math.max(closeMs, host.clock());
   const hourAtr = hourAtrAt(host.hourWarm.get(bar.productId) ?? [], closeMs / 1000);
   armClassAHourOpen(book, bar.productId, bar.startSec * 1000, bar.open);
   onIntrabar(book, { pair: bar.productId, tsMs: closeMs, open: bar.open, low: bar.low, hourAtr });
@@ -156,6 +170,25 @@ function applyClassABar(host: ClassALiveHost, book: ClassABook, bar: ClassABucke
   );
   const atr = atrSeries[index] ?? 0;
   onDaily(book, { pair: bar.productId, date: day.date, open: series.opens[index] ?? day.close, low: day.low, close: day.close, atr: atr > 0 ? atr : 0, hourAtr });
+}
+
+function applyClassASignal(host: ClassALiveHost, book: ClassABook, bar: ClassABucketBar): void {
+  const closeMs = (bar.startSec + 900) * 1000;
+  const nowMs = Math.max(closeMs, host.clock());
+  if (!isDayCloseBar(bar.startSec)) return;
+  const series = asDays(host.dailyBars.get(bar.productId) ?? []);
+  const days = series.days;
+  const index = days.length - 1;
+  const day = index >= 0 ? days[index] : undefined;
+  if (!day) return;
+  const atrSeries = wilderAtr(
+    days.map((row) => row.high),
+    days.map((row) => row.low),
+    days.map((row) => row.close),
+    14,
+  );
+  const atr = atrSeries[index] ?? 0;
+  const hourAtr = hourAtrAt(host.hourWarm.get(bar.productId) ?? [], closeMs / 1000);
   const signalMs = signalCloseMs(day.date);
   if (book.startMs == null) return;
   if (signalMs !== closeMs || signalMs < book.startMs) return;
