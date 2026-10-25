@@ -4,7 +4,6 @@ import { addDays } from "../p5/stats";
 import { classAMinOrderBase, classAMinSizeOf, ensureClassAMinSizes, loadClassAMinSizes } from "./class-a-live";
 import { emptyClassABook, evaluateSignal, signalCloseMs, type ClassADay, type ClassASignal } from "./class-a-paper";
 import { dataFile } from "./live-data";
-import nextConfig from "../../../web/next.config";
 
 const PRODUCTS_FILE = "../research/data/products/exchange-products.raw.json";
 const PUBLIC_PRODUCTS_URL = "https://api.exchange.coinbase.com/products";
@@ -142,9 +141,19 @@ test("a failed products load is not cached and the next call can succeed", async
   expect(calls).toBe(2);
 });
 
+function tracingBlock(source: string, route: string): string {
+  const includesAt = source.indexOf("outputFileTracingIncludes");
+  if (includesAt < 0) throw new Error("outputFileTracingIncludes");
+  const start = source.indexOf(`"${route}":`, includesAt);
+  if (start < 0) throw new Error(route);
+  const open = source.indexOf("[", start);
+  const close = source.indexOf("]", open);
+  if (open < 0 || close < 0) throw new Error(route);
+  return source.slice(open, close + 1);
+}
+
 test("the engine and health traces include the products snapshot", () => {
-  const includes = nextConfig.outputFileTracingIncludes;
-  if (!includes) throw new Error("tracing includes missing");
-  expect(includes["/api/engine"]).toContain(PRODUCTS_FILE);
-  expect(includes["/p6/health.json"]).toContain(PRODUCTS_FILE);
+  const source = readFileSync(new URL("../../../web/next.config.ts", import.meta.url), "utf8");
+  expect(tracingBlock(source, "/api/engine")).toContain(`"${PRODUCTS_FILE}"`);
+  expect(tracingBlock(source, "/p6/health.json")).toContain(`"${PRODUCTS_FILE}"`);
 });
