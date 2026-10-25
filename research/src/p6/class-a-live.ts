@@ -289,6 +289,9 @@ const CLASS_A_PRODUCTS_TIMEOUT_MS = 8_000;
 
 type MinSizeCache = { current: Map<string, number> | null };
 
+/** The call shape `fetch` is used with. Bun's `fetch` also has `preconnect`, which callers do not need. */
+type ProductsFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
 const minSizeCache: MinSizeCache = { current: null };
 
 /** base_min_size when it is present and positive. Otherwise base_increment. Unknown stays null, never zero. */
@@ -323,7 +326,7 @@ function readProductsFileText(): string | null {
   }
 }
 
-async function readPublicProducts(fetchImpl: typeof fetch, timeoutMs: number): Promise<unknown> {
+async function readPublicProducts(fetchImpl: ProductsFetch, timeoutMs: number): Promise<unknown> {
   const response = await fetchImpl(CLASS_A_PRODUCTS_URL, {
     method: "GET",
     signal: AbortSignal.timeout(timeoutMs),
@@ -340,7 +343,7 @@ async function readPublicProducts(fetchImpl: typeof fetch, timeoutMs: number): P
  */
 export async function loadClassAMinSizes(
   fileText: string | null,
-  fetchImpl: typeof fetch,
+  fetchImpl: ProductsFetch,
   store: MinSizeCache,
   timeoutMs = CLASS_A_PRODUCTS_TIMEOUT_MS,
 ): Promise<Map<string, number>> {
@@ -368,7 +371,7 @@ export async function loadClassAMinSizes(
  * Loads minimums before live bars. The committed file wins. A missing file uses fetch.
  * Successes stay cached. A failure does not, so the next invocation can retry.
  */
-export async function ensureClassAMinSizes(fetchImpl: typeof fetch = fetch): Promise<Map<string, number>> {
+export async function ensureClassAMinSizes(fetchImpl: ProductsFetch = fetch): Promise<Map<string, number>> {
   if (minSizeCache.current && minSizeCache.current.size > 0) return minSizeCache.current;
   classAProductsSnapshot();
   return loadClassAMinSizes(readProductsFileText(), fetchImpl, minSizeCache);

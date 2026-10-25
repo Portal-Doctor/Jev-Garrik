@@ -65,7 +65,7 @@ function btcRow(): { base_min_size?: unknown; base_increment?: unknown } {
 
 test("the committed products file gives BTC-USD a positive minimum", async () => {
   const expected = classAMinSizeOf(btcRow());
-  expect(expected).toBeGreaterThan(0);
+  if (expected == null) throw new Error("BTC-USD minimum missing");
   expect(classAMinOrderBase("BTC-USD")).toBe(expected);
   let called = false;
   const loaded = await ensureClassAMinSizes(async () => {
@@ -80,7 +80,7 @@ test("a missing products file uses the public products endpoint", async () => {
   let url = "";
   let method = "";
   let authorization: string | null = "unset";
-  const fetchImpl: typeof fetch = async (input, init) => {
+  const fetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
     url = String(input);
     method = init?.method ?? "";
     authorization = new Headers(init?.headers).get("authorization");
@@ -101,12 +101,12 @@ test("a missing products file uses the public products endpoint", async () => {
 });
 
 test("a products fetch failure or timeout stays null and the signal is skip_minsize_unknown", async () => {
-  const failing: typeof fetch = async () => {
+  const failing = async () => {
     throw new Error("down");
   };
   const failed = await loadClassAMinSizes(null, failing, { current: null });
   expect(failed.get("BTC-USD") ?? null).toBeNull();
-  const hung: typeof fetch = (_input, init) =>
+  const hung = (_input: string | URL | Request, init?: RequestInit): Promise<Response> =>
     new Promise((_resolve, reject) => {
       const signal = init?.signal;
       if (!signal) {
@@ -126,7 +126,7 @@ test("a products fetch failure or timeout stays null and the signal is skip_mins
 test("a failed products load is not cached and the next call can succeed", async () => {
   const store = { current: null as Map<string, number> | null };
   let calls = 0;
-  const fetchImpl: typeof fetch = async () => {
+  const fetchImpl = async () => {
     calls += 1;
     if (calls === 1) throw new Error("timeout");
     return Response.json([{ id: "BTC-USD", base_increment: "0.00000001" }]);
