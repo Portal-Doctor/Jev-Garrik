@@ -6,7 +6,6 @@
  * The bucket replay resolves every resting order once, then applies the cap, then runs stops.
  */
 
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { classAProductsSnapshot } from "./class-a-products";
 import { ema, wilderAtr } from "../p2/indicators";
@@ -284,7 +283,13 @@ function printsOf(host: ClassALiveHost, productId: string): { tsMs: number; pric
   return host.trades.filter((trade) => trade.productId === productId).map((trade) => ({ tsMs: trade.tsSec * 1000, price: trade.price }));
 }
 
-let minSizes: Map<string, number> | null = null;
+/** Public unauthenticated products list. No key, no environment variable, no authenticated path. */
+const CLASS_A_PRODUCTS_URL = "https://api.exchange.coinbase.com/products";
+const CLASS_A_PRODUCTS_TIMEOUT_MS = 8_000;
+
+type MinSizeCache = { current: Map<string, number> | null };
+
+const minSizeCache: MinSizeCache = { current: null };
 
 /** base_min_size when it is present and positive. Otherwise base_increment. Unknown stays null, never zero. */
 export function classAMinSizeOf(row: { base_min_size?: unknown; base_increment?: unknown }): number | null {
@@ -294,48 +299,99 @@ export function classAMinSizeOf(row: { base_min_size?: unknown; base_increment?:
   return increment > 0 ? increment : null;
 }
 
-/**
- * Coinbase minimum base size. base_min_size when the payload has it, otherwise base_increment.
- * The snapshot the repo already stores is the public products list. If that file is missing, the public unauthenticated products endpoint is read once. No key and no environment variable.
- */
-export function classAMinOrderBase(productId: string): number | null {
-  return loadClassAMinSizes().get(productId) ?? null;
+function mapFromProducts(body: unknown): Map<string, number> {
+  const map = new Map<string, number>();
+  if (!Array.isArray(body)) return map;
+  for (const row of body) {
+    if (!row || typeof row !== "object") continue;
+    const record = row as { id?: unknown; base_min_size?: unknown; base_increment?: unknown };
+    if (typeof record.id !== "string" || record.id.length === 0) continue;
+    const min = classAMinSizeOf(record);
+    if (min != null) map.set(record.id, min);
+  }
+  return map;
 }
 
-function loadClassAMinSizes(): Map<string, number> {
-  if (minSizes) return minSizes;
-  classAProductsSnapshot();
-  const map = new Map<string, number>();
+/** The committed snapshot. `dataFile` checks the module directory, cwd/research/data, and cwd/../research/data. */
+function readProductsFileText(): string | null {
   const path = dataFile("products", "exchange-products.raw.json");
-  if (path) {
+  if (!path) return null;
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+async function readPublicProducts(fetchImpl: typeof fetch, timeoutMs: number): Promise<unknown> {
+  const response = await fetchImpl(CLASS_A_PRODUCTS_URL, {
+    method: "GET",
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`products http ${response.status}`);
+  return response.json();
+}
+
+/**
+ * File text first. The public /products endpoint only when that text yields no minimum.
+ * A non-empty map is stored. An empty result is not, so the next call can retry.
+ * `fileText` null is the missing file. Unknown stays null, never zero.
+ */
+export async function loadClassAMinSizes(
+  fileText: string | null,
+  fetchImpl: typeof fetch,
+  store: MinSizeCache,
+  timeoutMs = CLASS_A_PRODUCTS_TIMEOUT_MS,
+): Promise<Map<string, number>> {
+  if (store.current && store.current.size > 0) return store.current;
+  let map = new Map<string, number>();
+  if (fileText != null) {
     try {
-      const body = JSON.parse(readFileSync(path, "utf8")) as { id?: string; base_min_size?: unknown; base_increment?: unknown }[];
-      if (Array.isArray(body)) {
-        for (const row of body) {
-          const min = classAMinSizeOf(row);
-          if (row.id && min != null) map.set(row.id, min);
-        }
-      }
+      map = mapFromProducts(JSON.parse(fileText) as unknown);
     } catch {
-      map.clear();
+      map = new Map();
     }
   }
   if (map.size === 0) {
     try {
-      const proc = spawnSync("curl", ["-fsS", "--max-time", "8", "https://api.exchange.coinbase.com/products"], { encoding: "utf8" });
-      if (proc.status === 0 && proc.stdout) {
-        const body = JSON.parse(proc.stdout) as { id?: string; base_min_size?: unknown; base_increment?: unknown }[];
-        if (Array.isArray(body)) {
-          for (const row of body) {
-            const min = classAMinSizeOf(row);
-            if (row.id && min != null) map.set(row.id, min);
-          }
-        }
+      map = mapFromProducts(await readPublicProducts(fetchImpl, timeoutMs));
+    } catch {
+      map = new Map();
+    }
+  }
+  if (map.size > 0) store.current = map;
+  return map;
+}
+
+/**
+ * Loads minimums before live bars. The committed file wins. A missing file uses fetch.
+ * Successes stay cached. A failure does not, so the next invocation can retry.
+ */
+export async function ensureClassAMinSizes(fetchImpl: typeof fetch = fetch): Promise<Map<string, number>> {
+  if (minSizeCache.current && minSizeCache.current.size > 0) return minSizeCache.current;
+  classAProductsSnapshot();
+  return loadClassAMinSizes(readProductsFileText(), fetchImpl, minSizeCache);
+}
+
+/**
+ * Coinbase minimum base size. base_min_size when the payload has it, otherwise base_increment.
+ * Reads the committed snapshot, or a successful public /products load. Unknown stays null, never zero.
+ */
+export function classAMinOrderBase(productId: string): number | null {
+  if (minSizeCache.current && minSizeCache.current.size > 0) return minSizeCache.current.get(productId) ?? null;
+  classAProductsSnapshot();
+  const text = readProductsFileText();
+  if (text != null) {
+    try {
+      const map = mapFromProducts(JSON.parse(text) as unknown);
+      if (map.size > 0) {
+        minSizeCache.current = map;
+        return map.get(productId) ?? null;
       }
     } catch {
       /* The minimum stays unknown. The entry fails closed. */
     }
   }
-  minSizes = map;
-  return map;
+  return null;
 }
